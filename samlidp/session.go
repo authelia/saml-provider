@@ -11,7 +11,7 @@ import (
 
 	"golang.org/x/crypto/bcrypt"
 
-	"github.com/crewjam/saml"
+	"authelia.com/provider/saml"
 )
 
 var sessionMaxAge = time.Hour

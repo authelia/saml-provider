@@ -1,6 +1,6 @@
 package samlsp
 
-import "github.com/crewjam/saml"
+import "authelia.com/provider/saml"
 
 // AssertionHandler is an interface implemented by types that can handle
 // assertions and add extra functionality

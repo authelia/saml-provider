@@ -12,9 +12,9 @@ import (
 
 	xrv "github.com/mattermost/xml-roundtrip-validator"
 
-	"github.com/crewjam/saml/logger"
+	"authelia.com/provider/saml/logger"
 
-	"github.com/crewjam/saml"
+	"authelia.com/provider/saml"
 )
 
 // ParseMetadata parses arbitrary SAML IDP metadata.

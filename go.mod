@@ -1,4 +1,4 @@
-module github.com/crewjam/saml
+module authelia.com/provider/saml
 
 go 1.22
 

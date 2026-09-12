@@ -22,8 +22,8 @@ import (
 	is "gotest.tools/assert/cmp"
 	"gotest.tools/golden"
 
-	"github.com/crewjam/saml"
-	"github.com/crewjam/saml/testsaml"
+	"authelia.com/provider/saml"
+	"authelia.com/provider/saml/testsaml"
 )
 
 type MiddlewareTest struct {

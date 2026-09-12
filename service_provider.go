@@ -28,8 +28,8 @@ import (
 	dsig "github.com/russellhaering/goxmldsig"
 	"github.com/russellhaering/goxmldsig/etreeutils"
 
-	"github.com/crewjam/saml/logger"
-	"github.com/crewjam/saml/xmlenc"
+	"authelia.com/provider/saml/logger"
+	"authelia.com/provider/saml/xmlenc"
 )
 
 // NameIDFormat is the format of the id
