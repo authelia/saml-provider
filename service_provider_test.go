@@ -1432,9 +1432,11 @@ func TestXswPermutationSevenIsRejected(t *testing.T) {
 	req := http.Request{PostForm: url.Values{}, URL: &s.AcsURL}
 	req.PostForm.Set("SAMLResponse", string(respStr))
 	_, err = s.ParseResponse(&req, []string{"ONELOGIN_4fee3b046395c4e751011e97f8900b5273d56685"})
-	// It's the assertion signature that can't be verified. The error message is generic and always mentions Response
+	// It's the assertion signature that can't be verified. goxmldsig now runs the
+	// signature check before the digest comparison, so the underlying
+	// crypto error surfaces instead of the generic "Signature could not be verified".
 	assert.Check(t, is.Error(err.(*InvalidResponseError).PrivateErr,
-		"cannot validate signature on Assertion: Signature could not be verified"))
+		"cannot validate signature on Assertion: crypto/rsa: verification error"))
 }
 
 func TestXswPermutationEightIsRejected(t *testing.T) {
@@ -1463,9 +1465,11 @@ func TestXswPermutationEightIsRejected(t *testing.T) {
 	req := http.Request{PostForm: url.Values{}, URL: &s.AcsURL}
 	req.PostForm.Set("SAMLResponse", string(respStr))
 	_, err = s.ParseResponse(&req, []string{"ONELOGIN_4fee3b046395c4e751011e97f8900b5273d56685"})
-	// It's the assertion signature that can't be verified. The error message is generic and always mentions Response
+	// It's the assertion signature that can't be verified. goxmldsig now runs the
+	// signature check before the digest comparison, so the underlying
+	// crypto error surfaces instead of the generic "Signature could not be verified".
 	assert.Check(t, is.Error(err.(*InvalidResponseError).PrivateErr,
-		"cannot validate signature on Assertion: Signature could not be verified"))
+		"cannot validate signature on Assertion: crypto/rsa: verification error"))
 }
 
 func TestXswPermutationNineIsRejected(t *testing.T) {
@@ -1494,7 +1498,9 @@ func TestXswPermutationNineIsRejected(t *testing.T) {
 	req := http.Request{PostForm: url.Values{}, URL: &s.AcsURL}
 	req.PostForm.Set("SAMLResponse", string(respStr))
 	_, err = s.ParseResponse(&req, []string{"ONELOGIN_4fee3b046395c4e751011e97f8900b5273d56685"})
-	// It's the assertion signature that can't be verified. The error message is generic and always mentions Response
+	// It's the assertion signature that can't be verified. goxmldsig now runs the
+	// signature check before the digest comparison, so the underlying
+	// crypto error surfaces instead of the generic "Signature could not be verified".
 	assert.Check(t, is.Error(err.(*InvalidResponseError).PrivateErr,
 		"cannot validate signature on Assertion: Missing signature referencing the top-level element"))
 }
