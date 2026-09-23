@@ -9,6 +9,7 @@ import (
 	"encoding/base64"
 	"encoding/pem"
 	"encoding/xml"
+	"errors"
 	"fmt"
 	"io"
 	"math/rand"
@@ -483,6 +484,106 @@ func TestIDPCanValidate(t *testing.T) {
 			"</AuthnRequest>"),
 	}
 	assert.Check(t, is.Error(req.Validate(), "cannot find assertion consumer service: file does not exist"))
+}
+
+func TestIDPValidateRequiresIssuer(t *testing.T) {
+	testCases := []struct {
+		name   string
+		issuer string
+	}{
+		{
+			name:   "no issuer",
+			issuer: "",
+		},
+		{
+			name:   "empty issuer",
+			issuer: `<Issuer xmlns="urn:oasis:names:tc:SAML:2.0:assertion"></Issuer>`,
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			test := NewIdentityProviderTest(t)
+			req := IdpAuthnRequest{
+				Now: TimeNow(),
+				IDP: &test.IDP,
+				RequestBuffer: []byte(`<AuthnRequest xmlns="urn:oasis:names:tc:SAML:2.0:protocol" ` +
+					`ID="id-00020406080a0c0e10121416181a1c1e" IssueInstant="2015-12-01T01:57:09Z" Version="2.0">` +
+					tc.issuer +
+					`</AuthnRequest>`),
+			}
+
+			assert.Check(t, is.Error(req.Validate(), "request does not contain an Issuer"))
+		})
+	}
+}
+
+func TestIDPGetSPEncryptionCert(t *testing.T) {
+	test := NewIdentityProviderTest(t)
+	encryption := base64.StdEncoding.EncodeToString(test.SPCertificate.Raw)
+	unlabeled := base64.StdEncoding.EncodeToString(test.Certificate.Raw)
+
+	keyDescriptor := func(use string, certificates ...string) KeyDescriptor {
+		keyDescriptor := KeyDescriptor{Use: use}
+		for _, certificate := range certificates {
+			keyDescriptor.KeyInfo.X509Data.X509Certificates = append(keyDescriptor.KeyInfo.X509Data.X509Certificates, X509Certificate{Data: certificate})
+		}
+		return keyDescriptor
+	}
+
+	testCases := []struct {
+		name           string
+		keyDescriptors []KeyDescriptor
+		expected       *x509.Certificate
+		err            error
+	}{
+		{
+			name:           "encryption",
+			keyDescriptors: []KeyDescriptor{keyDescriptor("", unlabeled), keyDescriptor("encryption", encryption)},
+			expected:       test.SPCertificate,
+		},
+		{
+			name:           "unlabeled",
+			keyDescriptors: []KeyDescriptor{keyDescriptor("signing", encryption), keyDescriptor("", unlabeled)},
+			expected:       test.Certificate,
+		},
+		{
+			name:           "encryption without certificate",
+			keyDescriptors: []KeyDescriptor{keyDescriptor("encryption")},
+			err:            os.ErrNotExist,
+		},
+		{
+			name:           "encryption without certificate then unlabeled",
+			keyDescriptors: []KeyDescriptor{keyDescriptor("encryption"), keyDescriptor("", unlabeled)},
+			expected:       test.Certificate,
+		},
+		{
+			name:           "encryption without certificate then encryption",
+			keyDescriptors: []KeyDescriptor{keyDescriptor("encryption"), keyDescriptor("encryption", encryption)},
+			expected:       test.SPCertificate,
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			req := IdpAuthnRequest{
+				SPSSODescriptor: &SPSSODescriptor{
+					SSODescriptor: SSODescriptor{
+						RoleDescriptor: RoleDescriptor{KeyDescriptors: tc.keyDescriptors},
+					},
+				},
+			}
+
+			cert, err := req.getSPEncryptionCert()
+			if tc.err != nil {
+				assert.Check(t, errors.Is(err, tc.err), "got %v", err)
+				return
+			}
+
+			assert.NilError(t, err)
+			assert.Check(t, is.DeepEqual(tc.expected.Raw, cert.Raw))
+		})
+	}
 }
 
 func TestIDPMakeAssertion(t *testing.T) {
