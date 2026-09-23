@@ -820,7 +820,7 @@ func (DefaultAssertionMaker) MakeAssertion(req *IdpAuthnRequest, session *Sessio
 			NotOnOrAfter: notOnOrAfterAfter,
 			AudienceRestrictions: []AudienceRestriction{
 				{
-					Audience: Audience{Value: req.ServiceProviderMetadata.EntityID},
+					Audiences: []Audience{{Value: req.ServiceProviderMetadata.EntityID}},
 				},
 			},
 		},

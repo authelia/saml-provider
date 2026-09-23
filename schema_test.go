@@ -34,6 +34,25 @@ func TestAttributeXMLRoundTrip(t *testing.T) {
 	assert.Check(t, is.DeepEqual(expected, actual))
 }
 
+func TestAudienceRestrictionXMLRoundTrip(t *testing.T) {
+	expected := AudienceRestriction{
+		Audiences: []Audience{
+			{Value: "https://sp.example.com/saml2/metadata"},
+			{Value: "https://other.example.com/"},
+		},
+	}
+
+	doc := etree.NewDocument()
+	doc.SetRoot(expected.Element())
+	x, err := doc.WriteToBytes()
+	assert.NilError(t, err)
+	assert.Check(t, is.Equal("<saml:AudienceRestriction><saml:Audience>https://sp.example.com/saml2/metadata</saml:Audience><saml:Audience>https://other.example.com/</saml:Audience></saml:AudienceRestriction>", string(x)))
+
+	var actual AudienceRestriction
+	assert.NilError(t, xml.Unmarshal(x, &actual))
+	assert.Check(t, is.DeepEqual(expected, actual))
+}
+
 func TestNameIDFormat(t *testing.T) {
 	var emptyString string
 	el := NameIDPolicy{

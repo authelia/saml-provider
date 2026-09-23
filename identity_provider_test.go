@@ -540,7 +540,7 @@ func TestIDPMakeAssertion(t *testing.T) {
 			NotOnOrAfter: TimeNow().Add(MaxIssueDelay),
 			AudienceRestrictions: []AudienceRestriction{
 				{
-					Audience: Audience{Value: "https://sp.example.com/saml2/metadata"},
+					Audiences: []Audience{{Value: "https://sp.example.com/saml2/metadata"}},
 				},
 			},
 		},

@@ -1016,13 +1016,15 @@ func (c *Conditions) UnmarshalXML(d *xml.Decoder, start xml.StartElement) error 
 //
 // See http://docs.oasis-open.org/security/saml/v2.0/saml-core-2.0-os.pdf §2.5.1.4
 type AudienceRestriction struct {
-	Audience Audience
+	Audiences []Audience `xml:"Audience"`
 }
 
 // Element returns an etree.Element representing the object in XML form.
 func (a *AudienceRestriction) Element() *etree.Element {
 	el := etree.NewElement("saml:AudienceRestriction")
-	el.AddChild(a.Audience.Element())
+	for _, audience := range a.Audiences {
+		el.AddChild(audience.Element())
+	}
 	return el
 }
 
