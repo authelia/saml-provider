@@ -1545,6 +1545,119 @@ func TestSPValidateAssertionWithoutConditions(t *testing.T) {
 	}
 }
 
+func TestSPValidateAssertionSubjectConfirmations(t *testing.T) {
+	const (
+		cm        = "urn:oasis:names:tc:SAML:2.0:cm:"
+		recipient = "https://15661444.ngrok.io/saml2/acs"
+		requestID = "id-9e61753d64e928af5a7a341a97f420c9"
+	)
+
+	confirmation := func(method, recipient string) SubjectConfirmation {
+		return SubjectConfirmation{
+			Method: method,
+			SubjectConfirmationData: &SubjectConfirmationData{
+				NotOnOrAfter: TimeNow().Add(time.Minute),
+				Recipient:    recipient,
+				InResponseTo: requestID,
+			},
+		}
+	}
+
+	testCases := []struct {
+		name    string
+		subject func(subject *Subject) *Subject
+		err     string
+	}{
+		{
+			name: "bearer",
+			subject: func(subject *Subject) *Subject {
+				return subject
+			},
+		},
+		{
+			name: "bearer and holder-of-key for another recipient",
+			subject: func(subject *Subject) *Subject {
+				subject.SubjectConfirmations = []SubjectConfirmation{
+					confirmation(cm+"bearer", recipient),
+					confirmation(cm+"holder-of-key", "https://other.example.com/acs"),
+				}
+				return subject
+			},
+		},
+		{
+			name: "bearer for another recipient then ours",
+			subject: func(subject *Subject) *Subject {
+				subject.SubjectConfirmations = []SubjectConfirmation{
+					confirmation(cm+"bearer", "https://other.example.com/acs"),
+					confirmation(cm+"bearer", recipient),
+				}
+				return subject
+			},
+		},
+		{
+			name: "bearer for other recipients",
+			subject: func(subject *Subject) *Subject {
+				subject.SubjectConfirmations = []SubjectConfirmation{
+					confirmation(cm+"bearer", "https://other.example.com/acs"),
+					confirmation(cm+"bearer", "https://another.example.com/acs"),
+				}
+				return subject
+			},
+			err: "assertion SubjectConfirmation Recipient is not https://15661444.ngrok.io/saml2/acs\nassertion SubjectConfirmation Recipient is not https://15661444.ngrok.io/saml2/acs",
+		},
+		{
+			name: "holder-of-key only",
+			subject: func(subject *Subject) *Subject {
+				subject.SubjectConfirmations = []SubjectConfirmation{
+					confirmation(cm+"holder-of-key", recipient),
+				}
+				return subject
+			},
+			err: "assertion Subject does not contain a bearer SubjectConfirmation",
+		},
+		{
+			name: "no subject confirmations",
+			subject: func(subject *Subject) *Subject {
+				subject.SubjectConfirmations = nil
+				return subject
+			},
+			err: "assertion Subject does not contain a bearer SubjectConfirmation",
+		},
+		{
+			name: "no subject",
+			subject: func(*Subject) *Subject {
+				return nil
+			},
+			err: "assertion Subject does not contain a bearer SubjectConfirmation",
+		},
+		{
+			name: "bearer without subject confirmation data",
+			subject: func(subject *Subject) *Subject {
+				subject.SubjectConfirmations = []SubjectConfirmation{
+					{Method: cm + "bearer"},
+				}
+				return subject
+			},
+			err: "assertion SubjectConfirmation does not contain SubjectConfirmationData",
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			s, assertion := newTestAssertion(t)
+			assertion.Subject = tc.subject(assertion.Subject)
+
+			err := s.validateAssertion(assertion, []string{requestID}, TimeNow())
+			if tc.err != "" {
+				assert.Check(t, is.Error(err, tc.err))
+				return
+			}
+
+			assert.Check(t, err)
+		})
+	}
+}
+
 func TestXswPermutationOneIsRejected(t *testing.T) {
 	test := NewServiceProviderTest(t)
 	idpMetadata := golden.Get(t, "TestSPCanHandleOneloginResponse_IDPMetadata")
@@ -2351,4 +2464,31 @@ func TestSPInvalidResponses(t *testing.T) {
 
 	assert.Check(t, is.Error(err.(*InvalidResponseError).PrivateErr,
 		"cannot validate signature on Assertion: x509: malformed certificate"))
+}
+
+func newTestAssertion(t *testing.T) (*ServiceProvider, *Assertion) {
+	test := NewServiceProviderTest(t)
+	s := &ServiceProvider{
+		Key:         test.Key,
+		Certificate: test.Certificate,
+		MetadataURL: mustParseURL("https://15661444.ngrok.io/saml2/metadata"),
+		AcsURL:      mustParseURL("https://15661444.ngrok.io/saml2/acs"),
+		IDPMetadata: &EntityDescriptor{},
+	}
+	assert.NilError(t, xml.Unmarshal(test.IDPMetadata, &s.IDPMetadata))
+
+	doc := etree.NewDocument()
+	assert.NilError(t, doc.ReadFromBytes(test.SamlResponse))
+	assertionEl, err := s.decryptElement(doc.Root().FindElement("//EncryptedAssertion"))
+	assert.NilError(t, err)
+
+	doc = etree.NewDocument()
+	doc.SetRoot(assertionEl)
+	assertionBuf, err := doc.WriteToBytes()
+	assert.NilError(t, err)
+
+	assertion := &Assertion{}
+	assert.NilError(t, xml.Unmarshal(assertionBuf, assertion))
+
+	return s, assertion
 }
