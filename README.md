@@ -224,5 +224,3 @@ Extensions and profiles published after SAML V2.0:
 | Kerberos Attribute Profile                                       | [PDF](https://docs.oasis-open.org/security/saml/Post2.0/sstc-saml-attribute-kerberos-cs01.pdf)                                         | [text](spec/sstc-saml-attribute-kerberos-cs01.txt)                   |
 | Kerberos Subject Confirmation Method                             | [PDF](https://docs.oasis-open.org/security/saml/Post2.0/sstc-saml-kerberos-subject-confirmation-method-cs01.pdf)                       | [text](spec/sstc-saml-kerberos-subject-confirmation-method-cs01.txt) |
 | Kerberos Web Browser SSO Profile                                 | [PDF](https://docs.oasis-open.org/security/saml/Post2.0/saml-kerberos-browser-sso/v1.0/cs01/saml-kerberos-browser-sso-v1.0-cs01.pdf)   | [text](spec/saml-kerberos-browser-sso-v1.0-cs01.txt)                 |
-
-[SAMLtest](https://samltest.id/) is a testing ground for SAML service and identity providers.
