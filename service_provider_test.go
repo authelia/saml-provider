@@ -1236,6 +1236,182 @@ func TestSPInvalidAssertions(t *testing.T) {
 	assert.Check(t, err)
 }
 
+func TestSPValidateRequestIDAllowIDPInitiated(t *testing.T) {
+	testCases := []struct {
+		name               string
+		allowIDPInitiated  bool
+		validateRequestID  func(response Response, possibleRequestIDs []string) error
+		inResponseTo       string
+		possibleRequestIDs []string
+		err                string
+	}{
+		{
+			name:               "unsolicited",
+			allowIDPInitiated:  true,
+			inResponseTo:       "",
+			possibleRequestIDs: []string{""},
+		},
+		{
+			name:               "unsolicited without possible request IDs",
+			allowIDPInitiated:  true,
+			inResponseTo:       "",
+			possibleRequestIDs: nil,
+		},
+		{
+			name:               "solicited",
+			allowIDPInitiated:  true,
+			inResponseTo:       "id-expected",
+			possibleRequestIDs: []string{"", "id-expected"},
+		},
+		{
+			name:               "solicited for another request",
+			allowIDPInitiated:  true,
+			inResponseTo:       "id-other",
+			possibleRequestIDs: []string{"", "id-expected"},
+			err:                "`InResponseTo` does not match any of the possible request IDs (expected [ id-expected])",
+		},
+		{
+			name:              "solicited for another request with ValidateRequestID",
+			allowIDPInitiated: true,
+			validateRequestID: func(Response, []string) error {
+				return nil
+			},
+			inResponseTo:       "id-other",
+			possibleRequestIDs: []string{"", "id-expected"},
+		},
+		{
+			name:               "unsolicited when not allowed",
+			allowIDPInitiated:  false,
+			inResponseTo:       "",
+			possibleRequestIDs: []string{"id-expected"},
+			err:                "`InResponseTo` does not match any of the possible request IDs (expected [id-expected])",
+		},
+		{
+			name:               "solicited when not allowed",
+			allowIDPInitiated:  false,
+			inResponseTo:       "id-expected",
+			possibleRequestIDs: []string{"id-expected"},
+		},
+		{
+			name:               "solicited for another request when not allowed",
+			allowIDPInitiated:  false,
+			inResponseTo:       "id-other",
+			possibleRequestIDs: []string{"id-expected"},
+			err:                "`InResponseTo` does not match any of the possible request IDs (expected [id-expected])",
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			s := ServiceProvider{
+				AllowIDPInitiated: tc.allowIDPInitiated,
+				ValidateRequestID: tc.validateRequestID,
+			}
+
+			err := s.validateRequestID(Response{InResponseTo: tc.inResponseTo}, tc.possibleRequestIDs)
+			if tc.err != "" {
+				assert.Check(t, is.Error(err, tc.err))
+				return
+			}
+
+			assert.Check(t, err)
+		})
+	}
+}
+
+func TestSPValidateAssertionInResponseToAllowIDPInitiated(t *testing.T) {
+	testCases := []struct {
+		name               string
+		allowIDPInitiated  bool
+		inResponseTo       string
+		possibleRequestIDs []string
+		err                string
+	}{
+		{
+			name:               "unsolicited",
+			allowIDPInitiated:  true,
+			inResponseTo:       "",
+			possibleRequestIDs: []string{""},
+		},
+		{
+			name:               "unsolicited without possible request IDs",
+			allowIDPInitiated:  true,
+			inResponseTo:       "",
+			possibleRequestIDs: nil,
+		},
+		{
+			name:               "solicited",
+			allowIDPInitiated:  true,
+			inResponseTo:       "id-expected",
+			possibleRequestIDs: []string{"", "id-expected"},
+		},
+		{
+			name:               "solicited for another request",
+			allowIDPInitiated:  true,
+			inResponseTo:       "id-other",
+			possibleRequestIDs: []string{"", "id-expected"},
+			err:                "assertion SubjectConfirmation one of the possible request IDs ([ id-expected])",
+		},
+		{
+			name:               "unsolicited when not allowed",
+			allowIDPInitiated:  false,
+			inResponseTo:       "",
+			possibleRequestIDs: []string{"id-expected"},
+			err:                "assertion SubjectConfirmation one of the possible request IDs ([id-expected])",
+		},
+		{
+			name:               "solicited when not allowed",
+			allowIDPInitiated:  false,
+			inResponseTo:       "id-expected",
+			possibleRequestIDs: []string{"id-expected"},
+		},
+		{
+			name:               "solicited for another request when not allowed",
+			allowIDPInitiated:  false,
+			inResponseTo:       "id-other",
+			possibleRequestIDs: []string{"id-expected"},
+			err:                "assertion SubjectConfirmation one of the possible request IDs ([id-expected])",
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			test := NewServiceProviderTest(t)
+			s := ServiceProvider{
+				Key:               test.Key,
+				Certificate:       test.Certificate,
+				MetadataURL:       mustParseURL("https://15661444.ngrok.io/saml2/metadata"),
+				AcsURL:            mustParseURL("https://15661444.ngrok.io/saml2/acs"),
+				IDPMetadata:       &EntityDescriptor{},
+				AllowIDPInitiated: tc.allowIDPInitiated,
+			}
+			assert.NilError(t, xml.Unmarshal(test.IDPMetadata, &s.IDPMetadata))
+
+			doc := etree.NewDocument()
+			assert.NilError(t, doc.ReadFromBytes(test.SamlResponse))
+			assertionEl, err := s.decryptElement(doc.Root().FindElement("//EncryptedAssertion"))
+			assert.NilError(t, err)
+
+			doc = etree.NewDocument()
+			doc.SetRoot(assertionEl)
+			assertionBuf, err := doc.WriteToBytes()
+			assert.NilError(t, err)
+
+			assertion := Assertion{}
+			assert.NilError(t, xml.Unmarshal(assertionBuf, &assertion))
+			assertion.Subject.SubjectConfirmations[0].SubjectConfirmationData.InResponseTo = tc.inResponseTo
+
+			err = s.validateAssertion(&assertion, tc.possibleRequestIDs, TimeNow())
+			if tc.err != "" {
+				assert.Check(t, is.Error(err, tc.err))
+				return
+			}
+
+			assert.Check(t, err)
+		})
+	}
+}
+
 func TestXswPermutationOneIsRejected(t *testing.T) {
 	test := NewServiceProviderTest(t)
 	idpMetadata := golden.Get(t, "TestSPCanHandleOneloginResponse_IDPMetadata")
