@@ -183,6 +183,12 @@ func OAEP_SHA512() RSA { //nolint:revive
 // PKCS1v15 returns a version of RSA that implements RSA in PKCS1v15 mode. By default
 // the block cipher used is AES-256 CBC. The DigestMethod field is ignored because PKCS1v15
 // does not use a digest function.
+//
+// PKCS1v15 is not registered as a decrypter by default, because decrypting
+// attacker-supplied PKCS1v15 ciphertexts exposes a padding oracle (Bleichenbacher)
+// that allows recovery of any value encrypted to the private key. Only if an
+// identity provider cannot be configured to use OAEP, opt in by calling
+// RegisterDecrypter(PKCS1v15()) during program initialization.
 func PKCS1v15() RSA {
 	return RSA{
 		BlockCipher:  AES256CBC,
@@ -199,5 +205,4 @@ func PKCS1v15() RSA {
 
 func init() {
 	RegisterDecrypter(OAEP())
-	RegisterDecrypter(PKCS1v15())
 }
