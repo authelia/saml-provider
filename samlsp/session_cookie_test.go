@@ -47,3 +47,39 @@ func TestCookieSameSite(t *testing.T) {
 		assert.Check(t, is.Equal(http.SameSiteStrictMode, cookie.SameSite))
 	})
 }
+
+func TestCookieSessionProviderDeleteSession(t *testing.T) {
+	csp := CookieSessionProvider{
+		Name:   "token",
+		Domain: "localhost:8080",
+		Codec: DefaultSessionCodec(Options{
+			Key: NewMiddlewareTest(t).Key,
+		}),
+	}
+
+	t.Run("expires the cookie", func(t *testing.T) {
+		resp := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodGet, "/", nil)
+		req.Header.Set("Cookie", "token=session")
+
+		assert.NilError(t, csp.DeleteSession(resp, req))
+
+		result := resp.Result()
+		assert.Check(t, result.Body.Close())
+		cookies := result.Cookies()
+		assert.Assert(t, is.Len(cookies, 1))
+		assert.Check(t, is.Equal("token", cookies[0].Name))
+		assert.Check(t, is.Equal("", cookies[0].Value))
+		assert.Check(t, is.Equal("localhost", cookies[0].Domain))
+		assert.Check(t, is.Equal("/", cookies[0].Path))
+		assert.Check(t, cookies[0].Expires.Before(saml.TimeNow()))
+	})
+
+	t.Run("no cookie", func(t *testing.T) {
+		resp := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodGet, "/", nil)
+
+		assert.NilError(t, csp.DeleteSession(resp, req))
+		assert.Check(t, is.Len(resp.Result().Cookies(), 0))
+	})
+}
