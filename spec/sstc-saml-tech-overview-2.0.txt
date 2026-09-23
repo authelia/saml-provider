@@ -1,0 +1,2225 @@
+Security Assertion Markup Language
+(SAML) V2.0 Technical Overview
+Committee Draft 02
+25 March 2008
+Specification URIs:
+This Version:
+       http://docs.oasis-open.org/security/saml/Post2.0/sstc-saml-tech-overview-2.0-cd-02.html
+          http://docs.oasis-open.org/security/saml/Post2.0/sstc-saml-tech-overview-2.0-cd-02.pdf
+          http://docs.oasis-open.org/security/saml/Post2.0/sstc-saml-tech-overview-2.0.cd-02.odt
+Previous Version:
+       N/A
+
+Latest Version:
+        http://docs.oasis-open.org/security/saml/Post2.0/sstc-saml-tech-overview-2.0.html
+          http://docs.oasis-open.org/security/saml/Post2.0/sstc-saml-tech-overview-2.0.pdf
+          http://docs.oasis-open.org/security/saml/Post2.0/sstc-saml-tech-overview-2.0.odt
+Technical Committee:
+       OASIS Security Services TC
+Chairs:
+          Hal Lockhart, BEA
+          Brian Campbell, Ping Identity
+
+Editors:
+        Nick Ragouzis, Enosis Group LLC
+        John Hughes, PA Consulting
+        Rob Philpott, EMC Corporation
+        Eve Maler, Sun Microsystems
+        Paul Madsen, NTT
+        Tom Scavo, NCSA/University of Illinois
+Related Work:
+       N/A
+
+Abstract:
+       The Security Assertion Markup Language (SAML) standard defines a framework for exchanging
+
+          security information between online business partners. This document provides a technical
+          description of SAML V2.0.
+Status:
+          The level of approval of this document is listed above. Check the "Latest Version" or "Latest
+          Approved Version" location noted above for possible later revisions of this document.
+          TC members should send comments on this specification to the TC’s email list. Others should
+          send comments to the TC by using the “Send A Comment” button on the TC’s web page at http://
+          www.oasis-open.org/committees/security.
+          For information on whether any patents have been disclosed that may be essential to
+          implementing this specification, and any offers of patent licensing terms, please refer to the
+          Intellectual Property Rights section of the Security Services TC web page (http://www.oasis-
+          open.org/committees/security/ipr.php).
+
+Notices
+Copyright © OASIS Open 2008. All Rights Reserved.
+
+All capitalized terms in the following text have the meanings assigned to them in the OASIS Intellectual
+Property Rights Policy (the "OASIS IPR Policy"). The full Policy may be found at the OASIS website.
+This document and translations of it may be copied and furnished to others, and derivative works that
+comment on or otherwise explain it or assist in its implementation may be prepared, copied, published,
+and distributed, in whole or in part, without restriction of any kind, provided that the above copyright notice
+and this section are included on all such copies and derivative works. However, this document itself may
+not be modified in any way, including by removing the copyright notice or references to OASIS, except as
+needed for the purpose of developing any document or deliverable produced by an OASIS Technical
+Committee (in which case the rules applicable to copyrights, as set forth in the OASIS IPR Policy, must be
+followed) or as required to translate it into languages other than English.
+
+The limited permissions granted above are perpetual and will not be revoked by OASIS or its successors
+or assigns.
+
+This document and the information contained herein is provided on an "AS IS" basis and OASIS
+DISCLAIMS ALL WARRANTIES, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO ANY
+WARRANTY THAT THE USE OF THE INFORMATION HEREIN WILL NOT INFRINGE ANY
+OWNERSHIP RIGHTS OR ANY IMPLIED WARRANTIES OF MERCHANTABILITY OR FITNESS FOR A
+PARTICULAR PURPOSE.
+
+OASIS requests that any OASIS Party or any other party that believes it has patent claims that would
+necessarily be infringed by implementations of this OASIS Committee Specification or OASIS Standard, to
+notify OASIS TC Administrator and provide an indication of its willingness to grant patent licenses to such
+patent claims in a manner consistent with the IPR Mode of the OASIS Technical Committee that produced
+this specification.
+
+OASIS invites any party to contact the OASIS TC Administrator if it is aware of a claim of ownership of any
+patent claims that would necessarily be infringed by implementations of this specification by a patent
+holder that is not willing to provide a license to such patent claims in a manner consistent with the IPR
+Mode of the OASIS Technical Committee that produced this specification. OASIS may include such
+claims on its website, but disclaims any obligation to do so.
+
+OASIS takes no position regarding the validity or scope of any intellectual property or other rights that
+might be claimed to pertain to the implementation or use of the technology described in this document or
+the extent to which any license under such rights might or might not be available; neither does it represent
+that it has made any effort to identify any such rights. Information on OASIS' procedures with respect to
+rights in any document or deliverable produced by an OASIS Technical Committee can be found on the
+OASIS website. Copies of claims of rights made available for publication and any assurances of licenses
+to be made available, or the result of an attempt made to obtain a general license or permission for the
+use of such proprietary rights by implementers or users of this OASIS Committee Specification or OASIS
+Standard, can be obtained from the OASIS TC Administrator. OASIS makes no representation that any
+information or list of intellectual property rights will at any time be complete, or that any claims in such list
+are, in fact, Essential Claims.
+
+The name "OASIS" is a trademark of OASIS, the owner and developer of this specification, and should be
+used only to refer to the organization and its official outputs. OASIS welcomes reference to, and
+implementation and use of, specifications, while reserving the right to enforce its marks against
+misleading uses. Please see http://www.oasis-open.org/who/trademark.php for above guidance.
+
+Table of Contents
+1 Introduction...............................................................................................................................................6
+   1.1 References........................................................................................................................................6
+2 Overview...................................................................................................................................................8
+   2.1 Drivers of SAML Adoption..................................................................................................................8
+   2.2 Documentation Roadmap .................................................................................................................8
+3 High-Level SAML Use Cases..................................................................................................................11
+   3.1 SAML Participants...........................................................................................................................11
+   3.2 Web Single Sign-On Use Case........................................................................................................11
+   3.3 Identity Federation Use Case...........................................................................................................12
+4 SAML Architecture..................................................................................................................................16
+   4.1 Basic Concepts................................................................................................................................16
+   4.2 Advanced Concepts.........................................................................................................................17
+      4.2.1 Subject Confirmation ...............................................................................................................17
+   4.3 SAML Components..........................................................................................................................17
+   4.4 SAML XML Constructs and Examples.............................................................................................19
+      4.4.1 Relationship of SAML Components..........................................................................................19
+      4.4.2 Assertion, Subject, and Statement Structure............................................................................20
+      4.4.3 Attribute Statement Structure...................................................................................................21
+      4.4.4 Message Structure and the SOAP Binding...............................................................................22
+   4.5 Privacy in SAML ..............................................................................................................................24
+   4.6 Security in SAML.............................................................................................................................25
+5 Major Profiles and Federation Use Cases...............................................................................................26
+   5.1 Web Browser SSO Profile...............................................................................................................26
+      5.1.1 Introduction...............................................................................................................................26
+      5.1.2 SP-Initiated SSO: Redirect/POST Bindings.............................................................................27
+      5.1.3 SP-Initiated SSO: POST/Artifact Bindings...............................................................................30
+      5.1.4 IdP-Initiated SSO: POST Binding............................................................................................33
+   5.2 ECP Profile......................................................................................................................................35
+      5.2.1 Introduction...............................................................................................................................35
+      5.2.2 ECP Profile Using PAOS Binding.............................................................................................35
+   5.3 Single Logout Profile........................................................................................................................36
+      5.3.1 Introduction...............................................................................................................................37
+      5.3.2 SP-Initiated Single Logout with Multiple SPs............................................................................37
+   5.4 Establishing and Managing Federated Identities..............................................................................38
+      5.4.1 Introduction...............................................................................................................................38
+      5.4.2 Federation Using Out-of-Band Account Linking........................................................................38
+      5.4.3 Federation Using Persistent Pseudonym Identifiers.................................................................40
+      5.4.4 Federation Using Transient Pseudonym Identifiers..................................................................42
+      5.4.5 Federation Termination............................................................................................................44
+   5.5 Use of Attributes..............................................................................................................................45
+6 Extending and Profiling SAML for Use in Other Frameworks..................................................................46
+   6.1 Web Services Security (WS-Security).............................................................................................46
+   6.2 eXtensible Access Control Markup Language (XACML)..................................................................48
+
+Table of Figures
+Figure 1: SAML V2.0 Document Set............................................................................................................6
+Figure 2: General Single Sign-On Use Case................................................................................................9
+Figure 3: General Identity Federation Use Case........................................................................................11
+Figure 4: Basic SAML Concepts................................................................................................................13
+Figure 5: Relationship of SAML Components............................................................................................17
+Figure 6: Assertion with Subject, Conditions, and Authentication Statement.............................................17
+Figure 7: Attribute Statement.....................................................................................................................19
+Figure 8: Protocol Messages Carried by SOAP Over HTTP......................................................................20
+Figure 9: Authentication Request in SOAP Envelope.................................................................................20
+Figure 10: Response in SOAP Envelope...................................................................................................21
+Figure 11: Differences in Initiation of Web Browser SSO...........................................................................24
+Figure 12: SP-Initiated SSO with Redirect and POST Bindings.................................................................25
+Figure 13: IdP-Initiated SSO with POST Binding........................................................................................31
+Figure 14: Enhanced Client/Proxy Use Cases...........................................................................................32
+Figure 15: SSO Using ECP with the PAOS Binding...................................................................................33
+Figure 16: SP-Initiated Single Logout with Multiple SPs.............................................................................34
+Figure 17: Identity Federation with Out-of-Band Account Linking...............................................................36
+Figure 18: SP-Initiated Identity Federation with Persistent Pseudonym.....................................................38
+Figure 19: SP-Initiated Identity Federation with Transient Pseudonym......................................................40
+Figure 20: Identity Federation Termination.................................................................................................41
+Figure 21: WS-Security with a SAML Token..............................................................................................44
+Figure 22: Typical Use of WS-Security with SAML Token..........................................................................45
+Figure 23: SAML and XACML Integration..................................................................................................46
+
+1       Introduction
+The Security Assertion Markup Language (SAML) standard defines a framework for exchanging security
+information between online business partners. It was developed by the Security Services Technical
+Committee (SSTC) of the standards organization OASIS (the Organization for the Advancement of
+Structured Information Standards). This document provides a technical description of SAML V2.0.
+
+1.1       References
+
+[SAMLAuthnCxt]        J. Kemp et al. Authentication Context for the OASIS Security Assertion Markup
+                      Language (SAML) V2.0. OASIS SSTC, March 2005. Document ID saml-authn-
+                      context-2.0-os. See http://docs.oasis-open.org/security/saml/v2.0/saml-authn-
+                      context-2.0-os.pdf.
+[SAMLBind]            S. Cantor et al. Bindings for the OASIS Security Assertion Markup Language (SAML)
+                      V2.0. OASIS SSTC, March 2005. Document ID saml-bindings-2.0-os. See
+                      http://docs.oasis-open.org/security/saml/v2.0/saml-bindings-2.0-os.pdf.
+[SAMLConform]         P. Mishra et al. Conformance Requirements for the OASIS Security Assertion Markup
+                      Language (SAML) V2.0. OASIS SSTC, March 2005. Document ID saml-
+                      conformance-2.0-os. See http://docs.oasis-open.org/security/saml/v2.0/saml-
+                      conformance-2.0-os.pdf.
+[SAMLCore]            S. Cantor et al. Assertions and Protocols for the OASIS Security Assertion Markup
+                      Language (SAML) V2.0. OASIS SSTC, March 2005. Document ID saml-core-2.0-os.
+                      See http://docs.oasis-open.org/security/saml/v2.0/saml-core-2.0-os.pdf.
+[SAMLErrata]          J. Moreh. Errata for the OASIS Security Assertion Markup Language (SAML) V2.0.
+                      OASIS SSTC, May, 2006. Document ID sstc-saml-errata-2.0-draft-nn. See
+                      http://www.oasis-open.org/committees/security/.
+[SAMLExecOvr]         P. Madsen, et al. SAML V2.0 Executive Overview. OASIS SSTC, April, 2005.
+                      Document ID sstc-saml-exec-overview-2.0-cd-01. See http://www.oasis-
+                      open.org/committees/security/.
+[SAMLGloss]           J. Hodges et al. Glossary for the OASIS Security Assertion Markup Language
+                      (SAML) V2.0. OASIS SSTC, March 2005. Document ID saml-glossary-2.0-os. See
+                      http://docs.oasis-open.org/security/saml/v2.0/saml-glossary-2.0-os.pdf.
+[SAMLMDExtQ]          T. Scavo, et al. SAML Metadata Extension for Query Requesters. OASIS SSTC,
+                      March 2006. Document ID sstc-saml-metadata-ext-query-cd-01. See
+                      http://www.oasis-open.org/committees/security/.
+[SAMLMDV1x]           G. Whitehead et al. Metadata Profile for the OASIS Security Assertion Markup
+                      Language (SAML) V1.x. OASIS SSTC, March 2005. Document ID sstc-saml1x-
+                      metadata-cd-01. See http://www.oasis-open.org/committees/security/.
+[SAMLMeta]            S. Cantor et al. Metadata for the OASIS Security Assertion Markup Language (SAML)
+                      V2.0. OASIS SSTC, March 2005. Document ID saml-metadata-2.0-os. See
+                      http://docs.oasis-open.org/security/saml/v2.0/saml-metadata-2.0-os.pdf.
+[SAMLProf]            S. Cantor et al. Profiles for the OASIS Security Assertion Markup Language (SAML)
+                      V2.0. OASIS SSTC, March 2005. Document ID saml-profiles-2.0-os. See
+                      http://docs.oasis-open.org/security/saml/v2.0/saml-profiles-2.0-os.pdf.
+[SAMLProt3P]          S. Cantor. SAML Protocol Extension for Third-Party Requests. OASIS SSTC, March
+                      2006. Document ID sstc-saml-protocol-ext-thirdparty-cd-01. See http://www.oasis-
+                      open.org/committees/security/.
+[SAMLSec]             F. Hirsch et al. Security and Privacy Considerations for the OASIS Security Assertion
+                      Markup Language (SAML) V2.0. OASIS SSTC, March 2005. Document ID saml-sec-
+                      consider-2.0-os. See http://docs.oasis-open.org/security/saml/v2.0/saml-sec-
+                      consider-2.0-os.pdf.
+[SAMLWeb]             OASIS Security Services Technical Committee web site, http://www.oasis-
+                      open.org/committees/security.
+
+[SAMLX509Attr]  R. Randall et al. SAML Attribute Sharing Profile for X.509 Authentication-Based
+                Systems. OASIS SSTC, March 2006. Document ID sstc-saml-x509-authn-attrib-
+                profile-cd-02. See http://www.oasis-open.org/committees/security/.
+[SAMLXPathAttr] C. Morris et al. SAML XPath Attribute Profile. OASIS SSTC, August, 2005. Document
+                ID sstc-saml-xpath-attribute-profile-cd-01. See http://www.oasis-
+                open.org/committees/security/.
+[ShibReqs]      S. Carmody. Shibboleth Overview and Requirements. Shibboleth project of Internet2.
+                See http://shibboleth.internet2.edu/docs/draft-internet2-shibboleth-
+                requirements-01.html.
+[WSS]           A. Nadalin et al. Web Services Security: SOAP Message Security 1.1 (WS-Security
+                2004). OASIS WSS-TC, February 2006. Document ID wss-v1.1-spec-os-
+                SOAPMessageSecurity. See http://www.oasis-open.org/committees/wss/.
+[WSSSAML]       R. Monzillo et al. Web Services Security: SAML Token Profile 1.1. OASIS WSS-TC,
+                February 2006. Document ID wss-v1.1-spec-os-SAMLTokenProfile. See
+                http://www.oasis-open.org/committees/wss/.
+[XACML]         T. Moses, et al. OASIS eXtensible Access Control Markup Language (XACML)
+                Version 2.0. OASIS XACML-TC, February 2005. Document ID oasis-access_control-
+                xacml-2.0-core-spec-os. See http://www.oasis-open.org/committees/xacml.
+[XMLEnc]        D. Eastlake et al. XML Encryption Syntax and Processing. World Wide Web
+                Consortium. See http://www.w3.org/TR/2002/REC-xmlenc-core-20021210/.
+[XMLSig]        D. Eastlake et al. XML-Signature Syntax and Processing. World Wide Web
+                Consortium. See .http://www.w3.org/TR/xmldsig-core/
+
+2       Overview
+The OASIS Security Assertion Markup Language (SAML) standard defines an XML-based framework for
+describing and exchanging security information between on-line business partners. This security
+information is expressed in the form of portable SAML assertions that applications working across security
+domain boundaries can trust. The OASIS SAML standard defines precise syntax and rules for requesting,
+creating, communicating, and using these SAML assertions.
+The OASIS Security Services Technical Committee (SSTC) develops and maintains the SAML standard.
+The SSTC has produced this technical overview to assist those wanting to know more about SAML by
+explaining the business use cases it addresses, the high-level technical components that make up a
+SAML deployment, details of message exchanges for common use cases, and where to go for additional
+information.
+
+2.1       Drivers of SAML Adoption
+Why is SAML needed for exchanging security information? There are several drivers behind the adoption
+of the SAML standard, including:
+    • Single Sign-On: Over the years, various products have been marketed with the claim of providing
+      support for web-based SSO. These products have typically relied on browser cookies to maintain
+      user authentication state information so that re-authentication is not required each time the web user
+      accesses the system. However, since browser cookies are never transmitted between DNS
+      domains, the authentication state information in the cookies from one domain is never available to
+      another domain. Therefore, these products have typically supported multi-domain SSO (MDSSO)
+      through the use of proprietary mechanisms to pass the authentication state information between the
+      domains. While the use of a single vendor's product may sometimes be viable within a single
+      enterprise, business partners usually have heterogeneous environments that make the use of
+      proprietary protocols impractical for MDSSO. SAML solves the MDSSO problem by providing a
+      standard vendor-independent grammar and protocol for transferring information about a user from
+      one web server to another independent of the server DNS domains.
+    • Federated identity: When online services wish to establish a collaborative application environment
+      for their mutual users, not only must the systems be able to understand the protocol syntax and
+      semantics involved in the exchange of information; they must also have a common understanding of
+      who the user is that is referred to in the exchange. Users often have individual local user identities
+      within the security domains of each partner with which they interact. Identity federation provides a
+      means for these partner services to agree on and establish a common, shared name identifier to
+      refer to the user in order to share information about the user across the organizational boundaries.
+      The user is said to have a federated identity when partners have established such an agreement
+      on how to refer to the user. From an administrative perspective, this type of sharing can help reduce
+      identity management costs as multiple services do not need to independently collect and maintain
+      identity-related data (e.g. passwords, identity attributes). In addition, administrators of these services
+      usually do not have to manually establish and maintain the shared identifiers; rather control for this
+      can reside with the user.
+    • Web services and other industry standards: SAML allows for its security assertion format to be
+      used outside of a “native” SAML-based protocol context. This modularity has proved useful to other
+      industry efforts addressing authorization services (IETF, OASIS), identity frameworks, web services
+      (OASIS, Liberty Alliance), etc. The OASIS WS-Security Technical Committee has defined a profile
+      for how to use SAML's rich assertion constructs within a WS-Security security token that can be
+      used, for example, to secure web service SOAP message exchanges. In particular, the advantage
+      offered by the use of a SAML assertion is that it provides a standards-based approach to the
+      exchange of information, including attributes, that are not easily conveyed using other WS-Security
+      token formats.
+
+2.2       Documentation Roadmap
+The OASIS SSTC has produced numerous documents related to SAML V2.0. This includes documents
+that make up the official OASIS standard itself, outreach material intended to help the public better
+
+understand SAML V2.0, and several extensions to SAML to facilitate its use in specific environments or to
+integrate it with other technologies.
+The documents that define and support the SAML V2.0 OASIS Standard are shown in Figure 1. The
+lighter-colored boxes represent non-normative information.
+
+                                               Conformance
+                                               Requirements
+
+       Assertions
+                                                                                      Authentication
+          and                  Bindings           Profiles           Metadata
+                                                                                         Context
+       Protocols
+      Protocols schema                          Attribute profile   Metadata schema      Authentication
+                                                    schemas                             context schemas
+     Assertions schema
+
+                                                                                         Security
+       Executive              Technical
+                                                 Glossary              Errata          and Privacy
+       Overview               Overview
+                                                                                      Considerations
+                                                                                                  SAML-docset
+
+                                       Figure 1: SAML V2.0 Document Set
+
+   • Conformance Requirements documents the technical requirements for SAML conformance, a
+     status that software vendors typically care about because it is one measure of cross-product
+     compatibility. If you need to make a formal reference to SAML V2.0 from another document, you
+     simply need to point to this one.
+   • Assertions and Protocol defines the syntax and semantics for creating XML-encoded assertions
+     to describe authentication, attribute, and authorization information, and for the protocol messages to
+     carry this information between systems. It has associated schemas, one for assertions and one for
+     protocols.
+   • Bindings defines how SAML assertions and request-response protocol messages can be
+     exchanged between systems using common underlying communication protocols and frameworks.
+   • Profiles defines specific sets of rules for using and restricting SAML's rich and flexible syntax for
+     conveying security information to solve specific business problems (for example, to perform a web
+     SSO exchange). It has several associated small schemas covering syntax aspects of attribute
+     profiles.
+   • Metadata defines how a SAML entity can describe its configuration data (e.g. service endpoint
+     URLs, key material for verifying signatures) in a standard way for consumption by partner entities. It
+     has an associated schema.
+   • Authentication Context defines a syntax for describing authentication context declarations which
+     describe various authentication mechanisms. It has an associated set of schemas.
+   • Executive Overview provides a brief executive-level overview of SAML and its primary benefits.
+     This is a non-normative document.
+   • Technical Overview is the document you are reading.
+   • Glossary normatively defines terms used throughout the SAML specifications. Where possible,
+     terms are aligned with those defined in other security glossaries.
+   • Errata clarifies interpretation of the SAML V2.0 standard where information in the final published
+     version was conflicting or unclear. Although the advice offered in this document is non-normative, it
+     is useful as a guide to the likely interpretations used by implementors of SAML-conforming software,
+     and is likely to be incorporated in any future revision to the standard. This document is updated on
+
+       an ongoing basis.
+   • Security and Privacy Considerations describes and analyzes the security and privacy properties
+     of SAML.
+Following the release of the SAML V2.0 OASIS Standard, the OASIS SSTC has continued work on
+several enhancements. As of this writing, the documents for the following enhancements have been
+approved as OASIS Committee Draft specifications and are available from the OASIS SSTC web site:
+   •   SAML Metadata Extension for Query Requesters . Defines role descriptor types that describe a
+       standalone SAML V1.x or V2.0 query requester for each of the three predefined query types.
+   •   SAML Attribute Sharing Profile for X.509 Authentication-Based Systems . Describes a SAML
+       profile enabling an attribute requester entity to make SAML attribute queries about users that have
+       authenticated at the requester entity using an X.509 client certificate.
+   •   SAML V1.x Metadata . Describes the use of the SAML V2.0 metadata constructs to describe
+       SAML entities that support the SAML V1.x OASIS Standard.
+   •   SAML XPath Attribute Profile . Profiles the use of SAML attributes for using XPath URI's as
+       attribute names.
+   •   SAML Protocol Extension for Third-Party Requests . Defines an extension to the SAML protocol
+       to facilitate requests made by entities other than the intended response recipient.
+
+3       High-Level SAML Use Cases
+Prior to examining details of the SAML standard, it's useful to describe some of the high-level use cases it
+addresses. More detailed use cases are described later in this document along with specific SAML
+profiles.
+
+3.1       SAML Participants
+Who are the participants involved in a SAML interaction? At a minimum, SAML exchanges take place
+between system entities referred to as a SAML asserting party and a SAML relying party. In many SAML
+use cases, a user, perhaps running a web browser or executing a SAML-enabled application, is also a
+participant, and may even be the asserting party.
+An asserting party is a system entity that makes SAML assertions. It is also sometimes called a SAML
+authority. A relying party is a system entity that uses assertions it has received. When a SAML asserting
+or relying party makes a direct request to another SAML entity, the party making the request is called a
+SAML requester, and the other party is referred to as a SAML responder. A replying party's willingness to
+rely on information from an asserting party depends on the existence of a trust relationship with the
+asserting party.
+SAML system entities can operate in a variety of SAML roles which define the SAML services and protocol
+messages they will use and the types of assertions they will generate or consume. For example, to
+support Multi-Domain Single Sign-On (MDSSO, or often just SSO), SAML defines the roles called identity
+provider (IdP) and service provider (SP). Another example is the attribute authority role where a SAML
+entity produces assertions in response to identity attribute queries from an entity acting as an attribute
+requester.
+At the heart of most SAML assertions is a subject (a principal – an entity that can be authenticated – within
+the context of a particular security domain) about which something is being asserted. The subject could be
+a human but could also be some other kind of entity, such as a company or a computer. The terms
+subject and principal tend to be used interchangeably in this document.
+A typical assertion from an identity provider might convey information such as “This user is John Doe, he
+has an email address of john.doe@example.com, and he was authenticated into this system using a
+password mechanism.” A service provider could choose to use this information, depending on its access
+policies, to grant John Doe web SSO access to local resources.
+
+3.2       Web Single Sign-On Use Case
+Multi-domain web single sign-on is arguably the most important use case for which SAML is applied. In
+this use case, a user has a login session (that is, a security context) on a web site (airline.example.com)
+and is accessing resources on that site. At some point, either explicitly or transparently, he is directed over
+to a partner's web site (cars.example.co.uk). In this case, we assume that a federated identity for the user
+has been previously established between airline.example.com and cars.example.co.uk based on a
+business agreement between them. The identity provider site (airline.example.com) asserts to the service
+provider site (cars.example.co.uk) that the user is known (by referring to the user by their federated
+identity), has authenticated to it, and has certain identity attributes (e.g. has a “Gold membership”). Since
+cars.example.co.uk trusts airline.example.com, it trusts that the user is valid and properly authenticated
+and thus creates a local session for the user. This use case is shown in Figure 2, which illustrates the fact
+that the user is not required to re-authenticate when directed over to the cars.example.co.uk site.
+
+                                                                Source web site:
+                                                              airline.example.com
+
+                                      Authenticate
+
+                                  1
+                                                              Business agreement              Identity
+
+                                  2     Access                Destination web site:         information
+                                       protected               cars.example.co.uk
+                                       resource
+
+                                                                                             SSO-usecase
+
+                                  Figure 2: General Single Sign-On Use Case
+This high-level description indicated that the user had first authenticated at the IdP before accessing a
+protected resource at the SP. This scenario is commonly referred to as an IdP-initiated web SSO
+scenario. While IdP-initiated SSO is useful in certain cases, a more common scenario starts with a user
+visiting an SP site through a browser bookmark, possibly first accessing resources that require no special
+authentication or authorization. In a SAML-enabled deployment, when they subsequently attempt to
+access a protected resource at the SP, the SP will send the user to the IdP with an authentication request
+in order to have the user log in. Thus this scenario is referred to as SP-initiated web SSO. Once logged in,
+the IdP can produce an assertion that can be used by the SP to validate the user's access rights to the
+protected resource. SAML V2.0 supports both the IdP-initiated and SP-initiated flows.
+SAML supports numerous variations on these two primary flows that deal with requirements for using
+various types and strengths of user authentication methods, alternative formats for expressing federated
+identities, use of different bindings for transporting the protocol messages, inclusion of identity attributes,
+etc. Many of these options are looked at in more detail in later sections of this document.
+
+3.3       Identity Federation Use Case
+As mentioned earlier, a user's identity is said to be federated between a set of providers when there is an
+agreement between the providers on a set of identifiers and/or identity attributes by which the sites will
+refer to the user.
+There are many questions that must be considered when business partners decide to use federated
+identities to share security and identity information about users. For example:
+   • Do the users have existing local identities at the sites that must be linked together through the
+     federated identifiers?
+   • Will the establishment and termination of federated identifiers for the users be done dynamically or
+     will the sites use pre-established federated identifiers?
+   • Do users need to explicitly consent to establishment of the federated identity?
+   • Do identity attributes about the users need to be exchanged?
+   • Should the identity federation rely on transient identifiers that are destroyed at the end of the user
+     session?
+   • Is the privacy of information to be exchanged of high concern such that the information should be
+
+      encrypted?
+Previous versions of the SAML standard relied on out-of-band agreement on the types of identifiers that
+would be used to represent a federated identity between partners (e.g. the use of X.509 subject names).
+While it supported the use of federated identities, it provided no means to directly establish the identifiers
+for those identities using SAML message exchanges. SAML V2.0 introduced two features to enhance its
+federated identity capabilities. First, new constructs and messages were added to support the dynamic
+establishment and management of federated name identifiers. Second, two new types of name identifiers
+were introduced with privacy-preserving characteristics.
+In some cases, exchanges of identity-related federation information may take place outside of the SAML
+V2.0 message exchanges. For example, providers may choose to share information about registered
+users via batch or off-line “identity feeds” that are driven by data sources (for example, human resources
+databases) at the identity provider and then propagated to service providers. Subsequently, the user's
+federated identity may be used in a SAML assertion and propagated between providers to implement
+single sign-on or to exchange identity attributes about the user. Alternatively, identity federation may be
+achieved purely by a business agreement that states that an identity provider will refer to a user based on
+certain attribute names and values, with no additional flows required for maintaining and updating user
+information between providers.
+The high-level identity federation use case described here demonstrates how SAML can use the new
+features to dynamically establish a federated identity for a user during a web SSO exchange. Most
+identity management systems maintain local identities for users. These local identities might be
+represented by the user's local login account or some other locally identifiable user profile. These local
+identities must be linked to the federated identity that will be used to represent the user when the provider
+interacts with a parter. The process of associating a federated identifier with the local identity at a partner
+(or partners) where the federated identity will be used is often called account linking.
+This use case, shown in Figure 3, demonstrates how, during web SSO, the sites can dynamically
+establish the federated name identifiers used in the account linking process. One identity provider,
+airline.example.com, and two service providers exist in this example: cars.example.co.uk for car rentals
+and hotels.example.ca for hotel bookings. The example assumes a user is registered on all three provider
+sites (i.e. they have pre-existing local login accounts), but the local accounts all have different account
+identifiers. At airline.example.com, user John is registered as johndoe, on cars.example.co.uk his
+account is jdoe, and on hotels.example.ca it is johnd. The sites have established an agreement to use
+persistent SAML privacy-preserving pseudonyms for the user's federated name identifiers. John has not
+previously federated his identities between these sites.
+
+                                    Figure 3: General Identity Federation Use Case
+
+                                          Prepare to rent car logged in            Prepare to book hotel logged in
+            Book flight logged in
+                                             as jdoe; accept offer of                 as johnd; accept offer of
+               as johndoe
+                                       federation with airline.example.com       federation with airline.example.com
+
+       airline.example.com                       cars.example.co.uk                            hotels.example.ca
+
+                                                                         No correlation of John's
+                                                                       activities across these sites
+
+                     Agree on azqu3H7 for referring to John
+               (neither knows the local ID used on the other side)
+
+                                           Agree on f78q9c0 for referring to John
+                                     (neither knows the local ID used on the other side)
+
+                                                                                                             IDFed-usecase
+
+The processing sequence is as follows:
+1. John books a flight at airline.example.com using his johndoe user account.
+2. John then uses a browser bookmark or clicks on a link to visit cars.example.co.uk to reserve a car.
+   This site sees that the browser user is not logged in locally but that he has previously visited their IdP
+   partner site airline.example.com (optionally using the new IdP discovery feature of SAML V2.0). So
+   cars.example.co.uk asks John if he would like to consent to federate his local cars.example.co.uk
+   identity with airline.example.com.
+3. John consents to the federation and his browser is redirected back to airline.example.com where the
+   site creates a new pseudonym, azqu3H7 for John's use when he visits cars.example.co.uk. The
+   pseudonym is linked to his johndoe account. Both providers agree to use this identifier to refer to John
+   in subsequent transactions.
+4. John is then redirected back to cars.example.co.uk with a SAML assertion indicating that the user
+   represented by the federated persistent identifier azqu3H7 is logged in at the IdP. Since this is the first
+   time that cars.example.co.uk has seen this identifier, it does not know which local user account to
+   which it applies.
+5. Thus, John must log in at cars.example.co.uk using his jdoe account. Then cars.example.co.uk
+   attaches the identity azqu3H7 to the local jdoe account for future use with the IdP airline.example.com.
+   The user accounts at the IdP and this SP are now linked using the federated name identifier azqu3H7.
+6. After reserving a car, John selects a browser bookmark or clicks on a link to visit hotels.example.ca in
+   order to book a hotel room.
+7. The federation process is repeated with the IdP airline.example.com, creating a new pseudonym,
+   f78q9C0, for IdP user johndoe that will be used when visiting hotels.example.ca.
+
+8. John is redirected back to the hotels.example.ca SP with a new SAML assertion. The SP requires John
+   to log into his local johnd user account and adds the pseudonym as the federated name identifier for
+   future use with the IdP airline.example.com. The user accounts at the IdP and this SP are now linked
+   using the federated name identifier f78q9C0.
+In the future, whenever John needs to books a flight, car, and hotel, he will only need to log in once to
+airline.example.com before visiting cars.example.co.uk and hotels.example.ca. The airline.example.com
+IdP will identify John as azqu3H7 to cars.example.co.uk and as f78q9C0 to hotels.example.ca. Each SP
+will locate John's local user account through the linked persistent pseudonyms and allow John to conduct
+business after the SSO exchange.
+
+4       SAML Architecture
+This section provides a brief description of the key SAML concepts and the components defined in the
+standard.
+
+4.1       Basic Concepts
+SAML consists of building-block components that, when put together, allow a number of use cases to be
+supported. The components primarily permit transfer of identity, authentication, attribute, and
+authorization information between autonomous organizations that have an established trust relationship.
+The core SAML specification defines the structure and content of both assertions and protocol messages
+used to transfer this information.
+SAML assertions carry statements about a principal that an asserting party claims to be true. The valid
+structure and contents of an assertion are defined by the SAML assertion XML schema. Assertions are
+usually created by an asserting party based on a request of some sort from a relying party, although under
+certain circumstances, the assertions can be delivered to a relying party in an unsolicited manner. SAML
+protocol messages are used to make the SAML-defined requests and return appropriate responses. The
+structure and contents of these messages are defined by the SAML-defined protocol XML schema.
+The means by which lower-level communication or messaging protocols (such as HTTP or SOAP) are
+used to transport SAML protocol messages between participants is defined by the SAML bindings.
+Next, SAML profiles are defined to satisfy a particular business use case, for example the Web Browser
+SSO profile. Profiles typically define constraints on the contents of SAML assertions, protocols, and
+bindings in order to solve the business use case in an interoperable fashion. There are also Attribute
+Profiles, which do not refer to any protocol messages and bindings, that define how to exchange attribute
+information using assertions in ways that align with a number of common usage environments (e.g. X.500/
+LDAP directories, DCE).
+Figure 4 illustrates the relationship between these basic SAML concepts.
+
+                                   Profiles
+                     Combinations of assertions, protocols,
+                   and bindings to support a defined use case
+
+                                  Bindings
+                         Mappings of SAML protocols
+                         onto standard messaging and
+                           communication protocols
+                                                                     Authentication Context
+                                                                         Detailed data on types
+                                                                     and strengths of authentication
+                                  Protocols
+                         Requests and responses for
+                        obtaining assertions and doing
+                             identity management                              Metadata
+                                                                          Configuration data for
+                                                                      identity and service providers
+                                 Assertions
+                          Authentication, attribute, and
+                            entitlement information
+
+                                                                                             SAML-concepts
+
+                                            Figure 4: Basic SAML Concepts
+
+Two other SAML concepts are useful for building and deploying a SAML environment:
+    • Metadata defines a way to express and share configuration information between SAML parties. For
+      instance, an entity's supported SAML bindings, operational roles (IDP, SP, etc), identifier
+      information, supporting identity attributes, and key information for encryption and signing can be
+
+      expressed using SAML metadata XML documents. SAML Metadata is defined by its own XML
+      schema.
+   • In a number of situations, a service provider may need to have detailed information regarding the
+     type and strength of authentication that a user employed when they authenticated at an identity
+     provider. A SAML authentication context is used in (or referred to from) an assertion's
+     authentication statement to carry this information. An SP can also include an authentication context
+     in a request to an IdP to request that the user be authenticated using a specific set of authentication
+     requirements, such as a multi-factor authentication. There is a general XML schema that defines the
+     mechanisms for creating authentication context declarations and a set of SAML-defined
+     Authentication Context Classes, each with their own XML schema, that describe commonly used
+     methods of authentication.
+This document does not go into further detail about Metadata and Authentication Context; for more
+information, see the specifications that focus on them ([SAMLMeta]and[SAMLAuthnCxt], respectively).
+It should be noted that the story of SAML need not end with its published set of assertions, protocols,
+bindings, and profiles. It is designed to be highly flexible, and thus it comes with extensibility points in its
+XML schemas, as well as guidelines for custom-designing new bindings and profiles in such a way as to
+ensure maximum interoperability.
+
+4.2       Advanced Concepts
+4.2.1       Subject Confirmation
+A SAML Assertion may contain an element called SubjectConfirmation. In practical terms, what
+SubjectConfirmation says is "these are the conditions under which an attesting entity (somebody
+trying to use the assertion) is permitted to do so". The entity trying to use the assertion, or the "wielder", is
+attesting to its right to do so, usually by implying a relationship with the subject. An assertion can have any
+number of SubjectConfirmation elements, but an attesting entity only has to satisfy one of them.
+The SubjectConfirmation element provides the means for a relying party to verify the
+correspondence of the subject of the assertion with the party with whom the relying party is
+communicating. The Method attribute indicates the specific method that the relying party should use to
+make this determination.
+
+SAML 2.0 accounts for three different security scenarios by defining three values for the Method attribute
+of the SubjectConformation element, these are
+   urn:oasis:names:tc:SAML:2.0:cm:holder-of-key
+   urn:oasis:names:tc:SAML:2.0:cm:sender-vouches
+   urn:oasis:names:tc:SAML:2.0:cm:bearer
+
+In the holder-of-key model, the relying party will allow any party capable of demonstrating knowledge
+of specific key information contained with the SubjectConfirmation element's
+SubjectConfirmationData element to use the assertion (and thereby lay claim to some relationship
+with the subject within).
+In the bearer model, the relying party will allow any party that bears the Assertion (assuming any other
+constraints are also met) to use the assertion (and thereby lay claim to some relationship with the subject
+within).
+In the sender-vouches model, the relying party will use other criteria in determining which parties
+should be allowed to use the assertion (and thereby lay claim to some relationship with the subject within).
+
+4.3       SAML Components
+This section takes a more detailed look at each of the components that represent the assertion, protocol,
+binding, and profile concepts in a SAML environment.
+
+Assertions: SAML allows for one party to assert security information in the form of statements about a
+subject. For instance, a SAML assertion could state that the subject is named “John Doe”, has an email
+address of john.doe@example.com, and is a member of the “engineering” group.
+An assertion contains some basic required and optional information that applies to all its statements, and
+usually contains a subject of the assertion (if not present, the identity determined through other means,
+e.g. the certificate used for subject confirmation), conditions used to validate the assertion, and assertion
+statements.
+SAML defines three kinds of statements that can be carried within an assertion:
+      • Authentication statements: These are created by the party that successfully authenticated a
+        user. At a minimum, they describe the particular means used to authenticate the user and the
+        specific time at which the authentication took place.
+      • Attribute statements: These contain specific identifying attributes about the subject (for
+        example, that user “John Doe” has “Gold” card status).
+      • Authorization decision statements: These define something that the subject is entitled to do
+        (for example, whether “John Doe” is permitted to buy a specified item).
+Protocols: SAML defines a number of generalized request/response protocols:
+
+      • Authentication Request Protocol: Defines a means by which a principal (or an agent acting on
+        behalf of the principal) can request assertions containing authentication statements and,
+        optionally, attribute statements. The Web Browser SSO Profile uses this protocol when
+        redirecting a user from an SP to an IdP when it needs to obtain an assertion in order to establish
+        a security context for the user at the SP.
+      • Single Logout Protocol: Defines a mechanism to allow near-simultaneous logout of active
+        sessions associated with a principal. The logout can be directly initiated by the user, or initiated
+        by an IdP or SP because of a session timeout, administrator command, etc.
+      • Assertion Query and Request Protocol: Defines a set of queries by which SAML assertions
+        may be obtained. The Request form of this protocol can ask an asserting party for an existing
+        assertion by referring to its assertion ID. The Query form of this protocol defines how a relying
+        party can ask for assertions (new or existing) on the basis of a specific subject and the desired
+        statement type.
+      • Artifact Resolution Protocol: Provides a mechanism by which SAML protocol messages may
+        be passed by reference using a small, fixed-length value called an artifact. The artifact receiver
+        uses the Artifact Resolution Protocol to ask the message creator to dereference the artifact and
+        return the actual protocol message. The artifact is typically passed to a message recipient using
+        one SAML binding (e.g. HTTP Redirect) while the resolution request and response take place
+        over a synchronous binding, such as SOAP.
+      • Name Identifier Management Protocol: Provides mechanisms to change the value or format
+        of the name identifier used to refer to a principal. The issuer of the request can be either the
+        service provider or the identity provider. The protocol also provides a mechanism to terminate an
+        association of a name identifier between an identity provider and service provider.
+      • Name Identifier Mapping Protocol: Provides a mechanism to programmatically map one
+        SAML name identifier into another, subject to appropriate policy controls. It permits, for example,
+        one SP to request from an IdP an identifier for a user that the SP can use at another SP in an
+        application integration scenario.
+Bindings: SAML bindings detail exactly how the various SAML protocol messages can be carried over
+underlying transport protocols. The bindings defined by SAML V2.0 are:
+      • HTTP Redirect Binding: Defines how SAML protocol messages can be transported using
+        HTTP redirect messages (302 status code responses).
+      • HTTP POST Binding: Defines how SAML protocol messages can be transported within the
+        base64-encoded content of an HTML form control.
+
+      • HTTP Artifact Binding: Defines how an artifact (described above in the Artifact Resolution
+        Protocol) is transported from a message sender to a message receiver using HTTP. Two
+        mechanisms are provided: either an HTML form control or a query string in the URL.
+      • SAML SOAP Binding: Defines how SAML protocol messages are transported within SOAP 1.1
+        messages, with details about using SOAP over HTTP.
+      • Reverse SOAP (PAOS) Binding: Defines a multi-stage SOAP/HTTP message exchange that
+        permits an HTTP client to be a SOAP responder. Used in the Enhanced Client and Proxy Profile
+        to enable clients and proxies capable of assisting in IDP discovery.
+      • SAML URI Binding: Defines a means for retrieving an existing SAML assertion by resolving a
+        URI (uniform resource identifier).
+Profiles: SAML profiles define how the SAML assertions, protocols, and bindings are combined and
+constrained to provide greater interoperability in particular usage scenarios. Some of these profiles are
+examined in detail later in this document. The profiles defined by SAML V2.0 are:
+      • Web Browser SSO Profile: Defines how SAML entities use the Authentication Request Protocol
+        and SAML Response messages and assertions to achieve single sign-on with standard web
+        browsers. It defines how the messages are used in combination with the HTTP Redirect, HTTP
+        POST, and HTTP Artifact bindings.
+      • Enhanced Client and Proxy (ECP) Profile: Defines a specialized SSO profile where
+        specialized clients or gateway proxies can use the Reverse-SOAP (PAOS) and SOAP bindings.
+      • Identity Provider Discovery Profile: Defines one possible mechanism for service providers to
+        learn about the identity providers that a user has previously visited.
+      • Single Logout Profile: Defines how the SAML Single Logout Protocol can be used with SOAP,
+        HTTP Redirect, HTTP POST, and HTTP Artifact bindings.
+      • Assertion Query/Request Profile: Defines how SAML entities can use the SAML Query and
+        Request Protocol to obtain SAML assertions over a synchronous binding, such as SOAP.
+      • Artifact Resolution Profile: Defines how SAML entities can use the Artifact Resolution Protocol
+        over a synchronous binding, such as SOAP, to obtain the protocol message referred to by an
+        artifact.
+      • Name Identifier Management Profile: Defines how the Name Identifier Management Protocol
+        may be used with SOAP, HTTP Redirect, HTTP POST, and HTTP Artifact bindings.
+      • Name Identifier Mapping Profile: Defines how the Name Identifier Mapping Protocol uses a
+        synchronous binding such as SOAP.
+
+4.4       SAML XML Constructs and Examples
+This section provides descriptions and examples of some of the key SAML XML constructs.
+
+4.4.1       Relationship of SAML Components
+An assertion contains one or more statements and some common information that applies to all contained
+statements or to the assertion as a whole. A SAML assertion is typically carried between parties in a
+SAML protocol response message, which itself must be transmitted using some sort of transport or
+messaging protocol.
+Figure 5 shows a typical example of containment: a SAML assertion containing a series of statements, the
+whole being contained within a SAML response, which itself is carried by some kind of protocol.
+
+                                                  Transport protocol
+
+                                               Transport protocol header
+
+                                               Transport protocol payload
+
+                                                    SAML response
+
+                                                       Assertion
+                                                      Assertion
+
+                                                    Authentication
+                                                      statement
+
+                                                        Other
+                                                     statements
+
+                                                                SAML-component-nesting
+
+                                  Figure 5: Relationship of SAML Components
+
+4.4.2       Assertion, Subject, and Statement Structure
+        1: <saml:Assertion xmlns:saml=”urn:oasis:names:tc:SAML:2.0:assertion”
+        2:   Version="2.0"
+        3:   IssueInstant="2005-01-31T12:00:00Z">
+        4:   <saml:Issuer Format=urn:oasis:names:SAML:2.0:nameid-format:entity>
+        5:     http://idp.example.org
+        6:   </saml:Issuer>
+        7:   <saml:Subject>
+        8:     <saml:NameID
+        9:       Format="urn:oasis:names:tc:SAML:1.1:nameid-format:emailAddress">
+       10:         j.doe@example.com
+       11:     </saml:NameID>
+       12:   </saml:Subject>
+       13:   <saml:Conditions
+       14:     NotBefore="2005-01-31T12:00:00Z"
+       15:     NotOnOrAfter="2005-01-31T12:10:00Z">
+       16:   </saml:Conditions>
+       17:   <saml:AuthnStatement
+       18:     AuthnInstant="2005-01-31T12:00:00Z" SessionIndex="67775277772">
+       19:     <saml:AuthnContext>
+       20:       <saml:AuthnContextClassRef>
+       21:         urn:oasis:names:tc:SAML:2.0:ac:classes:PasswordProtectedTransport
+       22:       </saml:AuthnContextClassRef>
+       23:     </saml:AuthnContext>
+       24:   </saml:AuthnStatement>
+       25: </saml:Assertion>
+
+                 Figure 6: Assertion with Subject, Conditions, and Authentication Statement
+
+ Figure 6shows an XML fragment containing an example assertion with a single authentication statement.
+Note that the XML text in the figure (and elsewhere in this document) has been formatted for presentation
+purposes. Specifically, while line breaks and extra spaces are ignored between XML attributes within an
+XML element tag, when they appear between XML element start/end tags, they technically become part of
+the element value. They are inserted in the example only for readability.
+
+   • Line 1 begins the assertion and contains the declaration of the SAML assertion namespace, which is
+     conventionally represented in the specifications with the saml: prefix.
+   • Lines 2 through 6 provide information about the nature of the assertion: which version of SAML is
+     being used, when the assertion was created, and who issued it.
+   • Lines 7 through 12 provide information about the subject of the assertion, to which all of the
+     contained statements apply. The subject has a name identifier (line 10) whose value is
+     “j.doe@example.com”, provided in the format described on line 9 (email address). SAML defines
+     various name identifier formats, and you can also define your own.
+   • The assertion as a whole has a validity period indicated by lines 14 and 15. Additional conditions on
+     the use of the assertion can be provided inside this element; SAML predefines some and you can
+     define your own. Timestamps in SAML use the XML Schema dateTime data type.
+   • The authentication statement appearing on lines 17 through 24 shows that this subject was originally
+     authenticated using a password-protected transport mechanism (e.g. entering a username and
+     password submitted over an SSL-protected browser session) at the time and date shown. SAML
+     predefines numerous authentication context mechanisms (called classes), and you can also define
+     your own mechanisms.
+The <NameID> element within a <Subject> offers the ability to provide name identifiers in a number of
+different formats. SAML's predefined formats include:
+   • Email address
+   • X.509 subject name
+   • Windows domain qualified name
+   • Kerberos principal name
+   • Entity identifier
+   • Persistent identifier
+   • Transient identifier
+Of these, persistent and transient name identifiers utilize privacy-preserving pseudonyms to represent the
+principal. Persistent identifiers provide a permanent privacy-preserving federation since they remain
+associated with the local identities until they are explicitly removed. Transient identifiers support
+“anonymity” at an SP since they correspond to a “one-time use” identifier created at the IdP. They are not
+associated with a specific local user identity at the SP and are destroyed once the user session
+terminates.
+When persistent identifiers are created by an IdP, they are usually established for use only with a single
+SP. That is, an SP will only know about the persistent identifier that the IdP created for a principal for use
+when visiting that SP. The SP does not know about identifiers for the same principal that the IdP may
+have created for the user at other service providers. SAML does, however, also provide support for the
+concept of an affiliation of service providers which can share a single persistent identifier to identify a
+principal. This provides a means for one SP to directly utilize services of another SP in the affiliation on
+behalf of the principal. Without an affiliation, service providers must rely on the Name Identifier Mapping
+protocol and always interact with the IdP to obtain an identifier that can be used at some other specific SP.
+
+4.4.3       Attribute Statement Structure
+Attribute information about a principal is often provided as an adjunct to authentication information in
+single sign-on or can be returned in response to attribute queries from a relying party. SAML's attribute
+structure does not presume that any particular type of data store or data types are being used for the
+attributes; it has an attribute type-agnostic structure.
+Figure 7 shows an XML fragment containing an example attribute statement.
+
+              1: <saml:AttributeStatement>
+              2:   <saml:Attribute
+              3:      xmlns:x500="urn:oasis:names:tc:SAML:2.0:profiles:attribute:X500"
+              4:      NameFormat="urn:oasis:names:tc:SAML:2.0:attrname-format:uri"
+              5:      Name="urn:oid:2.5.4.42"
+              6:      FriendlyName="givenName">
+              7:      <saml:AttributeValue xsi:type="xs:string"
+              8:        x500:Encoding="LDAP">John</saml:AttributeValue>
+              9:   </saml:Attribute>
+             10:   <saml:Attribute
+             11:     NameFormat="urn:oasis:names:tc:SAML:2.0:attrname-format:basic"
+             12:     Name="LastName">
+             13:     <saml:AttributeValue
+             14:       xsi:type="xs:string">Doe</saml:AttributeValue>
+             15:   </saml:Attribute>
+             16:   <saml:Attribute
+             17:     NameFormat=“http://smithco.com/attr-formats”
+             18:     Name=“CreditLimit”>
+             19:     xmlns:smithco=”http://www.smithco.com/smithco-schema.xsd”
+             20:     <saml:AttributeValue xsi:type=“smithco:type”>
+             21:       <smithco:amount currency=“USD”>500.00</smithco:amount>
+             22:     </saml:AttributeValue>
+             23:   </saml:Attribute>
+             24: </saml:AttributeStatement>
+
+                                               Figure 7: Attribute Statement
+
+Note the following:
+   • A single statement can contain multiple attributes. In this example, there are three attributes (starting
+     on lines 2, 10, and 16) within the statement.
+   • Attribute names are qualified with a name format (lines 4, 11, and 17) which indicates how the
+     attribute name is to be interpreted. This example takes advantage of two of the SAML-defined
+     attribute profiles and defines a third custom attribute as well. The first attribute uses the SAML X.
+     500/LDAP Attribute Profile to define a value for the LDAP attribute identified by the OID “2.5.4.42”.
+     This attribute in an LDAP directory has a friendly name of “givenName” and the attribute's value is
+     “John”. The second attribute utilizes the SAML Basic Attribute Profile, refers to an attribute named
+     “LastName” which has the value “Doe”. The name format of the third attribute indicates the name is
+     not of a format defined by SAML, but is rather defined by a third party, SmithCo. Note that the use of
+     private formats and attribute profiles can create significant interoperability issues. See the SAML
+     Profiles specification for more information and examples.
+   • The value of an attribute can be defined by simple data types, as on lines 7 and 14, or can be
+     structured XML, as on lines 20 through 22.
+
+4.4.4       Message Structure and the SOAP Binding
+In environments where communicating SAML parties are SOAP-enabled, the SOAP-over-HTTP binding
+can be used to exchange SAML request/response protocol messages. Figure 8 shows the structure of a
+SAML response message being carried within the SOAP body of a SOAP envelope, which itself has an
+HTTP response wrapper. Note that SAML itself does not make use of the SOAP header of a SOAP
+envelope but it does not prevent SAML-based application environments from doing so if needed.
+
+                                               HTTP response
+
+                                               SOAP envelope
+
+                                                SOAP header
+
+                                                 SOAP body
+
+                                                SAML request
+                                                    or
+                                               SAML response
+
+                                                             protocol-SOAP-HTTP
+
+                          Figure 8: Protocol Messages Carried by SOAP Over HTTP
+
+Figure 9 shows an XML document containing an example SAML attribute query message being
+transported within a SOAP envelope.
+
+           1.    <?xml version="1.0" encoding="UTF-8"?>
+           2.    <env:Envelope
+           3.      xmlns:env=”http://www.w3.org/2003/05/soap/envelope/”>
+           4.      <env:Body>
+           5.        <samlp:AttributeQuery
+           6.          xmlns:saml="urn:oasis:names:tc:SAML:2.0:assertion"
+           7.          xmlns:samlp="urn:oasis:names:tc:SAML:2.0:protocol"
+           8.          ID="aaf23196-1773-2113-474a-fe114412ab72"
+           9.          Version="2.0"
+           10.         IssueInstant="2006-07-17T20:31:40Z">
+           11.         <saml:Issuer>http://example.sp.com</saml:Issuer>
+           12.         <saml:Subject>
+           13.             <saml:NameID
+           14.             Format="urn:oasis:names:tc:SAML:1.1:nameid-format:X509SubjectName">
+           15.             C=US, O=NCSA-TEST, OU=User, CN=trscavo@uiuc.edu
+           16.             </saml:NameID>
+           17.         </saml:Subject>
+           18.         <saml:Attribute
+           19.             NameFormat="urn:oasis:names:tc:SAML:2.0:attrname-format:uri"
+           20.             Name="urn:oid:2.5.4.42"
+           21.             FriendlyName="givenName">
+           22.         </saml:Attribute>
+           23.        </samlp:AttributeQuery>
+           24.     </env:Body>
+           25.   </env:Envelope>
+
+                                  Figure 9: Attribute Query in SOAP Envelope
+
+Note the following:
+   • The SOAP envelope starts at line 2.
+   • The SAML attribute query starting on line 5 is embedded in a SOAP body element starting on line 4.
+   • The attribute query contains, from lines 6 through 10, various required and optional XML attributes
+     including declarations of the SAML V2.0 assertion and protocol namespaces, and the message ID, .
+
+   • The request specifies a number of optional elements, from lines 11 through 22, that govern the type
+     of attributes the requester expects back. This includes, for example, the requested attribute
+     (givenName) and the subject for which the attribute is sought.
+An example XML fragment containing a SAML protocol Response message being transported in a SOAP
+message is shown in Figure 10.
+
+         1: <?xml version="1.0" encoding="UTF-8"?>
+         2: <env:Envelope xmlns:env="http://schemas.xmlsoap.org/soap/envelope/">
+         3:   <env:Body>
+         4:     <samlp:Response
+         5:       xmlns:samlp="urn:oasis:names:tc:SAML:2.0:protocol"
+         6:       xmlns:saml="urn:oasis:names:tc:SAML:2.0:assertion"
+         7:       Version="2.0"
+         8:       ID="i92f8b5230dc04d73e93095719d191915fdc67d5e"
+         9:       IssueInstant="2006-07-17T20:31:41Z"
+        10:       InResponseTo="aaf23196-1773-2113-474a-fe114412ab72 ">
+        11:       <saml:Issuer>http://idp.example.org</saml:Issuer>
+        12:       <samlp:Status>
+        13:         <samlp:StatusCode Value="urn:oasis:names:tc:SAML:2.0:status:Success"/>
+        14:       </samlp:Status>
+        15:                     ...SAML assertion...
+        16:     </samlp:Response>
+        17:   </env:Body>
+        18: </env:Envelope>
+
+                                     Figure 10: Response in SOAP Envelope
+
+Note the following:
+   • On line 10, the Response InResponseTo XML attribute references the request to which the
+     asserting party is responding, and specifies additional information (lines 7 through 14) needed to
+     process the response, including status information. SAML defines a number of status codes and, in
+     many cases, dictates the circumstances under which they must be used.
+   • Within the response (line 15; detail elided) is a SAML assertion, that would contain the requested
+     given name attribute in an attribute statement.
+
+4.5       Privacy in SAML
+In an information technology context, privacy generally refers to both a user's ability to control how their
+identity data is shared and used, and to mechanisms that inhibit their actions at multiple service providers
+from being inappropriately correlated.
+SAML is often deployed in scenarios where such privacy requirements must be accounted for (as it is also
+often deployed in scenarios where such privacy need not be explicitly addressed, the assumption being
+that appropriate protections are enabled through other means and/or layers).
+SAML has a number of mechanisms that support deployment in privacy .
+    •    SAML supports the establishment of pseudonyms established between an identity provider and a
+         service provider. Such pseudonyms do not themselves enable inappropriate correlation between
+         service providers (as would be possible if the identity provider asserted the same identifier for a
+         user to every service provider, a so-called global identifier).
+    •    SAML supports one-time or transient identifiers – such identifiers ensure that every time a certain
+         user accesses a given service provider through a single sign-on operation from an identity
+         provider, that service provider will be unable to recognize them as the same individual as might
+         have previously visited (based solely on the identifier, correlation may be possible through non-
+         SAML handles).
+    •    SAML's Authentication Context mechanisms allow a user to be authenticated at a sufficient (but
+         not more than necessary) assurance level, appropriate to the resource they may be attempting to
+         access at some service provider.
+    •    SAML allows the claimed fact of a user consenting to certain operations (e.g. the act of
+
+         federation) to be expressed between providers. How, when or where such consent is obtained is
+         out of scope for SAML.
+
+4.6       Security in SAML
+Just providing assertions from an asserting party to a relying party may not be adequate to ensure a
+secure system. How does the relying party trust what is being asserted to it? In addition, what prevents a
+“man-in-the-middle” attack that might grab assertions to be illicitly “replayed” at a later date? These and
+many more security considerations are discussed in detail in the SAML Security and Privacy
+Considerations specification .
+SAML defines a number of security mechanisms to detect and protect against such attacks. The primary
+mechanism is for the relying party and asserting party to have a pre-existing trust relationship which
+typically relies on a Public Key Infrastructure (PKI). While use of a PKI is not mandated by SAML, it is
+recommended.
+Use of particular security mechanisms are described for each SAML binding. A general overview of what
+is recommended is provided below:
+   • Where message integrity and message confidentiality are required, then HTTP over SSL 3.0 or TLS
+     1.0 is recommended.
+   • When a relying party requests an assertion from an asserting party, bi-lateral authentication is
+     required and the use of SSL 3.0 or TLS 1.0 using mutual authentication or authentication via digital
+     signatures is recommended.
+   • When a response message containing an assertion is delivered to a relying party via a user's web
+     browser (for example using the HTTP POST binding), then to ensure message integrity, it is
+     mandated that the response message be digitally signed using XML Signature
+
+5       Major Profiles and Federation Use Cases
+As mentioned earlier, SAML defines a number of profiles to describe and constrain the use of SAML
+protocol messages and assertions to solve specific business use cases. This section provides greater
+detail on some of the most important SAML profiles and identity federation use cases.
+
+5.1       Web Browser SSO Profile
+This section describes the typical flows likely to be used with the web browser SSO profile of SAML V2.0.
+
+5.1.1       Introduction
+The Web Browser SSO Profile defines how to use SAML messages and bindings to support the web SSO
+use case described in section 3.2. This profile provides a wide variety of options, primarily having to do
+with two dimensions of choice: first whether the message flows are IdP-initiated or SP-initiated, and
+second, which bindings are used to deliver messages between the IdP and the SP.
+The first choice has to do with where the user starts the process of a web SSO exchange. SAML supports
+two general message flows to support the processes. The most common scenario for starting a web SSO
+exchange is the SP-initiated web SSO model which begins with the user choosing a browser bookmark or
+clicking a link that takes them directly to an SP application resource they need to access. However, since
+the user is not logged in at the SP, before it allows access to the resource, the SP sends the user to an
+IdP to authenticate. The IdP builds an assertion representing the user's authentication at the IdP and then
+sends the user back to the SP with the assertion. The SP processes the assertion and determines
+whether to grant the user access to the resource.
+
+In an IdP-initiated scenario, the user is visiting an IdP where they are already authenticated and they click
+on a link to a partner SP. The IdP builds an assertion representing the user's authentication state at the
+IdP and sends the user's browser over to the SP's assertion consumer service, which processes the
+assertion and creates a local security context for the user at the SP. This approach is useful in certain
+environments, but requires the IdP to be configured with inter-site transfer links to the SP's site.
+Sometimes a binding-specific field called RelayState is used to coordinate messages and actions of
+IdPs and SPs, for example, to allow an IdP (with which SSO was initiated) to indicate the URL of a desired
+resource when communicating with an SP.
+Figure 11compares the IdP-initiated and SP-initiated models.
+
+                                           Identity
+                                                                                             Identity
+                                           Provider
+                                                                                             Provider
+
+                                                                             Authenticate
+                                                                             when asked
+                        Authenticate
+                                                                            2
+                        1
+                        2                                                   1
+                              Access                                             Attempt
+                                           Service
+                            successfully                                         access      Service
+                                           Provider                         3                Provider
+                                                                                 Succeed
+                                                                                in attempt
+
+                                                                                               IdP-vs-SP-init
+
+                       IdP-initiated                                       SP-initiated
+                           Figure 11: Differences in Initiation of Web Browser SSO
+
+The second choice to be made when using the SAML profiles centers around which SAML bindings will be
+used when sending messages back and forth between the IdP and SP. There are many combinations of
+message flows and bindings that are possible, many of which are discussed in the following subsections.
+For the web SSO profile, we are mainly concerned with two SAML messages; namely an Authentication
+Request message sent from an SP to an IdP, and a Response message containing a SAML assertion that
+is sent from the IdP to the SP (and then, secondarily, with messages related to artifact resolution if that
+binding is chosen).
+The SAML Conformance and Profiles specifications identify the SAML bindings that can legally be used
+with these two messages. Specifically, an Authentication Request message can be sent from an SP to an
+IdP using either the HTTP Redirect Binding, HTTP POST Binding, or HTTP Artifact Binding. The
+Response message can be sent from an IdP to an SP using either the HTTP POST Binding or the HTTP
+Artifact Binding. For this pair of messages, SAML permits asymmetry in the choice of bindings used. That
+is, a request can be sent using one binding and the response can be returned using a different binding.
+The decision of which bindings to use is typically driven by configuration settings at the IdP and SP
+systems. Factors such as potential message sizes, whether identity information is allowed to transit
+through the browser (if not the artifact binding may be required) , etc. must be considered in the choice of
+bindings.
+The following subsections describe the detailed message flows involved in web SSO exchanges for the
+following use case scenarios:
+•   SP-initiated SSO using a Redirect Binding for the SP-to-IdP <AuthnRequest> message and a POST
+    Binding for the IdP-to-SP <Response> message
+•   SP-initiated SSO using a POST Binding for the <AuthnRequest> message and an Artifact Binding for
+    the <Response> message
+•   IDP-initiated SSO using a POST Binding for the IdP-to-SP <Response> message; no SP-to-IdP
+    <AuthnRequest> message is involved.
+
+5.1.2       SP-Initiated SSO: Redirect/POST Bindings
+This first example describes an SP-initiated SSO exchange. In such an exchange, the user attempts to
+
+access a resource on the SP, sp.example.com. However they do not have a current logon session on this
+site and their federated identity is managed by their IdP, idp.example.org. They are sent to the IdP to log
+on and the IdP provides a SAML web SSO assertion for the user's federated identity back to the SP.
+For this specific use case, the HTTP Redirect Binding is used to deliver the SAML <AuthnRequest>
+message to the IdP and the HTTP POST Binding is used to return the SAML <Response> message
+containing the assertion to the SP. Figure 12 illustrates the message flow.
+
+                      Service Provider                                        Identity Provider
+                      sp.example.com                                          idp.example.org
+
+                            Resource
+
+                                        Assertion                            Single
+          Access                        Consumer                            Sign-On
+          check                          Service                            Service
+
+                        7               2                               5                             3
+
+                                  Redirect with                           GET using              Challenge
+           Access
+                                 <AuthnRequest>                         <AuthnRequest>               for
+          resource
+                                                                                                 credentials
+                                                                   Signed
+                                               POST signed      <Response>               User
+                      Supply                   <Response>                                login
+                     resource                                  in HTML form
+
+              1                                       6                                    4
+
+                                                    User or UA action
+         Browser
+                                                    User or UA action
+
+                                                                                          SSO-SP-redir-POST
+
+                            Figure 12: SP-Initiated SSO with Redirect and POST Bindings
+
+The processing is as follows:
+1. The user attempts to access a resource on sp.example.com. The user does not have a valid logon
+   session (i.e. security context) on this site. The SP saves the requested resource URL in local state
+   information that can be saved across the web SSO exchange.
+2. The SP sends an HTTP redirect response to the browser (HTTP status 302 or 303). The Location
+   HTTP header contains the destination URI of the Sign-On Service at the identity provider together with
+   an <AuthnRequest> message encoded as a URL query variable named SAMLRequest.
+         <samlp:AuthnRequest
+             xmlns:samlp="urn:oasis:names:tc:SAML:2.0:protocol"
+             xmlns:saml="urn:oasis:names:tc:SAML:2.0:assertion"
+             ID="identifier_1"
+             Version="2.0"
+             IssueInstant="2004-12-05T09:21:59Z"
+             AssertionConsumerServiceIndex="1">
+             <saml:Issuer>https://sp.example.com/SAML2</saml:Issuer>
+             <samlp:NameIDPolicy
+               AllowCreate="true"
+               Format="urn:oasis:names:tc:SAML:2.0:nameid-format:transient"/>
+         </samlp:AuthnRequest>
+
+   The query string is encoded using the DEFLATE encoding. The browser processes the redirect
+
+   response and issues an HTTP GET request to the IdP's Single Sign-On Service with the
+   SAMLRequest query parameter. The local state information (or a reference to it) is also included in the
+   HTTP response encoded in a RelayState query string parameter.
+         https://idp.example.org/SAML2/SSO/Redirect?SAMLRequest=request&RelayState=token
+
+3. The Single Sign-On Service determines whether the user has an existing logon security context at the
+   identity provider that meets the default or requested (in the <AuthnRequest>) authentication policy
+   requirements. If not, the IdP interacts with the browser to challenge the user to provide valid
+   credentials.
+4. The user provides valid credentials and a local logon security context is created for the user at the IdP.
+5. The IdP Single Sign-On Service builds a SAML assertion representing the user's logon security
+   context. Since a POST binding is going to be used, the assertion is digitally signed and then placed
+   within a SAML <Response> message. The <Response> message is then placed within an HTML
+   FORM as a hidden form control named SAMLResponse. If the IdP received a RelayState value
+   from the SP, it must return it unmodified to the SP in a hidden form control named RelayState. The
+   Single Sign-On Service sends the HTML form back to the browser in the HTTP response. For ease of
+   use purposes, the HTML FORM typically will be accompanied by script code that will automatically post
+   the form to the destination site.
+         <form method="post" action="https://sp.example.com/SAML2/SSO/POST" ...>
+             <input type="hidden" name="SAMLResponse" value="response" />
+             <input type="hidden" name="RelayState" value="token" />
+             ...
+             <input type="submit" value="Submit" />
+         </form>
+
+         The value of the SAMLResponse parameter is the base64 encoding of the following
+         <samlp:Response> element:
+         <samlp:Response
+             xmlns:samlp="urn:oasis:names:tc:SAML:2.0:protocol"
+             xmlns:saml="urn:oasis:names:tc:SAML:2.0:assertion"
+             ID="identifier_2"
+             InResponseTo="identifier_1"
+             Version="2.0"
+             IssueInstant="2004-12-05T09:22:05Z"
+             Destination="https://sp.example.com/SAML2/SSO/POST">
+             <saml:Issuer>https://idp.example.org/SAML2</saml:Issuer>
+             <samlp:Status>
+               <samlp:StatusCode
+                 Value="urn:oasis:names:tc:SAML:2.0:status:Success"/>
+             </samlp:Status>
+             <saml:Assertion
+               xmlns:saml="urn:oasis:names:tc:SAML:2.0:assertion"
+               ID="identifier_3"
+               Version="2.0"
+               IssueInstant="2004-12-05T09:22:05Z">
+               <saml:Issuer>https://idp.example.org/SAML2</saml:Issuer>
+               <!-- a POSTed assertion MUST be signed -->
+               <ds:Signature
+                 xmlns:ds="http://www.w3.org/2000/09/xmldsig#">...</ds:Signature>
+               <saml:Subject>
+                 <saml:NameID
+                   Format="urn:oasis:names:tc:SAML:2.0:nameid-format:transient">
+                   3f7b3dcf-1674-4ecd-92c8-1544f346baf8
+                 </saml:NameID>
+                 <saml:SubjectConfirmation
+                   Method="urn:oasis:names:tc:SAML:2.0:cm:bearer">
+                   <saml:SubjectConfirmationData
+                     InResponseTo="identifier_1"
+                     Recipient="https://sp.example.com/SAML2/SSO/POST"
+                     NotOnOrAfter="2004-12-05T09:27:05Z"/>
+                 </saml:SubjectConfirmation>
+               </saml:Subject>
+               <saml:Conditions
+                 NotBefore="2004-12-05T09:17:05Z"
+                 NotOnOrAfter="2004-12-05T09:27:05Z">
+                 <saml:AudienceRestriction>
+                   <saml:Audience>https://sp.example.com/SAML2</saml:Audience>
+                 </saml:AudienceRestriction>
+
+               </saml:Conditions>
+               <saml:AuthnStatement
+                 AuthnInstant="2004-12-05T09:22:00Z"
+                 SessionIndex="identifier_3">
+                 <saml:AuthnContext>
+                   <saml:AuthnContextClassRef>
+                     urn:oasis:names:tc:SAML:2.0:ac:classes:PasswordProtectedTransport
+                  </saml:AuthnContextClassRef>
+                 </saml:AuthnContext>
+               </saml:AuthnStatement>
+             </saml:Assertion>
+           </samlp:Response>
+
+6. The browser, due either to a user action or execution of an “auto-submit” script, issues an HTTP POST
+   request to send the form to the SP's Assertion Consumer Service.
+           POST /SAML2/SSO/POST HTTP/1.1
+           Host: sp.example.com
+           Content-Type: application/x-www-form-urlencoded
+           Content-Length: nnn
+
+           SAMLResponse=response&RelayState=token
+
+         where the values of the SAMLResponse and RelayState parameters are taken from the HTML
+         form of Step 5.
+         The service provider's Assertion Consumer Service obtains the <Response> message from the
+         HTML FORM for processing. The digital signature on the SAML assertion must first be validated
+         and then the assertion contents are processed in order to create a local logon security context for
+         the user at the SP. Once this completes, the SP retrieves the local state information indicated by
+         the RelayState data to recall the originally-requested resource URL. It then sends an HTTP
+         redirect response to the browser directing it to access the originally requested resource (not
+         shown).
+7. An access check is made to establish whether the user has the correct authorization to access the
+   resource. If the access check passes, the resource is then returned to the browser.
+
+5.1.3       SP-Initiated SSO: POST/Artifact Bindings
+This use case again describes an SP-initiated SSO exchange.
+However, for this use case, the HTTP POST binding is used to deliver the SAML <AuthnRequest> to
+the IdP and the SAML <Response> message is returned using the Artifact binding. The HTTP POST
+binding may be necessary for an <AuthnRequest> message in cases where its length precludes the use
+of the HTTP Redirect binding (which is typical). The message may be long enough to require a POST
+binding when, for example, it includes many of its optional elements and attributes, or when it must be
+digitally signed.
+When using the HTTP Artifact binding for the SAML <Response> message, SAML permits the artifact to
+be delivered via the browser using either an HTTP POST or HTTP Redirect response (not to be confused
+with the SAML HTTP POST and Redirect Bindings). In this example, the artifact is delivered using an
+HTTP redirect.
+Once the SP is in possession of the artifact, it contacts the IdP's Artifact Resolution Service using the
+synchronous SOAP binding to obtain the SAML message that corresponds to the artifact. Figure 13
+illustrates the message flow.
+
+                      Service Provider                                        Identity Provider
+                      sp.example.com                                          idp.example.org
+
+                                                          <Artifact           Artifact
+                            Resource                      Resolve>           Resolution
+                                                           (SOAP)             Service
+                                                                        7
+                                       Assertion     6    <Artifact                Single
+           Access                      Consumer          Response>                Sign-On
+           check                        Service           (SOAP)                  Service
+
+                        8              2                                5                              3
+
+                                 Redirect with                               GET                  Challenge
+           Access
+                                <AuthnRequest>                          <AuthnRequest>                for
+          resource
+                                                                                                  credentials
+
+                                               GET SAMLart   Redirect with                User
+                      Supply                                                              login
+                     resource                                 SAMLart
+
+              1                                                                            4
+
+                                                   User or UA action
+          Browser
+                                                   User or UA action
+
+                                                                                             SSO-SP-POST-art
+
+                                    Figure 13: SP-Initiated SSO with Binding
+
+The processing is as follows:
+1. The user attempts to access a resource on sp.example.com. The user does not have a valid logon
+   session (i.e. security context) on this site. The SP saves the requested resource URL in local state
+   information that can be saved across the web SSO exchange.
+2. The SP sends an HTML form back to the browser in the HTTP response (HTTP status 200). The
+   HTML FORM contains a SAML <AuthnRequest> message encoded as the value of a hidden form
+   control named SAMLRequest.
+           <form method="post" action="https://idp.example.org/SAML2/SSO/POST" ...>
+             <input type="hidden" name="SAMLRequest" value="request" />
+             <input type="hidden" name="RelayState" value="token" />
+             ...
+             <input type="submit" value="Submit" />
+           </form>
+
+         The RelayState token is an opaque reference to state information maintained at the service
+         provider. (The RelayState mechanism can leak details of the user's activities at the SP to the IdP
+         and so the SP should take care in its implementation to protect the user's privacy.) The value of
+         the SAMLRequest parameter is the base64 encoding of the following <samlp:AuthnRequest>
+         element:
+         <samlp:AuthnRequest
+             xmlns:samlp="urn:oasis:names:tc:SAML:2.0:protocol"
+             xmlns:saml="urn:oasis:names:tc:SAML:2.0:assertion"
+             ID="identifier_1"
+             Version="2.0"
+             IssueInstant="2004-12-05T09:21:59Z"
+             AssertionConsumerServiceIndex="1">
+             <saml:Issuer>https://sp.example.com/SAML2</saml:Issuer>
+             <samlp:NameIDPolicy
+               AllowCreate="true"
+               Format="urn:oasis:names:tc:SAML:2.0:nameid-format:transient"/>
+         </samlp:AuthnRequest>
+
+1. For ease-of-use purposes, the HTML FORM typically will be accompanied by script code that will
+   automatically post the form to the destination site (which is the IdP in this case). The browser, due
+   either to a user action or execution of an “auto-submit” script, issues an HTTP POST request to send
+   the form to the identity provider's Single Sign-On Service.
+           POST /SAML2/SSO/POST HTTP/1.1
+           Host: idp.example.org
+           Content-Type: application/x-www-form-urlencoded
+           Content-Length: nnn
+
+           SAMLRequest=request&RelayState=token
+
+3. The Single Sign-On Service determines whether the user has an existing logon security context at the
+   identity provider that meets the default or requested authentication policy requirements. If not, the IdP
+   interacts with the browser to challenge the user to provide valid credentials.
+4. The user provides valid credentials and a local logon security context is created for the user at the IdP.
+5. The IdP Single Sign-On Service issues a SAML assertion representing the user's logon security
+   context and places the assertion within a SAML <Response> message. Since the HTTP Artifact
+   binding will be used to deliver the SAML Response message, it is not mandated that the assertion be
+   digitally signed. The IdP creates an artifact containing the source ID for the idp.example.org site and a
+   reference to the <Response> message (the MessageHandle). The HTTP Artifact binding allows the
+   choice of either HTTP redirection or an HTML form POST as the mechanism to deliver the artifact to
+   the partner. The figure shows the use of redirection.
+6. The SP's Assertion Consumer Service now sends a SAML <ArtifactResolve> message containing
+   the artifact to the IdP's Artifact Resolution Service endpoint. This exchange is performed using a
+   synchronous SOAP message exchange.
+           <samlp:ArtifactResolve
+             xmlns:samlp="urn:oasis:names:tc:SAML:2.0:protocol"
+             xmlns:saml="urn:oasis:names:tc:SAML:2.0:assertion"
+             ID="identifier_2"
+             Version="2.0"
+             IssueInstant="2004-12-05T09:22:04Z"
+             Destination="https://idp.example.org/SAML2/ArtifactResolution">
+             <saml:Issuer>https://sp.example.com/SAML2</saml:Issuer>
+             <!-- an ArtifactResolve message SHOULD be signed -->
+             <ds:Signature
+               xmlns:ds="http://www.w3.org/2000/09/xmldsig#">...</ds:Signature>
+             <samlp:Artifact>artifact</samlp:Artifact>
+          </samlp:ArtifactResolve>
+
+7. The IdP's Artifact Resolution Service extracts the MessageHandle from the artifact and locates the
+   original SAML <Response> message associated with it. This message is then placed inside a SAML
+   <ArtifactResponse> message, which is returned to the SP over the SOAP channel.
+
+          <samlp:ArtifactResponse
+             xmlns:samlp="urn:oasis:names:tc:SAML:2.0:protocol"
+
+             ID="identifier_3"
+             InResponseTo="identifier_2"
+             Version="2.0"
+             IssueInstant="2004-12-05T09:22:05Z">
+             <!-- an ArtifactResponse message SHOULD be signed -->
+             <ds:Signature
+               xmlns:ds="http://www.w3.org/2000/09/xmldsig#">...</ds:Signature>
+             <samlp:Status>
+               <samlp:StatusCode
+                 Value="urn:oasis:names:tc:SAML:2.0:status:Success"/>
+             </samlp:Status>
+             <samlp:Response
+               xmlns:samlp="urn:oasis:names:tc:SAML:2.0:protocol"
+               xmlns:saml="urn:oasis:names:tc:SAML:2.0:assertion"
+               ID="identifier_4"
+               InResponseTo="identifier_1"
+               Version="2.0"
+               IssueInstant="2004-12-05T09:22:05Z"
+               Destination="https://sp.example.com/SAML2/SSO/Artifact">
+               <saml:Issuer>https://idp.example.org/SAML2</saml:Issuer>
+               <ds:Signature
+                 xmlns:ds="http://www.w3.org/2000/09/xmldsig#">...</ds:Signature>
+               <samlp:Status>
+                 <samlp:StatusCode
+                   Value="urn:oasis:names:tc:SAML:2.0:status:Success"/>
+               </samlp:Status>
+               <saml:Assertion
+                 xmlns:saml="urn:oasis:names:tc:SAML:2.0:assertion"
+                 ID="identifier_5"
+                 Version="2.0"
+                 IssueInstant="2004-12-05T09:22:05Z">
+                 <saml:Issuer>https://idp.example.org/SAML2</saml:Issuer>
+                 <!-- a Subject element is required -->
+                 <saml:Subject>
+                   <saml:NameID
+                     Format="urn:oasis:names:tc:SAML:1.1:nameid-format:emailAddress">
+                     user@mail.example.org
+                   </saml:NameID>
+                   <saml:SubjectConfirmation
+                     Method="urn:oasis:names:tc:SAML:2.0:cm:bearer">
+                     <saml:SubjectConfirmationData
+                       InResponseTo="identifier_1"
+                       Recipient="https://sp.example.com/SAML2/SSO/Artifact"
+                       NotOnOrAfter="2004-12-05T09:27:05Z"/>
+                   </saml:SubjectConfirmation>
+                 </saml:Subject>
+                 <saml:Conditions
+                   NotBefore="2004-12-05T09:17:05Z"
+                   NotOnOrAfter="2004-12-05T09:27:05Z">
+                   <saml:AudienceRestriction>
+                     <saml:Audience>https://sp.example.com/SAML2</saml:Audience>
+                   </saml:AudienceRestriction>
+                 </saml:Conditions>
+                 <saml:AuthnStatement
+                   AuthnInstant="2004-12-05T09:22:00Z"
+                   SessionIndex="identifier_5">
+                   <saml:AuthnContext>
+                     <saml:AuthnContextClassRef>
+                       urn:oasis:names:tc:SAML:2.0:ac:classes:PasswordProtectedTransport
+                    </saml:AuthnContextClassRef>
+                   </saml:AuthnContext>
+                 </saml:AuthnStatement>
+               </saml:Assertion>
+             </samlp:Response>
+           </samlp:ArtifactResponse>
+
+   The SP extracts and processes the <Response> message and then processes the embedded
+   assertion in order to create a local logon security context for the user at the SP. Once this is
+   completed, the SP retrieves the local state information indicated by the RelayState data to recall the
+   originally-requested resource URL. It then sends an HTTP redirect response to the browser directing it
+   to access the originally requested resource (not shown).
+8. An access check is made to establish whether the user has the correct authorization to access the
+   resource. If the access check passes, the resource is then returned to the browser.
+
+5.1.4       IdP-Initiated SSO: POST Binding
+In addition to supporting the new SP-Initiated web SSO use cases, SAML v2 continues to support the IdP-
+initiated web SSO use cases originally supported by SAML v1. In an IdP-initiated use case, the identity
+provider is configured with specialized links that refer to the desired service providers. These links actually
+refer to the local IdP's Single Sign-On Service and pass parameters to the service identifying the remote
+SP. So instead of visiting the SP directly, the user accesses the IdP site and clicks on one of the links to
+gain access to the remote SP. This triggers the creation of a SAML assertion that, in this example, will be
+transported to the service provider using the HTTP POST binding.
+Figure 14 shows the process flow for an IdP-initiated web SSO exchange.
+
+                     Service Provider                                         Identity Provider
+                     sp.example.com                                           idp.example.org
+
+                           Resource
+
+                                       Assertion                            Single
+                                                                                          Access
+                                       Consumer                            Sign-On
+                                                                                          check
+                                        Service                            Service
+
+                       7                                               4                            1
+
+                                                                                Select      Challenge
+                                                                               remote           for
+                                                                              resource      credentials
+                                                                   Signed
+                                               POST signed      <Response>               User
+                     Supply                    <Response>                                login
+                    resource                                   in HTML form
+
+                                                    5                            3         2
+
+                                                   User or UA action
+          Browser
+
+                                                                                               SSO-IdP-POST
+
+                                Figure 14: IdP-Initiated SSO with POST Binding
+
+The processing is as follows:
+1. If the user does not have a valid local security context at the IdP, at some point the user will be
+   challenged to supply their credentials to the IdP site, idp.example.org.
+2. The user provides valid credentials and a local logon security context is created for the user at the IdP.
+3. The user selects a menu option or link on the IdP to request access to an SP web site,
+   sp.example.com. This causes the IdP's Single Sign-On Service to be called.
+4. The Single Sign-On Service builds a SAML assertion representing the user's logon security context.
+   Since a POST binding is going to be used, the assertion is digitally signed before it is placed within a
+   SAML <Response> message. The <Response> message is then placed within an HTML FORM as
+   a hidden form control named SAMLResponse. (If the convention for identifying a specific application
+   resource at the SP is supported at the IdP and SP, the resource URL at the SP is also encoded into
+   the form using a hidden form control named RelayState.) The Single Sign-On Service sends the
+   HTML form back to the browser in the HTTP response. For ease-of-use purposes, the HTML FORM
+
+   typically will contain script code that will automatically post the form to the destination site.
+5. The browser, due either to a user action or execution of an “auto-submit” script, issues an HTTP POST
+   request to send the form to the SP's Assertion Consumer Service. The service provider's Assertion
+   Consumer Service obtains the <Response> message from the HTML FORM for processing. The
+   digital signature on the SAML assertion must first be validated and then the assertion contents are
+   processed in order to create a local logon security context for the user at the SP. Once this completes,
+   the SP retrieves the RelayState data (if any) to determine the desired application resource URL and
+   sends an HTTP redirect response to the browser directing it to access the requested resource (not
+   shown).
+6. An access check is made to establish whether the user has the correct authorization to access the
+   resource. If the access check passes, the resource is then returned to the browser.
+
+5.2       ECP Profile
+The browser SSO profile discussed above works with commercial browsers that have no special
+capabilities. This section describes a SAML V2.0 profile that takes into account enhanced client devices
+and proxy servers.
+
+5.2.1       Introduction
+The Enhanced Client and Proxy (ECP) Profile supports several SSO use cases, in particular:
+    ●    Clients with capabilities beyond those of a browser, allowing them to more actively participate in
+         IDP discovery and message flow.
+    ●    Using a proxy server, for example a WAP gateway in front of a mobile device which has limited
+         functionality.
+    ●    When other bindings are precluded (e.g. where the client does not support redirects, or when auto
+         form post is not possible without Javascript, or when the artifact binding is ruled out because the
+         identity provider and service provider cannot directly communicate.
+Figure 15 illustrates two such use cases for using the ECP Profile.
+
+                                         Identity
+                                                                                                       Identity
+                                         Provider
+                                                                                                       Provider
+
+                                         Service                                  Example:             Service
+                                         Provider                                WAP gateway           Provider
+          Examples:
+           handsets,
+        medical devices,
+         set-top boxes
+                                                                                                        ECP-usecase
+
+                  Enhanced client                                 Enhanced proxy
+                             Figure 15: Enhanced Client/Proxy Use Cases
+
+The ECP profile defines a single binding – PAOS (Reverse SOAP). The profile uses SOAP headers and
+SOAP bodies to transport SAML <AuthnRequest> and SAML <Response> messages between the
+service provider and the identity provider.
+
+5.2.2       ECP Profile Using PAOS Binding
+Figure 16 shows the message flows between the ECP, service provider and identity provider. The ECP is
+shown as a single logical entity.
+                      Service Provider                                         Identity Provider
+                      sp.example.com                                           idp.example.org
+
+                            Resource
+
+                                         Assertion                                 Single
+           Access                        Consumer                                 Sign-On
+           check                          Service                                 Service
+
+                        6            2                                   4
+                                                 Signed
+                                               <Response>                    <AuthnRequest>
+           Access                               in PAOS                      in SOAP request
+          resource                              response
+                                                                  Signed
+                      Supply     <AuthnRequest>                 <Response>
+                     resource    in PAOS request                 in SOAP
+                                                                 response
+              1                                       5                       3
+
+           EnhancedClient                            SOAP intermediary
+          or Enhanced Proxy
+
+                                                                                               SSO-ECP-PAOS
+
+                                Figure 16: SSO Using ECP with the PAOS Binding
+
+The processing is as follows:
+1. The ECP wishes to gain access to a resource on the service provider, sp.example.com. The ECP will
+   issue an HTTP request for the resource. The HTTP request contains a PAOS HTTP header defining
+   that the ECP service is to be used.
+2. Accessing the resource requires that the principal has a valid security context, and hence a SAML
+   assertion needs to be supplied to the service provider. In the HTTP response to the ECP an
+   <AuthnRequest> is carried within a SOAP body. Additional information, using the PAOS binding, is
+   provided back to the ECP
+3. After some processing in the ECP the <AuthnRequest> is sent to the appropriate identity provider
+   using the SAML SOAP binding.
+4. The identity provider validates the <AuthnRequest> and sends back to the ECP a SAML
+   <Response>, again using the SAML SOAP binding.
+5. The ECP extracts the <Response> and forwards it to the service provider as a PAOS response.
+6. The service provider sends to the ECP an HTTP response containing the resource originally
+
+   requested.
+
+5.3       Single Logout Profile
+Once single sign-on has been achieved, several individual sessions with service providers share a single
+authentication context. This section discusses SAML's profile for single logout, which allows for reversing
+the sign-on process with all of these providers at once.
+One representative flow option is discussed in detail: single logout that is initiated at one SP and results in
+logout from multiple SPs.
+
+5.3.1       Introduction
+Single logout permits near real-time session logout of a user from all participants in a session. A request
+can be issued by any session participant to request that the session is to be ended. As specified in the
+SAML Conformance specification , the SAML logout messages can be exchanged over either the
+synchronous SOAP over HTTP binding or using the asynchronous HTTP Redirect, HTTP POST, or HTTP
+Artifact bindings. Note that a browser logout operation often requires access to local authentication
+cookies stored in the user's browser. Thus, asynchronous front-channel bindings are typically preferred for
+these exchanges in order to force the browser to visit each session participant to permit access to the
+browser cookies. However, user interaction with the browser might interrupt the process of visiting each
+participant and thus, the result of the logout process cannot be guaranteed.
+
+5.3.2       SP-Initiated Single Logout with Multiple SPs
+In the example shown in Figure 16, a user visiting the sp1.example.com service provider web site decides
+that they wish to log out of their web SSO session. The identity provider idp.example.org determines that
+other service providers are also participants in the web SSO session, and thus sends <LogoutRequest>
+messages to each of the other SPs. In this example, different bindings are used for the exchanges
+between the various pairs of session participants. The SP initiating the single logout uses the HTTP
+Redirect binding with the IdP, while the IdP uses a back-channel SOAP over HTTP binding to
+communicate with the other SP sp2.example.edu.
+
+                 Service Provider          Identity Provider                        Service Provider
+                 sp1.example.com           idp.example.org                          sp2.example.edu
+
+                                                               <LogoutRequest>
+                                               Single              (SOAP)               Single
+                                                           3
+                                               Logout                                   Logout
+                                               Service         <LogoutResponse>     4   Service
+                                                                    (SOAP)
+
+                     6     2                          5
+         Request
+          global
+          logout
+                 Logged out
+                         <LogoutRequest>
+                                               <LogoutResponse>
+                           (by redirect)
+             1                                    (by redirect)
+
+           Browser
+                                                                                           SLO-SP-init-mult
+
+                          Figure 17: SP-initiated Single Logout with Multiple SPs
+The processing is as follows:
+1. A user was previously authenticated by the idp.example.org identity provider and is interacting with the
+   sp1.example.com service provider through a web SSO session. The user decides to terminate their
+   session and selects a link on the SP that requests a global logout.
+2. The SP sp1.example.com destroys the local authentication session state for the user and then sends
+   the idp.example.org identity provider a SAML <LogoutRequest> message requesting that the user's
+   session be logged out. The request identifies the principal to be logged out using a <NameID>
+   element, as well as providing a <SessionIndex> element to uniquely identify the session being
+   closed. The <LogoutRequest> message is digitally signed and then transmitted using the HTTP
+   Redirect binding. The identity provider verifies that the <LogoutRequest> originated from a known
+   and trusted service provider. The identity provider processes the request and destroys any local
+   session information for the user.
+3. Having determined that other service providers are also participants in the web SSO session, the
+   identity provider similar sends a <LogoutRequest> message to those providers. In this example,
+   there is one other service provider, sp2.example.edu. The <LogoutRequest> message is sent using
+   the SOAP over HTTP Binding.
+4. The service provider sp2.example.edu returns a <LogoutResponse> message containing a suitable
+   status code response to the identity provider. The response is digitally signed and returned (in this
+   case) using the SOAP over HTTP binding.
+5. The identity provider returns a <LogoutResponse> message containing a suitable status code
+   response to the original requesting service provider, sp1.example.com. The response is digitally
+   signed and returned (in this case) using the HTTP Redirect binding.
+6. Finally, the service provider sp1.example.com informs the user that they are logged out of all the
+   providers.
+
+5.4       Establishing and Managing Federated Identities
+Thus far, the use case examples that have been presented have focused on the SAML message
+exchanges required to facilitate the implementation of web single sign-on solutions. This section
+examines issues surrounding how these message exchanges are tied to individual local and federated
+user identities shared between participants in the solution.
+
+5.4.1       Introduction
+The following sections describe mechanisms supported by SAML for establishing and managing federated
+identities. The following use cases are described:
+   • Federation via Out-of-Band Account Linking: The establishment of federated identities for users
+     and the association of those identities to local user identities can be performed without the use of
+     SAML protocols and assertions. This was the only style of federation supported by SAML V1 and is
+     still supported in SAML v2.0.
+   • Federation via Persistent Pseudonym Identifiers: An identity provider federates the user's local
+     identity principal with the principal's identity at the service provider using a persistent SAML name
+     identifier.
+   • Federation via Transient Pseudonym Identifiers: A temporary identifier is used to federate
+     between the IdP and the SP for the life of the user's web SSO session.
+   • Federation via Identity Attributes: Attributes of the principal, as defined by the identity provider,
+     are used to link to the account used at the service provider.
+   • Federation Termination: termination of an existing federation.
+To simplify the examples, not all possible SAML bindings are illustrated.
+All the examples are based on the use case scenarios originally defined in Section 3.2, with
+airline.example.com being the identity provider.
+
+5.4.2       Federation Using Out-of-Band Account Linking
+In this example, shown in Figure 18, the user John has accounts on both airline.example.com and
+cars.example.co.uk each using the same local user ID (john). The identity data stores at both sites are
+synchronized by some out-of-band means, for example using database synchronization or off-line batch
+updates.
+
+                                            Link Cars.example.co.uk's john
+                           Identity                                                      Identity
+                            store           with Airline.example.com's john               store
+                                                     outside of SAML
+
+                    Service Provider                                              Identity Provider
+                   cars.example.co.uk                                           airline.example.com
+
+                          Resource
+
+                                        Assertion                               Single
+          Access                        Consumer                               Sign-On
+          check                          Service                               Service
+
+                      8                 2                                 6                                 4
+         Access                             Pass along signed
+        resource                              <Response>                        Pass along             Challenge
+                                               about john                     <AuthnRequest>         for credentials
+
+                                      Normal SAML web single sign-on profile
+
+                                                             Convey signed                     User
+                    Supply           Convey                   <Response>                       login
+                   resource      <AuthnRequest>                about john
+             1                                         7                        3                5
+
+         Browser
+
+                                                                                                        IDFed-oob
+                                                    User with local ID john
+                                                      at both providers
+                       Figure 18: Identity Federation with Out-of-Band Account Linking
+
+The processing is as follows:
+1. The user is challenged to supply their credentials to the site airline.example.com.
+2. The user successfully provides their credentials and has a security context with the
+   airline.example.com identity provider.
+3. The user selects a menu option (or function) on the airline.example.com application that means the
+   user wants to access a resource or application on cars.example.co.uk. The airline.example.com
+   identity provider sends a HTML form back to the browser. The HTML FORM contains a SAML
+   response, within which is a SAML assertion about user john.
+4. The browser, either due to a user action or via an “auto-submit”, issues an HTTP POST containing the
+   SAML response to be sent to the cars.example.co.uk Service provider.
+The cars.example.co.uk service provider's Assertion Consumer Service validates the digital signature on
+the SAML Response. If this, and the assertion validate correctly it creates a local session for user john,
+
+based on the local john account. It then sends an HTTP redirect to the browser causing it to access the
+TARGET resource, with a cookie that identifies the local session. An access check is then made to
+establish whether the user john has the correct authorization to access the cars.example.co.uk web site
+and the TARGET resource. The TARGET resource is then returned to the browser.
+
+5.4.3          Federation Using Persistent Pseudonym Identifiers
+In this use case scenario, the partner sites take advantage of SAML V2.0's ability to dynamically establish
+a federated identity for a user as part of the web SSO message exchange. SAML V2.0 provides the
+NameIDPolicy element on the AuthnRequest to allow the SP to constrain such dynamic behaviour. The
+user jdoe on cars.example.co.uk wishes to federate this account with his john account on the IdP,
+airline.example.com. Figure 19 illustrates dynamic identity federation using persistent pseudonym
+identifiers in an SP-initiated web SSO exchange.
+
+          Local ID           IdP          Linked ID                   Linked ID             SP         Local ID
+           jdoe           Airline          61611                       61611              Cars          john
+           jdoe           Bank             71711                       61612              Hotels        john
+           mlamb          Airline          81811                       61621              Cars          mary
+
+                               Identity               Persistent pseudonym                  Identity
+                                store            (NameID=”61611”) and attributes             store
+
+                       Service Provider                                            Identity Provider
+                      cars.example.co.uk                                         airline.example.com
+
+                           Resource
+
+                                            Assertion                                  Single
+          Access                            Consumer                                  Sign-On
+          check                              Service                                  Service
+
+                 10                   8         2                                 6                               4
+                        User                         Pass along                                User
+       Access                                          signed
+      resource          login                                                        Pass      login
+                       as jdoe                      <Response>                               as john
+                                                                                     along
+                                             Convey                             <AuthnRequest>
+                                         <AuthnRequest>
+                              Challenge     asking for               Convey signed                          Challenge
+                Supply
+               resource    for credentials; persistent                <Response>                         for credentials,
+                                opt-in?    pseudonym                  about 61611                             opt-in?
+           1               9                                    7                     3                  5
+
+         Browser
+
+                                                                                                 IDFed-persistent-pseud
+                                           User with local ID john at airline.example.com
+                                             and local ID jdoe at cars.example.co.uk
+                      Figure 19: SP-Initiated Identity Federation with Persistent Pseudonym
+
+The processing is as follows:
+1. The user attempts to access a resource on cars.example.co.uk. The user does not have any current
+   logon session (i.e. security context) on this site, and is unknown to it. The resource that the user
+   attempted to access is saved as RelayState information.
+2. The service provider uses the HTTP Redirect Binding to send the user to the Single Sign-On Service at
+   the identity provider (airline.example.com). The HTTP redirect includes a SAML <AuthnRequest>
+   message requesting that the identity provider provide an assertion using a persistent name identifier
+   for the user. As the service provider desires the IdP have the flexibility to generate a new identifiier for
+   the user should one not already exist, the SP sets the AllowCreate attribute on the NameIDPolicy
+   element to 'true”.
+3. The user will be challenged to provide valid credentials.
+4. The user provides valid credentials identifying himself as john and a local security context is created
+   for the user at the IdP.
+5. The Single Sign-On Service looks up user john in its identity store and, seeing that the AllowCreate
+   attribute allows it to, creates a persistent name identifier (61611) to be used for the session at the
+   service provider. It then builds a signed SAML web SSO assertion where the subject uses a transient
+   name identifier format. The name john is not contained anywhere in the assertion. Note that
+   depending on the partner agreements, the assertion might also contain an attribute statement
+   describing identity attributes about the user (e.g. their membership level).
+6. The browser, due either to a user action or execution of an “auto-submit” script, issues an HTTP POST
+   request to send the form to the service provider's Assertion Consumer Service.
+7. The cars.example.co.uk service provider's Assertion Consumer service validates the digital signature
+   on the SAML Response and validates the SAML assertion. The supplied name identifier is then used
+   to determine whether a previous federation has been established. If a previous federation has been
+   established (because the name identifier maps to a local account) then go to step 9. If no federation
+   exists for the persistent identifier in the assertion, then the SP needs to determine the local identity to
+   which it should be assigned. The user will be challenged to provide local credentials at the SP.
+   Optionally the user might first be asked whether he would like to federate the two accounts.
+8. The user provides valid credentials and identifies his account at the SP as jdoe. The persistent name
+   identifier is then stored and registered with the jdoe account along with the name of the identity
+   provider that created the name identifier.
+9. A local logon session is created for user jdoe and an access check is then made to establish whether
+   the user jdoe has the correct authorization to access the desired resource at the cars.example.co.uk
+   web site (the resource URL was retrieved from state information identified by the RelayState
+   information.
+10.If the access check passes, the desired resource is returned to the browser.
+
+5.4.4       Federation Using Transient Pseudonym Identifiers
+The previous use case showed the use of persistent identifiers. So what if you do not want to establish a
+permanent federated identity between the parter sites? This is where the use of transient identifiers are
+useful. Transient identifiers allow you to:
+•   Completely avoid having to manage user ID's and passwords at the service provider.
+•   Have a scheme whereby the service provider does not have to manage specific user accounts, for
+    instance it could be a site with a “group-like” access policy.
+•   Support a truly anonymous service
+As with the Persistent Federation use cases, one can have SP and IdP-initiated variations. Figure 20
+shows the SP-initiated use case using transient pseudonym name identifiers.
+
+        Local ID         IdP            Linked ID               Linked ID              SP                Local ID
+         n/a          Airline            294723                  294723               Cars                john
+                           .                                                            .
+                           .                                                            .
+
+                           Cache               Transient pseudonym (NameID=           Identity
+                                                  ”294723”) and attributes             store
+
+                    Service Provider                                         Identity Provider
+                   cars.example.co.uk                                      airline.example.com
+
+                        Resource
+
+                                      Assertion                                  Single
+        Access                        Consumer                                  Sign-On
+        check                          Service                                  Service
+
+                      10               2                                    6                                4
+                                                 Pass along                               User
+         Access                                    signed
+        resource                                                                Pass      login
+                                                <Response>                              as  john
+                                                                                along
+                                       Convey                              <AuthnRequest>
+                                   <AuthnRequest>
+                                      asking for                Convey signed                           Challenge
+                    Supply
+                                      transient                  <Response>                                 for
+                   resource
+                                     pseudonym                  about 294723                            credentials
+            1                                           7                       3                   5
+
+       Browser
+
+                                                                                             IDFed-transient-pseud
+                                     User with local ID john at Airline.example.com
+                     Figure 20: SP-Initiated Identity Federation with Transient Pseudonym
+The processing is as follows:
+1. The user attempts to access a resource on cars.example.co.uk. The user does not have any current
+   logon session (i.e. security context) on this site, and is unknown to it. The resource that the user
+   attempted to access is saved as RelayState information.
+2. The service provider uses the HTTP Redirect Binding to send the user to the Single Sign-On Service at
+   the identity provider (airline.example.com). The HTTP redirect includes a SAML <AuthnRequest>
+   message requesting that the identity provider provide an assertion using a transient name identifier for
+   the user.
+3. The user will be challenged to provide valid credentials at the identity provider.
+4. The user provides valid credentials identifying himself as john and a local security context is created
+   for the user at the IdP.
+5. The Single Sign-On Service looks up user john in its identity store and creates a transient name
+
+   identifier (294723) to be used for the session at the service provider. It then builds a signed SAML web
+   SSO assertion where the subject uses a transient name identifier format. The name john is not
+   contained anywhere in the assertion. The assertion also contains an attribute statement with a
+   membership level attribute (“Gold” level). The assertion is placed in a SAML response message and
+   the IdP uses the HTTP POST Binding to send the Response message to the service provider.
+6. The browser, due either to a user action or execution of an “auto-submit” script, issues an HTTP POST
+   request to send the form to the service provider's Assertion Consumer Service.
+7. The cars.example.co.uk service provider's Assertion Consumer service validates the SAML Response
+   and SAML assertion. The supplied transient name identifier is then used to dynamically create a
+   session for the user at the SP. The membership level attribute might be used to perform an access
+   check on the requested resource and customize the content provided to the user.
+8. If the access check passes, the requested resource is then returned to the browser.
+While not shown in the diagram, the transient identifier remains active for the life of the user authentication
+session. If needed, the SP could use the identifier to make SAML attribute queries back to an attribute
+authority at airline.example.com to obtain other identity attributes about the user in order to customize their
+service provider content, etc.
+
+5.4.5       Federation Termination
+This example builds upon the previous federation example using persistent pseudonym identifiers and
+shows how a federation can be terminated. In this case the jdoe account on cars.example.co.uk service
+provider has been deleted, hence it wishes to terminate the federation with airline.example.com for this
+user.
+The Terminate request is sent to the identity provider using the Name Identifier Management Protocol,
+specifically using the <ManageNameIDRequest>. The example shown in Figure 21 uses the SOAP over
+HTTP binding which demonstrates a use of the back channel. Bindings are also defined that permit the
+request (and response) to be sent via the browser using asynchronous "front-channel" bindings, such as
+the HTTP Redirect, HTTP POST, or Artifact bindings.
+      Local ID         IdP             Linked ID                  Linked ID        SP          Local ID
+       jdoe         Airlines            61611                      61611      Cars              john
+       jdoe         BankingInc          71711                      61612      HotelStayInc      john
+       mlamb        Airlines            81811                      61621      Cars              mary
+
+                            Identity                                             Identity
+                             store                                                store
+
+                Service Provider                                            Identity Provider
+               cars.example.co.uk                                         airline.example.com
+
+                                                         Terminate
+                                                1         61611                  Manage
+                                                          linking                NameID
+                                                                                 Service
+                                                    Affirmative
+                                                    response         2
+                                                                                              IDFed-term
+
+                                   Figure 21: Identity Federation Termination
+
+In this example the processing is as follows:
+1. The service provider, cars.example.co.uk, determines that the local account, jdoe, should no longer be
+
+   federated. An example of this could be that the account has been deleted. The service provider sends
+   to the airline.example.com identity provider a <ManageIDNameRequest> defining that the persistent
+   identifier (previously established) must no longer be used. The request is carried in a SOAP message
+   which is transported using HTTP, as defined by the SAML SOAP binding. The request is also digitally
+   signed by the service provider.
+2. The identity provider verifies the digital signature ensuring that the <ManageIDNameRequest>
+   originated from a known and trusted service provider. The identity Provider processes the request
+   and returns a <ManageIDNameResponse> containing a suitable status code response. The response
+   is carried within a SOAP over HTTP message and is digitally signed.
+
+5.5       Use of Attributes
+As explained in Section 3.2, in describing the web single sign-on use case, the SAML assertion
+transferred from an identity provider to a service provider may include attributes describing the user. The
+ability to transfer attributes within an assertion is a powerful SAML feature and it may also be combined
+with the forms of identity federation described above.
+The following are some typical use patterns:
+   • Transfer of profile information
+      Attributes may be used to convey user profile information from the identity provider to the service
+      provider.This information may be used to provide personalized services at the service provider, or to
+      augment or even create a new account for the user at the service provider. The user should be
+      informed about the transfer of information, and, if required, user consent explicitly obtained.
+   • Authorization based on attributes
+      In this model, the attributes provided in the SAML assertion by the identity provider are used to
+      authorize specific services at the service provider. The service provider and identity provider need
+      prior agreement (out of band) on the attribute names and values included in the SAML assertion. An
+      interesting use of this pattern which preserves user anonymity but allows for differential classes of
+      service is found in Shibboleth : federation using transient pseudonyms combined with authorization
+      based on attributes.
+
+6         Extending and Profiling SAML for Use in Other
+        Frameworks
+SAML's components are modular and extensible. The SAML Assertions and Protocols specification has a
+section describing the basic extension features provided. The SAML Profiles specification provides
+guidelines on how to define new profiles and attribute profiles. The SAML Bindings specification likewise
+offers guidelines for defining new bindings.
+As a result of this flexibility, SAML has been adopted for use with several other standard frameworks.
+Following are some examples.
+
+6.1        Web Services Security (WS-Security)
+SAML assertions can be conveyed by means other than the SAML Request/Response protocols or
+profiles defined by the SAML specification set. One example of this is their use with Web Services
+Security (WS-Security), which is a set of specifications that define means for providing security protection
+of SOAP messages. The services provided by WS-Security are authentication, data integrity, and
+confidentiality.
+WS-Security defines a <Security> element that may be included in a SOAP message header. This
+element specifies how the message is protected. WS-Security makes use of mechanisms defined in the
+W3C XML Signature and XML Encryption specifications to sign and encrypt message data in both the
+SOAP header and body. The information in the <Security> element specifies what operations were
+performed and in what order, what keys were used for these operations, and what attributes and identity
+information are associated with that information. WS-Security also contains other features, such as the
+ability to timestamp the security information and to address it to a specified Role.
+In WS-Security, security data is specified using security tokens. Tokens can either be binary or structured
+XML. Binary tokens, such as X.509 certificates and Kerberos tickets, are carried in an XML wrapper. XML
+tokens, such as SAML assertions, are inserted directly as sub-elements of the <Security> element. A
+Security Token Reference may also be used to refer to a token in one of a number of ways.
+WS-Security consists of a core specification , which describes the mechanisms independent of the type of
+token being used, and a number of token profiles which describe the use of particular types of tokens.
+Token profiles cover considerations relating to that particular token type and methods of referencing the
+token using a Security Token Reference. The use of SAML assertions with WS-Security is described in
+the SAML Token Profile .
+Because the SAML protocols have a binding to SOAP, it is easy to get confused between that SAML-
+defined binding and the use of SAML assertions by WS-Security. They can be distinguished by their
+purpose, the message format, and the parties involved in processing the messages.
+The characteristics of the SAML Request/Response protocol binding over SOAP are as follows:
+    •    It is used to obtain SAML assertions for use external to the SOAP message exchange; they play no
+         role in protecting the SOAP message.
+    •    The SAML assertions are contained within a SAML Response, which is carried in the body of the
+         SOAP envelope.
+    •    The SAML assertions are provided by a trusted authority and may or may not pertain to the party
+         requesting them.
+The characteristics of the use of SAML assertions as defined by WS-Security are as follows:
+    •    The SAML assertions are carried in a <Security> element within the header of the SOAP
+         envelope as shown in Figure 22.
+    •    The SAML assertions usually play a role in the protection of the message they are carried in;
+         typically they contain a key used for digitally signing data within the body of the SOAP message.
+    •    The SAML assertions will have been obtained previously and typically pertain to the identity of the
+         sender of the SOAP message.
+
+Note that in principle, SAML assertions could be used in both ways in a single SOAP message. In this
+case the assertions in the header would refer to the identity of the Responder (and Requester) of the
+message. However, at this time, SAML has not profiled the use of WS-Security to secure the SOAP
+message exchanges that are made within a SAML deployment.
+
+                                                   HTTP response
+
+                                                   SOAP envelope
+
+                                                    SOAP header
+
+                                                    wsse:Security
+
+                                                       Assertion
+
+                                                    Authentication
+                                                      statement
+
+                                                         Other
+                                                      statements
+
+                                               wsse:SecurityTokenReference
+
+                                                      SOAP body
+
+                                   Figure 22: WS-Security with a SAML Token
+
+The following sequence of steps typifies the use of SAML assertions with WS-Security.
+A SOAP message sender obtains a SAML assertion by means of the SAML Request/Response protocol
+or other means. In this example, the assertion contains an attribute statement and a subject with a
+confirmation method called Holder of Key.
+To protect the SOAP message:
+     1. The sender constructs the SOAP message, including a SOAP header with a WS-Security header.
+        A SAML assertion is placed within a WS-Security token and included in the security header. The
+        key referred to by the SAML assertion is used to construct a digital signature over data in the
+        SOAP message body. Signature information is also included in the security header.
+     2. The message receiver verifies the digital signature.
+     3. The information in the SAML assertion is used for purposes such as Access Control and Audit
+        logging.
+Figure 23 illustrates this usage scenario.
+
+                 1
+
+              Obtain
+              SAML
+             assertion
+
+                                                                   Receiver
+                                                         3                            4
+                                  WS-Security
+                                    signed             Verify                      Access
+             Sender         2
+                                    SOAP             signature      SAML           check
+                                   message                         attribute
+                                                                 information
+
+                                                                                    Log
+
+                           Figure 23: Typical Use of WS-Security with SAML Token
+
+6.2       eXtensible Access Control Markup Language (XACML)
+SAML assertions provide a means to distribute security-related information that may be used for a number
+of purposes. One of the most important of these purposes is as input to Access Control decisions. For
+example, it is common to consider when and how a user authenticated or what their attributes are in
+deciding if a request should be allowed. SAML does not specify how this information should be used or
+how access control policies should be addressed. This makes SAML suitable for use in a variety of
+environments, including ones that existed prior to SAML.
+The eXtensible Access Control Markup Language (XACML) is an OASIS Standard that defines the syntax
+and semantics of a language for expressing and evaluating access control policies. Compatibility with
+SAML has been a key goal of the XACML TC.
+As a result, SAML and XACML can each be used independently of the other, or both can be used
+together. Figure 24 illustrates the typical use of SAML with XACML.
+
+                                                                                              Policy
+                                                                                              store
+
+                                                        2
+                                                                                                 5
+                                                  Collect other
+                                                  external data                           Obtain policies
+
+                                                                         Request
+                                                                   3
+                                                                        evaluation
+                             Request
+                             access,               Policy
+                            providing                                                    Policy Decision
+     Requester         1                        Enforcement
+                             input in                                                     Point (PDP)
+                              SAML               Point (PEP)
+                            assertions                                  Return
+                                                                                     5
+                                                                       decision
+
+                                                       6
+
+                                               Retrieve resource
+                                                as appropriate
+
+                                                 Resource
+
+                                    Figure 24: SAML and XACML Integration
+Using SAML and XACML in combination would typically involve the following steps.
+         1. An XACML Policy Enforcement Point (PEP) receives a request to access some resource.
+         2. The PEP obtains SAML assertions containing information about the parties to the request,
+            such as the requester, the receiver (if different) or intermediaries. These assertions might
+            accompany the request or be obtained directly from a SAML Authority, depending on the SAML
+            profile used.
+         3. The PEP obtains other information relevant to the request, such as time, date, location, and
+            properties of the resource.
+         4. The PEP presents all the information to a Policy Decision Point (PDP) to decide if the access
+            should be allowed.
+         5. The PDP obtains all the policies relevant to the request and evaluates them, combining
+            conflicting results if necessary.
+         6. The PDP informs the PEP of the decision result.
+         7. The PEP enforces the decision, by either allowing the requested access or indicating that
+            access is not allowed.
+The SAML and XACML specification sets contain some features specifically designed to facilitate their
+combined use.
+The XACML Attribute Profile in the SAML Profiles specification defines how attributes can be described
+using SAML syntax so that they may be automatically mapped to XACML Attributes. A schema is provided
+
+by SAML to facilitate this.
+A document that was produced by the XACML Technical Committee, SAML V2.0 profile of XACML v2.0,
+provides additional information on mapping SAML Attributes to XACML Attributes. This profile also defines
+a new type of Authorization decision query specifically designed for use in an XACML environment. It
+extends the SAML protocol schema and provides a request and response that contains exactly the inputs
+and outputs defined by XACML.
+That same document also contains two additional features that extend the SAML schemas. While they
+are not, strictly speaking, intended primarily to facilitate combining SAML and XACML, they are worth
+noting. The first is the XACML Policy Query. This extension to the SAML protocol schema allows the
+SAML protocol to be used to retrieve XACML policy which may be applicable to a given access decision.
+The second feature extends the SAML schema by allowing the SAML assertion envelope to be used to
+wrap an XACML policy. This makes available to XACML features such as Issuer, Validity interval and
+signature, without requiring the definition of a redundant or inconsistent scheme. This promotes code and
+knowledge reuse between SAML and XACML.
+
+A. Acknowledgments
+The editors would like to acknowledge the contributions of the OASIS Security Services Technical
+Committee, whose voting members at the time of publication were:
+
+    ●    Brian Campbell Ping Identity Corporation
+    ●    George Fletcher AOL
+    ●    Hal Lockhart BEA Systems, Inc.
+    ●    Rob Philpott EMC Corporation
+    ●    Scott Cantor Internet2
+    ●    Bob Morgan Internet2
+    ●    Eric Tiffany Liberty Alliance Project
+    ●    Tom Scavo National Center for Supercomputing Applications
+    ●    Jeff Hodges NeuStar, Inc.
+    ●    Frederick Hirsch Nokia Corporation
+    ●    Paul Madsen NTT Corporation
+    ●    Ari Kermaier Oracle Corporation
+    ●    Anil Saldhana Red Hat
+    ●    Emily Xu Sun Microsystems
+    ●    David Staggs Veterans Health Administration
+    ●    Eve Maler Sun Microsystems
+Of particular note are the contributions from: Hal Lockhart BEA, Thomas Wisniewski Entrust, Scott Cantor
+Internet2, Prateek Mishra Oracle, and Jim Lien EMC Corporation.

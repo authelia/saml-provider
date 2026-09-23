@@ -1,0 +1,477 @@
+SAML V2.0 Metadata Interoperability
+Profile Version 1.0
+OASIS Standard
+24 October 2019
+This version:
+https://docs.oasis-open.org/security/saml/Post2.0/sstc-metadata-iop-os.odt (Authoritative)
+https://docs.oasis-open.org/security/saml/Post2.0/sstc-metadata-iop-os.html
+https://docs.oasis-open.org/security/saml/Post2.0/sstc-metadata-iop-os.pdf
+Previous version:
+http://docs.oasis-open.org/security/saml/Post2.0/sstc-metadata-iop-cd-01.odt (Authoritative)
+http://docs.oasis-open.org/security/saml/Post2.0/sstc-metadata-iop-cd-01.html
+http://docs.oasis-open.org/security/saml/Post2.0/sstc-metadata-iop-cd-01.pdf
+Latest version:
+https://docs.oasis-open.org/security/saml/Post2.0/sstc-metadata-iop.odt (Authoritative)
+https://docs.oasis-open.org/security/saml/Post2.0/sstc-metadata-iop.html
+https://docs.oasis-open.org/security/saml/Post2.0/sstc-metadata-iop.pdf
+Technical Committee:
+OASIS Security Services TC
+Chair:
+Thomas Hardjono, hardjono@mit.edu, M.I.T.
+Editor:
+Scott Cantor, cantor.2@osu.edu, Internet2
+Abstract:
+This profile describes a set of rules for SAML metadata producers and consumers to follow such that
+federated relationships can be interoperably provisioned, and controlled at runtime in a secure,
+understandable, and self-contained fashion.
+
+Status:
+This document was last revised or approved by the membership of OASIS on the above date. The level of
+approval is also listed above. Check the "Latest version" location noted above for possible later revisions
+of this document. Any other numbered Versions and other technical work produced by the Technical
+Committee (TC) are listed at https://www.oasis-open.org/committees/tc_home.php?
+wg_abbrev=security#technical.
+TC members should send comments on this document to the TC's email list. Others should send
+comments to the TC's public comment list, after subscribing to it by following the instructions at the "Send
+A Comment" button on the TC's web page at https://www.oasis-open.org/committees/security/.
+This specification is provided under the RF on RAND Terms Mode of the OASIS IPR Policy, the mode
+chosen when the Technical Committee was established. For information on whether any patents have
+been disclosed that may be essential to implementing this specification, and any offers of patent licensing
+terms, please refer to the Intellectual Property Rights section of the TC's web page (https://www.oasis-
+open.org/committees/security/ipr.php).
+Note that any machine-readable content (Computer Language Definitions) declared Normative for this
+Work Product is provided in separate plain text files. In the event of a discrepancy between any such plain
+
+text file and display content in the Work Product's prose narrative document(s), the content in the
+separate plain text file prevails.
+
+Citation format:
+When referencing this specification the following citation format should be used:
+[sstc-md-iop-v1.0]
+SAML V2.0 Metadata Interoperability Profile Version 1.0. Edited by Scott Cantor. 24 October 2019.
+OASIS Standard. https://docs.oasis-open.org/security/saml/Post2.0/sstc-metadata-iop-os.html. Latest
+version: https://docs.oasis-open.org/security/saml/Post2.0/sstc-metadata-iop.html.
+
+Notices
+Copyright © OASIS Open 2019. All Rights Reserved.
+All capitalized terms in the following text have the meanings assigned to them in the OASIS Intellectual
+Property Rights Policy (the "OASIS IPR Policy"). The full Policy may be found at the OASIS website.
+This document and translations of it may be copied and furnished to others, and derivative works that
+comment on or otherwise explain it or assist in its implementation may be prepared, copied, published,
+and distributed, in whole or in part, without restriction of any kind, provided that the above copyright notice
+and this section are included on all such copies and derivative works. However, this document itself may
+not be modified in any way, including by removing the copyright notice or references to OASIS, except as
+needed for the purpose of developing any document or deliverable produced by an OASIS Technical
+Committee (in which case the rules applicable to copyrights, as set forth in the OASIS IPR Policy, must
+be followed) or as required to translate it into languages other than English.
+The limited permissions granted above are perpetual and will not be revoked by OASIS or its successors
+or assigns.
+This document and the information contained herein is provided on an "AS IS" basis and OASIS
+DISCLAIMS ALL WARRANTIES, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO ANY
+WARRANTY THAT THE USE OF THE INFORMATION HEREIN WILL NOT INFRINGE ANY
+OWNERSHIP RIGHTS OR ANY IMPLIED WARRANTIES OF MERCHANTABILITY OR FITNESS FOR A
+PARTICULAR PURPOSE.
+OASIS requests that any OASIS Party or any other party that believes it has patent claims that would
+necessarily be infringed by implementations of this OASIS Committee Specification or OASIS Standard,
+to notify OASIS TC Administrator and provide an indication of its willingness to grant patent licenses to
+such patent claims in a manner consistent with the IPR Mode of the OASIS Technical Committee that
+produced this specification.
+OASIS invites any party to contact the OASIS TC Administrator if it is aware of a claim of ownership of
+any patent claims that would necessarily be infringed by implementations of this specification by a patent
+holder that is not willing to provide a license to such patent claims in a manner consistent with the IPR
+Mode of the OASIS Technical Committee that produced this specification. OASIS may include such
+claims on its website, but disclaims any obligation to do so.
+OASIS takes no position regarding the validity or scope of any intellectual property or other rights that
+might be claimed to pertain to the implementation or use of the technology described in this document or
+the extent to which any license under such rights might or might not be available; neither does it represent
+that it has made any effort to identify any such rights. Information on OASIS' procedures with respect to
+rights in any document or deliverable produced by an OASIS Technical Committee can be found on the
+OASIS website. Copies of claims of rights made available for publication and any assurances of licenses
+to be made available, or the result of an attempt made to obtain a general license or permission for the
+use of such proprietary rights by implementers or users of this OASIS Committee Specification or OASIS
+Standard, can be obtained from the OASIS TC Administrator. OASIS makes no representation that any
+information or list of intellectual property rights will at any time be complete, or that any claims in such list
+are, in fact, Essential Claims.
+The name "OASIS" is a trademark of OASIS, the owner and developer of this specification, and should be
+used only to refer to the organization and its official outputs. OASIS welcomes reference to, and
+implementation and use of, specifications, while reserving the right to enforce its marks against
+misleading uses. Please see https://www.oasis-open.org/policies-guidelines/trademark for above
+guidance.
+
+Table of Contents
+1 Introduction............................................................................................................................................. 5
+   1.1 IPR Policy......................................................................................................................................... 6
+   1.2 Notation............................................................................................................................................ 6
+   1.3 Normative References...................................................................................................................... 7
+   1.4 Non-Normative References.............................................................................................................. 7
+2 SAML V2.0 Metadata Interoperability Profile.......................................................................................... 8
+   2.1 Required Information........................................................................................................................ 8
+   2.2 Profile Overview............................................................................................................................... 8
+   2.3 Metadata Exchange and Acceptance............................................................................................... 8
+   2.4 Implementation Constraints.............................................................................................................. 9
+      2.4.1 Peer Authentication................................................................................................................... 9
+   2.5 Metadata Producer Requirements.................................................................................................... 9
+      2.5.1 Key Representation................................................................................................................... 9
+   2.6 Metadata Consumer Requirements................................................................................................ 10
+      2.6.1 Key Processing........................................................................................................................ 10
+   2.7 Security Considerations................................................................................................................. 10
+3 Conformance........................................................................................................................................ 12
+   3.1 SAML V2.0 Metadata Interoperability Profile..................................................................................12
+Appendix A.          Acknowledgments.............................................................................................................. 13
+Appendix B.          Revision History.................................................................................................................. 14
+
+1 Introduction
+The SAML V2.0 metadata specification [SAML2Meta] defines an XML schema and a set of basic
+processing rules intended to facilitate the implementation and deployment of SAML profiles, and generally
+any profile or specification involving SAML. Practical experience has shown that the most complex
+aspects of implementing most SAML profiles, and obtaining interoperability between such
+implementations, are in the areas of provisioning federated relationships between deployments, and
+establishing the validity of cryptographic signatures and handshakes. Because the metadata specification
+was largely intended to solve those exact problems, additional profiling is needed to improve and clarify
+the use of metadata in addressing those aspects of deployment.
+This profile is the product of the implementation experience of several SAML solution providers and has
+been widely deployed and successfully used in furtherance of the goal of scaling deployment beyond
+small numbers into the hundreds and thousands of sites, without sacrificing security.
+Experience has shown that the most frustrating part of using SAML (and many similar technologies) is
+that products approach the use of cryptography and trust in wildly inconsistent ways, and often the
+libraries that such products depend on do the same in their own domains. Key management is hard, and
+often relies on complicated tools with cryptic output. Standards only help insofar as they can be
+understood and widely implemented; this has generally not occurred above a basic level of cryptographic
+correctness. A formal public key infrastructure (PKI) is a tremendously complex, and some would say
+intractable, goal; it could be argued that SAML itself is a reaction to this. Often, the security of
+deployments is based on a presumption that required practices such as certificate revocation checking
+are being performed, when in fact they are not.
+Of course, it is the case that some deployments, at least to date, have overcome some or all of these
+problems. They may have a mature PKI, possibly one that existed long before their use of SAML, or they
+may require such a PKI for other purposes. In such cases, it is obviously less beneficial to deploy a
+second trust infrastructure based on SAML metadata. Another factor in this profile's usefulness is the
+relationship between SAML and the other security technologies involved in a deployment; if the use of
+SAML is subordinated to a secondary role, this profile may be less applicable.
+The purpose of this profile is to guarantee that in a correct implementation, all security considerations not
+deriving from the particular cryptography used (i.e., algorithm strength, key sizes) can be isolated to
+metadata exchange and acceptance, and not affect the runtime processing of messages. In other words,
+given a metadata instance and presuming that it is successfully processed and has not been updated or
+superseded, it must be possible with no other information supplied to determine whether a given
+credential (e.g., a key or certificate) will be accepted by an implementation when used to secure a SAML
+protocol or assertion.
+If an implementation can be shown to rely solely on the acceptance of metadata to derive trust, it can be
+reasoned about in a much simpler way, and the security exposures can be well understood. Furthermore,
+this profile accomplishes a number of additional practical goals:
+  • simplifying ordinary implementations and deployments
+  • reducing the technical foundation required to understand and use implementations
+  • scaling the provisioning of federated relationships (via processing of metadata batches)
+  • facilitating the use of XML encryption without dependency on weaker methods for establishing
+    knowledge of public keys (e.g., guessing based on TLS server certificates)
+  • radically simplifying interactions between existing federated deployments (i.e. interfederation)
+Most importantly, these goals can be accomplished without sacrificing security. Too often, the reaction to
+security complexity is to produce competing approaches that start by rejecting the notion that a
+substantial degree of security is achievable in the general case.
+Another benefit of this profile is to produce a greater awareness of the importance of securing the
+exchange of metadata. Deployers have sometimes tended to ignore this issue by falling back on the
+
+assumption that the underlying PKI would provide the real security of the system, resulting in other
+exposures due to insecure provisioning of other important information.
+Finally, note that, in addition to SAML V2.0 itself, this profile is applicable to any set of use cases
+supported by SAML metadata, including SAML V1.x profiles (as in [SAML1Meta]) and any other
+specifications that may profile SAML metadata..
+
+1.1 IPR Policy
+This specification is provided under the RF on RAND Terms Mode of the OASIS IPR Policy, the mode
+chosen when the Technical Committee was established. For information on whether any patents have
+been disclosed that may be essential to implementing this specification, and any offers of patent licensing
+terms, please refer to the Intellectual Property Rights section of the TC’s web page (https://www.oasis-
+open.org/committees/security/ipr.php).
+
+1.2 Notation
+This specification uses normative text.
+The keywords "MUST", "MUST NOT", "REQUIRED", "SHALL", "SHALL NOT", "SHOULD", "SHOULD
+NOT", "RECOMMENDED", "MAY", and "OPTIONAL" in this specification are to be interpreted as
+described in [RFC2119]:
+         …they MUST only be used where it is actually required for interoperation or to limit
+         behavior which has potential for causing harm (e.g., limiting retransmissions)…
+These keywords are thus capitalized when used to unambiguously specify requirements over protocol
+and application features and behavior that affect the interoperability and security of implementations.
+When these words are not capitalized, they are meant in their natural-language sense.
+      Listings of XML schemas appear like this.
+
+      Example code listings appear like this.
+Conventional XML namespace prefixes are used throughout the listings in this specification to stand for
+their respective namespaces as follows, whether or not a namespace declaration is present in the
+example:
+
+   Prefix                      XML Namespace                                          Comments
+
+saml:         urn:oasis:names:tc:SAML:2.0:assertion                  This is the SAML V2.0 assertion namespace
+                                                                     defined in the SAML V2.0 core specification
+                                                                     [SAML2Core].
+
+md:           urn:oasis:names:tc:SAML:2.0:metadata                   This is the SAML V2.0 metadata namespace
+                                                                     defined in the SAML V2.0 metadata
+                                                                     specification [SAML2Meta].
+
+ds:           http://www.w3.org/2000/09/xmldsig#
+                                                                     This is the XML Signature namespace
+                                                                     [XMLSig].
+xsd:          http://www.w3.org/2001/XMLSchema                       This namespace is defined in the W3C XML
+                                                                     Schema specification [Schema1]. In schema
+                                                                     listings, this is the default namespace and no
+                                                                     prefix is shown.
+
+xsi:          http://www.w3.org/2001/XMLSchema-instance              This is the XML Schema namespace for
+                                                                     schema-related markup that appears in XML
+                                                                     instances [Schema1].
+
+This specification uses the following typographical conventions in text: <SAMLElement>,
+<ns:ForeignElement>, Attribute, Datatype, OtherCode.
+
+1.3 Normative References
+    [RFC2119]              S. Bradner. Key words for use in RFCs to Indicate Requirement Levels. IETF
+                           RFC 2119, March 1997. http://www.ietf.org/rfc/rfc2119.txt.
+    [RFC2818]              E. Rescorla. HTTP Over TLS. IETF RFC 2818, May 2000.
+                           http://www.ietf.org/rfc/rfc2818.txt.
+    [SAML2Bind]            OASIS Standard, Bindings for the OASIS Security Assertion Markup Language
+                           (SAML) V2.0. March 2005. http://docs.oasis-open.org/security/saml/v2.0/saml-
+                           bindings-2.0-os.pdf.
+    [SAML2Core]            OASIS Standard, Assertions and Protocols for the OASIS Security Assertion
+                           Markup Language (SAML) V2.0. March 2005. http://docs.oasis-open.org/security/
+                           saml/v2.0/saml-core-2.0-os.pdf.
+    [SAML2Errata]          OASIS Standard Errata, SAML V2.0 Errata. August 2007. http://docs.oasis-
+                           open.org/security/saml/v2.0/sstc-saml-approved-errata-2.0.pdf.
+    [SAML2Meta]            OASIS Standard, Metadata for the OASIS Security Assertion Markup Language
+                           (SAML) V2.0. March 2005. http://docs.oasis-open.org/security/saml/v2.0/saml-
+                           metadata-2.0-os.pdf.
+    [SAML2Prof]            OASIS Standard, Profiles for the OASIS Security Assertion Markup Language
+                           (SAML) V2.0. March 2005. http://docs.oasis-open.org/security/saml/v2.0/saml-
+                           profiles-2.0-os.pdf.
+    [Schema1]              H. S. Thompson et al. XML Schema Part 1: Structures. World Wide Web
+                           Consortium Recommendation, May 2001. See http://www.w3.org/TR/2001/REC-
+                           xmlschema-1-20010502/. Note that this specification normatively references
+                           [Schema2], listed below.
+    [Schema2]              Paul V. Biron, Ashok Malhotra. XML Schema Part 2: Datatypes. World Wide Web
+                           Consortium Recommendation, May 2001. See http://www.w3.org/TR/2001/REC-
+                           xmlschema-2-20010502/.
+    [XMLSig]               D. Eastlake et al. XML-Signature Syntax and Processing. World Wide Web
+                           Consortium Recommendation, February 2002. See
+                           http://www.w3.org/TR/xmldsig-core/.
+
+1.4 Non-Normative References
+    [RFC4346]              T. Dierks, E. Rescorla. The Transport Layer Security (TLS) Protocol Version 1.1.
+                           IETF RFC 4346, April 2006. http://www.ietf.org/rfc/rfc4346.txt.
+    [RFC5280]              D. Cooper, et al. Internet X.509 Public Key Infrastructure Certificate and
+                           Certificate Revocation List (CRL) Profile. IETF RFC 5280, May 2008.
+                           http://www.ietf.org/rfc/rfc5280.txt.
+    [SAML1Meta]            OASIS Standard, Metadata Profile for the OASIS Security Assertion Markup
+                           Language (SAML) V1.x. November 2007.
+                           http://docs.oasis-open.org/security/saml/Post2.0/sstc-saml1x-metadata-os.pdf
+
+2 SAML V2.0 Metadata Interoperability Profile
+2.1 Required Information
+Identification: urn:oasis:names:tc:SAML:2.0:profiles:metadata-iop
+Contact information: security-services-comment@lists.oasis-open.org
+Description: Given below.
+Updates: None.
+
+2.2 Profile Overview
+The SAML V2.0 profiles [SAML2Prof] and metadata [SAML2Meta] specifications, and subsequent
+profiles within OASIS and in other communities (e.g., [SAML1Meta]), describe the use of SAML metadata
+as a means of describing deployment capabilities and providing partners with information about
+endpoints, keys, profile support, processing requirements, etc.
+This profile extends these practices by guaranteeing that a given metadata document will be consistently
+interpreted by any conforming implementation of higher level profiles. To this end, it requires that
+metadata be usable as a self-contained vehicle for communicating trust such that a user of a conforming
+implementation can be guaranteed that any and all rules for processing digital signatures, encrypted XML,
+and transport layer cryptography (e.g., TLS/SSL [RFC4346]) can be derived from the metadata alone,
+with no additional trust requirements imposed.
+This profile requires that all runtime decisions are made solely on the basis of key comparisons, and not
+on any traditionally certificate-influenced basis. A signed metadata file conforming to this specification is
+semantically equivalent to an X.509-based public key infrastructure (PKI), hence there is little value in the
+additional layer of complexity provided by certificate validation as specified in [RFC5280]. Operational
+experience also shows that managing signed metadata is easier than managing a PKI of the
+corresponding size and scale.
+
+2.3 Metadata Exchange and Acceptance
+This profile does not constrain the method(s) by which metadata is published or acquired, but only its
+content and interpretation. It is assumed that, subject to the security and deployment requirements of the
+participants, some means of exchanging metadata exists that results in the "acceptance" of metadata by
+a consumer. Acceptance in this profile is defined as an explicit treatment of everything in the metadata as
+"true", for the purposes of the metadata consumer's operational behavior. The truth of a given set of
+metadata is of course contingent upon the metadata not being superseded by newer metadata, which
+may conflict with, and therefore render obsolete, the earlier information.
+In other words, this profile does not define how (or how often) metadata is exchanged or how and why it is
+trusted, but rather assumes that it is exchanged and trusted, and proceeds from that starting point.
+Dynamic exchange (as described in [SAML2Meta]), manual exchange, the aggregation and signing of
+metadata by third parties, or any other mechanism, can be used in conjunction with this profile. Note that
+verification of metadata signatures, if applicable, is considered to be part of this prerequisite step.
+The rest of this profile deals with the requirements for producing metadata, and a conformant consumer's
+obligations having accepted it.
+Finally, note that accepting metadata does not imply that a relying party will interoperate with a specific
+asserting party; it implies only that if it does so, it does so in a predictable fashion based on the metadata
+it accepts about that party.
+
+2.4 Implementation Constraints
+2.4.1 Peer Authentication
+An additional constraint is necessitated by the inability of SAML metadata to express the authentication
+requirements of back-channel communications between SAML-using entities, such as via the SAML
+SOAP binding [SAML2Bind]. In lieu of extending metadata to capture such requirements, this profile
+assumes that such communications are secured by means of some combination of TLS/SSL and digital
+signing. If this assumption cannot be made, this profile might need to be supplemented in such scenarios.
+
+2.5 Metadata Producer Requirements
+A producer of metadata that adheres to this profile may be an actual participant in a SAML (or other)
+profile, or an aggregator of metadata describing many such participants. In either case, the content of the
+metadata itself is independent of its source and MUST stand alone as a description of the requirements
+for securely communicating with the entity (or entities) described therein, to the extent that the constructs
+of the SAML V2.0 metadata specification [SAML2Meta] can express these requirements.
+Subject to any constraints of the exchange mechanisms in use, a conforming metadata instance may be
+rooted by either an <md:EntityDescriptor> or <md:EntitiesDescriptor> element. Any
+<md:RoleDescriptor> element (or any derived element or type) appearing in the metadata instance
+MUST conform to this profile's requirements.
+Within the context of a particular role (and the protocols it supports, as expressed in its
+protocolSupportEnumeration attribute), any and all cryptographic keys that are known by the
+producer to be valid at the time of metadata production MUST appear within that role's element, in the
+manner described below in section 2.5.1. This includes not only signing and encryption keys, but also any
+keys used to establish mutual authentication with technologies such as TLS/SSL.
+Signing or transport authentication keys intended for future use MAY be included as a means of preparing
+for migration from an older to a newer key (i.e., key rollover). Once an allowable period of time has
+elapsed (with this period dependent on deployment-specific policies), the older key can be removed,
+completing the change. Expired keys (those not in use anymore by an entity, for reasons other than
+compromise) SHOULD be removed once the rollover process to a new key (or keys) has been
+completed.
+Compromised keys MUST be removed from an entity's metadata. The metadata producer MUST NOT
+rely on the metadata consumer utilizing online or offline mechanisms for verifying the validity of a key
+(e.g., X.509 revocation lists, OCSP, etc.). The exact time by which a compromise is reflected in metadata
+is left to the requirements of the parties involved, the metadata's validity period (as defined by a
+validUntil or cacheDuration attribute), and the exchange mechanism in use.
+
+2.5.1 Key Representation
+Each key included in a metadata role MUST be placed within its own <md:KeyDescriptor> element,
+with the appropriate use attribute (see section 2.4.1.1 of [SAML2Meta], as revised by E62 in
+[SAML2Errata]), and expressed using the <ds:KeyInfo> element.
+
+One or more of the following representations within a <ds:KeyInfo> element MUST be present:
+    •    <ds:KeyValue>
+
+    •    <ds:X509Certificate> (child element of <ds:X509Data>)
+
+In the case of the latter, only a single certificate is permitted. If both forms are used, then they MUST
+represent the same key.
+Any other representation in the form of a <ds:KeyInfo> child element (such as <ds:KeyName>,
+<ds:X509SubjectName>, <ds:X509IssuerSerial>, etc.) MAY appear, but MUST NOT be required
+in order to identify the key (they are hints only).
+In the case of an X.509 certificate, there are no requirements as to the content of the certificate apart from
+the requirement that it contain the appropriate public key. Specifically, the certificate may be expired, not
+
+yet valid, carry critical or non-critical extensions or usage flags, and contain any subject or issuer. The use
+of the certificate structure is merely a matter of notational convenience to communicate a key and has no
+semantics in this profile apart from that. However, it is RECOMMENDED that certificates be unexpired.
+
+2.6 Metadata Consumer Requirements
+A metadata consumer MUST have the ability to fully provision and configure itself based on the content of
+a metadata instance that it has accepted (see section 2.3), within the constraints of the information
+represented by the SAML V2.0 metadata specification [SAML2Meta] and any profiles that make use of it.
+A consumer need not provision policy that is outside the scope of metadata, but MUST have the ability to
+interoperate with the entities described by a metadata instance that it accepts, constrained by whatever
+default policies it applies.
+Subject to the constraints of the exchange mechanism(s) in use, a metadata consumer MUST be able to
+process instances rooted with either an <md:EntityDescriptor> or <md:EntitiesDescriptor>
+element. When processing an <md:EntitiesDescriptor> element, each <md:EntityDescriptor>
+element contained within it MUST be processed in accordance with this profile.
+
+2.6.1 Key Processing
+Each key expressed by a <md:KeyDescriptor> element within a particular role MUST be treated as
+valid when processing messages or assertions in the context of that role. Specifically, any signatures or
+transport communications (e.g., TLS/SSL sessions) verifiable with a signing key MUST be treated as
+valid, and any encryption keys found MAY be used to encrypt messages or assertions (or encryption
+keys) intended for the containing entity.
+Subsequent to accepting a metadata instance, a consumer MUST NOT apply additional criteria of any
+kind on the acceptance, or validity, of the keys found within it or their use at runtime. Specifically,
+consumers SHALL NOT apply any online or offline techniques including, but not limited to, X.509 path
+validation or revocation lists, OCSP responders, etc.
+The following key representations within a <ds:KeyInfo> element MUST be supported:
+    •    <ds:KeyValue>
+
+    •    <ds:X509Certificate> (child element of <ds:X509Data>)
+
+In the case of the former, the key itself is explicitly identified. In the case of the latter, a metadata
+consumer MUST extract the public key found in the certificate and MUST NOT honor, interpret, or make
+use of any of the information found in the certificate other than as an aid in identifying the key used
+(based, for example, on information found at runtime in an XML digital signature's <ds:KeyInfo>
+element or the certificate presented by a transport peer).
+Upon identifying a candidate key, a signature can be directly evaluated based on whether it is verifiable
+with the key. Authentication of a transport peer can be evaluated by extracting the key presented by the
+peer (often in the form of an X.509 certificate) and comparing it by value to the candidate key. This
+process has the effect of decoupling the certificates that may be present in metadata from those
+presented at runtime, provided that the public keys are in fact the same.
+A metadata consumer, when implementing authentication of a transport peer via TLS/SSL, MAY retain
+the checking of server certificate names (e.g., subjectAltName or Common Name) in accordance with
+[RFC2818]. Note that this constrains the certificates that may be used at runtime for TLS/SSL server
+authentication, but does not affect certificates that might appear in metadata, because the eventual
+comparison is based solely on the key.
+
+2.7 Security Considerations
+A number of important exposures arise from the reliance on metadata alone to control runtime trust
+decisions.
+Metadata becomes a critical tool for the revocation of compromised sites and keys, and all of the standard
+practices in the use of tools like CRLs become relevant to the consumption of metadata. The specification
+has the mechanisms to address these issues, but they have to be used. Specifically, metadata obtained
+
+via an insecure transport should be both signed, and should expire, so that consumers are forced to
+refresh it often enough to limit the damage from compromised information. Either the validUntil or
+cacheDuration attribute may be appropriate to mitigate this threat, depending on the exchange
+mechanism.
+In addition, distributing signed metadata without an expiration over an untrusted channel (e.g., posting it
+on a public web site) creates an exposure. An attacker can corrupt the channel and substitute an old
+metadata file containing a compromised key and proceed to use that key together with other attacks to
+impersonate a site. Repeatedly expiring (using a validUntil attribute) and reissuing the metadata limits
+the window of exposure, just as a CRL does. Note that the cacheDuration attribute does not prevent
+this attack.
+A broad set of concerns arises in the dynamic exchange of metadata self-published by a site. In such
+cases, it may seem untenable to trust someone to properly identify their own key, and of course it may be.
+Rather than constraining the acceptance of that key, this profile relies on securing the exchange and
+acceptance of the metadata. Traditional PKI protections can be applied to that document and/or its
+exchange, subsequently leveraging that protection to establish trust in the key within the metadata.
+For example, when using the Well Known Location resolution profile [SAML2Meta], a producer may use
+an X.509 certificate to sign the metadata. This certificate can be bound to the metadata through its
+subject or subjectAltName (which might contain a SAML entityID). This ensures the appropriate key/name
+binding for the signature.
+
+3 Conformance
+3.1 SAML V2.0 Metadata Interoperability Profile
+A metadata producer conforms to this profile if it can produce metadata consistent with the normative text
+in section 2.5.
+A metadata consumer conforms to this profile if it can process metadata consistent with the normative
+text in section 2.6.
+
+Appendix A. Acknowledgments
+The editors would like to acknowledge the contributions of the OASIS Security Services Technical
+Committee, whose voting members at the time of publication were:
+    •    Rob Philpott, EMC Corporation
+    •    John Bradley, Individual
+    •    Jeff Hodges, Individual
+    •    Scott Cantor, Internet2
+    •    Nate Klingenstein, Internet2
+    •    Bob Morgan, Internet2
+    •    Joni Brennan, Liberty Alliance Project
+    •    Tom Scavo, National Center for Supercomputing Applications (NCSA)
+    •    Frederick Hirsch, Nokia Corporation
+    •    Ari Kermaier, Oracle Corporation
+    •    Hal Lockhart, Oracle Corporation
+    •    Brian Campbell, Ping Identity Corporation
+    •    Anil Saldhana, Red Hat
+    •    Kent Spaulding, Skyworth TTG Holdings Limited
+    •    Emily Xu, Sun Microsystems
+    •    Duane DeCouteau, Veterans Health Administration
+    •    David Staggs, Veterans Health Administration
+The editor would also like to acknowledge the following contributors:
+    •    Walter Hoehn, University of Memphis
+    •    Chad LaJoie, SWITCH
+    •    Ian Young, EDINA, University of Edinburgh
+
+Appendix B. Revision History
+    ●    Draft 01
+    ●    Draft 02, feedback and discussion (http://lists.oasis-open.org/archives/security-services/200808/
+         msg00038.html)
+    ●    Draft 03, feedback and discussion (http://lists.oasis-open.org/archives/security-services/200902/
+         msg00013.html)
+    ●    Draft 04, improvements to introductory material
+    ●    Committee Draft 01, CD edits
