@@ -4,6 +4,9 @@ import (
 	"bytes"
 	"encoding/xml"
 	"net/http"
+	"net/url"
+	"strings"
+	"unicode"
 
 	"authelia.com/provider/saml"
 )
@@ -198,13 +201,17 @@ func (m *Middleware) HandleStartAuthFlow(w http.ResponseWriter, r *http.Request)
 }
 
 // CreateSessionFromAssertion is invoked by ServeHTTP when we have a new, valid SAML assertion.
+//
+// The user is redirected to the URI of the tracked request, or for an IdP-initiated flow to the
+// RelayState, when it is a path on this service provider or an absolute URL with the same scheme
+// and host as the ACS URL. Otherwise, the user is redirected to redirectURI.
 func (m *Middleware) CreateSessionFromAssertion(w http.ResponseWriter, r *http.Request, assertion *saml.Assertion, redirectURI string) {
-	if trackedRequestIndex := r.Form.Get("RelayState"); trackedRequestIndex != "" {
+	if trackedRequestIndex := relayState(r); trackedRequestIndex != "" {
 		trackedRequest, err := m.RequestTracker.GetTrackedRequest(r, trackedRequestIndex)
 		if err != nil {
 			if err == http.ErrNoCookie && m.ServiceProvider.AllowIDPInitiated {
-				if uri := r.Form.Get("RelayState"); uri != "" {
-					redirectURI = uri
+				if m.isLocalRedirect(trackedRequestIndex) {
+					redirectURI = trackedRequestIndex
 				}
 			} else {
 				m.OnError(w, r, err)
@@ -216,7 +223,9 @@ func (m *Middleware) CreateSessionFromAssertion(w http.ResponseWriter, r *http.R
 				return
 			}
 
-			redirectURI = trackedRequest.URI
+			if m.isLocalRedirect(trackedRequest.URI) {
+				redirectURI = trackedRequest.URI
+			}
 		}
 	}
 
@@ -226,6 +235,33 @@ func (m *Middleware) CreateSessionFromAssertion(w http.ResponseWriter, r *http.R
 	}
 
 	http.Redirect(w, r, redirectURI, http.StatusFound)
+}
+
+// relayState returns the RelayState sent alongside the SAML message, so a
+// query string parameter cannot stand in for one missing from a POST body.
+func relayState(r *http.Request) string {
+	if r.PostForm.Has("SAMLResponse") || r.PostForm.Has("SAMLart") {
+		return r.PostForm.Get("RelayState")
+	}
+	return r.URL.Query().Get("RelayState")
+}
+
+// isLocalRedirect reports whether uri is a path on this service provider, or
+// an absolute URL with the same scheme and host as the ACS URL.
+func (m *Middleware) isLocalRedirect(uri string) bool {
+	if strings.ContainsFunc(uri, unicode.IsControl) {
+		return false
+	}
+	if strings.HasPrefix(uri, "/") {
+		return !strings.HasPrefix(uri, "//") && !strings.HasPrefix(uri, "/\\")
+	}
+	u, err := url.Parse(uri)
+	if err != nil {
+		return false
+	}
+	return u.User == nil &&
+		strings.EqualFold(u.Scheme, m.ServiceProvider.AcsURL.Scheme) &&
+		strings.EqualFold(u.Host, m.ServiceProvider.AcsURL.Host)
 }
 
 // RequireAttribute returns a middleware function that requires that the
