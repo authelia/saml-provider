@@ -1,5 +1,11 @@
 // Package samlidp a rudimentary SAML identity provider suitable for
 // testing or as a starting point for a more complex service.
+//
+// The RESTful interfaces for managing services, users, sessions and shortcuts
+// are served by Server.AdminHandler, which has no authentication of its own.
+// Anyone who can reach it can create a user and sign in as them, or register
+// a service provider. Only expose it behind authentication, or on a listener
+// that untrusted clients cannot reach.
 package samlidp
 
 import (
@@ -32,12 +38,16 @@ type Options struct {
 //	/sso          - the SAML endpoint to initiate an authentication flow
 //	/login        - prompt for a username and password if no session established
 //	/login/:shortcut - kick off an IDP-initiated authentication flow
+//
+// AdminHandler separately provides the following URLs, without authentication:
+//
 //	/services     - RESTful interface to Service objects
 //	/users        - RESTful interface to User objects
 //	/sessions     - RESTful interface to Session objects
 //	/shortcuts    - RESTful interface to Shortcut objects
 type Server struct {
 	http.Handler
+	AdminHandler      http.Handler
 	idpConfigMu       sync.RWMutex // protects calls into the IDP
 	logger            logger.Interface
 	serviceProviders  map[string]*saml.EntityDescriptor
@@ -87,9 +97,9 @@ func New(opts Options) (*Server, error) {
 	return s, nil
 }
 
-// InitializeHTTP sets up the HTTP handler for the server. (This function
-// is called automatically for you by New, but you may need to call it
-// yourself if you don't create the object using New.)
+// InitializeHTTP sets up the HTTP handler and the admin HTTP handler for the
+// server. (This function is called automatically for you by New, but you may
+// need to call it yourself if you don't create the object using New.)
 func (s *Server) InitializeHTTP() {
 	mux := http.NewServeMux()
 	s.Handler = mux
@@ -107,23 +117,26 @@ func (s *Server) InitializeHTTP() {
 	mux.HandleFunc("/login/{shortcut}", s.HandleIDPInitiated)
 	mux.HandleFunc("/login/{shortcut}/{suffix}", s.HandleIDPInitiated)
 
-	mux.HandleFunc("GET /services/", s.HandleListServices)
-	mux.HandleFunc("GET /services/{id}", s.HandleGetService)
-	mux.HandleFunc("PUT /services/{id}", s.HandlePutService)
-	mux.HandleFunc("POST /services/{id}", s.HandlePutService)
-	mux.HandleFunc("DELETE /services/{id}", s.HandleDeleteService)
+	admin := http.NewServeMux()
+	s.AdminHandler = admin
 
-	mux.HandleFunc("GET /users/", s.HandleListUsers)
-	mux.HandleFunc("GET /users/{id}", s.HandleGetUser)
-	mux.HandleFunc("PUT /users/{id}", s.HandlePutUser)
-	mux.HandleFunc("DELETE /users/{id}", s.HandleDeleteUser)
+	admin.HandleFunc("GET /services/", s.HandleListServices)
+	admin.HandleFunc("GET /services/{id}", s.HandleGetService)
+	admin.HandleFunc("PUT /services/{id}", s.HandlePutService)
+	admin.HandleFunc("POST /services/{id}", s.HandlePutService)
+	admin.HandleFunc("DELETE /services/{id}", s.HandleDeleteService)
 
-	mux.HandleFunc("GET /sessions/", s.HandleListSessions)
-	mux.HandleFunc("GET /sessions/{id}", s.HandleGetSession)
-	mux.HandleFunc("DELETE /sessions/{id}", s.HandleDeleteSession)
+	admin.HandleFunc("GET /users/", s.HandleListUsers)
+	admin.HandleFunc("GET /users/{id}", s.HandleGetUser)
+	admin.HandleFunc("PUT /users/{id}", s.HandlePutUser)
+	admin.HandleFunc("DELETE /users/{id}", s.HandleDeleteUser)
 
-	mux.HandleFunc("GET /shortcuts/", s.HandleListShortcuts)
-	mux.HandleFunc("GET /shortcuts/{id}", s.HandleGetShortcut)
-	mux.HandleFunc("PUT /shortcuts/{id}", s.HandlePutShortcut)
-	mux.HandleFunc("DELETE /shortcuts/{id}", s.HandleDeleteShortcut)
+	admin.HandleFunc("GET /sessions/", s.HandleListSessions)
+	admin.HandleFunc("GET /sessions/{id}", s.HandleGetSession)
+	admin.HandleFunc("DELETE /sessions/{id}", s.HandleDeleteSession)
+
+	admin.HandleFunc("GET /shortcuts/", s.HandleListShortcuts)
+	admin.HandleFunc("GET /shortcuts/{id}", s.HandleGetShortcut)
+	admin.HandleFunc("PUT /shortcuts/{id}", s.HandlePutShortcut)
+	admin.HandleFunc("DELETE /shortcuts/{id}", s.HandleDeleteShortcut)
 }
