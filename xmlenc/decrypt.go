@@ -51,7 +51,7 @@ func (e ErrIncorrectKeyType) Error() string {
 // Decrypt decrypts the encrypted data using the provided key. If the
 // data are encrypted using AES or 3DEC, then the key should be a []byte.
 // If the data are encrypted with PKCS1v15 or RSA-OAEP-MGF1P then key should
-// be a *rsa.PrivateKey.
+// be a *rsa.PrivateKey. PKCS1v15 is only supported after opting in, see PKCS1v15.
 func Decrypt(key interface{}, ciphertextEl *etree.Element) ([]byte, error) {
 	encryptionMethodEl := ciphertextEl.FindElement("./EncryptionMethod")
 	if encryptionMethodEl == nil {
