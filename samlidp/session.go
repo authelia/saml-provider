@@ -67,12 +67,22 @@ func (s *Server) GetSession(w http.ResponseWriter, r *http.Request, req *saml.Id
 			return nil
 		}
 
+		// The cookie must reach the IdP on the cross-site POST of the HTTP-POST
+		// binding, which requires SameSite None, and browsers only accept that
+		// on a Secure cookie.
+		secure := s.IDP.SSOURL.Scheme == "https" || r.TLS != nil
+		sameSite := http.SameSiteLaxMode
+		if secure {
+			sameSite = http.SameSiteNoneMode
+		}
+
 		http.SetCookie(w, &http.Cookie{
 			Name:     "session",
 			Value:    session.ID,
 			MaxAge:   int(sessionMaxAge.Seconds()),
 			HttpOnly: true,
-			Secure:   r.URL.Scheme == "https",
+			Secure:   secure,
+			SameSite: sameSite,
 			Path:     "/",
 		})
 
