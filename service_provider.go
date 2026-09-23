@@ -1206,11 +1206,13 @@ func (sp *ServiceProvider) validateAssertion(assertion *Assertion, possibleReque
 			return fmt.Errorf("assertion SubjectConfirmationData is expired")
 		}
 	}
-	if assertion.Conditions.NotBefore.Add(-MaxClockSkew).After(now) {
-		return fmt.Errorf("assertion Conditions is not yet valid")
-	}
-	if assertion.Conditions.NotOnOrAfter.Add(MaxClockSkew).Before(now) {
-		return fmt.Errorf("assertion Conditions is expired")
+	if assertion.Conditions != nil {
+		if assertion.Conditions.NotBefore.Add(-MaxClockSkew).After(now) {
+			return fmt.Errorf("assertion Conditions is not yet valid")
+		}
+		if assertion.Conditions.NotOnOrAfter.Add(MaxClockSkew).Before(now) {
+			return fmt.Errorf("assertion Conditions is expired")
+		}
 	}
 
 	if err := sp.validateAudienceRestriction(assertion); err != nil {

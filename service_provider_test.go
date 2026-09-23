@@ -1489,6 +1489,62 @@ func TestSPValidateAudienceRestriction(t *testing.T) {
 	}
 }
 
+func TestSPValidateAssertionWithoutConditions(t *testing.T) {
+	testCases := []struct {
+		name                        string
+		validateAudienceRestriction func(assertion *Assertion) error
+		err                         string
+	}{
+		{
+			name: "default",
+			err:  "assertion Conditions does not contain an AudienceRestriction",
+		},
+		{
+			name: "with ValidateAudienceRestriction",
+			validateAudienceRestriction: func(*Assertion) error {
+				return nil
+			},
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			test := NewServiceProviderTest(t)
+			s := ServiceProvider{
+				Key:                         test.Key,
+				Certificate:                 test.Certificate,
+				MetadataURL:                 mustParseURL("https://15661444.ngrok.io/saml2/metadata"),
+				AcsURL:                      mustParseURL("https://15661444.ngrok.io/saml2/acs"),
+				IDPMetadata:                 &EntityDescriptor{},
+				ValidateAudienceRestriction: tc.validateAudienceRestriction,
+			}
+			assert.NilError(t, xml.Unmarshal(test.IDPMetadata, &s.IDPMetadata))
+
+			doc := etree.NewDocument()
+			assert.NilError(t, doc.ReadFromBytes(test.SamlResponse))
+			assertionEl, err := s.decryptElement(doc.Root().FindElement("//EncryptedAssertion"))
+			assert.NilError(t, err)
+
+			doc = etree.NewDocument()
+			doc.SetRoot(assertionEl)
+			assertionBuf, err := doc.WriteToBytes()
+			assert.NilError(t, err)
+
+			assertion := Assertion{}
+			assert.NilError(t, xml.Unmarshal(assertionBuf, &assertion))
+			assertion.Conditions = nil
+
+			err = s.validateAssertion(&assertion, []string{"id-9e61753d64e928af5a7a341a97f420c9"}, TimeNow())
+			if tc.err != "" {
+				assert.Check(t, is.Error(err, tc.err))
+				return
+			}
+
+			assert.Check(t, err)
+		})
+	}
+}
+
 func TestXswPermutationOneIsRejected(t *testing.T) {
 	test := NewServiceProviderTest(t)
 	idpMetadata := golden.Get(t, "TestSPCanHandleOneloginResponse_IDPMetadata")
