@@ -20,6 +20,7 @@ import (
 	"net/http"
 	"net/url"
 	"regexp"
+	"slices"
 	"strings"
 	"time"
 
@@ -1205,11 +1206,13 @@ func (sp *ServiceProvider) validateAssertion(assertion *Assertion, possibleReque
 			return fmt.Errorf("assertion SubjectConfirmationData is expired")
 		}
 	}
-	if assertion.Conditions.NotBefore.Add(-MaxClockSkew).After(now) {
-		return fmt.Errorf("assertion Conditions is not yet valid")
-	}
-	if assertion.Conditions.NotOnOrAfter.Add(MaxClockSkew).Before(now) {
-		return fmt.Errorf("assertion Conditions is expired")
+	if assertion.Conditions != nil {
+		if assertion.Conditions.NotBefore.Add(-MaxClockSkew).After(now) {
+			return fmt.Errorf("assertion Conditions is not yet valid")
+		}
+		if assertion.Conditions.NotOnOrAfter.Add(MaxClockSkew).Before(now) {
+			return fmt.Errorf("assertion Conditions is expired")
+		}
 	}
 
 	if err := sp.validateAudienceRestriction(assertion); err != nil {
@@ -1226,15 +1229,15 @@ func (sp *ServiceProvider) validateAudienceRestriction(assertion *Assertion) err
 		return nil
 	}
 
-	audienceRestrictionsValid := len(assertion.Conditions.AudienceRestrictions) == 0
+	if assertion.Conditions == nil || len(assertion.Conditions.AudienceRestrictions) == 0 {
+		return fmt.Errorf("assertion Conditions does not contain an AudienceRestriction")
+	}
+
 	audience := firstSet(sp.EntityID, sp.MetadataURL.String())
 	for _, audienceRestriction := range assertion.Conditions.AudienceRestrictions {
-		if audienceRestriction.Audience.Value == audience {
-			audienceRestrictionsValid = true
+		if !slices.ContainsFunc(audienceRestriction.Audiences, func(a Audience) bool { return a.Value == audience }) {
+			return fmt.Errorf("assertion Conditions AudienceRestriction does not contain %q", audience)
 		}
-	}
-	if !audienceRestrictionsValid {
-		return fmt.Errorf("assertion Conditions AudienceRestriction does not contain %q", audience)
 	}
 	return nil
 }

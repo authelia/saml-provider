@@ -1224,16 +1224,15 @@ func TestSPInvalidAssertions(t *testing.T) {
 	assertion = Assertion{}
 	assert.Check(t, xml.Unmarshal(assertionBuf, &assertion))
 
-	assertion.Conditions.AudienceRestrictions[0].Audience.Value = "not/our/metadata/url"
+	assertion.Conditions.AudienceRestrictions[0].Audiences[0].Value = "not/our/metadata/url"
 	err = s.validateAssertion(&assertion, []string{"id-9e61753d64e928af5a7a341a97f420c9"}, TimeNow())
 	assert.Check(t, is.Error(err, "assertion Conditions AudienceRestriction does not contain \"https://15661444.ngrok.io/saml2/metadata\""))
 	assertion = Assertion{}
 	assert.Check(t, xml.Unmarshal(assertionBuf, &assertion))
 
-	// Not having an audience is not an error
 	assertion.Conditions.AudienceRestrictions = []AudienceRestriction{}
 	err = s.validateAssertion(&assertion, []string{"id-9e61753d64e928af5a7a341a97f420c9"}, TimeNow())
-	assert.Check(t, err)
+	assert.Check(t, is.Error(err, "assertion Conditions does not contain an AudienceRestriction"))
 }
 
 func TestSPValidateRequestIDAllowIDPInitiated(t *testing.T) {
@@ -1402,6 +1401,140 @@ func TestSPValidateAssertionInResponseToAllowIDPInitiated(t *testing.T) {
 			assertion.Subject.SubjectConfirmations[0].SubjectConfirmationData.InResponseTo = tc.inResponseTo
 
 			err = s.validateAssertion(&assertion, tc.possibleRequestIDs, TimeNow())
+			if tc.err != "" {
+				assert.Check(t, is.Error(err, tc.err))
+				return
+			}
+
+			assert.Check(t, err)
+		})
+	}
+}
+
+func TestSPValidateAudienceRestriction(t *testing.T) {
+	testCases := []struct {
+		name                        string
+		audiences                   string
+		validateAudienceRestriction func(assertion *Assertion) error
+		err                         string
+	}{
+		{
+			name:      "ours",
+			audiences: `<saml:AudienceRestriction><saml:Audience>https://sp.example.com/saml2/metadata</saml:Audience></saml:AudienceRestriction>`,
+		},
+		{
+			name:      "ours first of two",
+			audiences: `<saml:AudienceRestriction><saml:Audience>https://sp.example.com/saml2/metadata</saml:Audience><saml:Audience>https://other.example.com/</saml:Audience></saml:AudienceRestriction>`,
+		},
+		{
+			name:      "ours second of two",
+			audiences: `<saml:AudienceRestriction><saml:Audience>https://other.example.com/</saml:Audience><saml:Audience>https://sp.example.com/saml2/metadata</saml:Audience></saml:AudienceRestriction>`,
+		},
+		{
+			name:      "ours in every restriction",
+			audiences: `<saml:AudienceRestriction><saml:Audience>https://sp.example.com/saml2/metadata</saml:Audience></saml:AudienceRestriction><saml:AudienceRestriction><saml:Audience>https://other.example.com/</saml:Audience><saml:Audience>https://sp.example.com/saml2/metadata</saml:Audience></saml:AudienceRestriction>`,
+		},
+		{
+			name:      "other",
+			audiences: `<saml:AudienceRestriction><saml:Audience>https://other.example.com/</saml:Audience></saml:AudienceRestriction>`,
+			err:       "assertion Conditions AudienceRestriction does not contain \"https://sp.example.com/saml2/metadata\"",
+		},
+		{
+			name:      "ours then other restriction",
+			audiences: `<saml:AudienceRestriction><saml:Audience>https://sp.example.com/saml2/metadata</saml:Audience></saml:AudienceRestriction><saml:AudienceRestriction><saml:Audience>https://other.example.com/</saml:Audience></saml:AudienceRestriction>`,
+			err:       "assertion Conditions AudienceRestriction does not contain \"https://sp.example.com/saml2/metadata\"",
+		},
+		{
+			name:      "other then ours restriction",
+			audiences: `<saml:AudienceRestriction><saml:Audience>https://other.example.com/</saml:Audience></saml:AudienceRestriction><saml:AudienceRestriction><saml:Audience>https://sp.example.com/saml2/metadata</saml:Audience></saml:AudienceRestriction>`,
+			err:       "assertion Conditions AudienceRestriction does not contain \"https://sp.example.com/saml2/metadata\"",
+		},
+		{
+			name:      "empty restriction",
+			audiences: `<saml:AudienceRestriction></saml:AudienceRestriction>`,
+			err:       "assertion Conditions AudienceRestriction does not contain \"https://sp.example.com/saml2/metadata\"",
+		},
+		{
+			name:      "no restriction",
+			audiences: ``,
+			err:       "assertion Conditions does not contain an AudienceRestriction",
+		},
+		{
+			name:      "no restriction with ValidateAudienceRestriction",
+			audiences: ``,
+			validateAudienceRestriction: func(*Assertion) error {
+				return nil
+			},
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			s := ServiceProvider{
+				MetadataURL:                 mustParseURL("https://sp.example.com/saml2/metadata"),
+				ValidateAudienceRestriction: tc.validateAudienceRestriction,
+			}
+
+			conditions := &Conditions{}
+			assert.NilError(t, xml.Unmarshal([]byte(`<saml:Conditions xmlns:saml="urn:oasis:names:tc:SAML:2.0:assertion">`+tc.audiences+`</saml:Conditions>`), conditions))
+
+			err := s.validateAudienceRestriction(&Assertion{Conditions: conditions})
+			if tc.err != "" {
+				assert.Check(t, is.Error(err, tc.err))
+				return
+			}
+
+			assert.Check(t, err)
+		})
+	}
+}
+
+func TestSPValidateAssertionWithoutConditions(t *testing.T) {
+	testCases := []struct {
+		name                        string
+		validateAudienceRestriction func(assertion *Assertion) error
+		err                         string
+	}{
+		{
+			name: "default",
+			err:  "assertion Conditions does not contain an AudienceRestriction",
+		},
+		{
+			name: "with ValidateAudienceRestriction",
+			validateAudienceRestriction: func(*Assertion) error {
+				return nil
+			},
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			test := NewServiceProviderTest(t)
+			s := ServiceProvider{
+				Key:                         test.Key,
+				Certificate:                 test.Certificate,
+				MetadataURL:                 mustParseURL("https://15661444.ngrok.io/saml2/metadata"),
+				AcsURL:                      mustParseURL("https://15661444.ngrok.io/saml2/acs"),
+				IDPMetadata:                 &EntityDescriptor{},
+				ValidateAudienceRestriction: tc.validateAudienceRestriction,
+			}
+			assert.NilError(t, xml.Unmarshal(test.IDPMetadata, &s.IDPMetadata))
+
+			doc := etree.NewDocument()
+			assert.NilError(t, doc.ReadFromBytes(test.SamlResponse))
+			assertionEl, err := s.decryptElement(doc.Root().FindElement("//EncryptedAssertion"))
+			assert.NilError(t, err)
+
+			doc = etree.NewDocument()
+			doc.SetRoot(assertionEl)
+			assertionBuf, err := doc.WriteToBytes()
+			assert.NilError(t, err)
+
+			assertion := Assertion{}
+			assert.NilError(t, xml.Unmarshal(assertionBuf, &assertion))
+			assertion.Conditions = nil
+
+			err = s.validateAssertion(&assertion, []string{"id-9e61753d64e928af5a7a341a97f420c9"}, TimeNow())
 			if tc.err != "" {
 				assert.Check(t, is.Error(err, tc.err))
 				return
