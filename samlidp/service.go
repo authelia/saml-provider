@@ -3,9 +3,11 @@ package samlidp
 import (
 	"encoding/json"
 	"encoding/xml"
+	"errors"
 	"fmt"
 	"net/http"
 	"os"
+	"slices"
 
 	"authelia.com/provider/saml"
 )
@@ -69,9 +71,11 @@ func (s *Server) HandleGetService(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// HandlePutService handles the `PUT /shortcuts/:id` request. It accepts the XML-formatted
-// service metadata in the request body and stores it.
+// HandlePutService handles the `PUT /services/:id` request. It accepts the XML-formatted
+// service metadata in the request body and stores it. The request is rejected if the
+// entity ID in the metadata is already registered by another service.
 func (s *Server) HandlePutService(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
 	service := Service{}
 
 	metadata, err := getSPMetadata(r.Body)
@@ -83,41 +87,76 @@ func (s *Server) HandlePutService(w http.ResponseWriter, r *http.Request) {
 
 	service.Metadata = *metadata
 
-	err = s.Store.Put(fmt.Sprintf("/services/%s", r.PathValue("id")), &service)
+	s.idpConfigMu.Lock()
+	defer s.idpConfigMu.Unlock()
+
+	if _, ok := s.serviceProviders[service.Metadata.EntityID]; ok && s.serviceIDs[service.Metadata.EntityID] != id {
+		s.logger.Printf("ERROR: entity ID %q is already registered by another service", service.Metadata.EntityID)
+		http.Error(w, http.StatusText(http.StatusConflict), http.StatusConflict)
+		return
+	}
+
+	// Stop if the previous record cannot be read, because overwriting it would leave its entity ID
+	// registered with no record to deregister it from.
+	previous := Service{}
+	err = s.Store.Get(fmt.Sprintf("/services/%s", id), &previous)
+	if err != nil && !errors.Is(err, ErrNotFound) {
+		s.logger.Printf("ERROR: %s", err)
+		http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
+		return
+	}
+	hasPrevious := err == nil
+
+	err = s.Store.Put(fmt.Sprintf("/services/%s", id), &service)
 	if err != nil {
 		s.logger.Printf("ERROR: %s", err)
 		http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
 		return
 	}
 
-	s.idpConfigMu.Lock()
+	if hasPrevious {
+		s.deregisterServiceProvider(id, previous.Metadata.EntityID)
+	}
 	s.serviceProviders[service.Metadata.EntityID] = &service.Metadata
-	s.idpConfigMu.Unlock()
+	s.serviceIDs[service.Metadata.EntityID] = id
 
 	w.WriteHeader(http.StatusNoContent)
 }
 
 // HandleDeleteService handles the `DELETE /services/:id` request.
 func (s *Server) HandleDeleteService(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+
+	s.idpConfigMu.Lock()
+	defer s.idpConfigMu.Unlock()
+
 	service := Service{}
-	err := s.Store.Get(fmt.Sprintf("/services/%s", r.PathValue("id")), &service)
+	err := s.Store.Get(fmt.Sprintf("/services/%s", id), &service)
 	if err != nil {
 		s.logger.Printf("ERROR: %s", err)
 		http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
 		return
 	}
 
-	if err := s.Store.Delete(fmt.Sprintf("/services/%s", r.PathValue("id"))); err != nil {
+	if err := s.Store.Delete(fmt.Sprintf("/services/%s", id)); err != nil {
 		s.logger.Printf("ERROR: %s", err)
 		http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
 		return
 	}
 
-	s.idpConfigMu.Lock()
-	delete(s.serviceProviders, service.Metadata.EntityID)
-	s.idpConfigMu.Unlock()
+	s.deregisterServiceProvider(id, service.Metadata.EntityID)
 
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// deregisterServiceProvider removes entityID from the identity provider only
+// if it is registered by the service id. The caller must hold idpConfigMu.
+func (s *Server) deregisterServiceProvider(id, entityID string) {
+	if s.serviceIDs[entityID] != id {
+		return
+	}
+	delete(s.serviceProviders, entityID)
+	delete(s.serviceIDs, entityID)
 }
 
 // initializeServices reads all the stored services and initializes the underlying
@@ -127,6 +166,7 @@ func (s *Server) initializeServices() error {
 	if err != nil {
 		return err
 	}
+	slices.Sort(serviceNames)
 	for _, serviceName := range serviceNames {
 		service := Service{}
 		if err := s.Store.Get(fmt.Sprintf("/services/%s", serviceName), &service); err != nil {
@@ -134,7 +174,12 @@ func (s *Server) initializeServices() error {
 		}
 
 		s.idpConfigMu.Lock()
+		if other, ok := s.serviceIDs[service.Metadata.EntityID]; ok {
+			s.idpConfigMu.Unlock()
+			return fmt.Errorf("services %q and %q both register entity ID %q: remove one of them from the store", other, serviceName, service.Metadata.EntityID)
+		}
 		s.serviceProviders[service.Metadata.EntityID] = &service.Metadata
+		s.serviceIDs[service.Metadata.EntityID] = serviceName
 		s.idpConfigMu.Unlock()
 	}
 	return nil
