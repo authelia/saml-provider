@@ -1,0 +1,70 @@
+name: 'Go'
+on:
+  pull_request:
+    branches:
+      - 'main'
+  push:
+    branches:
+      - 'main'
+  merge_group:
+    branches:
+      - 'main'
+permissions:
+  contents: 'read'
+jobs:
+  cover:
+    name: 'Coverage'
+    runs-on: 'ubuntu-latest'
+    steps:
+      - name: 'Harden Runner'
+        uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
+        with:
+          egress-policy: 'audit'
+      - name: 'Set up Go'
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: '1.27.1'
+      - name: 'Checkout'
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: 'Get Dependencies'
+        run: |
+          go get -v -t ./...
+      - name: 'Test'
+        run: |
+          go test -coverprofile=coverage.txt -v ./...
+      - name: 'Coverage'
+        uses: codecov/codecov-action@303a32d7a59b442fa8d48b6a1cc6825c09c847a5 # v7.1.1
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+  build:
+    name: 'Build and Test'
+    runs-on: 'ubuntu-latest'
+    strategy:
+      matrix:
+        go:
+          - '1.27'
+      fail-fast: false
+    steps:
+      - name: 'Harden Runner'
+        uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
+        with:
+          egress-policy: 'audit'
+      - name: 'Set up Go ${{ matrix.go }}'
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: ${{ matrix.go }}
+      - name: 'Checkout'
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: 'Get Dependencies'
+        run: |
+          go get -v -t ./...
+      - name: 'Build'
+        run: |
+          go build -v ./...
+      - name: 'Test'
+        run: |
+          go test -race -v ./...
