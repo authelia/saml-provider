@@ -414,6 +414,67 @@ func TestMiddlewareCanParseResponse(t *testing.T) {
 		resp.Header()["Set-Cookie"]))
 }
 
+func TestMiddlewareRedirectAfterLogin(t *testing.T) {
+	const index = "KCosLjAyNDY4Ojw-QEJERkhKTE5QUlRWWFpcXmBiZGZoamxucHJ0dnh6"
+
+	testCases := []struct {
+		name              string
+		allowIDPInitiated bool
+		trackedURI        string
+		bodyRelayState    string
+		queryRelayState   string
+		location          string
+	}{
+		{name: "tracked path", trackedURI: "/frob", bodyRelayState: index, location: "/frob"},
+		{name: "tracked path with query", trackedURI: "/frob?a=b", bodyRelayState: index, location: "/frob?a=b"},
+		{name: "tracked protocol-relative", trackedURI: "//evil.example/pwn", bodyRelayState: index, location: "/"},
+		{name: "tracked backslash", trackedURI: "/\\evil.example/pwn", bodyRelayState: index, location: "/"},
+		{name: "tracked absolute", trackedURI: "https://evil.example/pwn", bodyRelayState: index, location: "/"},
+		{name: "tracked absolute same origin", trackedURI: "https://15661444.ngrok.io/frob", bodyRelayState: index, location: "https://15661444.ngrok.io/frob"},
+		{name: "idp-initiated path", allowIDPInitiated: true, trackedURI: "/frob", bodyRelayState: "/app", location: "/app"},
+		{name: "idp-initiated absolute same origin", allowIDPInitiated: true, trackedURI: "/frob", bodyRelayState: "https://15661444.ngrok.io/app", location: "https://15661444.ngrok.io/app"},
+		{name: "idp-initiated absolute", allowIDPInitiated: true, trackedURI: "/frob", bodyRelayState: "https://evil.example/", location: "/"},
+		{name: "idp-initiated protocol-relative", allowIDPInitiated: true, trackedURI: "/frob", bodyRelayState: "//evil.example/", location: "/"},
+		{name: "idp-initiated tab", allowIDPInitiated: true, trackedURI: "/frob", bodyRelayState: "/\t/evil.example/", location: "/"},
+		{name: "idp-initiated javascript", allowIDPInitiated: true, trackedURI: "/frob", bodyRelayState: "javascript:alert(1)", location: "/"},
+		{name: "idp-initiated backslash userinfo", allowIDPInitiated: true, trackedURI: "/frob", bodyRelayState: "https://evil.example\\@15661444.ngrok.io/", location: "/"},
+		{name: "idp-initiated userinfo", allowIDPInitiated: true, trackedURI: "/frob", bodyRelayState: "https://15661444.ngrok.io@evil.example/", location: "/"},
+		{name: "idp-initiated query relay state", allowIDPInitiated: true, trackedURI: "/frob", queryRelayState: "/app", location: "/"},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			test := NewMiddlewareTest(t)
+			test.Middleware.ServiceProvider.AllowIDPInitiated = tc.allowIDPInitiated
+
+			token, err := test.Middleware.RequestTracker.(CookieRequestTracker).Codec.Encode(TrackedRequest{
+				Index:         index,
+				SAMLRequestID: "id-9e61753d64e928af5a7a341a97f420c9",
+				URI:           tc.trackedURI,
+			})
+			assert.NilError(t, err)
+
+			v := &url.Values{}
+			v.Set("SAMLResponse", base64.StdEncoding.EncodeToString(test.SamlResponse))
+			if tc.bodyRelayState != "" {
+				v.Set("RelayState", tc.bodyRelayState)
+			}
+			target := "/saml2/acs"
+			if tc.queryRelayState != "" {
+				target += "?RelayState=" + url.QueryEscape(tc.queryRelayState)
+			}
+			req := httptest.NewRequest(http.MethodPost, target, strings.NewReader(v.Encode()))
+			req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+			req.Header.Set("Cookie", "saml_"+index+"="+token)
+
+			resp := httptest.NewRecorder()
+			test.Middleware.ServeHTTP(resp, req)
+			assert.Check(t, is.Equal(http.StatusFound, resp.Code))
+			assert.Check(t, is.Equal(tc.location, resp.Header().Get("Location")))
+		})
+	}
+}
+
 func TestMiddlewareDefaultCookieDomainIPv4(t *testing.T) {
 	test := NewMiddlewareTest(t)
 	ipv4Loopback := net.IP{127, 0, 0, 1}
