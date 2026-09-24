@@ -442,6 +442,10 @@ func (req *IdpAuthnRequest) Validate() error {
 		return fmt.Errorf("expected SAML request version 2.0 got %v", req.Request.Version)
 	}
 
+	if req.Request.Issuer == nil || req.Request.Issuer.Value == "" {
+		return fmt.Errorf("request does not contain an Issuer")
+	}
+
 	// find the service provider
 	serviceProviderID := req.Request.Issuer.Value
 	serviceProvider, err := req.IDP.ServiceProviderProvider.GetServiceProvider(req.HTTPRequest, serviceProviderID)
@@ -982,7 +986,7 @@ func (req *IdpAuthnRequest) WriteResponse(w http.ResponseWriter) error {
 func (req *IdpAuthnRequest) getSPEncryptionCert() (*x509.Certificate, error) {
 	certStr := ""
 	for _, keyDescriptor := range req.SPSSODescriptor.KeyDescriptors {
-		if keyDescriptor.Use == "encryption" {
+		if keyDescriptor.Use == "encryption" && len(keyDescriptor.KeyInfo.X509Data.X509Certificates) != 0 {
 			certStr = keyDescriptor.KeyInfo.X509Data.X509Certificates[0].Data
 			break
 		}
