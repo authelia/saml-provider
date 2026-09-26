@@ -3,7 +3,7 @@ package samlsp
 import (
 	"testing"
 
-	"github.com/golang-jwt/jwt/v5"
+	"authelia.com/provider/jose"
 	"gotest.tools/assert"
 	is "gotest.tools/assert/cmp"
 )
@@ -29,12 +29,12 @@ func TestJWTTrackedRequestCodecDecodeRejects(t *testing.T) {
 		{
 			name: "RS512",
 			encode: func(t *testing.T, codec JWTTrackedRequestCodec) string {
-				codec.SigningMethod = jwt.SigningMethodRS512
+				codec.SigningMethod = jose.RS512
 				token, err := codec.Encode(TrackedRequest{Index: "idx", SAMLRequestID: "id-1", URI: "/"})
 				assert.NilError(t, err)
 				return token
 			},
-			err: "token signature is invalid: signing method RS512 is invalid",
+			err: `unexpected signature algorithm "RS512"; expected ["RS256"]`,
 		},
 		{
 			name: "session",
@@ -59,6 +59,6 @@ func newTestTrackedRequestCodec(t *testing.T) JWTTrackedRequestCodec {
 	test := NewMiddlewareTest(t)
 	return DefaultTrackedRequestCodec(Options{
 		URL: mustParseURL("https://15661444.ngrok.io/"),
-		Key: test.Key,
+		Key: test.JWTKey,
 	})
 }

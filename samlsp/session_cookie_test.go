@@ -18,7 +18,7 @@ func TestCookieSameSite(t *testing.T) {
 		Name:   "token",
 		Domain: "localhost",
 		Codec: DefaultSessionCodec(Options{
-			Key: NewMiddlewareTest(t).Key,
+			Key: NewMiddlewareTest(t).JWTKey,
 		}),
 	}
 
@@ -53,7 +53,7 @@ func TestCookieSessionProviderDeleteSession(t *testing.T) {
 		Name:   "token",
 		Domain: "localhost:8080",
 		Codec: DefaultSessionCodec(Options{
-			Key: NewMiddlewareTest(t).Key,
+			Key: NewMiddlewareTest(t).JWTKey,
 		}),
 	}
 

@@ -5,7 +5,9 @@ import (
 	"errors"
 	"time"
 
-	"github.com/golang-jwt/jwt/v5"
+	"authelia.com/provider/jose"
+	"authelia.com/provider/jose/cryptosigner"
+	"authelia.com/provider/jose/jwt"
 
 	"authelia.com/provider/saml"
 )
@@ -18,7 +20,7 @@ const (
 // JWTSessionCodec implements SessionCoded to encode and decode Sessions from
 // the corresponding JWT.
 type JWTSessionCodec struct {
-	SigningMethod jwt.SigningMethod
+	SigningMethod jose.SignatureAlgorithm
 	Audience      string
 	Issuer        string
 	MaxAge        time.Duration
@@ -34,10 +36,10 @@ func (c JWTSessionCodec) New(assertion *saml.Assertion) (Session, error) {
 	now := saml.TimeNow()
 	claims := JWTSessionClaims{}
 	claims.SAMLSession = true
-	claims.Audience = jwt.ClaimStrings{c.Audience}
+	claims.Audience = jwt.Audience{c.Audience}
 	claims.Issuer = c.Issuer
 	claims.IssuedAt = jwt.NewNumericDate(now)
-	claims.ExpiresAt = jwt.NewNumericDate(now.Add(c.MaxAge))
+	claims.Expiry = jwt.NewNumericDate(now.Add(c.MaxAge))
 	claims.NotBefore = jwt.NewNumericDate(now)
 
 	if sub := assertion.Subject; sub != nil {
@@ -76,28 +78,14 @@ func (c JWTSessionCodec) New(assertion *saml.Assertion) (Session, error) {
 func (c JWTSessionCodec) Encode(s Session) (string, error) {
 	claims := s.(JWTSessionClaims) // this will panic if you pass the wrong kind of session
 
-	token := jwt.NewWithClaims(c.SigningMethod, claims)
-	signedString, err := token.SignedString(c.Key)
-	if err != nil {
-		return "", err
-	}
-
-	return signedString, nil
+	return signJWT(c.SigningMethod, c.Key, claims)
 }
 
 // Decode parses the serialized session that may have been returned by Encode
 // and returns a Session.
 func (c JWTSessionCodec) Decode(signed string) (Session, error) {
-	parser := jwt.NewParser(
-		jwt.WithValidMethods([]string{c.SigningMethod.Alg()}),
-		jwt.WithTimeFunc(saml.TimeNow),
-		jwt.WithAudience(c.Audience),
-		jwt.WithIssuer(c.Issuer),
-	)
 	claims := JWTSessionClaims{}
-	_, err := parser.ParseWithClaims(signed, &claims, func(*jwt.Token) (interface{}, error) {
-		return c.Key.Public(), nil
-	})
+	err := verifyJWT(signed, c.SigningMethod, c.Key, c.Audience, c.Issuer, &claims, &claims.Claims)
 	// TODO(ross): check for errors due to bad time and return ErrNoSession
 	if err != nil {
 		return nil, err
@@ -110,7 +98,7 @@ func (c JWTSessionCodec) Decode(signed string) (Session, error) {
 
 // JWTSessionClaims represents the JWT claims in the encoded session
 type JWTSessionClaims struct {
-	jwt.RegisteredClaims
+	jwt.Claims
 	Attributes  Attributes `json:"attr"`
 	SAMLSession bool       `json:"saml-session"`
 }
@@ -136,4 +124,30 @@ func (a Attributes) Get(key string) string {
 		return ""
 	}
 	return v[0]
+}
+
+func signJWT(alg jose.SignatureAlgorithm, key crypto.Signer, claims any) (string, error) {
+	signer, err := jose.NewSigner(jose.SigningKey{Algorithm: alg, Key: cryptosigner.Opaque(key)}, (&jose.SignerOptions{}).WithType("JWT"))
+	if err != nil {
+		return "", err
+	}
+
+	return jwt.Signed(signer).Claims(claims).Serialize()
+}
+
+func verifyJWT(signed string, alg jose.SignatureAlgorithm, key crypto.Signer, audience, issuer string, dest any, claims *jwt.Claims) error {
+	token, err := jwt.ParseSigned(signed, []jose.SignatureAlgorithm{alg})
+	if err != nil {
+		return err
+	}
+
+	if err = token.Claims(key.Public(), dest); err != nil {
+		return err
+	}
+
+	return claims.ValidateWithLeeway(jwt.Expected{
+		Issuer:      issuer,
+		AnyAudience: jwt.Audience{audience},
+		Time:        saml.TimeNow(),
+	}, 0)
 }

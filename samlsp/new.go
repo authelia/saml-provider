@@ -10,7 +10,7 @@ import (
 	"net/http"
 	"net/url"
 
-	"github.com/golang-jwt/jwt/v5"
+	"authelia.com/provider/jose"
 	dsig "github.com/russellhaering/goxmldsig"
 
 	"authelia.com/provider/saml"
@@ -37,16 +37,16 @@ type Options struct {
 	LogoutBindings        []string
 }
 
-func getDefaultSigningMethod(signer crypto.Signer) jwt.SigningMethod {
+func getDefaultSigningMethod(signer crypto.Signer) jose.SignatureAlgorithm {
 	if signer != nil {
 		switch signer.Public().(type) {
 		case *ecdsa.PublicKey:
-			return jwt.SigningMethodES256
+			return jose.ES256
 		case *rsa.PublicKey:
-			return jwt.SigningMethodRS256
+			return jose.RS256
 		}
 	}
-	return jwt.SigningMethodRS256
+	return jose.RS256
 }
 
 // DefaultSessionCodec returns the default SessionCodec for the provided options,
