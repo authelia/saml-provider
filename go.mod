@@ -3,7 +3,7 @@ module authelia.com/provider/saml
 go 1.27
 
 require (
-	github.com/beevik/etree v1.8.0
+	github.com/beevik/etree v1.8.1
 	github.com/golang-jwt/jwt/v5 v5.3.1
 	github.com/google/go-cmp v0.7.0
 	github.com/mattermost/xml-roundtrip-validator v0.1.0
