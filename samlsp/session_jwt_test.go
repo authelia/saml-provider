@@ -3,7 +3,7 @@ package samlsp
 import (
 	"testing"
 
-	"github.com/golang-jwt/jwt/v5"
+	"authelia.com/provider/jose"
 	"gotest.tools/assert"
 	is "gotest.tools/assert/cmp"
 
@@ -27,18 +27,18 @@ func TestJWTSessionCodecDecodeRejects(t *testing.T) {
 		{
 			name: "RS512",
 			encode: func(t *testing.T, codec JWTSessionCodec) string {
-				codec.SigningMethod = jwt.SigningMethodRS512
+				codec.SigningMethod = jose.RS512
 				return encodeTestSession(t, codec)
 			},
-			err: "token signature is invalid: signing method RS512 is invalid",
+			err: `unexpected signature algorithm "RS512"; expected ["RS256"]`,
 		},
 		{
 			name: "PS256",
 			encode: func(t *testing.T, codec JWTSessionCodec) string {
-				codec.SigningMethod = jwt.SigningMethodPS256
+				codec.SigningMethod = jose.PS256
 				return encodeTestSession(t, codec)
 			},
-			err: "token signature is invalid: signing method PS256 is invalid",
+			err: `unexpected signature algorithm "PS256"; expected ["RS256"]`,
 		},
 		{
 			name: "wrong audience",
@@ -46,7 +46,7 @@ func TestJWTSessionCodecDecodeRejects(t *testing.T) {
 				codec.Audience = "https://other.example.com/"
 				return encodeTestSession(t, codec)
 			},
-			err: "token has invalid claims: token has invalid audience",
+			err: "go-jose/go-jose/jwt: validation failed, invalid audience claim (aud)",
 		},
 		{
 			name: "wrong issuer",
@@ -54,7 +54,7 @@ func TestJWTSessionCodecDecodeRejects(t *testing.T) {
 				codec.Issuer = "https://other.example.com/"
 				return encodeTestSession(t, codec)
 			},
-			err: "token has invalid claims: token has invalid issuer",
+			err: "go-jose/go-jose/jwt: validation failed, invalid issuer claim (iss)",
 		},
 		{
 			name: "tracked request",
@@ -81,7 +81,7 @@ func newTestSessionCodec(t *testing.T) JWTSessionCodec {
 	test := NewMiddlewareTest(t)
 	return DefaultSessionCodec(Options{
 		URL: mustParseURL("https://15661444.ngrok.io/"),
-		Key: test.Key,
+		Key: test.JWTKey,
 	})
 }
 

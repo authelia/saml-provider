@@ -30,6 +30,7 @@ type MiddlewareTest struct {
 	AuthnRequest          []byte
 	SamlResponse          []byte
 	Key                   *rsa.PrivateKey
+	JWTKey                *rsa.PrivateKey
 	Certificate           *x509.Certificate
 	IDPMetadata           []byte
 	Middleware            *Middleware
@@ -60,6 +61,7 @@ func NewMiddlewareTest(t *testing.T) *MiddlewareTest {
 	test.AuthnRequest = golden.Get(t, "authn_request.url")
 	test.SamlResponse = golden.Get(t, "saml_response.xml")
 	test.Key = mustParsePrivateKey(golden.Get(t, "key.pem")).(*rsa.PrivateKey)
+	test.JWTKey = mustParsePrivateKey(golden.Get(t, "jwt_key.pem")).(*rsa.PrivateKey)
 	test.Certificate = mustParseCertificate(golden.Get(t, "cert.pem"))
 	test.IDPMetadata = golden.Get(t, "idp_metadata.xml")
 
@@ -81,12 +83,19 @@ func NewMiddlewareTest(t *testing.T) *MiddlewareTest {
 		panic(err)
 	}
 
+	requestTracker := test.Middleware.RequestTracker.(CookieRequestTracker)
+	requestTrackerCodec := requestTracker.Codec.(JWTTrackedRequestCodec)
+	requestTrackerCodec.Key = test.JWTKey
+	requestTracker.Codec = requestTrackerCodec
+	test.Middleware.RequestTracker = requestTracker
+
 	sessionProvider := DefaultSessionProvider(opts)
 	sessionProvider.Name = "ttt"
 	sessionProvider.MaxAge = 7200 * time.Second
 
 	sessionCodec := sessionProvider.Codec.(JWTSessionCodec)
 	sessionCodec.MaxAge = 7200 * time.Second
+	sessionCodec.Key = test.JWTKey
 	sessionProvider.Codec = sessionCodec
 
 	test.Middleware.Session = sessionProvider
@@ -481,7 +490,7 @@ func TestMiddlewareDefaultCookieDomainIPv4(t *testing.T) {
 
 	sp := DefaultSessionProvider(Options{
 		URL: mustParseURL("https://" + net.JoinHostPort(ipv4Loopback.String(), "54321")),
-		Key: test.Key,
+		Key: test.JWTKey,
 	})
 
 	req, _ := http.NewRequest("GET", "/", nil)
@@ -500,7 +509,7 @@ func TestMiddlewareDefaultCookieDomainIPv6(t *testing.T) {
 
 	sp := DefaultSessionProvider(Options{
 		URL: mustParseURL("https://" + net.JoinHostPort(net.IPv6loopback.String(), "54321")),
-		Key: test.Key,
+		Key: test.JWTKey,
 	})
 
 	req, _ := http.NewRequest("GET", "/", nil)
