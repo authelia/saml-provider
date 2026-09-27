@@ -4,7 +4,8 @@
 
 ![Build Status](https://authelia.com/provider/saml/actions/workflows/test.yml/badge.svg)
 
-Package saml contains a partial implementation of the SAML standard in golang.
+Package saml contains an implementation of the SAML / SAML 2.0 standard in golang.
+
 SAML is a standard for identity federation, i.e. either allowing a third party to authenticate your users or allowing
 third parties to rely on us to authenticate their users.
 
@@ -19,132 +20,125 @@ The core package contains the implementation of SAML. The package samlsp provide
 Service Provider applications. The package samlidp provides a rudimentary IDP service that is useful for testing or as 
 a starting point for other integrations.
 
-## Getting Started as a Service Provider
-
-Let us assume we have a simple web application to protect. We'll modify this application so it uses SAML to 
-authenticate users.
-
-```golang
-package main
-
-import (
-    "fmt"
-    "net/http"
-)
-
-func hello(w http.ResponseWriter, r *http.Request) {
-    fmt.Fprintf(w, "Hello, World!")
-}
-
-func main() {
-    app := http.HandlerFunc(hello)
-    http.Handle("/hello", app)
-    http.ListenAndServe(":8000", nil)
-}
-```
-
-Each service provider must have an self-signed X.509 key pair established. You can generate your own with something 
-like this:
-
-    openssl req -x509 -newkey rsa:2048 -keyout myservice.key -out myservice.cert -days 365 -nodes -subj "/CN=myservice.example.com"
-
-We will use `samlsp.Middleware` to wrap the endpoint we want to protect. Middleware provides both an `http.Handler` to
-serve the SAML specific URLs **and** a set of wrappers to require the user to be logged in. We also provide the URL
-where the service provider can fetch the metadata from the IDP at startup. In our case, we'll use [samltest.id](https://samltest.id/), an
-identity provider designed for testing.
-
-```golang
-package main
-
-import (
-	"context"
-	"crypto/rsa"
-	"crypto/tls"
-	"crypto/x509"
-	"fmt"
-	"net/http"
-	"net/url"
-
-	"authelia.com/provider/saml/samlsp"
-)
-
-func hello(w http.ResponseWriter, r *http.Request) {
-	fmt.Fprintf(w, "Hello, %s!", samlsp.AttributeFromContext(r.Context(), "displayName"))
-}
-
-func main() {
-	keyPair, err := tls.LoadX509KeyPair("myservice.cert", "myservice.key")
-	if err != nil {
-		panic(err) // TODO handle error
-	}
-	keyPair.Leaf, err = x509.ParseCertificate(keyPair.Certificate[0])
-	if err != nil {
-		panic(err) // TODO handle error
-	}
-
-	idpMetadataURL, err := url.Parse("https://samltest.id/saml/idp")
-	if err != nil {
-		panic(err) // TODO handle error
-	}
-	idpMetadata, err := samlsp.FetchMetadata(context.Background(), http.DefaultClient,
-		*idpMetadataURL)
-	if err != nil {
-		panic(err) // TODO handle error
-	}
-
-	rootURL, err := url.Parse("http://localhost:8000")
-	if err != nil {
-		panic(err) // TODO handle error
-	}
-
-	samlSP, _ := samlsp.New(samlsp.Options{
-		URL:            *rootURL,
-		Key:            keyPair.PrivateKey.(*rsa.PrivateKey),
-		Certificate:    keyPair.Leaf,
-		IDPMetadata: idpMetadata,
-	})
-	app := http.HandlerFunc(hello)
-	http.Handle("/hello", samlSP.RequireAccount(app))
-	http.Handle("/saml/", samlSP)
-	http.ListenAndServe(":8000", nil)
-}
-```
-
-Next we'll have to register our service provider with the identity provider to establish trust from the service provider
-to the IDP. For [samltest.id](https://samltest.id/), you can do something like:
-
-    mdpath=saml-test-$USER-$HOST.xml
-    curl localhost:8000/saml/metadata > $mdpath
-
-Navigate to https://samltest.id/upload.php and upload the file you fetched.
-
-Now you should be able to authenticate. The flow should look like this:
-
-1. You browse to `localhost:8000/hello`
-2. The middleware redirects you to `https://samltest.id/idp/profile/SAML2/Redirect/SSO`
-3. samltest.id prompts you for a username and password.
-4. samltest.id returns you an HTML document which contains an HTML form setup to POST to `localhost:8000/saml/acs`. The
-   form is automatically submitted if you have javascript enabled. 
-5. The local service validates the response, issues a session cookie, and redirects you to the original URL,
-   `localhost:8000/hello`. 
-6. This time when `localhost:8000/hello` is requested there is a valid session and so the main content is served.
-
-## Getting Started as an Identity Provider
-
-Please see `example/idp/` for a substantially complete example of how to use the library and helpers to be an identity 
-provider.
-
 ## Support
 
 The SAML standard is huge and complex with many dark corners and strange, unused features. This package implements the 
 most commonly used subset of these features required to provide a single sign on experience. The package supports at 
 least the subset of SAML known as [interoperable SAML](https://kantarainitiative.github.io/SAMLprofiles/saml2int.html).
 
-This package supports the **Web SSO** profile. Message flows from the service provider to the IDP are supported using 
-the **HTTP Redirect** binding and the **HTTP POST** binding. Message flows from the IDP to the service provider are
-supported via the **HTTP POST** binding.
+### Support Matrix
 
-The package can produce signed SAML assertions, and can validate both signed and encrypted SAML assertions.
+| Symbol | Meaning                                                  |
+|:------:|:---------------------------------------------------------|
+|   ✅   | Full: supported                                          |
+|   ⚠️   | Partial: supported with limitations, see the notes below |
+|   ❌   | None: not supported                                      |
+|  N/A   | Not applicable to this role                              |
+
+#### Profiles
+
+| Feature                                     | IdP | SP |
+|:--------------------------------------------|:---:|:--:|
+| Web Browser SSO (SP-initiated)              | ✅  | ✅ |
+| Web Browser SSO (IdP-initiated/unsolicited) | ✅  | ✅ |
+| Single Logout                               | ❌  | ⚠️ |
+| Artifact Resolution                         | ❌  | ✅ |
+| Enhanced Client or Proxy (ECP)              | ❌  | ❌ |
+| Holder-of-Key Web Browser SSO               | ❌  | ❌ |
+| Name Identifier Management                  | ❌  | ❌ |
+| Name Identifier Mapping                     | ❌  | ❌ |
+| Assertion Query/Request and Attribute Query | ❌  | ❌ |
+| Identity Provider Discovery                 | ❌  | ❌ |
+| SP Request Initiation                       | N/A | ❌ |
+
+#### Bindings
+
+| Feature                        | IdP | SP |
+|:-------------------------------|:---:|:--:|
+| HTTP Redirect (`AuthnRequest`) | ✅  | ✅ |
+| HTTP POST (`AuthnRequest`)     | ✅  | ✅ |
+| HTTP POST (`Response`)         | ✅  | ✅ |
+| HTTP Artifact (`Response`)     | ❌  | ✅ |
+| SOAP                           | ❌  | ⚠️ |
+| HTTP POST "SimpleSign"         | ❌  | ❌ |
+| Reverse SOAP (PAOS)            | ❌  | ❌ |
+
+#### Protocol
+
+| Feature                                           | IdP | SP  |
+|:--------------------------------------------------|:---:|:---:|
+| `AssertionConsumerServiceURL` / `Index` selection | ✅  | N/A |
+| `RelayState`                                      | ✅  | ✅  |
+| `NameIDPolicy`                                    | ⚠️  | ✅  |
+| `ForceAuthn` / `IsPassive`                        | ⚠️  | ✅  |
+| `RequestedAuthnContext`                           | ⚠️  | ✅  |
+| `Scoping` (proxying)                              | ❌  | ❌  |
+| Error status responses                            | ❌  | ✅  |
+| Multiple assertions in a single `Response`        | N/A | ⚠️  |
+| Replay detection                                  | ❌  | ⚠️  |
+
+#### Signing and Encryption
+
+| Feature                                      | IdP | SP  |
+|:---------------------------------------------|:---:|:---:|
+| Sign `Response` and `Assertion`              | ✅  | N/A |
+| Verify signed `Response` and `Assertion`     | N/A | ✅  |
+| Sign `AuthnRequest`                          | N/A | ✅  |
+| Verify signed `AuthnRequest`                 | ❌  | N/A |
+| RSA and ECDSA signatures (SHA-1/256/384/512) | ✅  | ✅  |
+| Encrypt `Assertion`                          | ⚠️  | N/A |
+| Decrypt `EncryptedAssertion`                 | N/A | ⚠️  |
+| `EncryptedID` and `EncryptedAttribute`       | ❌  | ❌  |
+
+#### Metadata
+
+| Feature                      | IdP | SP |
+|:-----------------------------|:---:|:--:|
+| Publish own metadata         | ✅  | ✅ |
+| Consume `EntityDescriptor`   | ✅  | ✅ |
+| Consume `EntitiesDescriptor` | N/A | ⚠️ |
+| Sign published metadata      | ❌  | ❌ |
+| Verify metadata signatures   | ❌  | ❌ |
+
+### Identity Provider Limitations
+
+- **Single Logout:** there is no SLO endpoint. Setting `IdentityProvider.LogoutURL` only advertises an HTTP Redirect
+  `SingleLogoutService` in the metadata; `LogoutRequest` and `LogoutResponse` messages are neither handled nor sent.
+- **Artifact Resolution, HTTP Artifact and SOAP:** responses are only ever delivered via HTTP POST, and there is no
+  `ArtifactResolutionService`.
+- **Verify signed `AuthnRequest`:** request signatures are ignored. Metadata never sets `WantAuthnRequestsSigned`, and
+  a request is rejected outright if it does.
+- **`NameIDPolicy`:** the requested format is ignored. The `NameID` format comes from `Session.NameIDFormat` and
+  defaults to transient, and the metadata only advertises transient.
+- **`ForceAuthn` / `IsPassive`:** not enforced by the library. The parsed request is passed to
+  `SessionProvider.GetSession`, so enforcing them is left to the implementation.
+- **`RequestedAuthnContext`:** ignored by `DefaultAssertionMaker`, which always asserts
+  `PasswordProtectedTransport`. A custom `AssertionMaker` can set a different context.
+- **Error status responses:** failures produce an HTTP error rather than a SAML `Response` carrying a non-success
+  status.
+- **Replay detection:** `AuthnRequest` IDs are not checked for reuse.
+- **Encrypt `Assertion`:** encryption always uses AES-128-CBC with RSA-OAEP-MGF1P (SHA-1), regardless of the
+  `EncryptionMethod` the SP advertises, and cannot be configured.
+- **Signature defaults:** `SignatureMethod` defaults to RSA-SHA1; set it explicitly to use a stronger algorithm.
+
+### Service Provider Limitations
+
+- **Single Logout:** `LogoutRequest` messages can be created and sent (HTTP Redirect or HTTP POST) and `LogoutResponse`
+  messages can be validated, however:
+  - Incoming `LogoutRequest` messages (IdP-initiated logout) cannot be parsed or validated.
+  - `samlsp.Middleware` does not serve the SLO endpoint.
+  - HTTP Redirect messages are signed with an embedded XML signature rather than the `SigAlg` and `Signature` query
+    parameters the binding requires, and received HTTP Redirect messages are validated the same way.
+- **SOAP:** only used as a client to send `ArtifactResolve`.
+- **Multiple assertions in a single `Response`:** only the first valid assertion is returned.
+- **Replay detection:** SP-initiated responses must match a tracked request ID, but assertion IDs are not remembered,
+  so an unsolicited response accepted with `AllowIDPInitiated` can be replayed until it expires.
+- **Decrypt `EncryptedAssertion`:** supported algorithms are AES-128/192/256-CBC, AES-128-GCM and 3DES for content
+  and RSA-OAEP-MGF1P for key transport. AES-192/256-GCM and XML Encryption 1.1 RSA-OAEP are not supported by default.
+  RSA PKCS#1 v1.5 key transport is disabled by default and can be enabled with
+  `xmlenc.RegisterDecrypter(xmlenc.PKCS1v15())`.
+- **Consume `EntitiesDescriptor`:** `samlsp.ParseMetadata` uses the first entity that has an `IDPSSODescriptor`; there
+  is no way to select a different entity.
 
 ## RelayState
 
@@ -224,3 +218,18 @@ Extensions and profiles published after SAML V2.0:
 | Kerberos Attribute Profile                                       | [PDF](https://docs.oasis-open.org/security/saml/Post2.0/sstc-saml-attribute-kerberos-cs01.pdf)                                         | [text](spec/sstc-saml-attribute-kerberos-cs01.txt)                   |
 | Kerberos Subject Confirmation Method                             | [PDF](https://docs.oasis-open.org/security/saml/Post2.0/sstc-saml-kerberos-subject-confirmation-method-cs01.pdf)                       | [text](spec/sstc-saml-kerberos-subject-confirmation-method-cs01.txt) |
 | Kerberos Web Browser SSO Profile                                 | [PDF](https://docs.oasis-open.org/security/saml/Post2.0/saml-kerberos-browser-sso/v1.0/cs01/saml-kerberos-browser-sso-v1.0-cs01.pdf)   | [text](spec/saml-kerberos-browser-sso-v1.0-cs01.txt)                 |
+
+## Thanks
+
+This is a hard fork of [Ross Kinder's SAML Library](https://github.com/crewjam/saml) under the 
+[BSD 2-Clause License](LICENSE) for the purpose of performing self-maintenance of this critical Authelia dependency.
+
+We however:
+
+- Acknowledge the amazing hard work of Ross Kinder and other contributors in making such an amazing library that we can
+  do this with.
+- Plan to continue to contribute back to te original repository and related projects should Ross return.
+- Have ensured the licensing is unchanged in this fork of the library.
+- Do not have a formal affiliation with Ross Kinder and individuals utilizing this library should not allow their usage
+  to be a reflection on Ross Kinder as this library is not maintained by him and intentionally diverges from the
+  original implementation.
