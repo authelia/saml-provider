@@ -2,13 +2,13 @@ name: 'Go'
 on:
   pull_request:
     branches:
-      - 'main'
+      - 'master'
   push:
     branches:
-      - 'main'
+      - 'master'
   merge_group:
     branches:
-      - 'main'
+      - 'master'
 permissions:
   contents: 'read'
 jobs:
