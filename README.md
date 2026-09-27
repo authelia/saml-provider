@@ -2,7 +2,8 @@
 
 [![](https://godoc.org/authelia.com/provider/saml?status.svg)](http://godoc.org/authelia.com/provider/saml)
 
-![Build Status](https://authelia.com/provider/saml/actions/workflows/test.yml/badge.svg)
+[![Build Status](https://github.com/authelia/saml-provider/actions/workflows/go.yml/badge.svg)](https://github.com/authelia/saml-provider/actions/workflows/go.yml)
+[![codecov](https://codecov.io/github/authelia/saml-provider/graph/badge.svg)](https://codecov.io/github/authelia/saml-provider)
 
 Package saml contains an implementation of the SAML / SAML 2.0 standard in golang.
 
@@ -159,65 +160,65 @@ The core SAML V2.0 standard:
 
 - SAMLCore defines data types
   ([PDF](https://docs.oasis-open.org/security/saml/v2.0/saml-core-2.0-os.pdf),
-  [text](spec/saml-core-2.0-os.txt)).
+  [TXT](spec/saml-core-2.0-os.txt)).
 - SAMLBindings defines the details of the HTTP requests in play
   ([PDF](https://docs.oasis-open.org/security/saml/v2.0/saml-bindings-2.0-os.pdf),
-  [text](spec/saml-bindings-2.0-os.txt)).
+  [TXT](spec/saml-bindings-2.0-os.txt)).
 - SAMLProfiles describes data flows
   ([PDF](https://docs.oasis-open.org/security/saml/v2.0/saml-profiles-2.0-os.pdf),
-  [text](spec/saml-profiles-2.0-os.txt)).
+  [TXT](spec/saml-profiles-2.0-os.txt)).
 - SAMLMetadata defines the metadata format used to describe entities
   ([PDF](https://docs.oasis-open.org/security/saml/v2.0/saml-metadata-2.0-os.pdf),
-  [text](spec/saml-metadata-2.0-os.txt)).
+  [TXT](spec/saml-metadata-2.0-os.txt)).
 - SAMLAuthnContext defines the authentication context classes
   ([PDF](https://docs.oasis-open.org/security/saml/v2.0/saml-authn-context-2.0-os.pdf),
-  [text](spec/saml-authn-context-2.0-os.txt)).
+  [TXT](spec/saml-authn-context-2.0-os.txt)).
 - SAMLConformance includes a support matrix for various parts of the protocol
   ([PDF](https://docs.oasis-open.org/security/saml/v2.0/saml-conformance-2.0-os.pdf),
-  [text](spec/saml-conformance-2.0-os.txt)).
+  [TXT](spec/saml-conformance-2.0-os.txt)).
 - SAMLSecurity covers security and privacy considerations
   ([PDF](https://docs.oasis-open.org/security/saml/v2.0/saml-sec-consider-2.0-os.pdf),
-  [text](spec/saml-sec-consider-2.0-os.txt)).
+  [TXT](spec/saml-sec-consider-2.0-os.txt)).
 - SAMLGloss is the glossary of terms
   ([PDF](https://docs.oasis-open.org/security/saml/v2.0/saml-glossary-2.0-os.pdf),
-  [text](spec/saml-glossary-2.0-os.txt)).
+  [TXT](spec/saml-glossary-2.0-os.txt)).
 - SAML V2.0 Errata 05 amends all of the above
   ([PDF](https://docs.oasis-open.org/security/saml/v2.0/errata05/os/saml-v2.0-errata05-os.pdf),
-  [text](spec/saml-v2.0-errata05-os.txt)).
+  [TXT](spec/saml-v2.0-errata05-os.txt)).
 - SAML V2.0 Technical Overview is a non-normative introduction
   ([PDF](https://docs.oasis-open.org/security/saml/Post2.0/sstc-saml-tech-overview-2.0.pdf),
-  [text](spec/sstc-saml-tech-overview-2.0.txt)).
+  [TXT](spec/sstc-saml-tech-overview-2.0.txt)).
 
 Extensions and profiles published after SAML V2.0:
 
-| Specification                                                    | Original                                                                                                                               | Text                                                                 |
-|:-----------------------------------------------------------------|:---------------------------------------------------------------------------------------------------------------------------------------|:---------------------------------------------------------------------|
-| Metadata Interoperability Profile                                | [PDF](https://docs.oasis-open.org/security/saml/Post2.0/sstc-metadata-iop-os.pdf)                                                      | [text](spec/sstc-metadata-iop-os.txt)                                |
-| Metadata Extension for Entity Attributes                         | [PDF](https://docs.oasis-open.org/security/saml/Post2.0/sstc-metadata-attr-cs-01.pdf)                                                  | [text](spec/sstc-metadata-attr-cs-01.txt)                            |
-| Metadata Extensions for Login and Discovery User Interface       | [PDF](https://docs.oasis-open.org/security/saml/Post2.0/sstc-saml-metadata-ui/v1.0/os/sstc-saml-metadata-ui-v1.0-os.pdf)               | [text](spec/sstc-saml-metadata-ui-v1.0-os.txt)                       |
-| Metadata Extensions for Registration and Publication Info        | [PDF](https://docs.oasis-open.org/security/saml/Post2.0/saml-metadata-rpi/v1.0/cs01/saml-metadata-rpi-v1.0-cs01.pdf)                   | [text](spec/saml-metadata-rpi-v1.0-cs01.txt)                         |
-| Metadata Profile for Algorithm Support                           | [PDF](https://docs.oasis-open.org/security/saml/Post2.0/sstc-saml-metadata-algsupport-v1.0-cs01.pdf)                                   | [text](spec/sstc-saml-metadata-algsupport-v1.0-cs01.txt)             |
-| Metadata Extension for SAML V2.0 and V1.x Query Requesters       | [PDF](https://docs.oasis-open.org/security/saml/Post2.0/sstc-saml-metadata-ext-query-os.pdf)                                           | [text](spec/sstc-saml-metadata-ext-query-os.txt)                     |
-| HTTP POST "SimpleSign" Binding                                   | [PDF](https://docs.oasis-open.org/security/saml/Post2.0/sstc-saml-binding-simplesign-cs-01.pdf)                                        | [text](spec/sstc-saml-binding-simplesign-cs-01.txt)                  |
-| Service Provider Request Initiation Protocol and Profile         | [PDF](https://docs.oasis-open.org/security/saml/Post2.0/sstc-request-initiation-cs-01.pdf)                                             | [text](spec/sstc-request-initiation-cs-01.txt)                       |
-| Identity Provider Discovery Service Protocol and Profile         | [PDF](https://docs.oasis-open.org/security/saml/Post2.0/sstc-saml-idp-discovery-cs-01.pdf)                                             | [text](spec/sstc-saml-idp-discovery-cs-01.txt)                       |
-| Asynchronous Single Logout Profile Extension                     | [PDF](https://docs.oasis-open.org/security/saml/Post2.0/saml-async-slo/v1.0/cs01/saml-async-slo-v1.0-cs01.pdf)                         | [text](spec/saml-async-slo-v1.0-cs01.txt)                            |
-| Enhanced Client or Proxy (ECP) Profile Version 2.0               | [PDF](https://docs.oasis-open.org/security/saml/Post2.0/saml-ecp/v2.0/cs01/saml-ecp-v2.0-cs01.pdf)                                     | [text](spec/saml-ecp-v2.0-cs01.txt)                                  |
-| Channel Binding Extensions                                       | [PDF](https://docs.oasis-open.org/security/saml/Post2.0/saml-channel-binding-ext/v1.0/cs01/saml-channel-binding-ext-v1.0-cs01.pdf)     | [text](spec/saml-channel-binding-ext-v1.0-cs01.txt)                  |
-| Holder-of-Key Assertion Profile                                  | [PDF](https://docs.oasis-open.org/security/saml/Post2.0/sstc-saml2-holder-of-key-cs-02.pdf)                                            | [text](spec/sstc-saml2-holder-of-key-cs-02.txt)                      |
-| Holder-of-Key Web Browser SSO Profile                            | [PDF](https://docs.oasis-open.org/security/saml/Post2.0/sstc-saml-holder-of-key-browser-sso-cs-02.pdf)                                 | [text](spec/sstc-saml-holder-of-key-browser-sso-cs-02.txt)           |
-| Condition for Delegation Restriction                             | [PDF](https://docs.oasis-open.org/security/saml/Post2.0/sstc-saml-delegation-cs-01.pdf)                                                | [text](spec/sstc-saml-delegation-cs-01.txt)                          |
-| Identity Assurance Profiles                                      | [PDF](https://docs.oasis-open.org/security/saml/Post2.0/sstc-saml-assurance-profile-cs-01.pdf)                                         | [text](spec/sstc-saml-assurance-profile-cs-01.txt)                   |
-| Session Token Profile                                            | [PDF](https://docs.oasis-open.org/security/saml/Post2.0/saml-session-token/v1.0/cs01/saml-session-token-v1.0-cs01.pdf)                 | [text](spec/saml-session-token-v1.0-cs01.txt)                        |
-| Change Notify Protocol                                           | [PDF](https://docs.oasis-open.org/security/saml/Post2.0/sstc-saml2-notify-protocol/v1.0/cs01/sstc-saml2-notify-protocol-v1.0-cs01.pdf) | [text](spec/sstc-saml2-notify-protocol-v1.0-cs01.txt)                |
-| Attribute Extensions                                             | [PDF](https://docs.oasis-open.org/security/saml/Post2.0/sstc-saml-attribute-ext-cs-01.pdf)                                             | [text](spec/sstc-saml-attribute-ext-cs-01.txt)                       |
-| Attribute Predicate Profile                                      | [PDF](https://docs.oasis-open.org/security/saml/Post2.0/sstc-saml-attr-predicate/v1.0/cs01/sstc-saml-attr-predicate-v1.0-cs01.pdf)     | [text](spec/sstc-saml-attr-predicate-v1.0-cs01.txt)                  |
-| X.500/LDAP Attribute Profile                                     | [PDF](https://docs.oasis-open.org/security/saml/Post2.0/sstc-saml-attribute-x500-cs-01.pdf)                                            | [text](spec/sstc-saml-attribute-x500-cs-01.txt)                      |
-| Attribute Sharing Profile for X.509 Authentication-Based Systems | [PDF](https://docs.oasis-open.org/security/saml/Post2.0/sstc-saml-x509-authn-attrib-profile-cs-01.pdf)                                 | [text](spec/sstc-saml-x509-authn-attrib-profile-cs-01.txt)           |
-| Deployment Profiles for X.509 Subjects                           | [PDF](https://docs.oasis-open.org/security/saml/Post2.0/sstc-saml2-profiles-deploy-x509-cs-01.pdf)                                     | [text](spec/sstc-saml2-profiles-deploy-x509-cs-01.txt)               |
-| Kerberos Attribute Profile                                       | [PDF](https://docs.oasis-open.org/security/saml/Post2.0/sstc-saml-attribute-kerberos-cs01.pdf)                                         | [text](spec/sstc-saml-attribute-kerberos-cs01.txt)                   |
-| Kerberos Subject Confirmation Method                             | [PDF](https://docs.oasis-open.org/security/saml/Post2.0/sstc-saml-kerberos-subject-confirmation-method-cs01.pdf)                       | [text](spec/sstc-saml-kerberos-subject-confirmation-method-cs01.txt) |
-| Kerberos Web Browser SSO Profile                                 | [PDF](https://docs.oasis-open.org/security/saml/Post2.0/saml-kerberos-browser-sso/v1.0/cs01/saml-kerberos-browser-sso-v1.0-cs01.pdf)   | [text](spec/saml-kerberos-browser-sso-v1.0-cs01.txt)                 |
+| Specification                                                    | Original                                                                                                                               | Text                                                                |
+|:-----------------------------------------------------------------|:---------------------------------------------------------------------------------------------------------------------------------------|:--------------------------------------------------------------------|
+| Metadata Interoperability Profile                                | [PDF](https://docs.oasis-open.org/security/saml/Post2.0/sstc-metadata-iop-os.pdf)                                                      | [TXT](spec/sstc-metadata-iop-os.txt)                                |
+| Metadata Extension for Entity Attributes                         | [PDF](https://docs.oasis-open.org/security/saml/Post2.0/sstc-metadata-attr-cs-01.pdf)                                                  | [TXT](spec/sstc-metadata-attr-cs-01.txt)                            |
+| Metadata Extensions for Login and Discovery User Interface       | [PDF](https://docs.oasis-open.org/security/saml/Post2.0/sstc-saml-metadata-ui/v1.0/os/sstc-saml-metadata-ui-v1.0-os.pdf)               | [TXT](spec/sstc-saml-metadata-ui-v1.0-os.txt)                       |
+| Metadata Extensions for Registration and Publication Info        | [PDF](https://docs.oasis-open.org/security/saml/Post2.0/saml-metadata-rpi/v1.0/cs01/saml-metadata-rpi-v1.0-cs01.pdf)                   | [TXT](spec/saml-metadata-rpi-v1.0-cs01.txt)                         |
+| Metadata Profile for Algorithm Support                           | [PDF](https://docs.oasis-open.org/security/saml/Post2.0/sstc-saml-metadata-algsupport-v1.0-cs01.pdf)                                   | [TXT](spec/sstc-saml-metadata-algsupport-v1.0-cs01.txt)             |
+| Metadata Extension for SAML V2.0 and V1.x Query Requesters       | [PDF](https://docs.oasis-open.org/security/saml/Post2.0/sstc-saml-metadata-ext-query-os.pdf)                                           | [TXT](spec/sstc-saml-metadata-ext-query-os.txt)                     |
+| HTTP POST "SimpleSign" Binding                                   | [PDF](https://docs.oasis-open.org/security/saml/Post2.0/sstc-saml-binding-simplesign-cs-01.pdf)                                        | [TXT](spec/sstc-saml-binding-simplesign-cs-01.txt)                  |
+| Service Provider Request Initiation Protocol and Profile         | [PDF](https://docs.oasis-open.org/security/saml/Post2.0/sstc-request-initiation-cs-01.pdf)                                             | [TXT](spec/sstc-request-initiation-cs-01.txt)                       |
+| Identity Provider Discovery Service Protocol and Profile         | [PDF](https://docs.oasis-open.org/security/saml/Post2.0/sstc-saml-idp-discovery-cs-01.pdf)                                             | [TXT](spec/sstc-saml-idp-discovery-cs-01.txt)                       |
+| Asynchronous Single Logout Profile Extension                     | [PDF](https://docs.oasis-open.org/security/saml/Post2.0/saml-async-slo/v1.0/cs01/saml-async-slo-v1.0-cs01.pdf)                         | [TXT](spec/saml-async-slo-v1.0-cs01.txt)                            |
+| Enhanced Client or Proxy (ECP) Profile Version 2.0               | [PDF](https://docs.oasis-open.org/security/saml/Post2.0/saml-ecp/v2.0/cs01/saml-ecp-v2.0-cs01.pdf)                                     | [TXT](spec/saml-ecp-v2.0-cs01.txt)                                  |
+| Channel Binding Extensions                                       | [PDF](https://docs.oasis-open.org/security/saml/Post2.0/saml-channel-binding-ext/v1.0/cs01/saml-channel-binding-ext-v1.0-cs01.pdf)     | [TXT](spec/saml-channel-binding-ext-v1.0-cs01.txt)                  |
+| Holder-of-Key Assertion Profile                                  | [PDF](https://docs.oasis-open.org/security/saml/Post2.0/sstc-saml2-holder-of-key-cs-02.pdf)                                            | [TXT](spec/sstc-saml2-holder-of-key-cs-02.txt)                      |
+| Holder-of-Key Web Browser SSO Profile                            | [PDF](https://docs.oasis-open.org/security/saml/Post2.0/sstc-saml-holder-of-key-browser-sso-cs-02.pdf)                                 | [TXT](spec/sstc-saml-holder-of-key-browser-sso-cs-02.txt)           |
+| Condition for Delegation Restriction                             | [PDF](https://docs.oasis-open.org/security/saml/Post2.0/sstc-saml-delegation-cs-01.pdf)                                                | [TXT](spec/sstc-saml-delegation-cs-01.txt)                          |
+| Identity Assurance Profiles                                      | [PDF](https://docs.oasis-open.org/security/saml/Post2.0/sstc-saml-assurance-profile-cs-01.pdf)                                         | [TXT](spec/sstc-saml-assurance-profile-cs-01.txt)                   |
+| Session Token Profile                                            | [PDF](https://docs.oasis-open.org/security/saml/Post2.0/saml-session-token/v1.0/cs01/saml-session-token-v1.0-cs01.pdf)                 | [TXT](spec/saml-session-token-v1.0-cs01.txt)                        |
+| Change Notify Protocol                                           | [PDF](https://docs.oasis-open.org/security/saml/Post2.0/sstc-saml2-notify-protocol/v1.0/cs01/sstc-saml2-notify-protocol-v1.0-cs01.pdf) | [TXT](spec/sstc-saml2-notify-protocol-v1.0-cs01.txt)                |
+| Attribute Extensions                                             | [PDF](https://docs.oasis-open.org/security/saml/Post2.0/sstc-saml-attribute-ext-cs-01.pdf)                                             | [TXT](spec/sstc-saml-attribute-ext-cs-01.txt)                       |
+| Attribute Predicate Profile                                      | [PDF](https://docs.oasis-open.org/security/saml/Post2.0/sstc-saml-attr-predicate/v1.0/cs01/sstc-saml-attr-predicate-v1.0-cs01.pdf)     | [TXT](spec/sstc-saml-attr-predicate-v1.0-cs01.txt)                  |
+| X.500/LDAP Attribute Profile                                     | [PDF](https://docs.oasis-open.org/security/saml/Post2.0/sstc-saml-attribute-x500-cs-01.pdf)                                            | [TXT](spec/sstc-saml-attribute-x500-cs-01.txt)                      |
+| Attribute Sharing Profile for X.509 Authentication-Based Systems | [PDF](https://docs.oasis-open.org/security/saml/Post2.0/sstc-saml-x509-authn-attrib-profile-cs-01.pdf)                                 | [TXT](spec/sstc-saml-x509-authn-attrib-profile-cs-01.txt)           |
+| Deployment Profiles for X.509 Subjects                           | [PDF](https://docs.oasis-open.org/security/saml/Post2.0/sstc-saml2-profiles-deploy-x509-cs-01.pdf)                                     | [TXT](spec/sstc-saml2-profiles-deploy-x509-cs-01.txt)               |
+| Kerberos Attribute Profile                                       | [PDF](https://docs.oasis-open.org/security/saml/Post2.0/sstc-saml-attribute-kerberos-cs01.pdf)                                         | [TXT](spec/sstc-saml-attribute-kerberos-cs01.txt)                   |
+| Kerberos Subject Confirmation Method                             | [PDF](https://docs.oasis-open.org/security/saml/Post2.0/sstc-saml-kerberos-subject-confirmation-method-cs01.pdf)                       | [TXT](spec/sstc-saml-kerberos-subject-confirmation-method-cs01.txt) |
+| Kerberos Web Browser SSO Profile                                 | [PDF](https://docs.oasis-open.org/security/saml/Post2.0/saml-kerberos-browser-sso/v1.0/cs01/saml-kerberos-browser-sso-v1.0-cs01.pdf)   | [TXT](spec/saml-kerberos-browser-sso-v1.0-cs01.txt)                 |
 
 ## Thanks
 
