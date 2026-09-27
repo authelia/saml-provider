@@ -1,0 +1,167 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512" role="img" aria-labelledby="title desc">
+  <title id="title">SAML 2.0 Gopher</title>
+  <desc id="desc">A Go gopher in front of a shield, presenting a signed SAML assertion scroll sealed with red wax and holding up an encrypted envelope, beneath a federation arc from the identity provider to the service provider.</desc>
+  <defs>
+    <linearGradient id="shield" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#7a5cf0"/>
+      <stop offset="1" stop-color="#34198f"/>
+    </linearGradient>
+    <linearGradient id="ribbon" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#f26a4b"/>
+      <stop offset="1" stop-color="#c9362a"/>
+    </linearGradient>
+    <path id="ribbonText" d="M92 451Q256 481 420 451"/>
+    <radialGradient id="glow" cx="0.5" cy="0.38" r="0.5">
+      <stop offset="0" stop-color="#c7b6ff" stop-opacity="0.55"/>
+      <stop offset="1" stop-color="#c7b6ff" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="fur" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#9be3f2"/>
+      <stop offset="1" stop-color="#5ec4dc"/>
+    </linearGradient>
+    <linearGradient id="gold" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#ffe07a"/>
+      <stop offset="1" stop-color="#e79a12"/>
+    </linearGradient>
+    <linearGradient id="parchment" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#fffaf0"/>
+      <stop offset="1" stop-color="#f3e3c3"/>
+    </linearGradient>
+    <linearGradient id="roll" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#f7e9cc"/>
+      <stop offset="0.5" stop-color="#fffaf0"/>
+      <stop offset="1" stop-color="#dcc497"/>
+    </linearGradient>
+    <radialGradient id="wax" cx="0.38" cy="0.34" r="0.7">
+      <stop offset="0" stop-color="#f0584a"/>
+      <stop offset="1" stop-color="#a3161b"/>
+    </radialGradient>
+    <linearGradient id="envelope" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#ffffff"/>
+      <stop offset="1" stop-color="#dfe6f2"/>
+    </linearGradient>
+  </defs>
+
+  <!-- shield -->
+  <path d="M256 24C330 58 400 64 456 64V250C456 370 370 440 256 488C142 440 56 370 56 250V64C112 64 182 58 256 24Z" fill="url(#shield)" stroke="#1f0e5c" stroke-width="16" stroke-linejoin="round"/>
+  <path d="M256 24C330 58 400 64 456 64V250C456 370 370 440 256 488C142 440 56 370 56 250V64C112 64 182 58 256 24Z" fill="none" stroke="#c4b3ff" stroke-width="5" stroke-linejoin="round"/>
+  <ellipse cx="256" cy="210" rx="190" ry="170" fill="url(#glow)"/>
+
+  <!-- federation: IdP to SP -->
+  <path d="M146 76Q256 22 366 76" fill="none" stroke="#e4dcff" stroke-width="4" stroke-linecap="round" stroke-dasharray="2 10" opacity="0.9"/>
+  <path d="M352 62l16 15-21 4" fill="none" stroke="#e4dcff" stroke-width="4" stroke-linecap="round" stroke-linejoin="round" opacity="0.9"/>
+  <g stroke="#1f0e5c" stroke-width="4" stroke-linejoin="round">
+    <rect x="112" y="72" width="54" height="26" rx="13" fill="#fff"/>
+    <rect x="348" y="72" width="44" height="26" rx="13" fill="#fff"/>
+  </g>
+  <g font-family="'Segoe UI', Helvetica, Arial, sans-serif" font-size="15" font-weight="800" fill="#34198f" text-anchor="middle">
+    <text x="139" y="90.5">IdP</text>
+    <text x="370" y="90.5">SP</text>
+  </g>
+  <!-- an assertion in flight -->
+  <g transform="rotate(-8 256 48)" stroke="#1f0e5c" stroke-width="3" stroke-linejoin="round">
+    <rect x="243" y="39" width="26" height="18" rx="3" fill="#fff"/>
+    <path d="M243 42l13 9 13-9" fill="none"/>
+  </g>
+
+  <g stroke="#16323a" stroke-width="5" stroke-linejoin="round" stroke-linecap="round">
+    <!-- ears -->
+    <circle cx="172" cy="140" r="22" fill="url(#fur)"/>
+    <circle cx="340" cy="140" r="22" fill="url(#fur)"/>
+    <circle cx="172" cy="140" r="10" fill="#4aa9c1" stroke="none"/>
+    <circle cx="340" cy="140" r="10" fill="#4aa9c1" stroke="none"/>
+
+    <!-- feet -->
+    <ellipse cx="210" cy="452" rx="32" ry="14" fill="#f6d2a2"/>
+    <ellipse cx="302" cy="452" rx="32" ry="14" fill="#f6d2a2"/>
+
+    <!-- body -->
+    <path d="M256 116C336 116 360 170 362 250L366 380C368 430 320 450 256 450C192 450 144 430 146 380L150 250C152 170 176 116 256 116Z" fill="url(#fur)"/>
+
+    <path d="M206 138C188 146 177 158 171 174" fill="none" stroke="#e6f9fd" stroke-width="8" opacity="0.8"/>
+
+    <!-- eyes, glancing up at the envelope -->
+    <circle cx="206" cy="198" r="40" fill="#fff"/>
+    <circle cx="306" cy="198" r="40" fill="#fff"/>
+    <circle cx="222" cy="186" r="15" fill="#16323a" stroke="none"/>
+    <circle cx="322" cy="186" r="15" fill="#16323a" stroke="none"/>
+    <circle cx="227" cy="181" r="5" fill="#fff" stroke="none"/>
+    <circle cx="327" cy="181" r="5" fill="#fff" stroke="none"/>
+
+    <!-- cheeks -->
+    <ellipse cx="178" cy="256" rx="16" ry="9" fill="#ff8fa3" opacity="0.45" stroke="none"/>
+    <ellipse cx="334" cy="256" rx="16" ry="9" fill="#ff8fa3" opacity="0.45" stroke="none"/>
+
+    <!-- snout, teeth, nose -->
+    <path d="M246 266h20v18a4 4 0 0 1-4 4h-12a4 4 0 0 1-4-4Z" fill="#fff"/>
+    <path d="M256 268v18" stroke-width="3"/>
+    <ellipse cx="256" cy="256" rx="36" ry="22" fill="#f6d2a2"/>
+    <ellipse cx="256" cy="244" rx="15" ry="10" fill="#3b2a20"/>
+
+    <!-- signed assertion scroll -->
+    <path d="M204 318h112v92h-112Z" fill="url(#parchment)"/>
+    <rect x="196" y="306" width="128" height="18" rx="9" fill="url(#roll)"/>
+    <rect x="196" y="404" width="128" height="18" rx="9" fill="url(#roll)"/>
+    <path d="M200 315h120M200 413h120" stroke="#c9ad78" stroke-width="2" opacity="0.8"/>
+    <path d="M205 315a4 5 0 1 1-4-4" fill="none" stroke="#b08f55" stroke-width="3"/>
+    <path d="M315 315a4 5 0 1 0 4-4" fill="none" stroke="#b08f55" stroke-width="3"/>
+    <path d="M205 413a4 5 0 1 1-4-4" fill="none" stroke="#b08f55" stroke-width="3"/>
+
+    <!-- <saml:Assertion> -->
+    <path d="M222 336l-8 6 8 6M246 336l8 6-8 6M239 334l-10 16" fill="none" stroke="#34198f" stroke-width="4.5"/>
+    <path d="M262 342h40" stroke="#fb015b" stroke-width="6"/>
+    <path d="M226 358h36" stroke="#d63aff" stroke-width="6"/>
+    <path d="M270 358h22" stroke="#00b9f1" stroke-width="6"/>
+    <path d="M226 372h24" stroke="#d63aff" stroke-width="6"/>
+    <path d="M258 372h38" stroke="#00b9f1" stroke-width="6"/>
+    <path d="M214 388h40" stroke="#fb015b" stroke-width="6"/>
+
+    <!-- wax seal (XML Signature) -->
+    <path d="M280 396l-8 34 12-6 6 11 6-30Z" fill="#c62828" stroke-width="4"/>
+    <path d="M300 396l8 34-12-6-6 11-6-30Z" fill="#a3161b" stroke-width="4"/>
+    <path d="M290 367c6 0 9 4 14 5s8 6 7 11 3 9 0 14-3 9-8 10-8 6-13 5-9 3-13 0-9-2-10-7-6-8-4-13-2-9 2-13 6-7 11-7 8-5 14-5Z" fill="url(#wax)" stroke="#6e0f12" stroke-width="4"/>
+    <circle cx="290" cy="389" r="13" fill="none" stroke="#7d1014" stroke-width="3" opacity="0.7"/>
+    <path d="M283 389l5 5 9-10" fill="none" stroke="#ffd3cc" stroke-width="4"/>
+
+    <!-- left arm presenting the scroll -->
+    <path d="M166 300C154 334 164 362 194 372" fill="none" stroke="#16323a" stroke-width="32"/>
+    <path d="M166 300C154 334 164 362 194 372" fill="none" stroke="#6fcbe0" stroke-width="22"/>
+    <circle cx="200" cy="372" r="14" fill="#f6d2a2"/>
+
+    <!-- encrypted assertion envelope -->
+    <g transform="translate(-4 14) rotate(-14 404 150)">
+      <rect x="360" y="118" width="88" height="62" rx="7" fill="url(#envelope)"/>
+      <path d="M362 180l32-28M446 180l-32-28" fill="none" stroke="#b7c3d6" stroke-width="3"/>
+      <path d="M361 122l43 32 43-32" fill="#eef2f8"/>
+      <!-- padlock -->
+      <path d="M396 147v-9a8 8 0 0 1 16 0v9" fill="none" stroke-width="5"/>
+      <rect x="390" y="146" width="28" height="22" rx="4" fill="url(#gold)"/>
+      <circle cx="404" cy="155" r="3.5" fill="#16323a" stroke="none"/>
+      <path d="M404 157v5" stroke-width="3"/>
+    </g>
+
+    <!-- right arm holding the envelope -->
+    <path d="M344 296C368 272 384 238 390 212" fill="none" stroke="#16323a" stroke-width="32"/>
+    <path d="M344 296C368 272 384 238 390 212" fill="none" stroke="#6fcbe0" stroke-width="22"/>
+    <circle cx="392" cy="198" r="16" fill="#f6d2a2"/>
+  </g>
+
+  <!-- ribbon -->
+  <g stroke="#6e1a14" stroke-width="5" stroke-linejoin="round">
+    <path d="M100 430L52 438L74 462L56 488L116 478Z" fill="#a82a21"/>
+    <path d="M412 430L460 438L438 462L456 488L396 478Z" fill="#a82a21"/>
+    <path d="M96 424Q256 454 416 424V470Q256 500 96 470Z" fill="url(#ribbon)"/>
+  </g>
+  <path d="M104 432Q256 461 408 432" fill="none" stroke="#ffb199" stroke-width="2" opacity="0.7"/>
+  <text font-family="'Segoe UI', Helvetica, Arial, sans-serif" font-size="17.5" font-weight="800" letter-spacing="0.6" fill="#fff" text-anchor="middle">
+    <textPath href="#ribbonText" startOffset="50%">SAML 2.0 · Web Browser SSO</textPath>
+  </text>
+
+  <!-- sparkles -->
+  <g fill="#fff3b0">
+    <path d="M430 250l5 14 14 5-14 5-5 14-5-14-14-5 14-5Z"/>
+    <path d="M428 104l3 9 9 3-9 3-3 9-3-9-9-3 9-3Z"/>
+    <path d="M96 150l4 11 11 4-11 4-4 11-4-11-11-4 11-4Z" fill="#e4dcff"/>
+    <path d="M118 330l3 8 8 3-8 3-3 8-3-8-8-3 8-3Z" fill="#e4dcff"/>
+  </g>
+</svg>
