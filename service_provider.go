@@ -1186,25 +1186,8 @@ func (sp *ServiceProvider) validateAssertion(assertion *Assertion, possibleReque
 	if assertion.Issuer.Value != sp.IDPMetadata.EntityID {
 		return fmt.Errorf("issuer is not %q", sp.IDPMetadata.EntityID)
 	}
-	for _, subjectConfirmation := range assertion.Subject.SubjectConfirmations {
-		if !sp.AllowIDPInitiated || subjectConfirmation.SubjectConfirmationData.InResponseTo != "" {
-			requestIDvalid := false
-			for _, possibleRequestID := range possibleRequestIDs {
-				if subjectConfirmation.SubjectConfirmationData.InResponseTo == possibleRequestID {
-					requestIDvalid = true
-					break
-				}
-			}
-			if !requestIDvalid {
-				return fmt.Errorf("assertion SubjectConfirmation one of the possible request IDs (%v)", possibleRequestIDs)
-			}
-		}
-		if subjectConfirmation.SubjectConfirmationData.Recipient != sp.AcsURL.String() {
-			return fmt.Errorf("assertion SubjectConfirmation Recipient is not %s", sp.AcsURL.String())
-		}
-		if subjectConfirmation.SubjectConfirmationData.NotOnOrAfter.Add(MaxClockSkew).Before(now) {
-			return fmt.Errorf("assertion SubjectConfirmationData is expired")
-		}
+	if err := sp.validateSubjectConfirmations(assertion, possibleRequestIDs, now); err != nil {
+		return err
 	}
 	if assertion.Conditions != nil {
 		if assertion.Conditions.NotBefore.Add(-MaxClockSkew).After(now) {
@@ -1217,6 +1200,47 @@ func (sp *ServiceProvider) validateAssertion(assertion *Assertion, possibleReque
 
 	if err := sp.validateAudienceRestriction(assertion); err != nil {
 		return err
+	}
+	return nil
+}
+
+func (sp *ServiceProvider) validateSubjectConfirmations(assertion *Assertion, possibleRequestIDs []string, now time.Time) error {
+	if assertion.Subject == nil {
+		return fmt.Errorf("assertion Subject does not contain a bearer SubjectConfirmation")
+	}
+
+	var errs []error
+	for _, subjectConfirmation := range assertion.Subject.SubjectConfirmations {
+		if subjectConfirmation.Method != "urn:oasis:names:tc:SAML:2.0:cm:bearer" {
+			continue
+		}
+		err := sp.validateBearerSubjectConfirmation(subjectConfirmation, possibleRequestIDs, now)
+		if err == nil {
+			return nil
+		}
+		errs = append(errs, err)
+	}
+	if len(errs) == 0 {
+		return fmt.Errorf("assertion Subject does not contain a bearer SubjectConfirmation")
+	}
+	return errors.Join(errs...)
+}
+
+func (sp *ServiceProvider) validateBearerSubjectConfirmation(subjectConfirmation SubjectConfirmation, possibleRequestIDs []string, now time.Time) error {
+	data := subjectConfirmation.SubjectConfirmationData
+	if data == nil {
+		return fmt.Errorf("assertion SubjectConfirmation does not contain SubjectConfirmationData")
+	}
+	if !sp.AllowIDPInitiated || data.InResponseTo != "" {
+		if !slices.Contains(possibleRequestIDs, data.InResponseTo) {
+			return fmt.Errorf("assertion SubjectConfirmation one of the possible request IDs (%v)", possibleRequestIDs)
+		}
+	}
+	if data.Recipient != sp.AcsURL.String() {
+		return fmt.Errorf("assertion SubjectConfirmation Recipient is not %s", sp.AcsURL.String())
+	}
+	if data.NotOnOrAfter.Add(MaxClockSkew).Before(now) {
+		return fmt.Errorf("assertion SubjectConfirmationData is expired")
 	}
 	return nil
 }
