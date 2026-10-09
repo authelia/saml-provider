@@ -41,6 +41,7 @@ type Server struct {
 	idpConfigMu       sync.RWMutex // protects calls into the IDP
 	logger            logger.Interface
 	serviceProviders  map[string]*saml.EntityDescriptor
+	serviceIDs        map[string]string
 	IDP               saml.IdentityProvider // the underlying IDP
 	Store             Store                 // the data store
 	LoginFormTemplate *template.Template
@@ -63,6 +64,7 @@ func New(opts Options) (*Server, error) {
 
 	s := &Server{
 		serviceProviders: map[string]*saml.EntityDescriptor{},
+		serviceIDs:       map[string]string{},
 		IDP: saml.IdentityProvider{
 			Key:         opts.Key,
 			Signer:      opts.Signer,
