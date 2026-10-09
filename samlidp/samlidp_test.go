@@ -114,6 +114,56 @@ func NewServerTest(t *testing.T) *ServerTest {
 	return &test
 }
 
+func TestServerAdminRoutesOnlyOnAdminHandler(t *testing.T) {
+	testCases := []struct {
+		method string
+		path   string
+		admin  bool
+	}{
+		{method: http.MethodGet, path: "/services/", admin: true},
+		{method: http.MethodGet, path: "/services/sp", admin: true},
+		{method: http.MethodPut, path: "/services/sp", admin: true},
+		{method: http.MethodPost, path: "/services/sp", admin: true},
+		{method: http.MethodDelete, path: "/services/sp", admin: true},
+		{method: http.MethodGet, path: "/users/", admin: true},
+		{method: http.MethodGet, path: "/users/alice", admin: true},
+		{method: http.MethodPut, path: "/users/alice", admin: true},
+		{method: http.MethodDelete, path: "/users/alice", admin: true},
+		{method: http.MethodGet, path: "/sessions/", admin: true},
+		{method: http.MethodGet, path: "/sessions/id", admin: true},
+		{method: http.MethodDelete, path: "/sessions/id", admin: true},
+		{method: http.MethodGet, path: "/shortcuts/", admin: true},
+		{method: http.MethodGet, path: "/shortcuts/bob", admin: true},
+		{method: http.MethodPut, path: "/shortcuts/bob", admin: true},
+		{method: http.MethodDelete, path: "/shortcuts/bob", admin: true},
+		{method: http.MethodGet, path: "/metadata"},
+		{method: http.MethodGet, path: "/sso"},
+		{method: http.MethodGet, path: "/login"},
+		{method: http.MethodGet, path: "/login/bob"},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.method+" "+tc.path, func(t *testing.T) {
+			test := NewServerTest(t)
+
+			public := httptest.NewRecorder()
+			test.Server.ServeHTTP(public, httptest.NewRequest(tc.method, "https://idp.example.com"+tc.path, strings.NewReader("{}")))
+
+			admin := httptest.NewRecorder()
+			test.Server.AdminHandler.ServeHTTP(admin, httptest.NewRequest(tc.method, "https://idp.example.com"+tc.path, strings.NewReader("{}")))
+
+			if tc.admin {
+				assert.Check(t, is.Equal(http.StatusNotFound, public.Code))
+				assert.Check(t, admin.Code != http.StatusNotFound && admin.Code != http.StatusMethodNotAllowed, "got %d", admin.Code)
+				return
+			}
+
+			assert.Check(t, public.Code != http.StatusNotFound, "got %d", public.Code)
+			assert.Check(t, is.Equal(http.StatusNotFound, admin.Code))
+		})
+	}
+}
+
 func TestHTTPCanHandleMetadataRequest(t *testing.T) {
 	test := NewServerTest(t)
 	w := httptest.NewRecorder()
