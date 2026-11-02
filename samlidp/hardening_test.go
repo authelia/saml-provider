@@ -19,6 +19,7 @@ import (
 	is "gotest.tools/assert/cmp"
 
 	"authelia.com/provider/saml"
+	"authelia.com/provider/saml/internal/dsig"
 )
 
 var adminRoutes = []struct{ method, path string }{
@@ -370,4 +371,32 @@ func TestShortcutGetIgnoresMalformedQuery(t *testing.T) {
 
 	w := serveAdminRoute(test.Server, "GET", "/login/app?a=%zz")
 	assert.Check(t, is.Equal(http.StatusOK, w.Code))
+}
+
+func TestSignedRedirectResumesAfterLogin(t *testing.T) {
+	test := NewServerTest(t)
+	hardeningAddUser(t, test)
+	test.SP.SignatureMethod = dsig.RSASHA256SignatureMethod
+	test.Server.serviceProviders["https://sp.example.com/saml2/metadata"] = test.SP.Metadata()
+
+	previousClock := saml.Clock
+	t.Cleanup(func() { saml.Clock = previousClock })
+	saml.Clock = dsig.NewFakeClockAt(test.SPCertificate.NotBefore)
+
+	form := hardeningStartSSO(t, test)
+
+	values := url.Values{
+		"user":              {"alice"},
+		"password":          {"hunter2"},
+		"SAMLRedirectQuery": {hardeningHidden(t, form, "SAMLRedirectQuery")},
+	}
+	r := httptest.NewRequest("POST", hardeningFormAction(t, form), strings.NewReader(values.Encode()))
+	r.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	w := httptest.NewRecorder()
+	test.Server.ServeHTTP(w, r)
+	hardeningAssertSAMLResponse(t, w, "frob")
+
+	// Without the signed query the request is refused, so the field can't simply be dropped.
+	failed := hardeningSubmitLogin(t, test, form, "hunter2")
+	assert.Check(t, is.Equal(http.StatusBadRequest, failed.Code))
 }

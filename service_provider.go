@@ -310,16 +310,11 @@ func (r *AuthnRequest) Redirect(relayState string, sp *ServiceProvider) (*url.UR
 		return nil, err
 	}
 
-	// We can't depend on Query().set() as order matters for signing
-	query := rv.RawQuery
-	if len(query) > 0 {
-		query += "&SAMLRequest=" + url.QueryEscape(requestStr.String())
-	} else {
-		query += "SAMLRequest=" + url.QueryEscape(requestStr.String())
-	}
-
+	// We can't depend on Query().set() as order matters for signing. SAMLBind §3.4.4.1 signs only
+	// these parameters, not any others that are already in the URL.
+	query := "SAMLRequest=" + url.QueryEscape(requestStr.String())
 	if relayState != "" {
-		query += "&RelayState=" + relayState
+		query += "&RelayState=" + url.QueryEscape(relayState)
 	}
 	if len(sp.SignatureMethod) > 0 {
 		query += "&SigAlg=" + url.QueryEscape(sp.SignatureMethod)
@@ -336,6 +331,9 @@ func (r *AuthnRequest) Redirect(relayState string, sp *ServiceProvider) (*url.UR
 		query += "&Signature=" + url.QueryEscape(base64.StdEncoding.EncodeToString(sig))
 	}
 
+	if rv.RawQuery != "" {
+		query = rv.RawQuery + "&" + query
+	}
 	rv.RawQuery = query
 
 	return rv, nil
@@ -1303,6 +1301,25 @@ func (sp *ServiceProvider) validateSignature(el *etree.Element) error {
 		return fmt.Errorf("cannot validate signature on %s: saml config not set up properly, specify either idp metadata url, fingerprints or actual certificate", el.Tag)
 	}
 
+	validationContext, el, err := signatureValidationContext(el, certs)
+	if err != nil {
+		return err
+	}
+
+	if sp.SignatureVerifier != nil {
+		return sp.SignatureVerifier.VerifySignature(validationContext, el)
+	}
+
+	if _, err := validationContext.Validate(el); err != nil {
+		return fmt.Errorf("cannot validate signature on %s: %v", el.Tag, err)
+	}
+
+	return nil
+}
+
+// signatureValidationContext returns the context for validating the signature on el with the given
+// certificates, and the element to pass to it.
+func signatureValidationContext(el *etree.Element, certs []*x509.Certificate) (*dsig.ValidationContext, *etree.Element, error) {
 	certificateStore := dsig.MemoryX509CertificateStore{
 		Roots: certs,
 	}
@@ -1332,26 +1349,18 @@ func (sp *ServiceProvider) validateSignature(el *etree.Element) error {
 
 	ctx, err := etreeutils.NSBuildParentContext(el)
 	if err != nil {
-		return fmt.Errorf("cannot validate signature on %s: %v", el.Tag, err)
+		return nil, nil, fmt.Errorf("cannot validate signature on %s: %v", el.Tag, err)
 	}
 	ctx, err = ctx.SubContext(el)
 	if err != nil {
-		return fmt.Errorf("cannot validate signature on %s: %v", el.Tag, err)
+		return nil, nil, fmt.Errorf("cannot validate signature on %s: %v", el.Tag, err)
 	}
-	el, err = etreeutils.NSDetatch(ctx, el)
+	detached, err := etreeutils.NSDetatch(ctx, el)
 	if err != nil {
-		return fmt.Errorf("cannot validate signature on %s: %v", el.Tag, err)
+		return nil, nil, fmt.Errorf("cannot validate signature on %s: %v", el.Tag, err)
 	}
 
-	if sp.SignatureVerifier != nil {
-		return sp.SignatureVerifier.VerifySignature(validationContext, el)
-	}
-
-	if _, err := validationContext.Validate(el); err != nil {
-		return fmt.Errorf("cannot validate signature on %s: %v", el.Tag, err)
-	}
-
-	return nil
+	return validationContext, detached, nil
 }
 
 // SignLogoutRequest adds the `Signature` element to the `LogoutRequest`.

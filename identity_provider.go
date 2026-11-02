@@ -128,6 +128,11 @@ type IdentityProvider struct {
 	SignatureMethod         string
 	ValidDuration           *time.Duration
 	ResponseFormTemplate    *template.Template
+
+	// WantAuthnRequestsSigned requires every AuthnRequest to be signed, and is declared in the
+	// metadata. A request is also required to be signed if the metadata of its service provider
+	// sets AuthnRequestsSigned, and any signature that is present is always verified.
+	WantAuthnRequestsSigned bool
 }
 
 // Metadata returns the metadata structure for this identity provider.
@@ -198,6 +203,11 @@ func (idp *IdentityProvider) Metadata() *EntityDescriptor {
 				},
 			},
 		},
+	}
+
+	if idp.WantAuthnRequestsSigned {
+		wantAuthnRequestsSigned := true
+		ed.IDPSSODescriptors[0].WantAuthnRequestsSigned = &wantAuthnRequestsSigned
 	}
 
 	if idp.LogoutURL.String() != "" {
@@ -354,7 +364,17 @@ type IdpAuthnRequest struct {
 	AssertionEl             *etree.Element
 	ResponseEl              *etree.Element
 	Now                     time.Time
+
+	// RedirectQuery is the raw query string of a signed HTTP-Redirect request, which is what the
+	// signature covers. A SessionProvider which shows a login form and re-presents the request as a
+	// POST must send this value in the RedirectQueryFormField field, otherwise the signature is lost
+	// and a service provider that requires one is refused.
+	RedirectQuery string
 }
+
+// RedirectQueryFormField is the POST form field which re-presents a signed HTTP-Redirect request. See
+// IdpAuthnRequest.RedirectQuery.
+const RedirectQueryFormField = "SAMLRedirectQuery"
 
 // NewIdpAuthnRequest returns a new IdpAuthnRequest for the given HTTP request to the authorization
 // service.
@@ -367,20 +387,9 @@ func NewIdpAuthnRequest(idp *IdentityProvider, r *http.Request) (*IdpAuthnReques
 
 	switch r.Method {
 	case "GET":
-		compressedRequest, err := base64.StdEncoding.DecodeString(r.URL.Query().Get("SAMLRequest"))
-		if err != nil {
-			return nil, fmt.Errorf("cannot decode request: %s", err)
-		}
-		// Read one byte past the limit so that an oversized request can be told apart from one
-		// that is exactly at the limit, without inflating any more of it.
-		req.RequestBuffer, err = io.ReadAll(io.LimitReader(newSaferFlateReader(bytes.NewReader(compressedRequest)), maxAuthnRequestSize+1))
-		if err != nil {
-			return nil, fmt.Errorf("cannot decompress request: %s", err)
-		}
-		if err := checkAuthnRequestSize(req.RequestBuffer); err != nil {
+		if err := req.readRedirectQuery(r.URL.RawQuery); err != nil {
 			return nil, err
 		}
-		req.RelayState = r.URL.Query().Get("RelayState")
 	case "POST":
 		// Limit what ParseForm reads, which is otherwise up to 10MB before any size check applies.
 		if r.Body != nil {
@@ -388,6 +397,14 @@ func NewIdpAuthnRequest(idp *IdentityProvider, r *http.Request) (*IdpAuthnReques
 		}
 		if err := r.ParseForm(); err != nil {
 			return nil, err
+		}
+		// A signed HTTP-Redirect request that was re-presented by a login form. The signature covers
+		// this query, so the unsigned SAMLRequest and RelayState fields are not used.
+		if rawQuery := r.PostForm.Get(RedirectQueryFormField); rawQuery != "" {
+			if err := req.readRedirectQuery(rawQuery); err != nil {
+				return nil, err
+			}
+			return req, nil
 		}
 		var err error
 		req.RequestBuffer, err = base64.StdEncoding.DecodeString(r.PostForm.Get("SAMLRequest"))
@@ -400,6 +417,32 @@ func NewIdpAuthnRequest(idp *IdentityProvider, r *http.Request) (*IdpAuthnReques
 	}
 
 	return req, nil
+}
+
+// readRedirectQuery reads the request from the query string of the HTTP-Redirect binding.
+func (req *IdpAuthnRequest) readRedirectQuery(rawQuery string) error {
+	// As with url.URL.Query, malformed pairs are dropped. Those can't affect a signed request, which
+	// verifyRedirectSignature rejects if the query has a malformed key.
+	values, _ := url.ParseQuery(rawQuery)
+
+	compressedRequest, err := base64.StdEncoding.DecodeString(values.Get("SAMLRequest"))
+	if err != nil {
+		return fmt.Errorf("cannot decode request: %s", err)
+	}
+	// Read one byte past the limit so that an oversized request can be told apart from one
+	// that is exactly at the limit, without inflating any more of it.
+	req.RequestBuffer, err = io.ReadAll(io.LimitReader(newSaferFlateReader(bytes.NewReader(compressedRequest)), maxAuthnRequestSize+1))
+	if err != nil {
+		return fmt.Errorf("cannot decompress request: %s", err)
+	}
+	if err := checkAuthnRequestSize(req.RequestBuffer); err != nil {
+		return err
+	}
+	req.RelayState = values.Get("RelayState")
+	if values.Has("Signature") || values.Has("SigAlg") {
+		req.RedirectQuery = rawQuery
+	}
+	return nil
 }
 
 // Validate checks that the authentication request is valid and assigns
@@ -420,19 +463,34 @@ func (req *IdpAuthnRequest) Validate() error {
 		return err
 	}
 
-	// We always have exactly one IDP SSO descriptor
-	if len(req.IDP.Metadata().IDPSSODescriptors) != 1 {
-		panic("expected exactly one IDP SSO descriptor in IDP metadata")
-	}
-	idpSsoDescriptor := req.IDP.Metadata().IDPSSODescriptors[0]
-
-	// TODO(ross): support signed authn requests
-	// For now we do the safe thing and fail in the case where we think
-	// requests might be signed.
-	if idpSsoDescriptor.WantAuthnRequestsSigned != nil && *idpSsoDescriptor.WantAuthnRequestsSigned {
-		return fmt.Errorf("authn request signature checking is not currently supported")
+	if err := req.checkRequest(); err != nil {
+		return err
 	}
 
+	// find the service provider
+	serviceProviderID := req.Request.Issuer.Value
+	serviceProvider, err := req.IDP.ServiceProviderProvider.GetServiceProvider(req.HTTPRequest, serviceProviderID)
+	if err == os.ErrNotExist {
+		return fmt.Errorf("cannot handle request from unknown service provider %s", serviceProviderID)
+	} else if err != nil {
+		return fmt.Errorf("cannot find service provider %s: %v", serviceProviderID, err)
+	}
+	req.ServiceProviderMetadata = serviceProvider
+
+	if err := req.verifyAuthnRequestSignature(); err != nil {
+		return err
+	}
+
+	// Check that the ACS URL matches an ACS endpoint in the SP metadata.
+	if err := req.getACSEndpoint(); err != nil {
+		return fmt.Errorf("cannot find assertion consumer service: %v", err)
+	}
+
+	return nil
+}
+
+// checkRequest makes the checks that depend only on the content of Request and the identity provider.
+func (req *IdpAuthnRequest) checkRequest() error {
 	// In http://docs.oasis-open.org/security/saml/v2.0/saml-bindings-2.0-os.pdf §3.4.5.2
 	// we get a description of the Destination attribute:
 	//
@@ -442,11 +500,9 @@ func (req *IdpAuthnRequest) Validate() error {
 	//   then verify that the value matches the location at which the message has
 	//   been received.
 	//
-	// We require the destination be correct either (a) if signing is enabled or
-	// (b) if it was provided.
-	mustHaveDestination := idpSsoDescriptor.WantAuthnRequestsSigned != nil && *idpSsoDescriptor.WantAuthnRequestsSigned
-	mustHaveDestination = mustHaveDestination || req.Request.Destination != ""
-	if mustHaveDestination {
+	// We require the destination to be correct if it was provided, or if every request must be signed.
+	// verifyAuthnRequestSignature requires it on any other request that is signed.
+	if req.IDP.WantAuthnRequestsSigned || req.Request.Destination != "" {
 		if req.Request.Destination != req.IDP.SSOURL.String() {
 			return fmt.Errorf("expected destination to be %q, not %q", req.IDP.SSOURL.String(), req.Request.Destination)
 		}
@@ -472,22 +528,6 @@ func (req *IdpAuthnRequest) Validate() error {
 	if req.Request.Issuer == nil || req.Request.Issuer.Value == "" {
 		return fmt.Errorf("request has no issuer")
 	}
-
-	// find the service provider
-	serviceProviderID := req.Request.Issuer.Value
-	serviceProvider, err := req.IDP.ServiceProviderProvider.GetServiceProvider(req.HTTPRequest, serviceProviderID)
-	if err == os.ErrNotExist {
-		return fmt.Errorf("cannot handle request from unknown service provider %s", serviceProviderID)
-	} else if err != nil {
-		return fmt.Errorf("cannot find service provider %s: %v", serviceProviderID, err)
-	}
-	req.ServiceProviderMetadata = serviceProvider
-
-	// Check that the ACS URL matches an ACS endpoint in the SP metadata.
-	if err := req.getACSEndpoint(); err != nil {
-		return fmt.Errorf("cannot find assertion consumer service: %v", err)
-	}
-
 	return nil
 }
 

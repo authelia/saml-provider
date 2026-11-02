@@ -26,7 +26,9 @@ type Options struct {
 	Store       Store
 
 	// LoginFormTemplate replaces the login form. It must post to {{.URL}} and include the
-	// SAMLRequest and RelayState hidden fields, which resume the flow once the user has logged in.
+	// SAMLRequest and RelayState hidden fields, which resume the flow once the user has logged in. It
+	// must also include {{.RedirectQuery}} in a SAMLRedirectQuery hidden field when that is not empty,
+	// or a request signed over the HTTP-Redirect binding can't be verified and is refused.
 	LoginFormTemplate *template.Template
 
 	// AdminAuthorizer decides whether a request may use the /services, /users, /sessions and
