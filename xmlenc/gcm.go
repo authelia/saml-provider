@@ -4,6 +4,7 @@ import (
 	"crypto/aes"
 	"crypto/cipher"
 	"encoding/base64"
+	"errors"
 	"fmt"
 	"io"
 
@@ -117,6 +118,10 @@ func (e GCM) Decrypt(key interface{}, ciphertextEl *etree.Element) ([]byte, erro
 	ciphertext, err := getCiphertext(ciphertextEl)
 	if err != nil {
 		return nil, err
+	}
+
+	if len(ciphertext) < aesgcm.NonceSize()+aesgcm.Overhead() {
+		return nil, errors.New("ciphertext too short")
 	}
 
 	nonce := ciphertext[:aesgcm.NonceSize()]

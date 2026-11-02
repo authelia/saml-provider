@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"crypto/rsa"
 	"crypto/x509"
+	"encoding/base64"
 	"math/big"
 	"testing"
 	"time"
@@ -93,4 +94,18 @@ func TestGCMRoundTripThroughOAEP(t *testing.T) {
 	decrypted, err := Decrypt(key, el)
 	assert.NilError(t, err)
 	assert.Check(t, is.DeepEqual(plaintext, decrypted))
+}
+
+func TestGCMDecryptRejectsShortCiphertext(t *testing.T) {
+	key := make([]byte, AES128GCM.KeySize())
+	for _, size := range []int{0, 1, 11, 12, 27} {
+		el, err := AES128GCM.Encrypt(key, []byte("plaintext"), nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		el.FindElement("./CipherData/CipherValue").SetText(base64.StdEncoding.EncodeToString(make([]byte, size)))
+		if _, err = AES128GCM.Decrypt(key, el); err == nil {
+			t.Errorf("expected an error for a ciphertext of %d bytes", size)
+		}
+	}
 }
