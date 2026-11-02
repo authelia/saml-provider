@@ -95,7 +95,7 @@ least the subset of SAML known as [interoperable SAML](https://kantarainitiative
 | Verify signed `Response` and `Assertion`     | N/A | ✅  |
 | Sign `AuthnRequest`                          | N/A | ✅  |
 | Verify signed `AuthnRequest`                 | ❌  | N/A |
-| RSA and ECDSA signatures (SHA-1/256/384/512) | ⚠️  | ✅  |
+| RSA and ECDSA signatures (SHA-1/256/384/512) | ⚠️  | ⚠️  |
 | Encrypt `Assertion`                          | ⚠️  | N/A |
 | Decrypt `EncryptedAssertion`                 | N/A | ⚠️  |
 | `EncryptedID` and `EncryptedAttribute`       | ❌  | ❌  |
@@ -145,6 +145,9 @@ least the subset of SAML known as [interoperable SAML](https://kantarainitiative
 - **Multiple assertions in a single `Response`:** only the first valid assertion is returned.
 - **Replay detection:** SP-initiated responses must match a tracked request ID, but assertion IDs are not remembered,
   so an unsolicited response accepted with `AllowIDPInitiated` can be replayed until it expires.
+- **ECDSA signatures:** the default verifier rejects the `r||s` form XML Signature requires, because
+  `x509.CheckSignature` expects DER, so standards-compliant ECDSA signatures fail unless `SignatureVerifier` is set. Signed
+  requests are written in DER as well, so other implementations may reject them. RSA signatures are not affected.
 - **Decrypt `EncryptedAssertion`:** supported algorithms are AES-128/192/256-CBC, AES-128-GCM and 3DES for content
   and RSA-OAEP-MGF1P for key transport. AES-192/256-GCM and XML Encryption 1.1 RSA-OAEP are not supported by default.
   RSA PKCS#1 v1.5 key transport is disabled by default and can be enabled with
