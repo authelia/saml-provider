@@ -1092,7 +1092,66 @@ func (req *IdpAuthnRequest) MakeResponse() error {
 		}
 	}
 
-	response := &Response{
+	responseEl, err := req.signResponse(req.newResponse(Status{StatusCode: StatusCode{Value: StatusSuccess}}), req.AssertionEl)
+	if err != nil {
+		return err
+	}
+
+	req.ResponseEl = responseEl
+	return nil
+}
+
+// MakeErrorResponse creates and assigns a new signed SAML response in ResponseEl which reports a
+// failure and carries no assertion, replacing any response made earlier. The topLevelStatus must be
+// one of StatusRequester, StatusResponder or StatusVersionMismatch, as required by SAMLCore §3.2.2.2.
+// The secondLevelStatus and message are optional, and message is sent to the service provider as is.
+//
+// It returns an error if ACSEndpoint is not set, because a response must only be sent to an endpoint
+// that has been checked against the metadata of the service provider. Requests which fail before
+// that point, such as any for which Validate returns an error, can't be answered with a SAML response.
+func (req *IdpAuthnRequest) MakeErrorResponse(topLevelStatus, secondLevelStatus, message string) error {
+	req.ResponseEl = nil
+
+	if req.ACSEndpoint == nil {
+		return fmt.Errorf("cannot make an error response without a validated assertion consumer service")
+	}
+
+	switch topLevelStatus {
+	case StatusRequester, StatusResponder, StatusVersionMismatch:
+	default:
+		return fmt.Errorf("invalid top-level status %q for an error response", topLevelStatus)
+	}
+
+	status := Status{StatusCode: StatusCode{Value: topLevelStatus}}
+	if secondLevelStatus != "" {
+		status.StatusCode.StatusCode = &StatusCode{Value: secondLevelStatus}
+	}
+	if message != "" {
+		status.StatusMessage = &StatusMessage{Value: message}
+	}
+
+	responseEl, err := req.signResponse(req.newResponse(status), nil)
+	if err != nil {
+		return err
+	}
+
+	req.ResponseEl = responseEl
+	return nil
+}
+
+// WriteErrorResponse writes a signed SAML response which reports a failure to the assertion consumer
+// service of the service provider. See MakeErrorResponse for the arguments and when it can be used.
+// Nothing is written to w if it returns an error from MakeErrorResponse.
+func (req *IdpAuthnRequest) WriteErrorResponse(w http.ResponseWriter, topLevelStatus, secondLevelStatus, message string) error {
+	if err := req.MakeErrorResponse(topLevelStatus, secondLevelStatus, message); err != nil {
+		return err
+	}
+	return req.WriteResponse(w)
+}
+
+// newResponse returns the Response for this request with the given status.
+func (req *IdpAuthnRequest) newResponse(status Status) *Response {
+	return &Response{
 		Destination:  req.ACSEndpoint.Location,
 		ID:           fmt.Sprintf("id-%x", randomBytes(20)),
 		InResponseTo: req.Request.ID,
@@ -1102,36 +1161,35 @@ func (req *IdpAuthnRequest) MakeResponse() error {
 			Format: "urn:oasis:names:tc:SAML:2.0:nameid-format:entity",
 			Value:  req.IDP.MetadataURL.String(),
 		},
-		Status: Status{
-			StatusCode: StatusCode{
-				Value: StatusSuccess,
-			},
-		},
+		Status: status,
 	}
+}
 
+// signResponse returns the signed element for response, which contains assertionEl if it is not nil.
+// The assertionEl is either an EncryptedAssertion or an already signed Assertion element.
+func (req *IdpAuthnRequest) signResponse(response *Response, assertionEl *etree.Element) (*etree.Element, error) {
 	responseEl := response.Element()
-	responseEl.AddChild(req.AssertionEl) // AssertionEl either an EncryptedAssertion or Assertion element
-
-	// Sign the response element (we've already signed the Assertion element)
-	{
-		signingContext, err := req.signingContext()
-		if err != nil {
-			return err
-		}
-
-		signedResponseEl, err := signingContext.SignEnveloped(responseEl)
-		if err != nil {
-			return err
-		}
-
-		sigEl := signedResponseEl.ChildElements()[len(signedResponseEl.ChildElements())-1]
-		response.Signature = sigEl
-		responseEl = response.Element()
-		responseEl.AddChild(req.AssertionEl)
+	if assertionEl != nil {
+		responseEl.AddChild(assertionEl)
 	}
 
-	req.ResponseEl = responseEl
-	return nil
+	signingContext, err := req.signingContext()
+	if err != nil {
+		return nil, err
+	}
+
+	signedResponseEl, err := signingContext.SignEnveloped(responseEl)
+	if err != nil {
+		return nil, err
+	}
+
+	response.Signature = signedResponseEl.ChildElements()[len(signedResponseEl.ChildElements())-1]
+	responseEl = response.Element()
+	if assertionEl != nil {
+		responseEl.AddChild(assertionEl)
+	}
+
+	return responseEl, nil
 }
 
 // signingContext will create a signing context for the request.
