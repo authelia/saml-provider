@@ -1,6 +1,7 @@
 package saml
 
 import (
+	"encoding/json"
 	"fmt"
 	"regexp"
 	"strconv"
@@ -11,6 +12,25 @@ import (
 // Duration is a time.Duration that uses the xsd:duration format for text
 // marshalling and unmarshalling.
 type Duration time.Duration
+
+// MarshalJSON implements the json.Marshaler interface. A Duration is a number of nanoseconds in JSON,
+// the same as a time.Duration, so that it stays readable from stored metadata. UnmarshalJSON also
+// accepts an xsd:duration string.
+func (d Duration) MarshalJSON() ([]byte, error) {
+	return json.Marshal(int64(d))
+}
+
+// UnmarshalJSON implements the json.Unmarshaler interface.
+func (d *Duration) UnmarshalJSON(data []byte) error {
+	if len(data) != 0 && data[0] == '"' {
+		var text string
+		if err := json.Unmarshal(data, &text); err != nil {
+			return err
+		}
+		return d.UnmarshalText([]byte(text))
+	}
+	return json.Unmarshal(data, (*int64)(d))
+}
 
 // MarshalText implements the encoding.TextMarshaler interface.
 func (d Duration) MarshalText() ([]byte, error) {
