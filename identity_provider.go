@@ -25,6 +25,19 @@ import (
 	"authelia.com/provider/saml/xmlenc"
 )
 
+// maxAuthnRequestSize is the largest decoded AuthnRequest that the identity provider will process.
+// Real requests are a few kilobytes, including any signature and certificate. Requests are parsed
+// before any authentication, so this limit bounds the work an anonymous client can cause.
+const maxAuthnRequestSize = 16 * 1024
+
+// maxAuthnRequestBodySize is the largest HTTP POST body that the identity provider will read. It
+// allows for a request of maxAuthnRequestSize whose base64 is entirely percent-encoded, with room
+// for RelayState and any login form fields.
+const maxAuthnRequestBodySize = 128 * 1024
+
+// maxAuthnRequestIDLength is the longest AuthnRequest ID that the identity provider will accept.
+const maxAuthnRequestIDLength = 256
+
 // Session represents a user session. It is returned by the
 // SessionProvider implementation's GetSession method. Fields here
 // are used to set fields in the SAML assertion.
@@ -368,12 +381,21 @@ func NewIdpAuthnRequest(idp *IdentityProvider, r *http.Request) (*IdpAuthnReques
 		if err != nil {
 			return nil, fmt.Errorf("cannot decode request: %s", err)
 		}
-		req.RequestBuffer, err = io.ReadAll(newSaferFlateReader(bytes.NewReader(compressedRequest)))
+		// Read one byte past the limit so that an oversized request can be told apart from one
+		// that is exactly at the limit, without inflating any more of it.
+		req.RequestBuffer, err = io.ReadAll(io.LimitReader(newSaferFlateReader(bytes.NewReader(compressedRequest)), maxAuthnRequestSize+1))
 		if err != nil {
 			return nil, fmt.Errorf("cannot decompress request: %s", err)
 		}
+		if err := checkAuthnRequestSize(req.RequestBuffer); err != nil {
+			return nil, err
+		}
 		req.RelayState = r.URL.Query().Get("RelayState")
 	case "POST":
+		// Limit what ParseForm reads, which is otherwise up to 10MB before any size check applies.
+		if r.Body != nil {
+			r.Body = http.MaxBytesReader(nil, r.Body, maxAuthnRequestBodySize)
+		}
 		if err := r.ParseForm(); err != nil {
 			return nil, err
 		}
@@ -394,6 +416,12 @@ func NewIdpAuthnRequest(idp *IdentityProvider, r *http.Request) (*IdpAuthnReques
 // the AuthnRequest and Metadata properties. Returns a non-nil error if the
 // request is not valid.
 func (req *IdpAuthnRequest) Validate() error {
+	// This must come first: this code runs before any authentication, and the cost of the XML
+	// parsing below is proportional to the size of the request.
+	if err := checkAuthnRequestSize(req.RequestBuffer); err != nil {
+		return err
+	}
+
 	if err := xrv.Validate(bytes.NewReader(req.RequestBuffer)); err != nil {
 		return err
 	}
@@ -438,8 +466,18 @@ func (req *IdpAuthnRequest) Validate() error {
 		return fmt.Errorf("request expired at %s",
 			req.Request.IssueInstant.Add(MaxIssueDelay))
 	}
+	if req.Request.IssueInstant.After(req.Now.Add(MaxClockSkew)) {
+		return fmt.Errorf("request issued in the future at %s", req.Request.IssueInstant)
+	}
 	if req.Request.Version != "2.0" {
 		return fmt.Errorf("expected SAML request version 2.0 got %v", req.Request.Version)
+	}
+	if !isValidAuthnRequestID(req.Request.ID) {
+		// The value is not included because this error is logged without authentication.
+		return fmt.Errorf("invalid request ID")
+	}
+	if req.Request.Issuer == nil || req.Request.Issuer.Value == "" {
+		return fmt.Errorf("request has no issuer")
 	}
 
 	// find the service provider
@@ -458,6 +496,36 @@ func (req *IdpAuthnRequest) Validate() error {
 	}
 
 	return nil
+}
+
+// checkAuthnRequestSize returns an error if the decoded request is larger than maxAuthnRequestSize.
+func checkAuthnRequestSize(buf []byte) error {
+	if len(buf) > maxAuthnRequestSize {
+		return fmt.Errorf("request exceeds the limit of %d bytes", maxAuthnRequestSize)
+	}
+	return nil
+}
+
+// isValidAuthnRequestID returns true if id is non-empty, no longer than maxAuthnRequestIDLength,
+// and contains only ASCII letters, digits, '_', '-' and '.'. The value is copied into the signed
+// response, where anything that an XML parser or Unicode normalization might alter could break the
+// signature.
+//
+// Unlike xs:ID this does not restrict the first character, because some service providers send IDs
+// which begin with a digit, such as a bare UUID.
+func isValidAuthnRequestID(id string) bool {
+	if id == "" || len(id) > maxAuthnRequestIDLength {
+		return false
+	}
+	for i := 0; i < len(id); i++ {
+		c := id[i]
+		switch {
+		case c >= 'a' && c <= 'z', c >= 'A' && c <= 'Z', c >= '0' && c <= '9', c == '_', c == '-', c == '.':
+		default:
+			return false
+		}
+	}
+	return true
 }
 
 func (req *IdpAuthnRequest) getACSEndpoint() error {
@@ -773,14 +841,10 @@ func (DefaultAssertionMaker) MakeAssertion(req *IdpAuthnRequest, session *Sessio
 		})
 	}
 
-	// allow for some clock skew in the validity period using the
-	// issuer's apparent clock.
+	// allow for some clock skew in the validity period. This uses our own clock, because the
+	// request and therefore its IssueInstant are not authenticated.
 	notBefore := req.Now.Add(-1 * MaxClockSkew)
 	notOnOrAfterAfter := req.Now.Add(MaxIssueDelay)
-	if notBefore.Before(req.Request.IssueInstant) {
-		notBefore = req.Request.IssueInstant
-		notOnOrAfterAfter = notBefore.Add(MaxIssueDelay)
-	}
 
 	nameIDFormat := "urn:oasis:names:tc:SAML:2.0:nameid-format:transient"
 
@@ -981,10 +1045,13 @@ func (req *IdpAuthnRequest) WriteResponse(w http.ResponseWriter) error {
 // to the SP in PEM format, or nil if no such certificate is found.
 func (req *IdpAuthnRequest) getSPEncryptionCert() (*x509.Certificate, error) {
 	certStr := ""
+	encryptionRequested := false
 	for _, keyDescriptor := range req.SPSSODescriptor.KeyDescriptors {
 		if keyDescriptor.Use == "encryption" {
-			certStr = keyDescriptor.KeyInfo.X509Data.X509Certificates[0].Data
-			break
+			encryptionRequested = true
+			if certStr = firstCertificateData(keyDescriptor); certStr != "" {
+				break
+			}
 		}
 	}
 
@@ -992,14 +1059,20 @@ func (req *IdpAuthnRequest) getSPEncryptionCert() (*x509.Certificate, error) {
 	// non-empty cert we find.
 	if certStr == "" {
 		for _, keyDescriptor := range req.SPSSODescriptor.KeyDescriptors {
-			if keyDescriptor.Use == "" && len(keyDescriptor.KeyInfo.X509Data.X509Certificates) != 0 && keyDescriptor.KeyInfo.X509Data.X509Certificates[0].Data != "" {
-				certStr = keyDescriptor.KeyInfo.X509Data.X509Certificates[0].Data
-				break
+			if keyDescriptor.Use == "" {
+				if certStr = firstCertificateData(keyDescriptor); certStr != "" {
+					break
+				}
 			}
 		}
 	}
 
 	if certStr == "" {
+		// os.ErrNotExist makes the caller send the assertion in plaintext, which is not acceptable
+		// if the service provider asked for encryption with a key we are unable to use.
+		if encryptionRequested {
+			return nil, fmt.Errorf("service provider has an encryption key descriptor with no usable certificate")
+		}
 		return nil, os.ErrNotExist
 	}
 
@@ -1014,6 +1087,17 @@ func (req *IdpAuthnRequest) getSPEncryptionCert() (*x509.Certificate, error) {
 		return nil, fmt.Errorf("cannot parse certificate: %v", err)
 	}
 	return cert, nil
+}
+
+// firstCertificateData returns the data of the first non-empty certificate in the key descriptor,
+// or an empty string if there is none.
+func firstCertificateData(keyDescriptor KeyDescriptor) string {
+	for _, certificate := range keyDescriptor.KeyInfo.X509Data.X509Certificates {
+		if certificate.Data != "" {
+			return certificate.Data
+		}
+	}
+	return ""
 }
 
 // unmarshalEtreeHack parses `el` and sets values in the structure `v`.
