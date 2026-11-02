@@ -192,11 +192,11 @@ type ContactPerson struct {
 //
 // See http://docs.oasis-open.org/security/saml/v2.0/saml-metadata-2.0-os.pdf §2.4.1
 type RoleDescriptor struct {
-	ID                         string     `xml:",attr,omitempty"`
-	ValidUntil                 *time.Time `xml:"validUntil,attr,omitempty"`
-	CacheDuration              Duration   `xml:"cacheDuration,attr,omitempty"`
-	ProtocolSupportEnumeration string     `xml:"protocolSupportEnumeration,attr"`
-	ErrorURL                   string     `xml:"errorURL,attr,omitempty"`
+	ID                         string      `xml:",attr,omitempty"`
+	ValidUntil                 *time.Time  `xml:"validUntil,attr,omitempty"`
+	CacheDuration              XSDDuration `xml:"cacheDuration,attr,omitempty"`
+	ProtocolSupportEnumeration string      `xml:"protocolSupportEnumeration,attr"`
+	ErrorURL                   string      `xml:"errorURL,attr,omitempty"`
 	Signature                  *etree.Element
 	KeyDescriptors             []KeyDescriptor `xml:"KeyDescriptor,omitempty"`
 	Organization               *Organization   `xml:"Organization,omitempty"`
@@ -449,10 +449,10 @@ type AttributeAuthorityDescriptor struct {
 //
 // See http://docs.oasis-open.org/security/saml/v2.0/saml-metadata-2.0-os.pdf §2.5
 type AffiliationDescriptor struct {
-	AffiliationOwnerID string    `xml:"affiliationOwnerID,attr"`
-	ID                 string    `xml:",attr"`
-	ValidUntil         time.Time `xml:"validUntil,attr,omitempty"`
-	CacheDuration      Duration  `xml:"cacheDuration,attr,omitempty"`
+	AffiliationOwnerID string       `xml:"affiliationOwnerID,attr"`
+	ID                 string       `xml:",attr"`
+	ValidUntil         time.Time    `xml:"validUntil,attr,omitempty"`
+	CacheDuration      *XSDDuration `xml:"cacheDuration,attr,omitempty"`
 	Signature          *etree.Element
 	AffiliateMembers   []string        `xml:"AffiliateMember"`
 	KeyDescriptors     []KeyDescriptor `xml:"KeyDescriptor"`

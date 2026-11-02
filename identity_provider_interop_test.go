@@ -4,7 +4,6 @@ import (
 	"crypto/x509"
 	"encoding/json"
 	"encoding/xml"
-	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -204,48 +203,80 @@ func TestIDPOmitsEmptyAttributeStatement(t *testing.T) {
 	assert.Check(t, is.Len(req.Assertion.AttributeStatements, 1))
 }
 
-func TestRoleCacheDurationUsesXSDDuration(t *testing.T) {
+func TestCacheDurationPreservesLexicalForm(t *testing.T) {
+	for _, value := range []string{"P1M", "P1Y2M3DT4H5M6.5S", "-P1D", "PT0S", "PT1H"} {
+		doc := `<EntityDescriptor xmlns="urn:oasis:names:tc:SAML:2.0:metadata" entityID="https://sp">` +
+			`<SPSSODescriptor protocolSupportEnumeration="urn:oasis:names:tc:SAML:2.0:protocol" cacheDuration="` + value + `"/>` +
+			`<AffiliationDescriptor affiliationOwnerID="https://sp" cacheDuration="` + value + `"/>` +
+			`</EntityDescriptor>`
+
+		metadata := EntityDescriptor{}
+		assert.NilError(t, xml.Unmarshal([]byte(doc), &metadata))
+		assert.Assert(t, is.Len(metadata.SPSSODescriptors, 1))
+		assert.Check(t, is.Equal(XSDDuration(value), metadata.SPSSODescriptors[0].CacheDuration))
+		assert.Assert(t, metadata.AffiliationDescriptor != nil && metadata.AffiliationDescriptor.CacheDuration != nil)
+		assert.Check(t, is.Equal(XSDDuration(value), *metadata.AffiliationDescriptor.CacheDuration))
+
+		buf, err := xml.Marshal(metadata)
+		assert.NilError(t, err)
+		assert.Check(t, is.Equal(2, strings.Count(string(buf), `cacheDuration="`+value+`"`)), string(buf))
+	}
+}
+
+func TestCacheDurationAbsentIsOmitted(t *testing.T) {
 	const doc = `<EntityDescriptor xmlns="urn:oasis:names:tc:SAML:2.0:metadata" entityID="https://sp">` +
-		`<SPSSODescriptor protocolSupportEnumeration="urn:oasis:names:tc:SAML:2.0:protocol" cacheDuration="PT1H"/>` +
-		`<AffiliationDescriptor affiliationOwnerID="https://sp" cacheDuration="PT2H"/>` +
+		`<SPSSODescriptor protocolSupportEnumeration="urn:oasis:names:tc:SAML:2.0:protocol"/>` +
+		`<AffiliationDescriptor affiliationOwnerID="https://sp"/>` +
 		`</EntityDescriptor>`
 
 	metadata := EntityDescriptor{}
 	assert.NilError(t, xml.Unmarshal([]byte(doc), &metadata))
-	assert.Assert(t, is.Len(metadata.SPSSODescriptors, 1))
-	assert.Check(t, is.Equal(Duration(time.Hour), metadata.SPSSODescriptors[0].CacheDuration))
-	assert.Assert(t, metadata.AffiliationDescriptor != nil)
-	assert.Check(t, is.Equal(Duration(2*time.Hour), metadata.AffiliationDescriptor.CacheDuration))
+	assert.Check(t, metadata.AffiliationDescriptor.CacheDuration == nil)
 
 	buf, err := xml.Marshal(metadata)
 	assert.NilError(t, err)
-	assert.Check(t, strings.Contains(string(buf), `cacheDuration="PT1H"`), string(buf))
-	assert.Check(t, strings.Contains(string(buf), `cacheDuration="PT2H"`), string(buf))
+	assert.Check(t, !strings.Contains(string(buf), `cacheDuration`), string(buf))
 
-	buf, err = xml.Marshal(EntityDescriptor{AffiliationDescriptor: &AffiliationDescriptor{}})
+	empty := XSDDuration("")
+	buf, err = xml.Marshal(AffiliationDescriptor{CacheDuration: &empty})
 	assert.NilError(t, err)
-	assert.Check(t, !strings.Contains(string(buf), `cacheDuration`), "a zero duration must be omitted: %s", buf)
+	assert.Check(t, !strings.Contains(string(buf), `cacheDuration`), string(buf))
 }
 
-func TestDurationJSONAcceptsXSDDuration(t *testing.T) {
-	var duration Duration
-	assert.NilError(t, json.Unmarshal([]byte(`"PT1H"`), &duration))
-	assert.Check(t, is.Equal(Duration(time.Hour), duration))
-}
-
-func TestRoleCacheDurationJSON(t *testing.T) {
-	// Stored services are JSON, written by earlier versions when this field was a time.Duration.
-	metadata := EntityDescriptor{}
-	assert.NilError(t, json.Unmarshal([]byte(`{"SPSSODescriptors":[{"CacheDuration":3600000000000}]}`), &metadata))
-	assert.Check(t, is.Equal(Duration(time.Hour), metadata.SPSSODescriptors[0].CacheDuration))
-
-	for _, duration := range []Duration{0, Duration(time.Hour)} {
-		buf, err := json.Marshal(SPSSODescriptor{SSODescriptor: SSODescriptor{RoleDescriptor: RoleDescriptor{CacheDuration: duration}}})
-		assert.NilError(t, err)
-		assert.Check(t, strings.Contains(string(buf), fmt.Sprintf(`"CacheDuration":%d`, int64(duration))), string(buf))
-
-		decoded := SPSSODescriptor{}
-		assert.NilError(t, json.Unmarshal(buf, &decoded))
-		assert.Check(t, is.Equal(duration, decoded.CacheDuration))
+func TestCacheDurationRejectsInvalidValue(t *testing.T) {
+	for _, value := range []string{"", "1h", "P", "PT1H "} {
+		doc := `<AffiliationDescriptor xmlns="urn:oasis:names:tc:SAML:2.0:metadata" affiliationOwnerID="https://sp" cacheDuration="` + value + `"/>`
+		assert.Check(t, xml.Unmarshal([]byte(doc), &AffiliationDescriptor{}) != nil, value)
 	}
+
+	var duration XSDDuration
+	assert.Check(t, json.Unmarshal([]byte(`"1h"`), &duration) != nil)
+	assert.Check(t, json.Unmarshal([]byte(`true`), &duration) != nil)
+}
+
+func TestCacheDurationJSON(t *testing.T) {
+	// Stored services are JSON, written by earlier versions when these fields were a time.Duration.
+	metadata := EntityDescriptor{}
+	assert.NilError(t, json.Unmarshal([]byte(`{"SPSSODescriptors":[{"CacheDuration":3600000000000}],"AffiliationDescriptor":{"CacheDuration":7200000000000}}`), &metadata))
+	assert.Check(t, is.Equal(XSDDuration("PT1H"), metadata.SPSSODescriptors[0].CacheDuration))
+	assert.Check(t, is.Equal(XSDDuration("PT2H"), *metadata.AffiliationDescriptor.CacheDuration))
+
+	legacy := EntityDescriptor{}
+	assert.NilError(t, json.Unmarshal([]byte(`{"SPSSODescriptors":[{"CacheDuration":0}],"AffiliationDescriptor":{"CacheDuration":0}}`), &legacy))
+	buf, err := xml.Marshal(legacy)
+	assert.NilError(t, err)
+	assert.Check(t, !strings.Contains(string(buf), `cacheDuration`), "an unset legacy duration must stay absent: %s", buf)
+
+	month := XSDDuration("P1M")
+	buf, err = json.Marshal(AffiliationDescriptor{CacheDuration: &month})
+	assert.NilError(t, err)
+	decoded := AffiliationDescriptor{}
+	assert.NilError(t, json.Unmarshal(buf, &decoded))
+	assert.Check(t, is.Equal(month, *decoded.CacheDuration))
+
+	buf, err = json.Marshal(AffiliationDescriptor{})
+	assert.NilError(t, err)
+	decoded = AffiliationDescriptor{}
+	assert.NilError(t, json.Unmarshal(buf, &decoded))
+	assert.Check(t, decoded.CacheDuration == nil)
 }
