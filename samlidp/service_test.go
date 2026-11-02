@@ -255,3 +255,29 @@ func TestPutServiceFailsWhenThePreviousRecordCannotBeRead(t *testing.T) {
 	_, err = test.Server.GetServiceProvider(nil, newEntityID)
 	assert.Check(t, is.Equal(os.ErrNotExist, err), "the new entity ID must not be registered")
 }
+
+func TestPutServiceRejectsUnrecognizedKeyUse(t *testing.T) {
+	test := NewServerTest(t)
+	metadata := func(use string) string {
+		return `<EntityDescriptor xmlns="urn:oasis:names:tc:SAML:2.0:metadata" entityID="https://use.example.com/metadata">` +
+			`<SPSSODescriptor protocolSupportEnumeration="urn:oasis:names:tc:SAML:2.0:protocol">` +
+			`<KeyDescriptor` + use + `/>` +
+			`<AssertionConsumerService Binding="urn:oasis:names:tc:SAML:2.0:bindings:HTTP-POST" Location="https://use.example.com/acs" index="1"/>` +
+			`</SPSSODescriptor></EntityDescriptor>`
+	}
+
+	for use, code := range map[string]int{
+		` use="both"`:       http.StatusBadRequest,
+		` use="Encryption"`: http.StatusBadRequest,
+		` use="encryption"`: http.StatusNoContent,
+		` use="signing"`:    http.StatusNoContent,
+		``:                  http.StatusNoContent,
+	} {
+		t.Run(use, func(t *testing.T) {
+			w := httptest.NewRecorder()
+			r, _ := http.NewRequest("PUT", "https://idp.example.com/services/use", strings.NewReader(metadata(use)))
+			test.Server.ServeHTTP(w, r)
+			assert.Check(t, is.Equal(code, w.Code))
+		})
+	}
+}

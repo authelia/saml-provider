@@ -1051,10 +1051,8 @@ func (req *IdpAuthnRequest) WriteResponse(w http.ResponseWriter) error {
 // to the SP in PEM format, or nil if no such certificate is found.
 func (req *IdpAuthnRequest) getSPEncryptionCert() (*x509.Certificate, error) {
 	certStr := ""
-	encryptionRequested := false
 	for _, keyDescriptor := range req.SPSSODescriptor.KeyDescriptors {
 		if keyDescriptor.Use == "encryption" {
-			encryptionRequested = true
 			if certStr = firstCertificateData(keyDescriptor); certStr != "" {
 				break
 			}
@@ -1076,8 +1074,8 @@ func (req *IdpAuthnRequest) getSPEncryptionCert() (*x509.Certificate, error) {
 	if certStr == "" {
 		// os.ErrNotExist makes the caller send the assertion in plaintext, which is not acceptable
 		// if the service provider asked for encryption with a key we are unable to use.
-		if encryptionRequested {
-			return nil, fmt.Errorf("service provider has an encryption key descriptor with no usable certificate")
+		if req.serviceProviderAcceptsEncryption() {
+			return nil, fmt.Errorf("service provider metadata allows encryption but has no usable certificate in the selected descriptor")
 		}
 		return nil, os.ErrNotExist
 	}
@@ -1093,6 +1091,24 @@ func (req *IdpAuthnRequest) getSPEncryptionCert() (*x509.Certificate, error) {
 		return nil, fmt.Errorf("cannot parse certificate: %v", err)
 	}
 	return cert, nil
+}
+
+// serviceProviderAcceptsEncryption returns true if any of the service provider's key descriptors
+// might be used for encryption, which includes any with an unrecognized use. This includes its other SPSSODescriptors, because the descriptor in use is
+// selected by the ACS in the unauthenticated request, which must not be able to avoid encryption.
+func (req *IdpAuthnRequest) serviceProviderAcceptsEncryption() bool {
+	descriptors := []SPSSODescriptor{*req.SPSSODescriptor}
+	if req.ServiceProviderMetadata != nil {
+		descriptors = append(descriptors, req.ServiceProviderMetadata.SPSSODescriptors...)
+	}
+	for _, descriptor := range descriptors {
+		for _, keyDescriptor := range descriptor.KeyDescriptors {
+			if keyDescriptor.Use != "signing" {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // firstCertificateData returns the data of the first non-empty certificate in the key descriptor,
