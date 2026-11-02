@@ -95,7 +95,7 @@ least the subset of SAML known as [interoperable SAML](https://kantarainitiative
 | Verify signed `Response` and `Assertion`     | N/A | ✅  |
 | Sign `AuthnRequest`                          | N/A | ✅  |
 | Verify signed `AuthnRequest`                 | ❌  | N/A |
-| RSA and ECDSA signatures (SHA-1/256/384/512) | ✅  | ✅  |
+| RSA and ECDSA signatures (SHA-1/256/384/512) | ⚠️  | ✅  |
 | Encrypt `Assertion`                          | ⚠️  | N/A |
 | Decrypt `EncryptedAssertion`                 | N/A | ⚠️  |
 | `EncryptedID` and `EncryptedAttribute`       | ❌  | ❌  |
@@ -129,7 +129,9 @@ least the subset of SAML known as [interoperable SAML](https://kantarainitiative
 - **Replay detection:** `AuthnRequest` IDs are not checked for reuse.
 - **Encrypt `Assertion`:** encryption always uses AES-128-CBC with RSA-OAEP-MGF1P (SHA-1), regardless of the
   `EncryptionMethod` the SP advertises, and cannot be configured.
-- **Signature defaults:** `SignatureMethod` defaults to RSA-SHA1; set it explicitly to use a stronger algorithm.
+- **Signature defaults:** `SignatureMethod` defaults to RSA-SHA256, and SHA-1 is only used if set explicitly.
+- **ECDSA signatures:** only available through `Signer` with an explicit `SignatureMethod`. They are written in DER rather
+  than the `r||s` form XML Signature requires, so other implementations may reject them.
 
 ### Service Provider Limitations
 
