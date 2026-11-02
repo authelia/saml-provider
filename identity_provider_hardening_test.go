@@ -304,3 +304,22 @@ func TestNewIdpAuthnRequestLimitsPostBody(t *testing.T) {
 		assert.Check(t, is.Error(err, "missing form body"))
 	})
 }
+
+func TestIDPMaxAuthnRequestAge(t *testing.T) {
+	test := NewIdentityProviderTest(t, applyKey)
+	old := hardeningRequest(`ID="id-1"`, TimeNow().Add(-4*time.Minute), hardeningIssuer)
+
+	_, err := hardeningValidate(test, old)
+	assert.Check(t, is.ErrorContains(err, "expired"), "the default age limit is MaxIssueDelay")
+
+	test.IDP.MaxAuthnRequestAge = 5 * time.Minute
+	req, err := hardeningValidate(test, old)
+	assert.NilError(t, err)
+	assert.NilError(t, DefaultAssertionMaker{}.MakeAssertion(req, &Session{ID: "f00d", NameID: "alice"}))
+	assert.Check(t, req.Assertion.Conditions.NotOnOrAfter.Equal(TimeNow().Add(MaxIssueDelay)),
+		"an old request must not shorten the assertion lifetime")
+
+	test.IDP.MaxAuthnRequestAge = 3 * time.Minute
+	_, err = hardeningValidate(test, old)
+	assert.Check(t, is.ErrorContains(err, "expired"))
+}

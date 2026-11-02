@@ -92,6 +92,20 @@ func (s *Server) HandleDeleteShortcut(w http.ResponseWriter, r *http.Request) {
 // the specified shortcut, generates the appropriate SAML assertion and redirects the
 // user via the HTTP-POST binding to the service providers ACS URL.
 func (s *Server) HandleIDPInitiated(w http.ResponseWriter, r *http.Request) {
+	// A browser would resolve these against the login form's URL, moving it off this path.
+	if isDotSegment(r.PathValue("shortcut")) || isDotSegment(r.PathValue("suffix")) {
+		http.Error(w, http.StatusText(http.StatusBadRequest), http.StatusBadRequest)
+		return
+	}
+
+	// The login form posts back here, and GetSession reads the credentials from r.PostForm.
+	if r.Method == http.MethodPost {
+		if err := r.ParseForm(); err != nil {
+			http.Error(w, http.StatusText(http.StatusBadRequest), http.StatusBadRequest)
+			return
+		}
+	}
+
 	shortcutName := r.PathValue("shortcut")
 	shortcut := Shortcut{}
 	if err := s.Store.Get(fmt.Sprintf("/shortcuts/%s", shortcutName), &shortcut); err != nil {
@@ -110,7 +124,11 @@ func (s *Server) HandleIDPInitiated(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	s.idpConfigMu.RLock()
-	defer s.idpConfigMu.RUnlock()
+	// Do not hold idpConfigMu here: GetServiceProvider takes it, and a recursive read lock deadlocks
+	// if a writer queues in between.
 	s.IDP.ServeIDPInitiated(w, r, shortcut.ServiceProviderID, relayState)
+}
+
+func isDotSegment(segment string) bool {
+	return segment == "." || segment == ".."
 }

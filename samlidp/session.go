@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"html/template"
 	"net/http"
+	"net/url"
 	"time"
 
 	"golang.org/x/crypto/bcrypt"
@@ -72,7 +73,10 @@ func (s *Server) GetSession(w http.ResponseWriter, r *http.Request, req *saml.Id
 			Value:    session.ID,
 			MaxAge:   int(sessionMaxAge.Seconds()),
 			HttpOnly: true,
-			Secure:   r.URL.Scheme == "https",
+			// r.URL.Scheme is empty on server requests. The configured URL covers TLS terminated
+			// by a proxy.
+			Secure:   r.TLS != nil || s.IDP.SSOURL.Scheme == "https",
+			SameSite: http.SameSiteLaxMode,
 			Path:     "/",
 		})
 
@@ -129,7 +133,7 @@ func (s *Server) sendLoginForm(w http.ResponseWriter, req *saml.IdpAuthnRequest,
 		RelayState  string
 	}{
 		Toast:       toast,
-		URL:         req.IDP.LoginURL.String(),
+		URL:         loginFormURL(req),
 		SAMLRequest: base64.StdEncoding.EncodeToString(req.RequestBuffer),
 		RelayState:  req.RelayState,
 	}
@@ -137,6 +141,30 @@ func (s *Server) sendLoginForm(w http.ResponseWriter, req *saml.IdpAuthnRequest,
 	if err := tmpl.Execute(w, data); err != nil {
 		panic(err)
 	}
+}
+
+// loginFormURL returns where the login form posts to, which resumes whichever flow is in progress
+// once the session exists.
+func loginFormURL(req *saml.IdpAuthnRequest) string {
+	if len(req.RequestBuffer) != 0 {
+		return req.IDP.SSOURL.String()
+	}
+	if req.HTTPRequest != nil {
+		if shortcut := req.HTTPRequest.PathValue("shortcut"); shortcut != "" {
+			// These are decoded values chosen by whoever wrote the link, so they are escaped rather
+			// than cleaned to keep the form, and the password, on the shortcut's own path.
+			u := req.IDP.LoginURL
+			u.RawPath = u.EscapedPath()
+			for _, segment := range []string{shortcut, req.HTTPRequest.PathValue("suffix")} {
+				if segment != "" {
+					u.Path += "/" + segment
+					u.RawPath += "/" + url.PathEscape(segment)
+				}
+			}
+			return u.String()
+		}
+	}
+	return req.IDP.LoginURL.String()
 }
 
 // HandleLogin handles the `POST /login` and `GET /login` forms. If credentials are present

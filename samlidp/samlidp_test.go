@@ -109,6 +109,8 @@ func NewServerTest(t *testing.T) *ServerTest {
 		panic(err)
 	}
 
+	test.Server.AdminAuthorizer = func(*http.Request) bool { return true }
+
 	test.SP.IDPMetadata = test.Server.IDP.Metadata()
 	test.Server.serviceProviders["https://sp.example.com/saml2/metadata"] = test.SP.Metadata()
 	return &test
@@ -136,7 +138,7 @@ func TestHTTPCanSSORequest(t *testing.T) {
 	test.Server.ServeHTTP(w, r)
 	assert.Check(t, is.Equal(http.StatusOK, w.Code))
 	assert.Check(t,
-		strings.HasPrefix(w.Body.String(), "<html><p></p><form method=\"post\" action=\"https://idp.example.com/login\">"),
+		strings.HasPrefix(w.Body.String(), "<html><p></p><form method=\"post\" action=\"https://idp.example.com/sso\">"),
 		w.Body.String())
 	golden.Assert(t, w.Body.String(), "http_sso_response.html")
 }

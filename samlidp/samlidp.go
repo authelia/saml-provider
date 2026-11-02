@@ -10,6 +10,7 @@ import (
 	"net/url"
 	"strings"
 	"sync"
+	"time"
 
 	"authelia.com/provider/saml"
 	"authelia.com/provider/saml/logger"
@@ -17,13 +18,20 @@ import (
 
 // Options represent the parameters to New() for creating a new IDP server
 type Options struct {
-	URL               url.URL
-	Key               crypto.PrivateKey
-	Signer            crypto.Signer
-	Logger            logger.Interface
-	Certificate       *x509.Certificate
-	Store             Store
+	URL         url.URL
+	Key         crypto.PrivateKey
+	Signer      crypto.Signer
+	Logger      logger.Interface
+	Certificate *x509.Certificate
+	Store       Store
+
+	// LoginFormTemplate replaces the login form. It must post to {{.URL}} and include the
+	// SAMLRequest and RelayState hidden fields, which resume the flow once the user has logged in.
 	LoginFormTemplate *template.Template
+
+	// AdminAuthorizer decides whether a request may use the /services, /users, /sessions and
+	// /shortcuts interfaces. If it is nil, every such request is refused.
+	AdminAuthorizer func(r *http.Request) bool
 }
 
 // Server represents an IDP server. The server provides the following URLs:
@@ -36,6 +44,9 @@ type Options struct {
 //	/users        - RESTful interface to User objects
 //	/sessions     - RESTful interface to Session objects
 //	/shortcuts    - RESTful interface to Shortcut objects
+//
+// The RESTful interfaces can create users, read session identifiers and redirect assertions, so
+// they respond with 403 Forbidden unless AdminAuthorizer approves the request.
 type Server struct {
 	http.Handler
 	idpConfigMu       sync.RWMutex // protects calls into the IDP
@@ -44,7 +55,12 @@ type Server struct {
 	IDP               saml.IdentityProvider // the underlying IDP
 	Store             Store                 // the data store
 	LoginFormTemplate *template.Template
+	AdminAuthorizer   func(r *http.Request) bool // approves requests to the RESTful interfaces
 }
+
+// maxLoginDuration is how long a user has to complete the login form. The form re-presents the
+// original AuthnRequest, which must still be acceptable when the credentials arrive.
+const maxLoginDuration = 5 * time.Minute
 
 // New returns a new Server
 func New(opts Options) (*Server, error) {
@@ -71,10 +87,13 @@ func New(opts Options) (*Server, error) {
 			MetadataURL: metadataURL,
 			SSOURL:      ssoURL,
 			LoginURL:    loginURL,
+
+			MaxAuthnRequestAge: maxLoginDuration,
 		},
 		logger:            logr,
 		Store:             opts.Store,
 		LoginFormTemplate: opts.LoginFormTemplate,
+		AdminAuthorizer:   opts.AdminAuthorizer,
 	}
 
 	s.IDP.SessionProvider = s
@@ -107,23 +126,33 @@ func (s *Server) InitializeHTTP() {
 	mux.HandleFunc("/login/{shortcut}", s.HandleIDPInitiated)
 	mux.HandleFunc("/login/{shortcut}/{suffix}", s.HandleIDPInitiated)
 
-	mux.HandleFunc("GET /services/", s.HandleListServices)
-	mux.HandleFunc("GET /services/{id}", s.HandleGetService)
-	mux.HandleFunc("PUT /services/{id}", s.HandlePutService)
-	mux.HandleFunc("POST /services/{id}", s.HandlePutService)
-	mux.HandleFunc("DELETE /services/{id}", s.HandleDeleteService)
+	admin := func(pattern string, handler http.HandlerFunc) {
+		mux.HandleFunc(pattern, func(w http.ResponseWriter, r *http.Request) {
+			if s.AdminAuthorizer == nil || !s.AdminAuthorizer(r) {
+				http.Error(w, http.StatusText(http.StatusForbidden), http.StatusForbidden)
+				return
+			}
+			handler(w, r)
+		})
+	}
 
-	mux.HandleFunc("GET /users/", s.HandleListUsers)
-	mux.HandleFunc("GET /users/{id}", s.HandleGetUser)
-	mux.HandleFunc("PUT /users/{id}", s.HandlePutUser)
-	mux.HandleFunc("DELETE /users/{id}", s.HandleDeleteUser)
+	admin("GET /services/", s.HandleListServices)
+	admin("GET /services/{id}", s.HandleGetService)
+	admin("PUT /services/{id}", s.HandlePutService)
+	admin("POST /services/{id}", s.HandlePutService)
+	admin("DELETE /services/{id}", s.HandleDeleteService)
 
-	mux.HandleFunc("GET /sessions/", s.HandleListSessions)
-	mux.HandleFunc("GET /sessions/{id}", s.HandleGetSession)
-	mux.HandleFunc("DELETE /sessions/{id}", s.HandleDeleteSession)
+	admin("GET /users/", s.HandleListUsers)
+	admin("GET /users/{id}", s.HandleGetUser)
+	admin("PUT /users/{id}", s.HandlePutUser)
+	admin("DELETE /users/{id}", s.HandleDeleteUser)
 
-	mux.HandleFunc("GET /shortcuts/", s.HandleListShortcuts)
-	mux.HandleFunc("GET /shortcuts/{id}", s.HandleGetShortcut)
-	mux.HandleFunc("PUT /shortcuts/{id}", s.HandlePutShortcut)
-	mux.HandleFunc("DELETE /shortcuts/{id}", s.HandleDeleteShortcut)
+	admin("GET /sessions/", s.HandleListSessions)
+	admin("GET /sessions/{id}", s.HandleGetSession)
+	admin("DELETE /sessions/{id}", s.HandleDeleteSession)
+
+	admin("GET /shortcuts/", s.HandleListShortcuts)
+	admin("GET /shortcuts/{id}", s.HandleGetShortcut)
+	admin("PUT /shortcuts/{id}", s.HandlePutShortcut)
+	admin("DELETE /shortcuts/{id}", s.HandleDeleteShortcut)
 }
