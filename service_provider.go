@@ -1849,7 +1849,68 @@ func unmarshalElement(el *etree.Element, v interface{}) error {
 	if err != nil {
 		return err
 	}
+
+	// This has to follow elementToBytes, which adds declarations to the root of the subtree.
+	doc := etree.NewDocument()
+	if err := doc.ReadFromBytes(buf); err != nil {
+		return err
+	}
+	doc.SetRoot(removeUnusedNamespaceDeclarations(doc.Root()))
+	if buf, err = doc.WriteToBytes(); err != nil {
+		return err
+	}
 	return xml.Unmarshal(buf, v)
+}
+
+// removeUnusedNamespaceDeclarations returns a copy of el without the namespace declarations that its
+// elements and attributes don't use.
+//
+// Exclusive canonicalization omits these, so a signature doesn't cover them. They must be removed
+// before using encoding/xml, which also matches a struct's attributes against xmlns:name.
+func removeUnusedNamespaceDeclarations(el *etree.Element) *etree.Element {
+	stripped := el.Copy()
+	stripUnusedNamespaceDeclarations(stripped)
+	return stripped
+}
+
+// stripUnusedNamespaceDeclarations modifies el, and returns the prefixes that it uses but doesn't declare.
+func stripUnusedNamespaceDeclarations(el *etree.Element) map[string]struct{} {
+	used := map[string]struct{}{}
+	if el.Space != "" {
+		used[el.Space] = struct{}{}
+	}
+	for _, attr := range el.Attr {
+		if attr.Space != "" && attr.Space != "xmlns" {
+			used[attr.Space] = struct{}{}
+		}
+	}
+	for _, child := range el.ChildElements() {
+		// An enveloped signature doesn't cover itself, so using a prefix in there doesn't bring a
+		// declaration of it under the signature. This has to be checked first, while child can still
+		// resolve its namespace.
+		signature := child.Tag == "Signature" && child.NamespaceURI() == dsig.Namespace
+		childUsed := stripUnusedNamespaceDeclarations(child)
+		if signature {
+			continue
+		}
+		for prefix := range childUsed {
+			used[prefix] = struct{}{}
+		}
+	}
+
+	declared := make([]etree.Attr, 0, len(el.Attr))
+	declared = append(declared, el.Attr...)
+	for _, attr := range declared {
+		if attr.Space != "xmlns" {
+			continue
+		}
+		if _, ok := used[attr.Key]; ok {
+			delete(used, attr.Key)
+		} else {
+			el.RemoveAttr(attr.FullKey())
+		}
+	}
+	return used
 }
 
 func elementToString(el *etree.Element) string {
