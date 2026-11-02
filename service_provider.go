@@ -85,8 +85,9 @@ type ServiceProvider struct {
 	Certificate   *x509.Certificate
 	Intermediates []*x509.Certificate
 
-	// HTTPClient to use during SAML artifact resolution. It should have a timeout, and its
-	// CheckRedirect is not used because redirects are not followed.
+	// HTTPClient to use during SAML artifact resolution. It should have a timeout, as the default of
+	// 30 seconds only applies when this is not set. Its CheckRedirect is not used because redirects
+	// are not followed.
 	HTTPClient *http.Client
 
 	// MetadataURL is the full URL to the metadata endpoint on this host,
@@ -752,6 +753,14 @@ func (sp *ServiceProvider) ParseResponse(req *http.Request, possibleRequestIDs [
 	return sp.parseResponseHTTP(req, possibleRequestIDs)
 }
 
+// These are variables so that they can be changed by tests.
+var (
+	// maxArtifactResponseSize limits the size of a response to an ArtifactResolve.
+	maxArtifactResponseSize int64 = 10 * 1024 * 1024
+	// defaultArtifactResolutionTimeout is used if neither HTTPClient nor http.DefaultClient has a timeout.
+	defaultArtifactResolutionTimeout = 30 * time.Second
+)
+
 func (sp *ServiceProvider) handleArtifactRequest(ctx context.Context, artifactID string, possibleRequestIDs []string) (*Assertion, error) {
 	retErr := &InvalidResponseError{Now: TimeNow()}
 
@@ -776,6 +785,9 @@ func (sp *ServiceProvider) handleArtifactRequest(ctx context.Context, artifactID
 	req.Header.Set("Content-Type", "text/xml")
 
 	httpClient := *http.DefaultClient
+	if httpClient.Timeout == 0 {
+		httpClient.Timeout = defaultArtifactResolutionTimeout
+	}
 	if sp.HTTPClient != nil {
 		httpClient = *sp.HTTPClient
 	}
@@ -797,9 +809,13 @@ func (sp *ServiceProvider) handleArtifactRequest(ctx context.Context, artifactID
 		retErr.PrivateErr = fmt.Errorf("Error during artifact resolution: HTTP status %d (%s)", response.StatusCode, response.Status)
 		return nil, retErr
 	}
-	responseBody, err := io.ReadAll(response.Body)
+	responseBody, err := io.ReadAll(io.LimitReader(response.Body, maxArtifactResponseSize+1))
 	if err != nil {
 		retErr.PrivateErr = fmt.Errorf("Error during artifact resolution: %s", err)
+		return nil, retErr
+	}
+	if int64(len(responseBody)) > maxArtifactResponseSize {
+		retErr.PrivateErr = fmt.Errorf("Error during artifact resolution: response too large, the limit is %d bytes", maxArtifactResponseSize)
 		return nil, retErr
 	}
 	assertion, err := sp.ParseXMLArtifactResponse(responseBody, possibleRequestIDs, artifactResolveRequest.ID, *req.URL)

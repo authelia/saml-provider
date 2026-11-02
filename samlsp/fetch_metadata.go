@@ -9,6 +9,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"time"
 
 	xrv "github.com/mattermost/xml-roundtrip-validator"
 
@@ -51,8 +52,25 @@ func ParseMetadata(data []byte) (*saml.EntityDescriptor, error) {
 	return entity, nil
 }
 
+// These are variables so that they can be changed by tests.
+var (
+	// maxMetadataSize limits the size of fetched metadata, and allows for large federations.
+	maxMetadataSize int64 = 256 * 1024 * 1024
+	// defaultFetchMetadataTimeout is used if httpClient is nil.
+	defaultFetchMetadataTimeout = 30 * time.Second
+)
+
 // FetchMetadata returns metadata from an IDP metadata URL.
+//
+// The metadata decides which keys are trusted, so the URL should be one the operator has chosen and
+// should use TLS. Redirects are followed according to httpClient, including to other hosts, and its
+// CheckRedirect can restrict them. If httpClient is nil then a client with a timeout of 30 seconds is
+// used. Otherwise, httpClient or ctx should have a timeout, which http.DefaultClient does not.
 func FetchMetadata(ctx context.Context, httpClient *http.Client, metadataURL url.URL) (*saml.EntityDescriptor, error) {
+	if httpClient == nil {
+		httpClient = &http.Client{Timeout: defaultFetchMetadataTimeout}
+	}
+
 	req, err := http.NewRequest("GET", metadataURL.String(), nil)
 	if err != nil {
 		return nil, err
@@ -72,9 +90,12 @@ func FetchMetadata(ctx context.Context, httpClient *http.Client, metadataURL url
 		return nil, fmt.Errorf("failed to fetch metadata: unexpected status code %d", resp.StatusCode)
 	}
 
-	data, err := io.ReadAll(resp.Body)
+	data, err := io.ReadAll(io.LimitReader(resp.Body, maxMetadataSize+1))
 	if err != nil {
 		return nil, err
+	}
+	if int64(len(data)) > maxMetadataSize {
+		return nil, fmt.Errorf("failed to fetch metadata: too large, the limit is %d bytes", maxMetadataSize)
 	}
 
 	return ParseMetadata(data)
