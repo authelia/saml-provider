@@ -85,7 +85,8 @@ type ServiceProvider struct {
 	Certificate   *x509.Certificate
 	Intermediates []*x509.Certificate
 
-	// HTTPClient to use during SAML artifact resolution
+	// HTTPClient to use during SAML artifact resolution. It should have a timeout, and its
+	// CheckRedirect is not used because redirects are not followed.
 	HTTPClient *http.Client
 
 	// MetadataURL is the full URL to the metadata endpoint on this host,
@@ -774,11 +775,15 @@ func (sp *ServiceProvider) handleArtifactRequest(ctx context.Context, artifactID
 	}
 	req.Header.Set("Content-Type", "text/xml")
 
-	httpClient := sp.HTTPClient
-	if httpClient == nil {
-		httpClient = http.DefaultClient
+	httpClient := *http.DefaultClient
+	if sp.HTTPClient != nil {
+		httpClient = *sp.HTTPClient
 	}
-	response, err := httpClient.Do(req) //nolint:gosec // G704: the URL is from the IdP metadata, and the artifact is only in the body.
+	// A redirect would send the signed request somewhere other than the location in the metadata.
+	httpClient.CheckRedirect = func(*http.Request, []*http.Request) error {
+		return http.ErrUseLastResponse
+	}
+	response, err := httpClient.Do(req) //nolint:gosec // G704: the URL is from the IdP metadata, redirects are not followed, and the artifact is only in the body.
 	if err != nil {
 		retErr.PrivateErr = fmt.Errorf("cannot resolve artifact: %s", err)
 		return nil, retErr
