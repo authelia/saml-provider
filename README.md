@@ -95,10 +95,16 @@ least the subset of SAML known as [interoperable SAML](https://kantarainitiative
 | Verify signed `Response` and `Assertion`     | N/A | ✅  |
 | Sign `AuthnRequest`                          | N/A | ✅  |
 | Verify signed `AuthnRequest`                 | ❌  | N/A |
-| RSA and ECDSA signatures (SHA-1/256/384/512) | ⚠️  | ⚠️  |
+| RSA signatures (SHA-1/256/384/512)           | ✅  | ✅  |
+| ECDSA signatures (SHA-1/256/384/512)[^ecdsa] | ⚠️  | ⚠️  |
 | Encrypt `Assertion`                          | ⚠️  | N/A |
 | Decrypt `EncryptedAssertion`                 | N/A | ⚠️  |
 | `EncryptedID` and `EncryptedAttribute`       | ❌  | ❌  |
+
+[^ecdsa]: The `r||s` signature encoding XML Signature requires is not supported. Signatures are written in DER, so other
+    implementations may reject them, and the default SP verifier rejects standards-compliant signatures unless
+    `SignatureVerifier` is set. An IdP cannot sign with an ECDSA `Key` and must use `Signer` with an explicit
+    `SignatureMethod`. ECDSA keys cannot be used for assertion encryption or decryption, which require RSA.
 
 #### Metadata
 
