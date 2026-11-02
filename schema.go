@@ -771,6 +771,12 @@ func (a *Assertion) Element() *etree.Element {
 	if err != nil {
 		panic(err)
 	}
+	// Canonicalization removes the declaration of the xs prefix, because it is only used in the value
+	// of xsi:type, but an encrypted assertion stands alone once decrypted and must declare it. This
+	// does not affect the signature, because canonicalization removes it again when verifying.
+	if len(a.AttributeStatements) != 0 {
+		el.CreateAttr("xmlns:xs", "http://www.w3.org/2001/XMLSchema")
+	}
 	return el
 }
 
@@ -1244,7 +1250,9 @@ func (a *AttributeValue) Element() *etree.Element {
 	el := etree.NewElement("saml:AttributeValue")
 	el.CreateAttr("xmlns:xsi", "http://www.w3.org/2001/XMLSchema-instance")
 	el.CreateAttr("xmlns:xs", "http://www.w3.org/2001/XMLSchema")
-	el.CreateAttr("xsi:type", a.Type)
+	if a.Type != "" {
+		el.CreateAttr("xsi:type", a.Type)
+	}
 	if a.NameID != nil {
 		el.AddChild(a.NameID.Element())
 	}

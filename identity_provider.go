@@ -310,27 +310,7 @@ func (idp *IdentityProvider) ServeIDPInitiated(w http.ResponseWriter, r *http.Re
 	}
 
 	// find an ACS endpoint that we can use
-	for _, spssoDescriptor := range req.ServiceProviderMetadata.SPSSODescriptors {
-		for _, endpoint := range spssoDescriptor.AssertionConsumerServices {
-			if endpoint.Binding == HTTPPostBinding {
-				// explicitly copy loop iterator variables
-				//
-				// c.f. https://github.com/golang/go/wiki/CommonMistakes#using-reference-to-loop-iterator-variable
-				//
-				// (note that I'm pretty sure this isn't strictly necessary because we break out of the loop immediately,
-				// but it certainly doesn't hurt anything and may prevent bugs in the future.)
-				endpoint, spssoDescriptor := endpoint, spssoDescriptor
-
-				req.ACSEndpoint = &endpoint
-				req.SPSSODescriptor = &spssoDescriptor
-				break
-			}
-		}
-		if req.ACSEndpoint != nil {
-			break
-		}
-	}
-	if req.ACSEndpoint == nil {
+	if err := req.useDefaultACSEndpoint(); err != nil {
 		idp.Logger.Printf("saml metadata does not contain an Assertion Customer Service url")
 		http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
 		return
@@ -534,94 +514,61 @@ func isValidAuthnRequestID(id string) bool {
 	return true
 }
 
+// getACSEndpoint finds the endpoint to deliver the response to. HTTP-POST is the only binding this
+// identity provider can send a response with, so other endpoints are never selected.
 func (req *IdpAuthnRequest) getACSEndpoint() error {
-	if req.Request.AssertionConsumerServiceIndex != "" {
-		for _, spssoDescriptor := range req.ServiceProviderMetadata.SPSSODescriptors {
-			for _, spAssertionConsumerService := range spssoDescriptor.AssertionConsumerServices {
-				if strconv.Itoa(spAssertionConsumerService.Index) == req.Request.AssertionConsumerServiceIndex {
-					// explicitly copy loop iterator variables
-					//
-					// c.f. https://github.com/golang/go/wiki/CommonMistakes#using-reference-to-loop-iterator-variable
-					//
-					// (note that I'm pretty sure this isn't strictly necessary because we break out of the loop immediately,
-					// but it certainly doesn't hurt anything and may prevent bugs in the future.)
-					spssoDescriptor, spAssertionConsumerService := spssoDescriptor, spAssertionConsumerService
+	index, location := req.Request.AssertionConsumerServiceIndex, req.Request.AssertionConsumerServiceURL
 
-					req.SPSSODescriptor = &spssoDescriptor
-					req.ACSEndpoint = &spAssertionConsumerService
-					return nil
-				}
-			}
-		}
-	}
-
-	if req.Request.AssertionConsumerServiceURL != "" {
-		for _, spssoDescriptor := range req.ServiceProviderMetadata.SPSSODescriptors {
-			for _, spAssertionConsumerService := range spssoDescriptor.AssertionConsumerServices {
-				if spAssertionConsumerService.Location == req.Request.AssertionConsumerServiceURL {
-					// explicitly copy loop iterator variables
-					//
-					// c.f. https://github.com/golang/go/wiki/CommonMistakes#using-reference-to-loop-iterator-variable
-					//
-					// (note that I'm pretty sure this isn't strictly necessary because we break out of the loop immediately,
-					// but it certainly doesn't hurt anything and may prevent bugs in the future.)
-					spssoDescriptor, spAssertionConsumerService := spssoDescriptor, spAssertionConsumerService
-
-					req.SPSSODescriptor = &spssoDescriptor
-					req.ACSEndpoint = &spAssertionConsumerService
-					return nil
-				}
-			}
-		}
-	}
-
-	// Some service providers, like the Microsoft Azure AD service provider, issue
-	// assertion requests that don't specify an ACS url at all.
-	if req.Request.AssertionConsumerServiceURL == "" && req.Request.AssertionConsumerServiceIndex == "" {
-		// find a default ACS binding in the metadata that we can use
-		for _, spssoDescriptor := range req.ServiceProviderMetadata.SPSSODescriptors {
-			for _, spAssertionConsumerService := range spssoDescriptor.AssertionConsumerServices {
-				if spAssertionConsumerService.IsDefault != nil && *spAssertionConsumerService.IsDefault {
-					switch spAssertionConsumerService.Binding {
-					case HTTPPostBinding, HTTPRedirectBinding:
-						// explicitly copy loop iterator variables
-						//
-						// c.f. https://github.com/golang/go/wiki/CommonMistakes#using-reference-to-loop-iterator-variable
-						//
-						// (note that I'm pretty sure this isn't strictly necessary because we break out of the loop immediately,
-						// but it certainly doesn't hurt anything and may prevent bugs in the future.)
-						spssoDescriptor, spAssertionConsumerService := spssoDescriptor, spAssertionConsumerService
-
-						req.SPSSODescriptor = &spssoDescriptor
-						req.ACSEndpoint = &spAssertionConsumerService
+	if index != "" || location != "" {
+		for _, match := range []func(endpoint IndexedEndpoint) bool{
+			func(endpoint IndexedEndpoint) bool { return index != "" && strconv.Itoa(endpoint.Index) == index },
+			func(endpoint IndexedEndpoint) bool { return location != "" && endpoint.Location == location },
+		} {
+			for _, spssoDescriptor := range req.ServiceProviderMetadata.SPSSODescriptors {
+				for _, endpoint := range spssoDescriptor.AssertionConsumerServices {
+					if endpoint.Binding == HTTPPostBinding && match(endpoint) {
+						req.SPSSODescriptor, req.ACSEndpoint = &spssoDescriptor, &endpoint
 						return nil
 					}
 				}
 			}
 		}
+		return os.ErrNotExist
+	}
 
-		// if we can't find a default, use *any* ACS binding
-		for _, spssoDescriptor := range req.ServiceProviderMetadata.SPSSODescriptors {
-			for _, spAssertionConsumerService := range spssoDescriptor.AssertionConsumerServices {
-				switch spAssertionConsumerService.Binding {
-				case HTTPPostBinding, HTTPRedirectBinding:
-					// explicitly copy loop iterator variables
-					//
-					// c.f. https://github.com/golang/go/wiki/CommonMistakes#using-reference-to-loop-iterator-variable
-					//
-					// (note that I'm pretty sure this isn't strictly necessary because we break out of the loop immediately,
-					// but it certainly doesn't hurt anything and may prevent bugs in the future.)
-					spssoDescriptor, spAssertionConsumerService := spssoDescriptor, spAssertionConsumerService
+	// Some service providers, like the Microsoft Azure AD service provider, issue
+	// assertion requests that don't specify an ACS url at all.
+	return req.useDefaultACSEndpoint()
+}
 
-					req.SPSSODescriptor = &spssoDescriptor
-					req.ACSEndpoint = &spAssertionConsumerService
-					return nil
-				}
-			}
+// useDefaultACSEndpoint selects the default HTTP-POST endpoint as defined by SAMLMetadata §2.2.3: the
+// first with isDefault set to true, otherwise the first without isDefault set to false, otherwise
+// the first.
+func (req *IdpAuthnRequest) useDefaultACSEndpoint() error {
+	preference := func(endpoint IndexedEndpoint) int {
+		switch {
+		case endpoint.IsDefault == nil:
+			return 2
+		case *endpoint.IsDefault:
+			return 3
+		default:
+			return 1
 		}
 	}
 
-	return os.ErrNotExist // no ACS url found or specified
+	best := 0
+	for _, spssoDescriptor := range req.ServiceProviderMetadata.SPSSODescriptors {
+		for _, endpoint := range spssoDescriptor.AssertionConsumerServices {
+			if endpoint.Binding == HTTPPostBinding && preference(endpoint) > best {
+				best = preference(endpoint)
+				req.SPSSODescriptor, req.ACSEndpoint = &spssoDescriptor, &endpoint
+			}
+		}
+	}
+	if best == 0 {
+		return os.ErrNotExist
+	}
+	return nil
 }
 
 // DefaultAssertionMaker produces a SAML assertion for the
@@ -908,11 +855,11 @@ func (DefaultAssertionMaker) MakeAssertion(req *IdpAuthnRequest, session *Sessio
 				},
 			},
 		},
-		AttributeStatements: []AttributeStatement{
-			{
-				Attributes: attributes,
-			},
-		},
+	}
+
+	// SAMLCore §2.7.3 requires an AttributeStatement to contain at least one attribute.
+	if len(attributes) != 0 {
+		req.Assertion.AttributeStatements = []AttributeStatement{{Attributes: attributes}}
 	}
 
 	return nil

@@ -1,6 +1,8 @@
 package saml
 
 import (
+	"encoding/json"
+	"encoding/xml"
 	"fmt"
 	"regexp"
 	"strconv"
@@ -124,5 +126,50 @@ func (d *Duration) UnmarshalText(text []byte) error {
 	}
 
 	*d = Duration(sign * out)
+	return nil
+}
+
+// XSDDuration is an xsd:duration kept in its original lexical form, so that calendar components such as
+// months survive parsing and emission. The empty value means the duration is absent.
+type XSDDuration string
+
+// MarshalXMLAttr implements the xml.MarshalerAttr interface. The attribute is omitted if the value is empty.
+func (d XSDDuration) MarshalXMLAttr(name xml.Name) (xml.Attr, error) {
+	if d == "" {
+		return xml.Attr{}, nil
+	}
+	return xml.Attr{Name: name, Value: string(d)}, nil
+}
+
+// UnmarshalText implements the encoding.TextUnmarshaler interface.
+func (d *XSDDuration) UnmarshalText(text []byte) error {
+	if err := new(Duration).UnmarshalText([]byte(string(text))); err != nil {
+		return err
+	}
+	*d = XSDDuration(text)
+	return nil
+}
+
+// UnmarshalJSON implements the json.Unmarshaler interface. It also accepts the number of nanoseconds written
+// when this field was a time.Duration, where zero means the duration is absent.
+func (d *XSDDuration) UnmarshalJSON(data []byte) error {
+	var text string
+	if err := json.Unmarshal(data, &text); err == nil {
+		if text == "" {
+			*d = ""
+			return nil
+		}
+		return d.UnmarshalText([]byte(text))
+	}
+
+	var nanoseconds int64
+	if err := json.Unmarshal(data, &nanoseconds); err != nil {
+		return err
+	}
+	out, err := Duration(nanoseconds).MarshalText()
+	if err != nil {
+		return err
+	}
+	*d = XSDDuration(out)
 	return nil
 }
