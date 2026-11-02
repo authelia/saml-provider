@@ -74,7 +74,7 @@ func TestValidateLogoutResponseUsesSignedAttributesWhenSignaturePrefixIsRebound(
 			altered := rebindSignaturePrefix(t, body, "<samlp:LogoutResponse ",
 				`xmlns:Destination="`+test.SP.SloURL.String()+`"`, "Destination", prefix)
 
-			err := test.SP.ValidateLogoutResponseForm(base64.StdEncoding.EncodeToString([]byte(altered)))
+			err := test.SP.ValidateLogoutResponseForm(base64.StdEncoding.EncodeToString([]byte(altered)), []string{"id-request"})
 			assert.Check(t, is.ErrorContains(err, "Destination"))
 		})
 	}
@@ -136,7 +136,7 @@ func TestSignatureVerifierPathIgnoresReboundSignaturePrefix(t *testing.T) {
 			altered := rebindSignaturePrefix(t, body, "<samlp:LogoutResponse ",
 				`xmlns:Destination="`+test.SP.SloURL.String()+`"`, "Destination", prefix)
 
-			err := test.SP.ValidateLogoutResponseForm(base64.StdEncoding.EncodeToString([]byte(altered)))
+			err := test.SP.ValidateLogoutResponseForm(base64.StdEncoding.EncodeToString([]byte(altered)), []string{"id-request"})
 			assert.Check(t, is.ErrorContains(err, "Destination"))
 		})
 	}

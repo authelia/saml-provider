@@ -138,10 +138,10 @@ func TestValidateLogoutResponseRejectsDestinationInUnusedDeclaration(t *testing.
 	}
 	encode := func(body string) string { return base64.StdEncoding.EncodeToString([]byte(body)) }
 
-	assert.NilError(t, test.SP.ValidateLogoutResponseForm(encode(sign(test.SP.SloURL.String()))))
+	assert.NilError(t, test.SP.ValidateLogoutResponseForm(encode(sign(test.SP.SloURL.String())), []string{"id-request"}))
 
 	body := addAttributes(t, sign("https://other.example.com/slo"), "<samlp:LogoutResponse ", `xmlns:Destination="`+test.SP.SloURL.String()+`"`)
-	assert.Check(t, is.ErrorContains(test.SP.ValidateLogoutResponseForm(encode(body)), "Destination"))
+	assert.Check(t, is.ErrorContains(test.SP.ValidateLogoutResponseForm(encode(body), []string{"id-request"}), "Destination"))
 }
 
 func TestRemoveUnusedNamespaceDeclarations(t *testing.T) {
@@ -246,7 +246,7 @@ func TestValidateLogoutResponseRedirectRejectsDestinationInUnusedDeclaration(t *
 	assert.NilError(t, err)
 	assert.NilError(t, w.Close())
 
-	err = test.SP.ValidateLogoutResponseRedirect(&url.URL{RawQuery: "SAMLResponse=" + url.QueryEscape(base64.StdEncoding.EncodeToString(compressed.Bytes()))})
+	err = test.SP.ValidateLogoutResponseRedirect(&url.URL{RawQuery: "SAMLResponse=" + url.QueryEscape(base64.StdEncoding.EncodeToString(compressed.Bytes()))}, []string{"id-request"})
 	assert.Check(t, is.ErrorContains(err, "Destination"))
 }
 
@@ -302,7 +302,7 @@ func logoutResponseWithDeclarationUsedInSignature(t *testing.T) (*IdentityProvid
 func TestValidateLogoutResponseFormRejectsDeclarationUsedOnlyInSignature(t *testing.T) {
 	test, body := logoutResponseWithDeclarationUsedInSignature(t)
 
-	err := test.SP.ValidateLogoutResponseForm(base64.StdEncoding.EncodeToString([]byte(body)))
+	err := test.SP.ValidateLogoutResponseForm(base64.StdEncoding.EncodeToString([]byte(body)), []string{"id-request"})
 	assert.Check(t, is.ErrorContains(err, "Destination"))
 }
 
@@ -316,7 +316,7 @@ func TestValidateLogoutResponseRedirectRejectsDeclarationUsedOnlyInSignature(t *
 	assert.NilError(t, err)
 	assert.NilError(t, w.Close())
 
-	err = test.SP.ValidateLogoutResponseRedirect(&url.URL{RawQuery: "SAMLResponse=" + url.QueryEscape(base64.StdEncoding.EncodeToString(compressed.Bytes()))})
+	err = test.SP.ValidateLogoutResponseRedirect(&url.URL{RawQuery: "SAMLResponse=" + url.QueryEscape(base64.StdEncoding.EncodeToString(compressed.Bytes()))}, []string{"id-request"})
 	assert.Check(t, is.ErrorContains(err, "Destination"))
 }
 

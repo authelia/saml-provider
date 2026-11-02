@@ -182,8 +182,23 @@ func newLogoutResponseFixture(t *testing.T) *logoutResponseFixture {
 
 func (f *logoutResponseFixture) setMessage(t *testing.T, destination string) {
 	t.Helper()
-	body := fmt.Sprintf(`<samlp:LogoutResponse xmlns:samlp="urn:oasis:names:tc:SAML:2.0:protocol" xmlns:saml="urn:oasis:names:tc:SAML:2.0:assertion" ID="id-response" InResponseTo="id-request" Version="2.0" IssueInstant="%s" Destination="%s"><saml:Issuer>%s</saml:Issuer><samlp:Status><samlp:StatusCode Value="%s"/></samlp:Status></samlp:LogoutResponse>`,
-		time.Now().UTC().Format(time.RFC3339), destination, f.sp.IDPMetadata.EntityID, StatusSuccess)
+	f.setMessageInResponseTo(t, destination, ` InResponseTo="id-request"`)
+}
+
+func (f *logoutResponseFixture) setMessageInResponseTo(t *testing.T, destination, inResponseTo string) {
+	t.Helper()
+	f.setMessageBody(t, destination, inResponseTo, "<saml:Issuer>"+f.sp.IDPMetadata.EntityID+"</saml:Issuer>")
+}
+
+func (f *logoutResponseFixture) setMessageWithoutIssuer(t *testing.T) {
+	t.Helper()
+	f.setMessageBody(t, f.sp.SloURL.String(), ` InResponseTo="id-request"`, "")
+}
+
+func (f *logoutResponseFixture) setMessageBody(t *testing.T, destination, inResponseTo, issuer string) {
+	t.Helper()
+	body := fmt.Sprintf(`<samlp:LogoutResponse xmlns:samlp="urn:oasis:names:tc:SAML:2.0:protocol" xmlns:saml="urn:oasis:names:tc:SAML:2.0:assertion" ID="id-response"%s Version="2.0" IssueInstant="%s" Destination="%s">%s<samlp:Status><samlp:StatusCode Value="%s"/></samlp:Status></samlp:LogoutResponse>`,
+		inResponseTo, time.Now().UTC().Format(time.RFC3339), destination, issuer, StatusSuccess)
 	var compressed bytes.Buffer
 	w, err := flate.NewWriter(&compressed, flate.BestCompression)
 	assert.NilError(t, err)
@@ -222,7 +237,7 @@ func (f *logoutResponseFixture) signed(t *testing.T, relayState string) string {
 }
 
 func (f *logoutResponseFixture) validate(rawQuery string) error {
-	return f.sp.ValidateLogoutResponseRedirect(&url.URL{RawQuery: rawQuery})
+	return f.sp.ValidateLogoutResponseRedirect(&url.URL{RawQuery: rawQuery}, []string{"id-request"})
 }
 
 func TestSPValidatesRedirectLogoutResponseSignedInTheQuery(t *testing.T) {
@@ -246,7 +261,7 @@ func TestSPValidatesRedirectLogoutResponseSignedInTheQuery(t *testing.T) {
 		f := newLogoutResponseFixture(t)
 		req, err := http.NewRequest(http.MethodGet, "https://sp.example.com/saml2/slo?"+f.signed(t, "relay"), nil)
 		assert.NilError(t, err)
-		assert.Check(t, f.sp.ValidateLogoutResponseRequest(req))
+		assert.Check(t, f.sp.ValidateLogoutResponseRequest(req, []string{"id-request"}))
 	})
 
 	t.Run("ecdsa", func(t *testing.T) {
@@ -364,7 +379,7 @@ func TestSPRejectsInvalidRedirectLogoutResponseSignature(t *testing.T) {
 		f := newLogoutResponseFixture(t)
 		req, err := http.NewRequest(http.MethodGet, "https://sp.example.com/saml2/slo?SAML%52esponse=forged&"+f.signed(t, ""), nil)
 		assert.NilError(t, err)
-		assert.Assert(t, f.sp.ValidateLogoutResponseRequest(req) != nil)
+		assert.Assert(t, f.sp.ValidateLogoutResponseRequest(req, []string{"id-request"}) != nil)
 	})
 }
 
@@ -426,8 +441,8 @@ func TestLogoutResponseRedirectRoundTrip(t *testing.T) {
 	u, err := response.Redirect("relay state&more", &sender)
 	assert.NilError(t, err)
 
-	assert.Check(t, f.sp.ValidateLogoutResponseRedirect(u))
+	assert.Check(t, f.sp.ValidateLogoutResponseRedirect(u, []string{"id-request"}))
 
 	u.RawQuery = strings.Replace(u.RawQuery, "RelayState=relay", "RelayState=other", 1)
-	assert.Assert(t, f.sp.ValidateLogoutResponseRedirect(u) != nil)
+	assert.Assert(t, f.sp.ValidateLogoutResponseRedirect(u, []string{"id-request"}) != nil)
 }
