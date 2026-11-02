@@ -159,7 +159,7 @@ func defaultSigningMethodForKey(key crypto.Signer) string {
 	}
 	switch public := key.Public().(type) {
 	case *rsa.PublicKey:
-		return dsig.RSASHA1SignatureMethod
+		return dsig.RSASHA256SignatureMethod
 	case *ecdsa.PublicKey:
 		return dsig.DefaultECDSASignatureMethod(public)
 	default:
