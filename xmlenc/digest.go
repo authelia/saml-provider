@@ -32,19 +32,19 @@ var (
 
 	// SHA256 implements the SHA-256 digest method
 	SHA256 = digestMethod{
-		algorithm: "http://www.w3.org/2000/09/xmldsig#sha256",
+		algorithm: "http://www.w3.org/2001/04/xmlenc#sha256",
 		hash:      sha256.New,
 	}
 
 	// SHA512 implements the SHA-512 digest method
 	SHA512 = digestMethod{
-		algorithm: "http://www.w3.org/2000/09/xmldsig#sha512",
+		algorithm: "http://www.w3.org/2001/04/xmlenc#sha512",
 		hash:      sha512.New,
 	}
 
 	// RIPEMD160 implements the RIPEMD160 digest method
 	RIPEMD160 = digestMethod{
-		algorithm: "http://www.w3.org/2000/09/xmldsig#ripemd160",
+		algorithm: "http://www.w3.org/2001/04/xmlenc#ripemd160",
 		hash:      ripemd160.New,
 	}
 )
@@ -54,4 +54,9 @@ func init() {
 	RegisterDigestMethod(SHA256)
 	RegisterDigestMethod(SHA512)
 	RegisterDigestMethod(RIPEMD160)
+
+	// Earlier versions wrote these identifiers, which are not part of any specification.
+	RegisterDigestMethod(digestMethod{algorithm: "http://www.w3.org/2000/09/xmldsig#sha256", hash: sha256.New})
+	RegisterDigestMethod(digestMethod{algorithm: "http://www.w3.org/2000/09/xmldsig#sha512", hash: sha512.New})
+	RegisterDigestMethod(digestMethod{algorithm: "http://www.w3.org/2000/09/xmldsig#ripemd160", hash: ripemd160.New})
 }
