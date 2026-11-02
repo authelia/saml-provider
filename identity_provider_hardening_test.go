@@ -5,6 +5,7 @@ import (
 	"compress/flate"
 	"encoding/base64"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -210,6 +211,9 @@ func TestIDPGetSPEncryptionCert(t *testing.T) {
 	withCert := func(use string) KeyDescriptor {
 		return KeyDescriptor{Use: use, KeyInfo: KeyInfo{X509Data: X509Data{X509Certificates: []X509Certificate{{Data: certData}}}}}
 	}
+	emptyThenCert := func(use string) KeyDescriptor {
+		return KeyDescriptor{Use: use, KeyInfo: KeyInfo{X509Data: X509Data{X509Certificates: []X509Certificate{{}, {Data: certData}}}}}
+	}
 	noCerts := KeyDescriptor{Use: "encryption"}
 	emptyCert := KeyDescriptor{Use: "encryption", KeyInfo: KeyInfo{X509Data: X509Data{X509Certificates: []X509Certificate{{}}}}}
 
@@ -228,6 +232,8 @@ func TestIDPGetSPEncryptionCert(t *testing.T) {
 		{name: "unusable encryption then usable", descriptors: []KeyDescriptor{noCerts, withCert("encryption")}, found: true},
 		{name: "unusable encryption then unspecified", descriptors: []KeyDescriptor{noCerts, withCert("")}, found: true},
 		{name: "unusable encryption and signing", descriptors: []KeyDescriptor{noCerts, withCert("signing")}},
+		{name: "empty then usable certificate in an encryption descriptor", descriptors: []KeyDescriptor{emptyThenCert("encryption")}, found: true},
+		{name: "empty then usable certificate with unspecified use", descriptors: []KeyDescriptor{emptyThenCert("")}, found: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			req := &IdpAuthnRequest{SPSSODescriptor: &SPSSODescriptor{SSODescriptor: SSODescriptor{RoleDescriptor: RoleDescriptor{KeyDescriptors: tc.descriptors}}}}
@@ -245,4 +251,56 @@ func TestIDPGetSPEncryptionCert(t *testing.T) {
 			}
 		})
 	}
+}
+
+type countingReader struct {
+	r io.Reader
+	n int
+}
+
+func (c *countingReader) Read(p []byte) (int, error) {
+	n, err := c.r.Read(p)
+	c.n += n
+	return n, err
+}
+
+func TestNewIdpAuthnRequestLimitsPostBody(t *testing.T) {
+	test := NewIdentityProviderTest(t, applyKey)
+	samlRequest := base64.StdEncoding.EncodeToString(hardeningRequest(`ID="id-1"`, TimeNow(), hardeningIssuer))
+
+	post := func(body io.Reader) *http.Request {
+		r := httptest.NewRequest("POST", "https://idp.example.com/saml/sso", body)
+		r.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		return r
+	}
+	form := func(size int) string {
+		prefix := "SAMLRequest=" + url.QueryEscape(samlRequest) + "&RelayState="
+		return prefix + strings.Repeat("a", size-len(prefix))
+	}
+
+	t.Run("at the limit", func(t *testing.T) {
+		req, err := NewIdpAuthnRequest(&test.IDP, post(strings.NewReader(form(maxAuthnRequestBodySize))))
+		assert.NilError(t, err)
+		assert.Check(t, is.Equal(samlRequest, base64.StdEncoding.EncodeToString(req.RequestBuffer)))
+	})
+
+	t.Run("over the limit stops reading", func(t *testing.T) {
+		body := &countingReader{r: strings.NewReader(form(10 * maxAuthnRequestBodySize))}
+		_, err := NewIdpAuthnRequest(&test.IDP, post(body))
+		assert.Check(t, err != nil)
+		assert.Check(t, body.n <= maxAuthnRequestBodySize+1, "read %d bytes", body.n)
+	})
+
+	t.Run("largest request with every base64 character escaped fits", func(t *testing.T) {
+		encoded := strings.Repeat("%2B", base64.StdEncoding.EncodedLen(maxAuthnRequestSize))
+		_, err := NewIdpAuthnRequest(&test.IDP, post(strings.NewReader("SAMLRequest="+encoded)))
+		assert.Check(t, err == nil || !strings.Contains(err.Error(), "too large"), "err=%v", err)
+	})
+
+	t.Run("no body", func(t *testing.T) {
+		r, err := http.NewRequest("POST", "https://idp.example.com/saml/sso", nil)
+		assert.NilError(t, err)
+		_, err = NewIdpAuthnRequest(&test.IDP, r)
+		assert.Check(t, is.Error(err, "missing form body"))
+	})
 }

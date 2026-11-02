@@ -30,6 +30,11 @@ import (
 // before any authentication, so this limit bounds the work an anonymous client can cause.
 const maxAuthnRequestSize = 16 * 1024
 
+// maxAuthnRequestBodySize is the largest HTTP POST body that the identity provider will read. It
+// allows for a request of maxAuthnRequestSize whose base64 is entirely percent-encoded, with room
+// for RelayState and any login form fields.
+const maxAuthnRequestBodySize = 128 * 1024
+
 // maxAuthnRequestIDLength is the longest AuthnRequest ID that the identity provider will accept.
 const maxAuthnRequestIDLength = 256
 
@@ -387,6 +392,10 @@ func NewIdpAuthnRequest(idp *IdentityProvider, r *http.Request) (*IdpAuthnReques
 		}
 		req.RelayState = r.URL.Query().Get("RelayState")
 	case "POST":
+		// Limit what ParseForm reads, which is otherwise up to 10MB before any size check applies.
+		if r.Body != nil {
+			r.Body = http.MaxBytesReader(nil, r.Body, maxAuthnRequestBodySize)
+		}
 		if err := r.ParseForm(); err != nil {
 			return nil, err
 		}
@@ -1040,8 +1049,7 @@ func (req *IdpAuthnRequest) getSPEncryptionCert() (*x509.Certificate, error) {
 	for _, keyDescriptor := range req.SPSSODescriptor.KeyDescriptors {
 		if keyDescriptor.Use == "encryption" {
 			encryptionRequested = true
-			if len(keyDescriptor.KeyInfo.X509Data.X509Certificates) != 0 && keyDescriptor.KeyInfo.X509Data.X509Certificates[0].Data != "" {
-				certStr = keyDescriptor.KeyInfo.X509Data.X509Certificates[0].Data
+			if certStr = firstCertificateData(keyDescriptor); certStr != "" {
 				break
 			}
 		}
@@ -1051,9 +1059,10 @@ func (req *IdpAuthnRequest) getSPEncryptionCert() (*x509.Certificate, error) {
 	// non-empty cert we find.
 	if certStr == "" {
 		for _, keyDescriptor := range req.SPSSODescriptor.KeyDescriptors {
-			if keyDescriptor.Use == "" && len(keyDescriptor.KeyInfo.X509Data.X509Certificates) != 0 && keyDescriptor.KeyInfo.X509Data.X509Certificates[0].Data != "" {
-				certStr = keyDescriptor.KeyInfo.X509Data.X509Certificates[0].Data
-				break
+			if keyDescriptor.Use == "" {
+				if certStr = firstCertificateData(keyDescriptor); certStr != "" {
+					break
+				}
 			}
 		}
 	}
@@ -1078,6 +1087,17 @@ func (req *IdpAuthnRequest) getSPEncryptionCert() (*x509.Certificate, error) {
 		return nil, fmt.Errorf("cannot parse certificate: %v", err)
 	}
 	return cert, nil
+}
+
+// firstCertificateData returns the data of the first non-empty certificate in the key descriptor,
+// or an empty string if there is none.
+func firstCertificateData(keyDescriptor KeyDescriptor) string {
+	for _, certificate := range keyDescriptor.KeyInfo.X509Data.X509Certificates {
+		if certificate.Data != "" {
+			return certificate.Data
+		}
+	}
+	return ""
 }
 
 // unmarshalEtreeHack parses `el` and sets values in the structure `v`.
