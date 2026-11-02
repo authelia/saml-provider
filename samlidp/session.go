@@ -114,6 +114,7 @@ var defaultLoginFormTemplate = template.Must(template.New("saml-post-form").Pars
 	`<input type="password" name="password" placeholder="password" value="" />` +
 	`<input type="hidden" name="SAMLRequest" value="{{.SAMLRequest}}" />` +
 	`<input type="hidden" name="RelayState" value="{{.RelayState}}" />` +
+	`{{if .RedirectQuery}}<input type="hidden" name="SAMLRedirectQuery" value="{{.RedirectQuery}}" />{{end}}` +
 	`<input type="submit" value="Log In" />` +
 	`</form>` +
 	`</html>`))
@@ -127,15 +128,17 @@ func (s *Server) sendLoginForm(w http.ResponseWriter, req *saml.IdpAuthnRequest,
 		tmpl = defaultLoginFormTemplate
 	}
 	data := struct {
-		Toast       string
-		URL         string
-		SAMLRequest string
-		RelayState  string
+		Toast         string
+		URL           string
+		SAMLRequest   string
+		RelayState    string
+		RedirectQuery string
 	}{
-		Toast:       toast,
-		URL:         loginFormURL(req),
-		SAMLRequest: base64.StdEncoding.EncodeToString(req.RequestBuffer),
-		RelayState:  req.RelayState,
+		Toast:         toast,
+		URL:           loginFormURL(req),
+		SAMLRequest:   base64.StdEncoding.EncodeToString(req.RequestBuffer),
+		RelayState:    req.RelayState,
+		RedirectQuery: req.RedirectQuery,
 	}
 
 	if err := tmpl.Execute(w, data); err != nil {
