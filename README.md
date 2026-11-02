@@ -83,7 +83,7 @@ least the subset of SAML known as [interoperable SAML](https://kantarainitiative
 | `ForceAuthn` / `IsPassive`                        | ⚠️  | ✅  |
 | `RequestedAuthnContext`                           | ⚠️  | ✅  |
 | `Scoping` (proxying)                              | ❌  | ❌  |
-| Error status responses                            | ❌  | ✅  |
+| Error status responses                            | ⚠️  | ✅  |
 | Multiple assertions in a single `Response`        | N/A | ⚠️  |
 | Replay detection                                  | ❌  | ⚠️  |
 
@@ -126,14 +126,17 @@ least the subset of SAML known as [interoperable SAML](https://kantarainitiative
   required if the SP metadata sets `AuthnRequestsSigned` or `IdentityProvider.WantAuthnRequestsSigned` is set. SHA-1
   signatures are accepted. A custom login form must send `IdpAuthnRequest.RedirectQuery` in the `SAMLRedirectQuery`
   field, because the signature of a redirect does not survive being re-presented as a POST.
-- **`NameIDPolicy`:** the requested format is ignored. The `NameID` format comes from `Session.NameIDFormat` and
-  defaults to transient, and the metadata only advertises transient.
+- **`NameIDPolicy`:** a request that the assertion can't satisfy receives an `InvalidNameIDPolicy` status. The `NameID`
+  format comes from `Session.NameIDFormat` and defaults to transient, and the metadata only advertises transient, so a
+  request for any other format is refused unless the session provides it. `EncryptedID` is not supported, so the
+  encrypted format is always refused. `AllowCreate` is not checked by default: set
+  `IdentityProvider.NameIDPolicyEnforcer` to check it, or to decide differently for each SP.
 - **`ForceAuthn` / `IsPassive`:** not enforced by the library. The parsed request is passed to
   `SessionProvider.GetSession`, so enforcing them is left to the implementation.
 - **`RequestedAuthnContext`:** ignored by `DefaultAssertionMaker`, which always asserts
   `PasswordProtectedTransport`. A custom `AssertionMaker` can set a different context.
-- **Error status responses:** failures produce an HTTP error rather than a SAML `Response` carrying a non-success
-  status.
+- **Error status responses:** `IdpAuthnRequest.WriteErrorResponse` sends a SAML `Response` with a non-success status once
+  the ACS has been validated, and `NameIDPolicy` refusals use it. Other failures produce an HTTP error.
 - **Replay detection:** `AuthnRequest` IDs are not checked for reuse.
 - **Encrypt `Assertion`:** key transport always uses RSA-OAEP-MGF1P (SHA-1). Content encryption uses the first of
   AES-128-GCM and AES-128/192/256-CBC the SP lists in `EncryptionMethod`, or AES-128-CBC if it lists none of them.

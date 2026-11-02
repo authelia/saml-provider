@@ -95,6 +95,19 @@ type AssertionMaker interface {
 	MakeAssertion(req *IdpAuthnRequest, session *Session) error
 }
 
+// NameIDPolicyEnforcer is an interface used by IdentityProvider to decide whether an assertion
+// satisfies the NameIDPolicy of its request, which allows the decision to differ for each service
+// provider. The default implementation is DefaultNameIDPolicyEnforcer, which is used if no
+// NameIDPolicyEnforcer is specified.
+type NameIDPolicyEnforcer interface {
+	// EnforceNameIDPolicy returns an error if req.Assertion doesn't satisfy req.Request.NameIDPolicy,
+	// which is not nil. The service provider receives an InvalidNameIDPolicy status, not the error.
+	//
+	// This is where to check AllowCreate, which the default implementation can't: only the identity
+	// provider knows whether an identifier has already been established for this principal.
+	EnforceNameIDPolicy(req *IdpAuthnRequest, session *Session) error
+}
+
 // IdentityProvider implements the SAML Identity Provider role (IDP).
 //
 // An identity provider receives SAML assertion requests and responds
@@ -133,6 +146,10 @@ type IdentityProvider struct {
 	// metadata. A request is also required to be signed if the metadata of its service provider
 	// sets AuthnRequestsSigned, and any signature that is present is always verified.
 	WantAuthnRequestsSigned bool
+
+	// NameIDPolicyEnforcer decides whether an assertion satisfies the NameIDPolicy of its request.
+	// Defaults to DefaultNameIDPolicyEnforcer.
+	NameIDPolicyEnforcer NameIDPolicyEnforcer
 }
 
 // Metadata returns the metadata structure for this identity provider.
@@ -288,6 +305,20 @@ func (idp *IdentityProvider) ServeSSO(w http.ResponseWriter, r *http.Request) {
 		idp.Logger.Printf("failed to make assertion: %s", err)
 		http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
 		return
+	}
+	if req.Request.NameIDPolicy != nil {
+		nameIDPolicyEnforcer := idp.NameIDPolicyEnforcer
+		if nameIDPolicyEnforcer == nil {
+			nameIDPolicyEnforcer = DefaultNameIDPolicyEnforcer{}
+		}
+		if err := nameIDPolicyEnforcer.EnforceNameIDPolicy(req, session); err != nil {
+			idp.Logger.Printf("cannot satisfy name id policy: %s", err)
+			if err := req.WriteErrorResponse(w, StatusRequester, StatusInvalidNameIDPolicy, ""); err != nil {
+				idp.Logger.Printf("failed to write response: %s", err)
+				http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
+			}
+			return
+		}
 	}
 	if err := req.WriteResponse(w); err != nil {
 		idp.Logger.Printf("failed to write response: %s", err)
@@ -617,6 +648,45 @@ func (req *IdpAuthnRequest) useDefaultACSEndpoint() error {
 	}
 	return nil
 }
+
+// DefaultNameIDPolicyEnforcer applies the rules of SAMLCore §3.4.1.1, as changed by errata E15.
+type DefaultNameIDPolicyEnforcer struct {
+}
+
+// EnforceNameIDPolicy implements NameIDPolicyEnforcer. Unless the policy leaves the format open, the
+// NameID must have that format. The encrypted format is always refused, because the assertions made
+// here don't contain an EncryptedID. If the policy has an SPNameQualifier, the NameID must also have
+// that value.
+func (DefaultNameIDPolicyEnforcer) EnforceNameIDPolicy(req *IdpAuthnRequest, _ *Session) error {
+	policy := req.Request.NameIDPolicy
+	if req.Assertion == nil || req.Assertion.Subject == nil || req.Assertion.Subject.NameID == nil {
+		return fmt.Errorf("assertion has no NameID")
+	}
+	nameID := req.Assertion.Subject.NameID
+
+	if policy.Format != nil {
+		switch *policy.Format {
+		case "", string(UnspecifiedNameIDFormat), unspecifiedNameIDFormat:
+		case encryptedNameIDFormat:
+			return fmt.Errorf("the request requires an EncryptedID, which is not supported")
+		default:
+			if nameID.Format != *policy.Format {
+				return fmt.Errorf("the NameID format is %q and the request requires %q", nameID.Format, *policy.Format)
+			}
+		}
+	}
+	if policy.SPNameQualifier != nil && nameID.SPNameQualifier != *policy.SPNameQualifier {
+		return fmt.Errorf("the NameID SPNameQualifier is %q and the request requires %q", nameID.SPNameQualifier, *policy.SPNameQualifier)
+	}
+	return nil
+}
+
+// unspecifiedNameIDFormat is the value that SAMLCore §3.4.1.1 gives for a format left open, which
+// differs from the identifier that UnspecifiedNameIDFormat holds, as defined by SAMLCore §8.3.1.
+const unspecifiedNameIDFormat = "urn:oasis:names:tc:SAML:2.0:nameid-format:unspecified"
+
+// encryptedNameIDFormat is the format that requests an EncryptedID, from SAMLCore §3.4.1.1.
+const encryptedNameIDFormat = "urn:oasis:names:tc:SAML:2.0:nameid-format:encrypted"
 
 // DefaultAssertionMaker produces a SAML assertion for the
 // given request and assigns it to req.Assertion.
