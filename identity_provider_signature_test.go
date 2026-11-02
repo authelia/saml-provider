@@ -38,8 +38,6 @@ func TestIDPDefaultSignatureMethod(t *testing.T) {
 	})
 
 	t.Run("ecdsa signer must choose a method explicitly", func(t *testing.T) {
-		// goxmldsig writes ECDSA signatures in DER rather than the r||s form of XML Signature, which
-		// other implementations reject, so this must not be selected without asking for it.
 		key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 		assert.NilError(t, err)
 		test := NewIdentityProviderTest(t)

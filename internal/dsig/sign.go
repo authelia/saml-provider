@@ -130,6 +130,10 @@ func (ctx *SigningContext) signDigest(digest []byte) ([]byte, error) {
 			return nil, err
 		}
 
+		if public, ok := ctx.signer.Public().(*ecdsa.PublicKey); ok {
+			return ecdsaDERToRaw(public, rawSignature)
+		}
+
 		return rawSignature, nil
 	}
 }

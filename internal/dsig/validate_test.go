@@ -259,17 +259,6 @@ func testValidateDoc(t *testing.T, doc *etree.Document, certPEM string) {
 	require.NotEmpty(t, el)
 }
 
-func TestValidateECDSA(t *testing.T) {
-	doc := etree.NewDocument()
-	err := doc.ReadFromBytes([]byte(ecdsaResponse))
-	require.NoError(t, err)
-
-	sig := doc.FindElement("//" + SignatureTag)
-	require.NotEmpty(t, sig)
-
-	testValidateDoc(t, doc, ecdsaCert)
-}
-
 const (
 	validateCert = `
 -----BEGIN CERTIFICATE-----

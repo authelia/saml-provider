@@ -220,43 +220,6 @@ func (ctx *ValidationContext) getCanonicalSignedInfo(sig *types.Signature) ([]by
 	return canonical, nil
 }
 
-// deprecated
-func (ctx *ValidationContext) verifySignedInfo(sig *types.Signature, canonicalizer Canonicalizer, signatureMethodId string, cert *x509.Certificate, decodedSignature []byte) error {
-	signatureElement := sig.UnderlyingElement()
-
-	nsCtx, err := etreeutils.NSBuildParentContext(signatureElement)
-	if err != nil {
-		return err
-	}
-
-	signedInfo, err := etreeutils.NSFindOneChildCtx(nsCtx, signatureElement, Namespace, SignedInfoTag)
-	if err != nil {
-		return err
-	}
-
-	if signedInfo == nil {
-		return errors.New("Missing SignedInfo")
-	}
-
-	// Canonicalize the xml
-	canonical, err := canonicalSerialize(signedInfo)
-	if err != nil {
-		return err
-	}
-
-	algo, ok := x509SignatureAlgorithmByIdentifier[signatureMethodId]
-	if !ok {
-		return errors.New("Unknown signature method: " + signatureMethodId)
-	}
-
-	err = cert.CheckSignature(algo, canonical, decodedSignature)
-	if err != nil {
-		return err
-	}
-
-	return nil
-}
-
 func (ctx *ValidationContext) validateSignature(el *etree.Element, sig *types.Signature, cert *x509.Certificate) (*etree.Element, error) {
 
 	// Actually verify the 'SignedInfo' was signed by a trusted source
@@ -286,7 +249,7 @@ func (ctx *ValidationContext) validateSignature(el *etree.Element, sig *types.Si
 		return nil, errors.New("Could not decode signature")
 	}
 
-	err = cert.CheckSignature(algo, canonicalSignedInfoBytes, decodedSignature)
+	err = checkSignature(cert, algo, canonicalSignedInfoBytes, decodedSignature)
 	if err != nil {
 		return nil, err
 	}
