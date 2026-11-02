@@ -1220,9 +1220,7 @@ func (req *IdpAuthnRequest) signingContext() (*dsig.SigningContext, error) {
 		signingContext = dsig.NewDefaultSigningContext(keyStore)
 	}
 
-	// Default to using RSA with SHA-256 if the signature method isn't set. There is deliberately no
-	// default for ECDSA keys, because goxmldsig writes those signatures in DER rather than the r||s
-	// form of XML Signature, which other implementations reject.
+	// Default to using RSA with SHA-256 if the signature method isn't set. ECDSA keys must set one.
 	signatureMethod := req.IDP.SignatureMethod
 	if signatureMethod == "" {
 		signatureMethod = dsig.RSASHA256SignatureMethod
