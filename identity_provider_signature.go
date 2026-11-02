@@ -60,7 +60,7 @@ func (req *IdpAuthnRequest) verifyAuthnRequestSignature() error {
 	}
 
 	if req.RedirectQuery != "" {
-		if err := verifyRedirectSignature(req.RedirectQuery, certificates); err != nil {
+		if err := verifyRedirectSignature(req.RedirectQuery, "SAMLRequest", certificates); err != nil {
 			return fmt.Errorf("invalid request signature: %w", err)
 		}
 	}
@@ -178,7 +178,7 @@ func redirectParameters(rawQuery string) (map[string]string, error) {
 			return nil, errors.New("malformed query parameter")
 		}
 		switch key {
-		case "SAMLRequest", "RelayState", "SigAlg", "Signature":
+		case "SAMLRequest", "SAMLResponse", "RelayState", "SigAlg", "Signature":
 			if _, repeated := parameters[key]; repeated {
 				return nil, fmt.Errorf("repeated %s parameter", key)
 			}
@@ -190,18 +190,18 @@ func redirectParameters(rawQuery string) (map[string]string, error) {
 
 // verifyRedirectSignature verifies the signature of the HTTP-Redirect binding. As SAMLBind §3.4.4.1
 // requires, it covers the parameters as they were received rather than a new encoding of their values.
-func verifyRedirectSignature(rawQuery string, certificates []*x509.Certificate) error {
+func verifyRedirectSignature(rawQuery, messageParameter string, certificates []*x509.Certificate) error {
 	parameters, err := redirectParameters(rawQuery)
 	if err != nil {
 		return err
 	}
-	for _, key := range []string{"SAMLRequest", "SigAlg", "Signature"} {
+	for _, key := range []string{messageParameter, "SigAlg", "Signature"} {
 		if _, ok := parameters[key]; !ok {
 			return fmt.Errorf("missing %s parameter", key)
 		}
 	}
 
-	signed := "SAMLRequest=" + parameters["SAMLRequest"]
+	signed := messageParameter + "=" + parameters[messageParameter]
 	if relayState, ok := parameters["RelayState"]; ok {
 		signed += "&RelayState=" + relayState
 	}

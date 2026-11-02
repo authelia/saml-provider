@@ -6,6 +6,7 @@ import (
 	"encoding/base64"
 	"errors"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"testing"
 	"time"
@@ -245,7 +246,7 @@ func TestValidateLogoutResponseRedirectRejectsDestinationInUnusedDeclaration(t *
 	assert.NilError(t, err)
 	assert.NilError(t, w.Close())
 
-	err = test.SP.ValidateLogoutResponseRedirect(base64.StdEncoding.EncodeToString(compressed.Bytes()))
+	err = test.SP.ValidateLogoutResponseRedirect(&url.URL{RawQuery: "SAMLResponse=" + url.QueryEscape(base64.StdEncoding.EncodeToString(compressed.Bytes()))})
 	assert.Check(t, is.ErrorContains(err, "Destination"))
 }
 
@@ -315,7 +316,7 @@ func TestValidateLogoutResponseRedirectRejectsDeclarationUsedOnlyInSignature(t *
 	assert.NilError(t, err)
 	assert.NilError(t, w.Close())
 
-	err = test.SP.ValidateLogoutResponseRedirect(base64.StdEncoding.EncodeToString(compressed.Bytes()))
+	err = test.SP.ValidateLogoutResponseRedirect(&url.URL{RawQuery: "SAMLResponse=" + url.QueryEscape(base64.StdEncoding.EncodeToString(compressed.Bytes()))})
 	assert.Check(t, is.ErrorContains(err, "Destination"))
 }
 

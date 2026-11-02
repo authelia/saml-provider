@@ -149,8 +149,8 @@ least the subset of SAML known as [interoperable SAML](https://kantarainitiative
   messages can be validated, however:
   - Incoming `LogoutRequest` messages (IdP-initiated logout) cannot be parsed or validated.
   - `samlsp.Middleware` does not serve the SLO endpoint.
-  - HTTP Redirect messages are signed with an embedded XML signature rather than the `SigAlg` and `Signature` query
-    parameters the binding requires, and received HTTP Redirect messages are validated the same way.
+  - A received HTTP Redirect `LogoutResponse` may also use an embedded XML signature instead of the `SigAlg` and
+    `Signature` query parameters the binding requires. `SignatureVerifier` does not apply to the query parameters.
 - **SOAP:** only used as a client to send `ArtifactResolve`.
 - **Multiple assertions in a single `Response`:** only the first valid assertion is returned.
 - **Replay detection:** SP-initiated responses must match a tracked request ID, but assertion IDs are not remembered,
