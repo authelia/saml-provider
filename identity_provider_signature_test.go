@@ -1,9 +1,6 @@
 package saml
 
 import (
-	"crypto/ecdsa"
-	"crypto/elliptic"
-	"crypto/rand"
 	"testing"
 
 	"gotest.tools/assert"
@@ -35,21 +32,6 @@ func TestIDPDefaultSignatureMethod(t *testing.T) {
 	t.Run("rsa signer", func(t *testing.T) {
 		signature, _ := interopSignatureMethod(t, NewIdentityProviderTest(t, applySigner))
 		assert.Check(t, is.Equal(dsig.RSASHA256SignatureMethod, signature))
-	})
-
-	t.Run("ecdsa signer must choose a method explicitly", func(t *testing.T) {
-		key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
-		assert.NilError(t, err)
-		test := NewIdentityProviderTest(t)
-		test.IDP.Signer = key
-		req, err := hardeningValidate(test, hardeningRequest(`ID="id-1"`, TimeNow(), hardeningIssuer))
-		assert.NilError(t, err)
-		assert.NilError(t, DefaultAssertionMaker{}.MakeAssertion(req, &Session{ID: "f00d", NameID: "alice"}))
-		assert.Check(t, is.ErrorContains(req.MakeResponse(), "incompatible"))
-
-		test.IDP.SignatureMethod = dsig.ECDSASHA256SignatureMethod
-		signature, _ := interopSignatureMethod(t, test)
-		assert.Check(t, is.Equal(dsig.ECDSASHA256SignatureMethod, signature))
 	})
 
 	t.Run("explicit method is kept", func(t *testing.T) {

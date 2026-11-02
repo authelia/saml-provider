@@ -9,7 +9,6 @@ import (
 	"crypto/rsa"
 	"crypto/sha256"
 	"crypto/sha512"
-	"crypto/tls"
 	"crypto/x509"
 	"encoding/base64"
 	"encoding/xml"
@@ -77,11 +76,12 @@ type ServiceProvider struct {
 	// Entity ID is optional - if not specified then MetadataURL will be used
 	EntityID string
 
-	// Key is private key we use to sign requests. It must be either an
-	// *rsa.PrivateKey or an *ecdsa.PrivateKey.
+	// Key is private key we use to sign requests. Its public key must be either
+	// an *rsa.PublicKey or an *ecdsa.PublicKey.
 	Key crypto.Signer
 
-	// Certificate is the RSA public part of Key.
+	// Certificate is the public part of Key. Encrypted assertions are only
+	// advertised for an RSA certificate.
 	Certificate   *x509.Certificate
 	Intermediates []*x509.Certificate
 
@@ -145,11 +145,11 @@ type ServiceProvider struct {
 	//
 	// The method specified here must be consistent with the type of Key.
 	//
-	// If Key is *rsa.PrivateKey, then this must be one of dsig.RSASHA1SignatureMethod,
+	// If Key is an RSA key, then this must be one of dsig.RSASHA1SignatureMethod,
 	// dsig.RSASHA256SignatureMethod, dsig.RSASHA384SignatureMethod, or
 	// dsig.RSASHA512SignatureMethod:
 	//
-	// If Key is *ecdsa.PrivateKey, then this must be one of dsig.ECDSASHA1SignatureMethod,
+	// If Key is an ECDSA key, then this must be one of dsig.ECDSASHA1SignatureMethod,
 	// dsig.ECDSASHA256SignatureMethod, dsig.ECDSASHA384SignatureMethod, or
 	// dsig.ECDSASHA512SignatureMethod.
 	SignatureMethod string
@@ -200,8 +200,9 @@ func (sp *ServiceProvider) Metadata() *EntityDescriptor {
 		for _, intermediate := range sp.Intermediates {
 			certBytes = append(certBytes, intermediate.Raw...)
 		}
-		keyDescriptors = []KeyDescriptor{
-			{
+		// Decryption requires RSA, so a certificate with any other type of key must not be advertised for it.
+		if _, ok := sp.Certificate.PublicKey.(*rsa.PublicKey); ok {
+			keyDescriptors = append(keyDescriptors, KeyDescriptor{
 				Use: "encryption",
 				KeyInfo: KeyInfo{
 					X509Data: X509Data{
@@ -216,7 +217,7 @@ func (sp *ServiceProvider) Metadata() *EntityDescriptor {
 					{Algorithm: "http://www.w3.org/2001/04/xmlenc#aes256-cbc"},
 					{Algorithm: "http://www.w3.org/2001/04/xmlenc#rsa-oaep-mgf1p"},
 				},
-			},
+			})
 		}
 		if len(sp.SignatureMethod) > 0 {
 			keyDescriptors = append(keyDescriptors, KeyDescriptor{
@@ -563,41 +564,34 @@ func (sp *ServiceProvider) MakeAuthenticationRequest(idpURL string, binding stri
 
 // GetSigningContext returns a dsig.SigningContext initialized based on the Service Provider's configuration
 func GetSigningContext(sp *ServiceProvider) (*dsig.SigningContext, error) {
-	keyPair := tls.Certificate{
-		Certificate: [][]byte{sp.Certificate.Raw},
-		PrivateKey:  sp.Key,
-		Leaf:        sp.Certificate,
-	}
 	// TODO: add intermediates for SP
-	// for _, cert := range sp.Intermediates {
-	// 	keyPair.Certificate = append(keyPair.Certificate, cert.Raw)
-	// }
+	chain := [][]byte{sp.Certificate.Raw}
+
+	var public crypto.PublicKey
+	if sp.Key != nil {
+		public = sp.Key.Public()
+	}
 
 	switch sp.SignatureMethod {
 	case dsig.RSASHA1SignatureMethod,
 		dsig.RSASHA256SignatureMethod,
 		dsig.RSASHA384SignatureMethod,
 		dsig.RSASHA512SignatureMethod:
-		if _, ok := sp.Key.(*rsa.PrivateKey); !ok {
-			return nil, fmt.Errorf("signature method %s requires a key of type rsa.PrivateKey, not %T", sp.SignatureMethod, sp.Key)
+		if _, ok := public.(*rsa.PublicKey); !ok {
+			return nil, fmt.Errorf("signature method %s requires an RSA key, not %T", sp.SignatureMethod, sp.Key)
 		}
 
 	case dsig.ECDSASHA1SignatureMethod,
 		dsig.ECDSASHA256SignatureMethod,
 		dsig.ECDSASHA384SignatureMethod,
 		dsig.ECDSASHA512SignatureMethod:
-		if _, ok := sp.Key.(*ecdsa.PrivateKey); !ok {
-			return nil, fmt.Errorf("signature method %s requires a key of type ecdsa.PrivateKey, not %T", sp.SignatureMethod, sp.Key)
+		if _, ok := public.(*ecdsa.PublicKey); !ok {
+			return nil, fmt.Errorf("signature method %s requires an ECDSA key, not %T", sp.SignatureMethod, sp.Key)
 		}
 	default:
 		return nil, fmt.Errorf("invalid signing method %s", sp.SignatureMethod)
 	}
 
-	keyStore := dsig.TLSCertKeyStore(keyPair)
-	chain, err := keyStore.GetChain()
-	if err != nil {
-		return nil, err
-	}
 	signingContext, err := dsig.NewSigningContext(sp.Key, chain)
 	if err != nil {
 		return nil, err

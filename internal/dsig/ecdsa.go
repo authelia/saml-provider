@@ -79,3 +79,16 @@ func isECDSAAlgorithm(algorithm x509.SignatureAlgorithm) bool {
 		return false
 	}
 }
+
+// DefaultECDSASignatureMethod returns the signature method whose hash matches the strength of the
+// curve of the key.
+func DefaultECDSASignatureMethod(public *ecdsa.PublicKey) string {
+	switch size := public.Curve.Params().N.BitLen(); {
+	case size <= 256:
+		return ECDSASHA256SignatureMethod
+	case size <= 384:
+		return ECDSASHA384SignatureMethod
+	default:
+		return ECDSASHA512SignatureMethod
+	}
+}

@@ -3,7 +3,8 @@ package saml
 import (
 	"bytes"
 	"crypto"
-	"crypto/tls"
+	"crypto/ecdsa"
+	"crypto/rsa"
 	"crypto/x509"
 	"encoding/base64"
 	"encoding/xml"
@@ -140,6 +141,38 @@ func (idp *IdentityProvider) Metadata() *EntityDescriptor {
 		validDuration = DefaultValidDuration
 	}
 
+	keyDescriptors := []KeyDescriptor{
+		{
+			Use: "signing",
+			KeyInfo: KeyInfo{
+				X509Data: X509Data{
+					X509Certificates: []X509Certificate{
+						{Data: certStr},
+					},
+				},
+			},
+		},
+	}
+	// Encryption requires RSA, so a certificate with any other type of key must not be advertised for it.
+	if _, ok := idp.Certificate.PublicKey.(*rsa.PublicKey); ok {
+		keyDescriptors = append(keyDescriptors, KeyDescriptor{
+			Use: "encryption",
+			KeyInfo: KeyInfo{
+				X509Data: X509Data{
+					X509Certificates: []X509Certificate{
+						{Data: certStr},
+					},
+				},
+			},
+			EncryptionMethods: []EncryptionMethod{
+				{Algorithm: "http://www.w3.org/2001/04/xmlenc#aes128-cbc"},
+				{Algorithm: "http://www.w3.org/2001/04/xmlenc#aes192-cbc"},
+				{Algorithm: "http://www.w3.org/2001/04/xmlenc#aes256-cbc"},
+				{Algorithm: "http://www.w3.org/2001/04/xmlenc#rsa-oaep-mgf1p"},
+			},
+		})
+	}
+
 	ed := &EntityDescriptor{
 		EntityID:      idp.MetadataURL.String(),
 		ValidUntil:    TimeNow().Add(validDuration),
@@ -149,34 +182,7 @@ func (idp *IdentityProvider) Metadata() *EntityDescriptor {
 				SSODescriptor: SSODescriptor{
 					RoleDescriptor: RoleDescriptor{
 						ProtocolSupportEnumeration: "urn:oasis:names:tc:SAML:2.0:protocol",
-						KeyDescriptors: []KeyDescriptor{
-							{
-								Use: "signing",
-								KeyInfo: KeyInfo{
-									X509Data: X509Data{
-										X509Certificates: []X509Certificate{
-											{Data: certStr},
-										},
-									},
-								},
-							},
-							{
-								Use: "encryption",
-								KeyInfo: KeyInfo{
-									X509Data: X509Data{
-										X509Certificates: []X509Certificate{
-											{Data: certStr},
-										},
-									},
-								},
-								EncryptionMethods: []EncryptionMethod{
-									{Algorithm: "http://www.w3.org/2001/04/xmlenc#aes128-cbc"},
-									{Algorithm: "http://www.w3.org/2001/04/xmlenc#aes192-cbc"},
-									{Algorithm: "http://www.w3.org/2001/04/xmlenc#aes256-cbc"},
-									{Algorithm: "http://www.w3.org/2001/04/xmlenc#rsa-oaep-mgf1p"},
-								},
-							},
-						},
+						KeyDescriptors:             keyDescriptors,
 					},
 					NameIDFormats: []NameIDFormat{NameIDFormat("urn:oasis:names:tc:SAML:2.0:nameid-format:transient")},
 				},
@@ -1201,29 +1207,27 @@ func (req *IdpAuthnRequest) signingContext() (*dsig.SigningContext, error) {
 		certificates = append(certificates, cert.Raw)
 	}
 
-	var signingContext *dsig.SigningContext
-	var err error
 	// If signer is set, use it instead of the private key.
-	if req.IDP.Signer != nil {
-		signingContext, err = dsig.NewSigningContext(req.IDP.Signer, certificates)
-		if err != nil {
-			return nil, err
+	signer := req.IDP.Signer
+	if signer == nil {
+		var ok bool
+		if signer, ok = req.IDP.Key.(crypto.Signer); !ok {
+			return nil, fmt.Errorf("identity provider key of type %T does not implement crypto.Signer", req.IDP.Key)
 		}
-	} else {
-		keyPair := tls.Certificate{
-			Certificate: certificates,
-			PrivateKey:  req.IDP.Key,
-			Leaf:        req.IDP.Certificate,
-		}
-		keyStore := dsig.TLSCertKeyStore(keyPair)
-
-		signingContext = dsig.NewDefaultSigningContext(keyStore)
 	}
 
-	// Default to using RSA with SHA-256 if the signature method isn't set. ECDSA keys must set one.
+	signingContext, err := dsig.NewSigningContext(signer, certificates)
+	if err != nil {
+		return nil, err
+	}
+
+	// Default to RSA with SHA-256, or ECDSA with the hash matching the curve of the key.
 	signatureMethod := req.IDP.SignatureMethod
 	if signatureMethod == "" {
 		signatureMethod = dsig.RSASHA256SignatureMethod
+		if public, ok := signer.Public().(*ecdsa.PublicKey); ok {
+			signatureMethod = dsig.DefaultECDSASignatureMethod(public)
+		}
 	}
 
 	signingContext.Canonicalizer = dsig.MakeC14N10ExclusiveCanonicalizerWithPrefixList(canonicalizerPrefixList)

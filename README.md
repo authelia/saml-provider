@@ -102,8 +102,8 @@ least the subset of SAML known as [interoperable SAML](https://kantarainitiative
 | `EncryptedID` and `EncryptedAttribute`       | ❌  | ❌  |
 
 [^ecdsa]: Signatures use the `r||s` encoding XML Signature requires, and DER signatures are rejected unless
-    `SignatureVerifier` is set. An IdP cannot sign with an ECDSA `Key` and must use `Signer` with an explicit
-    `SignatureMethod`. ECDSA keys cannot be used for assertion encryption or decryption, which require RSA.
+    `SignatureVerifier` is set. ECDSA keys cannot be used for assertion encryption or decryption, which require RSA,
+    so metadata does not advertise encryption for an ECDSA certificate.
 
 #### Metadata
 
@@ -134,8 +134,11 @@ least the subset of SAML known as [interoperable SAML](https://kantarainitiative
 - **Replay detection:** `AuthnRequest` IDs are not checked for reuse.
 - **Encrypt `Assertion`:** encryption always uses AES-128-CBC with RSA-OAEP-MGF1P (SHA-1), regardless of the
   `EncryptionMethod` the SP advertises, and cannot be configured.
-- **Signature defaults:** `SignatureMethod` defaults to RSA-SHA256, and SHA-1 is only used if set explicitly.
-- **ECDSA signatures:** only available through `Signer` with an explicit `SignatureMethod`.
+- **Signature defaults:** `SignatureMethod` defaults to RSA-SHA256 for RSA keys, and SHA-1 is only used if set explicitly.
+  For ECDSA keys it defaults to the hash matching the curve: SHA-256 for P-256, SHA-384 for P-384 and SHA-512 for P-521.
+- **SPs with ECDSA certificates:** a service provider whose metadata allows encryption with an ECDSA certificate is
+  rejected, including a certificate with no `use`, because assertions cannot be encrypted to it. It must set
+  `use="signing"`.
 
 ### Service Provider Limitations
 
