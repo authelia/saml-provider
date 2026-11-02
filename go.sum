@@ -1,5 +1,5 @@
-authelia.com/provider/jose v0.2.0 h1:wY1zjGAd3v6btARQjODC2l4Bv3+3MTTtNF/u3ogm97c=
-authelia.com/provider/jose v0.2.0/go.mod h1:xDYHQF6hQu15fpyl2BoPpOtjiBOoVJSwErjd5Rdqi1g=
+authelia.com/provider/jose v0.2.1 h1:qL9ySHYQbxUwxzur0ISuNzzdWoCzhHi8NqCyE2YpxM4=
+authelia.com/provider/jose v0.2.1/go.mod h1:xDYHQF6hQu15fpyl2BoPpOtjiBOoVJSwErjd5Rdqi1g=
 github.com/beevik/etree v1.8.1 h1:MchsAnqPGCGsfQezhwcouHPlAHlcAOqWpyCVZoyWfjU=
 github.com/beevik/etree v1.8.1/go.mod h1:bh4zJxiIr62SOf9pRzN7UUYaEDa9HEKafK25+sLc0Gc=
 github.com/davecgh/go-spew v1.1.0/go.mod h1:J7Y8YcW2NihsgmVo/mv3lAwl/skON4iLHjSsI+c5H38=
