@@ -291,11 +291,17 @@ func (sp *ServiceProvider) MakeRedirectAuthenticationRequest(relayState string) 
 
 // Redirect returns a URL suitable for using the redirect binding with the request
 func (r *AuthnRequest) Redirect(relayState string, sp *ServiceProvider) (*url.URL, error) {
-	var requestStr strings.Builder
-	base64Writer := base64.NewEncoder(base64.StdEncoding, &requestStr)
+	return redirectURL(r.Destination, "SAMLRequest", r.Element(), relayState, sp)
+}
+
+// redirectURL returns a URL for the HTTP-Redirect binding which delivers the message, signed in the
+// query if the service provider has a signature method, as SAMLBind §3.4.4.1 describes.
+func redirectURL(destination, parameter string, message *etree.Element, relayState string, sp *ServiceProvider) (*url.URL, error) {
+	var encoded strings.Builder
+	base64Writer := base64.NewEncoder(base64.StdEncoding, &encoded)
 	compressedWriter, _ := flate.NewWriter(base64Writer, 9)
 	doc := etree.NewDocument()
-	doc.SetRoot(r.Element())
+	doc.SetRoot(message)
 	if _, err := doc.WriteTo(compressedWriter); err != nil {
 		return nil, err
 	}
@@ -306,18 +312,18 @@ func (r *AuthnRequest) Redirect(relayState string, sp *ServiceProvider) (*url.UR
 		return nil, err
 	}
 
-	rv, err := url.Parse(r.Destination)
+	rv, err := url.Parse(destination)
 	if err != nil {
 		return nil, err
 	}
 
 	// We can't depend on Query().set() as order matters for signing. SAMLBind §3.4.4.1 signs only
 	// these parameters, not any others that are already in the URL.
-	query := "SAMLRequest=" + url.QueryEscape(requestStr.String())
+	query := parameter + "=" + url.QueryEscape(encoded.String())
 	if relayState != "" {
 		query += "&RelayState=" + url.QueryEscape(relayState)
 	}
-	if len(sp.SignatureMethod) > 0 {
+	if sp != nil && len(sp.SignatureMethod) > 0 {
 		query += "&SigAlg=" + url.QueryEscape(sp.SignatureMethod)
 		signingContext, err := GetSigningContext(sp)
 
@@ -1442,36 +1448,16 @@ func (sp *ServiceProvider) MakeRedirectLogoutRequest(nameID, relayState string) 
 	if err != nil {
 		return nil, err
 	}
-	return req.Redirect(relayState), nil
+	return req.Redirect(relayState, sp)
 }
 
-// Redirect returns a URL suitable for using the redirect binding with the request
-func (r *LogoutRequest) Redirect(relayState string) *url.URL {
-	w := &bytes.Buffer{}
-	w1 := base64.NewEncoder(base64.StdEncoding, w)
-	w2, _ := flate.NewWriter(w1, 9)
-	doc := etree.NewDocument()
-	doc.SetRoot(r.Element())
-	if _, err := doc.WriteTo(w2); err != nil {
-		panic(err)
-	}
-	if err := w2.Close(); err != nil {
-		panic(err)
-	}
-	if err := w1.Close(); err != nil {
-		panic(err)
-	}
-
-	rv, _ := url.Parse(r.Destination)
-
-	query := rv.Query()
-	query.Set("SAMLRequest", w.String())
-	if relayState != "" {
-		query.Set("RelayState", relayState)
-	}
-	rv.RawQuery = query.Encode()
-
-	return rv
+// Redirect returns a URL suitable for using the redirect binding with the request, which is signed in
+// the query if the service provider has a signature method.
+func (r *LogoutRequest) Redirect(relayState string, sp *ServiceProvider) (*url.URL, error) {
+	// SAMLBind §3.4.4.1 requires any signature on the message to be removed, as it is signed in the query.
+	unsigned := *r
+	unsigned.Signature = nil
+	return redirectURL(r.Destination, "SAMLRequest", unsigned.Element(), relayState, sp)
 }
 
 // MakePostLogoutRequest creates a SAML authentication request using
@@ -1556,36 +1542,16 @@ func (sp *ServiceProvider) MakeRedirectLogoutResponse(logoutRequestID, relayStat
 	if err != nil {
 		return nil, err
 	}
-	return resp.Redirect(relayState), nil
+	return resp.Redirect(relayState, sp)
 }
 
-// Redirect returns a URL suitable for using the redirect binding with the LogoutResponse.
-func (r *LogoutResponse) Redirect(relayState string) *url.URL {
-	w := &bytes.Buffer{}
-	w1 := base64.NewEncoder(base64.StdEncoding, w)
-	w2, _ := flate.NewWriter(w1, 9)
-	doc := etree.NewDocument()
-	doc.SetRoot(r.Element())
-	if _, err := doc.WriteTo(w2); err != nil {
-		panic(err)
-	}
-	if err := w2.Close(); err != nil {
-		panic(err)
-	}
-	if err := w1.Close(); err != nil {
-		panic(err)
-	}
-
-	rv, _ := url.Parse(r.Destination)
-
-	query := rv.Query()
-	query.Set("SAMLResponse", w.String())
-	if relayState != "" {
-		query.Set("RelayState", relayState)
-	}
-	rv.RawQuery = query.Encode()
-
-	return rv
+// Redirect returns a URL suitable for using the redirect binding with the LogoutResponse, which is
+// signed in the query if the service provider has a signature method.
+func (r *LogoutResponse) Redirect(relayState string, sp *ServiceProvider) (*url.URL, error) {
+	// SAMLBind §3.4.4.1 requires any signature on the message to be removed, as it is signed in the query.
+	unsigned := *r
+	unsigned.Signature = nil
+	return redirectURL(r.Destination, "SAMLResponse", unsigned.Element(), relayState, sp)
 }
 
 // MakePostLogoutResponse creates a SAML LogoutResponse using
@@ -1669,12 +1635,15 @@ func (sp *ServiceProvider) nameIDFormat() string {
 
 // ValidateLogoutResponseRequest validates the LogoutResponse content from the request
 func (sp *ServiceProvider) ValidateLogoutResponseRequest(req *http.Request) error {
-	if data := req.URL.Query().Get("SAMLResponse"); data != "" {
-		return sp.ValidateLogoutResponseRedirect(data)
+	parameters, err := redirectParameters(req.URL.RawQuery)
+	if err != nil {
+		return &InvalidResponseError{Now: TimeNow(), PrivateErr: err}
+	}
+	if parameters["SAMLResponse"] != "" {
+		return sp.ValidateLogoutResponseRedirect(req.URL)
 	}
 
-	err := req.ParseForm()
-	if err != nil {
+	if err = req.ParseForm(); err != nil {
 		return fmt.Errorf("unable to parse form: %v", err)
 	}
 
@@ -1719,13 +1688,44 @@ func (sp *ServiceProvider) ValidateLogoutResponseForm(postFormData string) error
 	return sp.validateLogoutResponse(&resp)
 }
 
-// ValidateLogoutResponseRedirect returns a nil error if the logout response is valid.
+// ValidateLogoutResponseRedirect returns a nil error if the logout response in the query of the URL
+// is valid. The URL must be as it was received, because the signature covers the query as it was sent.
+//
+// The signature must be in the SigAlg and Signature parameters as SAMLBind §3.4.4.1 requires, or else
+// embedded in the message, which that section does not allow but some identity providers send.
 //
 // URL Binding appears to be gzip / flate encoded
 // See https://www.oasis-open.org/committees/download.php/20645/sstc-saml-tech-overview-2%200-draft-10.pdf  6.6
-func (sp *ServiceProvider) ValidateLogoutResponseRedirect(queryParameterData string) error {
+func (sp *ServiceProvider) ValidateLogoutResponseRedirect(u *url.URL) error {
 	retErr := &InvalidResponseError{
 		Now: TimeNow(),
+	}
+
+	parameters, err := redirectParameters(u.RawQuery)
+	if err != nil {
+		retErr.PrivateErr = err
+		return retErr
+	}
+
+	_, hasSignature := parameters["Signature"]
+	_, hasAlgorithm := parameters["SigAlg"]
+	signedInQuery := hasSignature || hasAlgorithm
+	if signedInQuery {
+		certificates, err := sp.redirectSigningCertificates()
+		if err != nil {
+			retErr.PrivateErr = err
+			return retErr
+		}
+		if err := verifyRedirectSignature(u.RawQuery, "SAMLResponse", certificates); err != nil {
+			retErr.PrivateErr = err
+			return retErr
+		}
+	}
+
+	queryParameterData, err := url.QueryUnescape(parameters["SAMLResponse"])
+	if err != nil {
+		retErr.PrivateErr = fmt.Errorf("unable to parse SAMLResponse: %s", err)
+		return retErr
 	}
 
 	rawResponseBuf, err := base64.StdEncoding.DecodeString(queryParameterData)
@@ -1751,10 +1751,14 @@ func (sp *ServiceProvider) ValidateLogoutResponseRedirect(queryParameterData str
 		return retErr
 	}
 
-	verifiedEl, err := sp.verifySignature(doc.Root())
-	if err != nil {
-		retErr.PrivateErr = err
-		return retErr
+	// A signature in the query covers the whole message, so all of it is verified content.
+	verifiedEl := doc.Root()
+	if !signedInQuery {
+		verifiedEl, err = sp.verifySignature(doc.Root())
+		if err != nil {
+			retErr.PrivateErr = err
+			return retErr
+		}
 	}
 
 	var resp LogoutResponse
@@ -1763,6 +1767,45 @@ func (sp *ServiceProvider) ValidateLogoutResponseRedirect(queryParameterData str
 		return retErr
 	}
 	return sp.validateLogoutResponse(&resp)
+}
+
+// redirectSigningCertificates returns the certificates which can verify a signature in the query. A
+// fingerprint selects from the certificates in the metadata, because a query has no certificate.
+func (sp *ServiceProvider) redirectSigningCertificates() ([]*x509.Certificate, error) {
+	hasFingerprint := sp.IDPCertificateFingerprint != nil && sp.IDPCertificateFingerprintAlgorithm != nil
+	switch {
+	case sp.IDPMetadata == nil:
+		return nil, errors.New("cannot validate signature: identity provider metadata is not set")
+	case sp.IDPCertificate != nil && sp.IDPCertificateFingerprint == nil && sp.IDPCertificateFingerprintAlgorithm == nil:
+		certificate, err := parseCert(*sp.IDPCertificate)
+		if err != nil {
+			return nil, fmt.Errorf("cannot validate signature: %w", err)
+		}
+		return []*x509.Certificate{certificate}, nil
+	case sp.IDPCertificate == nil && sp.IDPCertificateFingerprint == nil && sp.IDPCertificateFingerprintAlgorithm == nil:
+		return sp.getIDPSigningCerts()
+	case sp.IDPCertificate == nil && hasFingerprint:
+		certificates, err := sp.getIDPSigningCerts()
+		if err != nil {
+			return nil, err
+		}
+		matching := make([]*x509.Certificate, 0, len(certificates))
+		for _, certificate := range certificates {
+			value, err := fingerprint(certificate, *sp.IDPCertificateFingerprintAlgorithm)
+			if err != nil {
+				return nil, fmt.Errorf("cannot validate signature: %w", err)
+			}
+			if value == *sp.IDPCertificateFingerprint {
+				matching = append(matching, certificate)
+			}
+		}
+		if len(matching) == 0 {
+			return nil, errors.New("cannot validate signature: fingerprint mismatch")
+		}
+		return matching, nil
+	default:
+		return nil, errors.New("cannot validate signature: saml config not set up properly, specify either idp metadata url, fingerprints or actual certificate")
+	}
 }
 
 // validateLogoutResponse validates the LogoutResponse fields. Returns a nil error if the LogoutResponse is valid.
