@@ -1214,10 +1214,12 @@ func (req *IdpAuthnRequest) signingContext() (*dsig.SigningContext, error) {
 		signingContext = dsig.NewDefaultSigningContext(keyStore)
 	}
 
-	// Default to using SHA1 if the signature method isn't set.
+	// Default to using RSA with SHA-256 if the signature method isn't set. There is deliberately no
+	// default for ECDSA keys, because goxmldsig writes those signatures in DER rather than the r||s
+	// form of XML Signature, which other implementations reject.
 	signatureMethod := req.IDP.SignatureMethod
 	if signatureMethod == "" {
-		signatureMethod = dsig.RSASHA1SignatureMethod
+		signatureMethod = dsig.RSASHA256SignatureMethod
 	}
 
 	signingContext.Canonicalizer = dsig.MakeC14N10ExclusiveCanonicalizerWithPrefixList(canonicalizerPrefixList)
