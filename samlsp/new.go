@@ -40,11 +40,15 @@ type Options struct {
 
 func getDefaultSigningMethod(signer crypto.Signer) jose.SignatureAlgorithm {
 	if signer != nil {
-		switch signer.Public().(type) {
-		case *ecdsa.PublicKey:
-			return jose.ES256
-		case *rsa.PublicKey:
-			return jose.RS256
+		if public, ok := signer.Public().(*ecdsa.PublicKey); ok {
+			switch public.Curve.Params().BitSize {
+			case 384:
+				return jose.ES384
+			case 521:
+				return jose.ES512
+			default:
+				return jose.ES256
+			}
 		}
 	}
 	return jose.RS256
@@ -150,13 +154,14 @@ func DefaultServiceProvider(opts Options) saml.ServiceProvider {
 }
 
 func defaultSigningMethodForKey(key crypto.Signer) string {
-	switch key.(type) {
-	case *rsa.PrivateKey:
-		return dsig.RSASHA1SignatureMethod
-	case *ecdsa.PrivateKey:
-		return dsig.ECDSASHA256SignatureMethod
-	case nil:
+	if key == nil {
 		return ""
+	}
+	switch public := key.Public().(type) {
+	case *rsa.PublicKey:
+		return dsig.RSASHA1SignatureMethod
+	case *ecdsa.PublicKey:
+		return dsig.DefaultECDSASignatureMethod(public)
 	default:
 		panic(fmt.Sprintf("programming error: unsupported key type %T", key))
 	}

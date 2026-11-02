@@ -273,10 +273,6 @@ func TestSPCanProduceSignedRequestRedirectBinding(t *testing.T) {
 		dsig.RSASHA256SignatureMethod,
 		dsig.RSASHA384SignatureMethod,
 		dsig.RSASHA512SignatureMethod,
-		dsig.ECDSASHA1SignatureMethod,
-		dsig.ECDSASHA256SignatureMethod,
-		dsig.ECDSASHA384SignatureMethod,
-		dsig.ECDSASHA512SignatureMethod,
 	} {
 		testName := strings.Split(alg, "#")[1]
 		t.Run(testName, func(t *testing.T) {
@@ -292,7 +288,7 @@ func TestSPCanProduceSignedRequestRedirectBinding(t *testing.T) {
 				MetadataURL:     mustParseURL("https://15661444.ngrok.io/saml2/metadata"),
 				AcsURL:          mustParseURL("https://15661444.ngrok.io/saml2/acs"),
 				IDPMetadata:     &EntityDescriptor{},
-				SignatureMethod: dsig.RSASHA1SignatureMethod,
+				SignatureMethod: alg,
 			}
 			err := xml.Unmarshal(test.IDPMetadata, &s.IDPMetadata)
 			assert.Check(t, err)
@@ -303,6 +299,13 @@ func TestSPCanProduceSignedRequestRedirectBinding(t *testing.T) {
 			// https://www.samltool.com/validate_authn_req.php . Once we add
 			// support for validating signed AuthN requests in the IDP implementation
 			// we can switch to testing using that.
+			signed, signature := signedRedirectQuery(t, redirectURL.RawQuery)
+			assert.Check(t, test.Certificate.CheckSignature(map[string]x509.SignatureAlgorithm{
+				dsig.RSASHA1SignatureMethod:   x509.SHA1WithRSA,
+				dsig.RSASHA256SignatureMethod: x509.SHA256WithRSA,
+				dsig.RSASHA384SignatureMethod: x509.SHA384WithRSA,
+				dsig.RSASHA512SignatureMethod: x509.SHA512WithRSA,
+			}[alg], []byte(signed), signature))
 			golden.Assert(t, redirectURL.RawQuery, t.Name()+"_queryString")
 
 			decodedRequest, err := testsaml.ParseRedirectRequest(redirectURL)
