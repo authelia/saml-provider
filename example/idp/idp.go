@@ -3,6 +3,7 @@ package main
 
 import (
 	"crypto"
+	"crypto/subtle"
 	"crypto/x509"
 	"encoding/pem"
 	"flag"
@@ -74,6 +75,7 @@ UzreO96WzlBBMtY=
 func main() {
 	logr := logger.DefaultLogger
 	baseURLstr := flag.String("idp", "", "The URL to the IDP")
+	adminToken := flag.String("admin-token", "", "Bearer token for the RESTful interfaces, which are refused if this is empty")
 	flag.Parse()
 
 	baseURL, err := url.Parse(*baseURLstr)
@@ -87,6 +89,10 @@ func main() {
 		Logger:      logr,
 		Certificate: cert,
 		Store:       &samlidp.MemoryStore{},
+		AdminAuthorizer: func(r *http.Request) bool {
+			expected := "Bearer " + *adminToken
+			return *adminToken != "" && subtle.ConstantTimeCompare([]byte(r.Header.Get("Authorization")), []byte(expected)) == 1
+		},
 	})
 	if err != nil {
 		logr.Fatalf("%s", err)

@@ -123,6 +123,7 @@ OwJlNCASPZRH/JmF8tX0hoHuAQ==
 func main() {
 	rootURLstr := flag.String("url", "https://962766ce.ngrok.io", "The base URL of this service")
 	idpMetadataURLstr := flag.String("idp", "https://516becc2.ngrok.io/metadata", "The metadata URL for the IDP")
+	idpAdminToken := flag.String("idp-admin-token", "", "The bearer token used to register with the IDP")
 	flag.Parse()
 
 	keyPair, err := tls.X509KeyPair(cert, key)
@@ -165,13 +166,22 @@ func main() {
 	spMetadataBuf, _ := xml.MarshalIndent(samlSP.ServiceProvider.Metadata(), "", "  ")
 	spURL := *idpMetadataURL
 	spURL.Path = "/services/sp"
-	resp, err := http.Post(spURL.String(), "text/xml", bytes.NewReader(spMetadataBuf))
+	registration, err := http.NewRequest("POST", spURL.String(), bytes.NewReader(spMetadataBuf))
+	if err != nil {
+		panic(err)
+	}
+	registration.Header.Set("Content-Type", "text/xml")
+	registration.Header.Set("Authorization", "Bearer "+*idpAdminToken)
+	resp, err := http.DefaultClient.Do(registration)
 	if err != nil {
 		panic(err)
 	}
 
 	if err := resp.Body.Close(); err != nil {
 		panic(err)
+	}
+	if resp.StatusCode != http.StatusNoContent {
+		panic(fmt.Sprintf("cannot register with the IDP: %s", resp.Status))
 	}
 
 	mux := http.NewServeMux()

@@ -108,11 +108,14 @@ type AssertionMaker interface {
 // handles the actual authentication (i.e. prompting for a username
 // and password).
 type IdentityProvider struct {
-	Key                     crypto.PrivateKey
-	Signer                  crypto.Signer
-	Logger                  logger.Interface
-	Certificate             *x509.Certificate
-	Intermediates           []*x509.Certificate
+	Key           crypto.PrivateKey
+	Signer        crypto.Signer
+	Logger        logger.Interface
+	Certificate   *x509.Certificate
+	Intermediates []*x509.Certificate
+	// MaxAuthnRequestAge is the oldest AuthnRequest that will be accepted, which must allow for a
+	// SessionProvider that re-presents the request after a login form. Defaults to MaxIssueDelay.
+	MaxAuthnRequestAge      time.Duration
 	MetadataURL             url.URL
 	SSOURL                  url.URL
 	LoginURL                url.URL
@@ -462,9 +465,12 @@ func (req *IdpAuthnRequest) Validate() error {
 		}
 	}
 
-	if req.Request.IssueInstant.Add(MaxIssueDelay).Before(req.Now) {
-		return fmt.Errorf("request expired at %s",
-			req.Request.IssueInstant.Add(MaxIssueDelay))
+	maxAge := req.IDP.MaxAuthnRequestAge
+	if maxAge == 0 {
+		maxAge = MaxIssueDelay
+	}
+	if req.Request.IssueInstant.Add(maxAge).Before(req.Now) {
+		return fmt.Errorf("request expired at %s", req.Request.IssueInstant.Add(maxAge))
 	}
 	if req.Request.IssueInstant.After(req.Now.Add(MaxClockSkew)) {
 		return fmt.Errorf("request issued in the future at %s", req.Request.IssueInstant)
