@@ -94,7 +94,7 @@ least the subset of SAML known as [interoperable SAML](https://kantarainitiative
 | Sign `Response` and `Assertion`              | ✅  | N/A |
 | Verify signed `Response` and `Assertion`     | N/A | ✅  |
 | Sign `AuthnRequest`                          | N/A | ✅  |
-| Verify signed `AuthnRequest`                 | ❌  | N/A |
+| Verify signed `AuthnRequest`                 | ✅  | N/A |
 | RSA signatures (SHA-1/256/384/512)           | ✅  | ✅  |
 | ECDSA signatures (SHA-1/256/384/512)[^ecdsa] | ⚠️  | ⚠️  |
 | Encrypt `Assertion`                          | ⚠️  | N/A |
@@ -122,8 +122,10 @@ least the subset of SAML known as [interoperable SAML](https://kantarainitiative
   `SingleLogoutService` in the metadata; `LogoutRequest` and `LogoutResponse` messages are neither handled nor sent.
 - **Artifact Resolution, HTTP Artifact and SOAP:** responses are only ever delivered via HTTP POST, and there is no
   `ArtifactResolutionService`.
-- **Verify signed `AuthnRequest`:** request signatures are ignored. Metadata never sets `WantAuthnRequestsSigned`, and
-  a request is rejected outright if it does.
+- **Verify signed `AuthnRequest`:** any signature on the HTTP Redirect or HTTP POST bindings is verified, and one is
+  required if the SP metadata sets `AuthnRequestsSigned` or `IdentityProvider.WantAuthnRequestsSigned` is set. SHA-1
+  signatures are accepted. A custom login form must send `IdpAuthnRequest.RedirectQuery` in the `SAMLRedirectQuery`
+  field, because the signature of a redirect does not survive being re-presented as a POST.
 - **`NameIDPolicy`:** the requested format is ignored. The `NameID` format comes from `Session.NameIDFormat` and
   defaults to transient, and the metadata only advertises transient.
 - **`ForceAuthn` / `IsPassive`:** not enforced by the library. The parsed request is passed to
