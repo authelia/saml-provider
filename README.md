@@ -133,8 +133,8 @@ least the subset of SAML known as [interoperable SAML](https://kantarainitiative
 - **Error status responses:** failures produce an HTTP error rather than a SAML `Response` carrying a non-success
   status.
 - **Replay detection:** `AuthnRequest` IDs are not checked for reuse.
-- **Encrypt `Assertion`:** encryption always uses AES-128-CBC with RSA-OAEP-MGF1P (SHA-1), regardless of the
-  `EncryptionMethod` the SP advertises, and cannot be configured.
+- **Encrypt `Assertion`:** key transport always uses RSA-OAEP-MGF1P (SHA-1). Content encryption uses the first of
+  AES-128-GCM and AES-128/192/256-CBC the SP lists in `EncryptionMethod`, or AES-128-CBC if it lists none of them.
 - **Signature defaults:** `SignatureMethod` defaults to RSA-SHA256 for RSA keys, and SHA-1 is only used if set explicitly.
   For ECDSA keys it defaults to the hash matching the curve: SHA-256 for P-256, SHA-384 for P-384 and SHA-512 for P-521.
 - **SPs with ECDSA certificates:** a service provider whose metadata allows encryption with an ECDSA certificate is

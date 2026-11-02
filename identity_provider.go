@@ -953,7 +953,7 @@ func (req *IdpAuthnRequest) MakeAssertionEl() error {
 	}
 
 	encryptor := xmlenc.OAEP()
-	encryptor.BlockCipher = xmlenc.AES128CBC
+	encryptor.BlockCipher = req.contentEncryption()
 	encryptor.DigestMethod = &xmlenc.SHA1
 	encryptedDataEl, err := encryptor.Encrypt(certBuf, signedAssertionBuf, nil)
 	if err != nil {
@@ -1041,28 +1041,51 @@ func (req *IdpAuthnRequest) WriteResponse(w http.ResponseWriter) error {
 	return nil
 }
 
+// contentEncryptionMethods are the content encryption algorithms this identity provider can use.
+var contentEncryptionMethods = []xmlenc.BlockCipher{
+	xmlenc.AES128GCM,
+	xmlenc.AES128CBC,
+	xmlenc.AES192CBC,
+	xmlenc.AES256CBC,
+}
+
+// contentEncryption returns the first algorithm the service provider advertises for its encryption
+// key that we can use, as metadata lists them in order of preference. It returns AES-128-CBC if there
+// is none, which is the only option known to work with service providers that advertise nothing.
+func (req *IdpAuthnRequest) contentEncryption() xmlenc.BlockCipher {
+	if keyDescriptor := req.spEncryptionKeyDescriptor(); keyDescriptor != nil {
+		for _, method := range keyDescriptor.EncryptionMethods {
+			for _, candidate := range contentEncryptionMethods {
+				if candidate.Algorithm() == method.Algorithm {
+					return candidate
+				}
+			}
+		}
+	}
+	return xmlenc.AES128CBC
+}
+
+// spEncryptionKeyDescriptor returns the key descriptor of the certificate used to encrypt things to
+// the SP. It is the first one labeled for encryption which has a certificate, or if there are none
+// the first one with no use which has a certificate, or nil if no such key descriptor is found.
+func (req *IdpAuthnRequest) spEncryptionKeyDescriptor() *KeyDescriptor {
+	for _, use := range []string{"encryption", ""} {
+		for i := range req.SPSSODescriptor.KeyDescriptors {
+			keyDescriptor := &req.SPSSODescriptor.KeyDescriptors[i]
+			if keyDescriptor.Use == use && firstCertificateData(*keyDescriptor) != "" {
+				return keyDescriptor
+			}
+		}
+	}
+	return nil
+}
+
 // getSPEncryptionCert returns the certificate which we can use to encrypt things
 // to the SP in PEM format, or nil if no such certificate is found.
 func (req *IdpAuthnRequest) getSPEncryptionCert() (*x509.Certificate, error) {
 	certStr := ""
-	for _, keyDescriptor := range req.SPSSODescriptor.KeyDescriptors {
-		if keyDescriptor.Use == "encryption" {
-			if certStr = firstCertificateData(keyDescriptor); certStr != "" {
-				break
-			}
-		}
-	}
-
-	// If there are no certs explicitly labeled for encryption, return the first
-	// non-empty cert we find.
-	if certStr == "" {
-		for _, keyDescriptor := range req.SPSSODescriptor.KeyDescriptors {
-			if keyDescriptor.Use == "" {
-				if certStr = firstCertificateData(keyDescriptor); certStr != "" {
-					break
-				}
-			}
-		}
+	if keyDescriptor := req.spEncryptionKeyDescriptor(); keyDescriptor != nil {
+		certStr = firstCertificateData(*keyDescriptor)
 	}
 
 	if certStr == "" {
