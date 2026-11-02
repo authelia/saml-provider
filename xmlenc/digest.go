@@ -49,9 +49,28 @@ var (
 	}
 )
 
+// The legacy digest methods use identifiers which are not part of any specification, but which some
+// implementations write and expect. They are accepted when decrypting, and are only written if set
+// as the DigestMethod of an encrypter, for a recipient which does not accept the standard identifiers.
+var (
+	// LegacySHA256 implements the SHA-256 digest method with its legacy identifier
+	LegacySHA256 = digestMethod{
+		algorithm: "http://www.w3.org/2000/09/xmldsig#sha256",
+		hash:      sha256.New,
+	}
+
+	// LegacySHA512 implements the SHA-512 digest method with its legacy identifier
+	LegacySHA512 = digestMethod{
+		algorithm: "http://www.w3.org/2000/09/xmldsig#sha512",
+		hash:      sha512.New,
+	}
+)
+
 func init() {
 	RegisterDigestMethod(SHA1)
 	RegisterDigestMethod(SHA256)
 	RegisterDigestMethod(SHA512)
 	RegisterDigestMethod(RIPEMD160)
+	RegisterDigestMethod(LegacySHA256)
+	RegisterDigestMethod(LegacySHA512)
 }
