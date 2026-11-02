@@ -54,9 +54,4 @@ func init() {
 	RegisterDigestMethod(SHA256)
 	RegisterDigestMethod(SHA512)
 	RegisterDigestMethod(RIPEMD160)
-
-	// Earlier versions wrote these identifiers, which are not part of any specification.
-	RegisterDigestMethod(digestMethod{algorithm: "http://www.w3.org/2000/09/xmldsig#sha256", hash: sha256.New})
-	RegisterDigestMethod(digestMethod{algorithm: "http://www.w3.org/2000/09/xmldsig#sha512", hash: sha512.New})
-	RegisterDigestMethod(digestMethod{algorithm: "http://www.w3.org/2000/09/xmldsig#ripemd160", hash: ripemd160.New})
 }

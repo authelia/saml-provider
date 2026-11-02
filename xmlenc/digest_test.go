@@ -20,7 +20,7 @@ func TestDigestMethodsUseStandardAlgorithmIdentifiers(t *testing.T) {
 	assert.Equal(t, "http://www.w3.org/2001/04/xmlenc#ripemd160", RIPEMD160.Algorithm())
 }
 
-func TestDecryptAcceptsDigestIdentifiers(t *testing.T) {
+func TestDecryptDigestIdentifiers(t *testing.T) {
 	key, err := rsa.GenerateKey(rand.Reader, 2048)
 	require.NoError(t, err)
 	template := &x509.Certificate{
@@ -38,13 +38,14 @@ func TestDecryptAcceptsDigestIdentifiers(t *testing.T) {
 		name       string
 		digest     DigestMethod
 		identifier string
+		err        string
 	}{
-		{"standard sha256", SHA256, "http://www.w3.org/2001/04/xmlenc#sha256"},
-		{"standard sha512", SHA512, "http://www.w3.org/2001/04/xmlenc#sha512"},
-		{"standard ripemd160", RIPEMD160, "http://www.w3.org/2001/04/xmlenc#ripemd160"},
-		{"legacy sha256", SHA256, "http://www.w3.org/2000/09/xmldsig#sha256"},
-		{"legacy sha512", SHA512, "http://www.w3.org/2000/09/xmldsig#sha512"},
-		{"legacy ripemd160", RIPEMD160, "http://www.w3.org/2000/09/xmldsig#ripemd160"},
+		{"standard sha256", SHA256, "http://www.w3.org/2001/04/xmlenc#sha256", ""},
+		{"standard sha512", SHA512, "http://www.w3.org/2001/04/xmlenc#sha512", ""},
+		{"standard ripemd160", RIPEMD160, "http://www.w3.org/2001/04/xmlenc#ripemd160", ""},
+		{"nonstandard sha256", SHA256, "http://www.w3.org/2000/09/xmldsig#sha256", "algorithm is not implemented"},
+		{"nonstandard sha512", SHA512, "http://www.w3.org/2000/09/xmldsig#sha512", "algorithm is not implemented"},
+		{"nonstandard ripemd160", RIPEMD160, "http://www.w3.org/2000/09/xmldsig#ripemd160", "algorithm is not implemented"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			encrypter := OAEP()
@@ -58,6 +59,10 @@ func TestDecryptAcceptsDigestIdentifiers(t *testing.T) {
 			digestEl.SelectAttr("Algorithm").Value = tc.identifier
 
 			plaintext, err := Decrypt(key, el)
+			if tc.err != "" {
+				assert.ErrorContains(t, err, tc.err)
+				return
+			}
 			require.NoError(t, err)
 			assert.Equal(t, "plaintext", string(plaintext))
 		})
