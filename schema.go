@@ -8,7 +8,8 @@ import (
 	"time"
 
 	"github.com/beevik/etree"
-	"github.com/russellhaering/goxmldsig/etreeutils"
+
+	"authelia.com/provider/saml/internal/dsig/etreeutils"
 )
 
 // RequestedAuthnContext represents the SAML object of the same name, an indication of the

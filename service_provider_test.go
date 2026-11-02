@@ -19,7 +19,8 @@ import (
 	"gotest.tools/golden"
 
 	"github.com/beevik/etree"
-	dsig "github.com/russellhaering/goxmldsig"
+
+	"authelia.com/provider/saml/internal/dsig"
 
 	"authelia.com/provider/saml/testsaml"
 )

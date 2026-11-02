@@ -26,8 +26,9 @@ import (
 
 	"github.com/beevik/etree"
 	xrv "github.com/mattermost/xml-roundtrip-validator"
-	dsig "github.com/russellhaering/goxmldsig"
-	"github.com/russellhaering/goxmldsig/etreeutils"
+
+	"authelia.com/provider/saml/internal/dsig"
+	"authelia.com/provider/saml/internal/dsig/etreeutils"
 
 	"authelia.com/provider/saml/logger"
 	"authelia.com/provider/saml/xmlenc"
@@ -51,12 +52,16 @@ const (
 	PersistentNameIDFormat   NameIDFormat = "urn:oasis:names:tc:SAML:2.0:nameid-format:persistent"
 )
 
+// ValidationContext is the signature validation context given to a SignatureVerifier. It is exported
+// so that SignatureVerifier can be implemented outside of this module.
+type ValidationContext = dsig.ValidationContext
+
 // SignatureVerifier verifies a signature
 //
 // Can be implemented in order to override ServiceProvider's default
 // way of verifying signatures.
 type SignatureVerifier interface {
-	VerifySignature(validationContext *dsig.ValidationContext, el *etree.Element) error
+	VerifySignature(validationContext *ValidationContext, el *etree.Element) error
 }
 
 // ServiceProvider implements SAML Service provider.

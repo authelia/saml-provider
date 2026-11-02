@@ -11,7 +11,8 @@ import (
 	"net/url"
 
 	"authelia.com/provider/jose"
-	dsig "github.com/russellhaering/goxmldsig"
+
+	"authelia.com/provider/saml/internal/dsig"
 
 	"authelia.com/provider/saml"
 )
