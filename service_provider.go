@@ -875,6 +875,12 @@ func (sp *ServiceProvider) parseArtifactResponse(artifactResponseEl *etree.Eleme
 		Response: elementToString(artifactResponseEl),
 	}
 
+	// As in parseResponse, an error is acted on after the attributes have been checked.
+	verifiedEl, sigErr := sp.verifySignature(artifactResponseEl)
+	if sigErr == nil {
+		artifactResponseEl = verifiedEl
+	}
+
 	{
 		var artifactResponse ArtifactResponse
 		if err := unmarshalElement(artifactResponseEl, &artifactResponse); err != nil {
@@ -900,7 +906,6 @@ func (sp *ServiceProvider) parseArtifactResponse(artifactResponseEl *etree.Eleme
 	}
 
 	var signatureRequirement signatureRequirement
-	sigErr := sp.validateSignature(artifactResponseEl)
 	switch sigErr {
 	case nil:
 		signatureRequirement = signatureNotRequired
@@ -987,9 +992,13 @@ func (sp *ServiceProvider) parseResponse(responseEl *etree.Element, possibleRequ
 	var responseSignatureErr error
 	var responseHasSignature bool
 	if signatureRequirement == signatureRequired {
-		responseSignatureErr = sp.validateSignature(responseEl)
+		var verifiedEl *etree.Element
+		verifiedEl, responseSignatureErr = sp.verifySignature(responseEl)
 		if responseSignatureErr != errSignatureElementNotPresent {
 			responseHasSignature = true
+		}
+		if responseSignatureErr == nil {
+			responseEl = verifiedEl
 		}
 
 		// Note: we're deferring taking action on the signature validation until after we've
@@ -1154,10 +1163,11 @@ func (sp *ServiceProvider) decryptElement(encryptedEl *etree.Element) (*etree.El
 
 func (sp *ServiceProvider) parseAssertion(assertionEl *etree.Element, possibleRequestIDs []string, now time.Time, signatureRequirement signatureRequirement) (*Assertion, error) {
 	if signatureRequirement == signatureRequired {
-		sigErr := sp.validateSignature(assertionEl)
+		verifiedEl, sigErr := sp.verifySignature(assertionEl)
 		if sigErr != nil {
 			return nil, sigErr
 		}
+		assertionEl = verifiedEl
 	}
 
 	// parse the assertion we just validated
@@ -1270,52 +1280,67 @@ var errSignatureElementNotPresent = errors.New("signature element not present")
 
 // validateSignature returns nil iff the Signature embedded in the element is valid
 func (sp *ServiceProvider) validateSignature(el *etree.Element) error {
+	_, err := sp.verifySignature(el)
+	return err
+}
+
+// verifySignature checks the Signature embedded in the element and returns the content to use.
+//
+// That is what the signature covers rather than el, which can differ. For example, exclusive
+// canonicalization omits unused namespace declarations, while encoding/xml matches attributes against
+// xmlns:name. A SignatureVerifier doesn't return this content, so el is returned after it succeeds and
+// unmarshalElement is left to remove those declarations.
+func (sp *ServiceProvider) verifySignature(el *etree.Element) (*etree.Element, error) {
 	sigEl, err := findChild(el, "http://www.w3.org/2000/09/xmldsig#", "Signature")
 	if err != nil {
-		return err
+		return nil, err
 	}
 	if sigEl == nil {
-		return errSignatureElementNotPresent
+		return nil, errSignatureElementNotPresent
 	}
 
 	var certs []*x509.Certificate
 	if sp.IDPMetadata != nil && sp.IDPCertificateFingerprint == nil && sp.IDPCertificateFingerprintAlgorithm == nil && sp.IDPCertificate == nil {
 		certs, err = sp.getIDPSigningCerts()
 		if err != nil {
-			return fmt.Errorf("cannot validate signature on %s: %v", el.Tag, err)
+			return nil, fmt.Errorf("cannot validate signature on %s: %v", el.Tag, err)
 		}
 	}
 	if sp.IDPMetadata != nil && sp.IDPCertificateFingerprint != nil && sp.IDPCertificateFingerprintAlgorithm != nil && sp.IDPCertificate == nil {
 		certs, err = sp.getCertBasedOnFingerprint(el)
 		if err != nil {
-			return fmt.Errorf("cannot validate signature on %s: %v", el.Tag, err)
+			return nil, fmt.Errorf("cannot validate signature on %s: %v", el.Tag, err)
 		}
 	}
 	if sp.IDPMetadata != nil && sp.IDPCertificateFingerprint == nil && sp.IDPCertificateFingerprintAlgorithm == nil && sp.IDPCertificate != nil {
 		cert, err := parseCert(*sp.IDPCertificate)
 		if err != nil {
-			return fmt.Errorf("cannot validate signature on %s: %w", el.Tag, err)
+			return nil, fmt.Errorf("cannot validate signature on %s: %w", el.Tag, err)
 		}
 		certs = append(certs, cert)
 	}
 	if len(certs) == 0 {
-		return fmt.Errorf("cannot validate signature on %s: saml config not set up properly, specify either idp metadata url, fingerprints or actual certificate", el.Tag)
+		return nil, fmt.Errorf("cannot validate signature on %s: saml config not set up properly, specify either idp metadata url, fingerprints or actual certificate", el.Tag)
 	}
 
-	validationContext, el, err := signatureValidationContext(el, certs)
+	validationContext, detached, err := signatureValidationContext(el, certs)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	if sp.SignatureVerifier != nil {
-		return sp.SignatureVerifier.VerifySignature(validationContext, el)
+		if err := sp.SignatureVerifier.VerifySignature(validationContext, detached); err != nil {
+			return nil, err
+		}
+		return el, nil
 	}
 
-	if _, err := validationContext.Validate(el); err != nil {
-		return fmt.Errorf("cannot validate signature on %s: %v", el.Tag, err)
+	verified, err := validationContext.Validate(detached)
+	if err != nil {
+		return nil, fmt.Errorf("cannot validate signature on %s: %v", el.Tag, err)
 	}
 
-	return nil
+	return verified, nil
 }
 
 // signatureValidationContext returns the context for validating the signature on el with the given
@@ -1680,13 +1705,14 @@ func (sp *ServiceProvider) ValidateLogoutResponseForm(postFormData string) error
 		return retErr
 	}
 
-	if err := sp.validateSignature(doc.Root()); err != nil {
+	verifiedEl, err := sp.verifySignature(doc.Root())
+	if err != nil {
 		retErr.PrivateErr = err
 		return retErr
 	}
 
 	var resp LogoutResponse
-	if err := unmarshalElement(doc.Root(), &resp); err != nil {
+	if err := unmarshalElement(verifiedEl, &resp); err != nil {
 		retErr.PrivateErr = err
 		return retErr
 	}
@@ -1725,13 +1751,14 @@ func (sp *ServiceProvider) ValidateLogoutResponseRedirect(queryParameterData str
 		return retErr
 	}
 
-	if err := sp.validateSignature(doc.Root()); err != nil {
+	verifiedEl, err := sp.verifySignature(doc.Root())
+	if err != nil {
 		retErr.PrivateErr = err
 		return retErr
 	}
 
 	var resp LogoutResponse
-	if err := unmarshalElement(doc.Root(), &resp); err != nil {
+	if err := unmarshalElement(verifiedEl, &resp); err != nil {
 		retErr.PrivateErr = err
 		return retErr
 	}
@@ -1830,18 +1857,45 @@ func findChild(parentEl *etree.Element, childNS string, childTag string) (*etree
 }
 
 func elementToBytes(el *etree.Element) ([]byte, error) {
-	namespaces := map[string]string{}
-	for _, childEl := range el.FindElements("//*") {
-		ns := childEl.NamespaceURI()
-		if ns != "" {
-			namespaces[childEl.Space] = ns
-		}
+	ctx, err := etreeutils.NSBuildParentContext(el)
+	if err != nil {
+		return nil, err
+	}
+	if ctx, err = ctx.SubContext(el); err != nil {
+		return nil, err
 	}
 
 	doc := etree.NewDocument()
 	doc.SetRoot(el.Copy())
-	for space, uri := range namespaces {
-		doc.Root().CreateAttr("xmlns:"+space, uri)
+
+	// Only what's in scope at el is copied, for the prefixes that el and its descendants use. A
+	// declaration elsewhere in the document, or below el, must not change the namespace of anything
+	// else. Those below el stay with their descendants, so a prefix may not be in scope here.
+	for _, childEl := range append([]*etree.Element{el}, el.FindElements(".//*")...) {
+		if childEl.Space == "xml" {
+			continue
+		}
+
+		uri, err := ctx.LookupPrefix(childEl.Space)
+		var undeclared etreeutils.ErrUndeclaredNSPrefix
+		if errors.As(err, &undeclared) {
+			continue
+		}
+		if err != nil {
+			return nil, err
+		}
+
+		key := "xmlns:" + childEl.Space
+		if childEl.Space == "" {
+			// A context with no default namespace reports the XML namespace for this prefix.
+			if uri == etreeutils.XMLNamespace {
+				continue
+			}
+			key = "xmlns"
+		}
+		if doc.Root().SelectAttr(key) == nil {
+			doc.Root().CreateAttr(key, uri)
+		}
 	}
 
 	return doc.WriteToBytes()
