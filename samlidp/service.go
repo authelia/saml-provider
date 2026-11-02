@@ -85,6 +85,18 @@ func (s *Server) HandlePutService(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	for _, spssoDescriptor := range metadata.SPSSODescriptors {
+		for _, keyDescriptor := range spssoDescriptor.KeyDescriptors {
+			switch keyDescriptor.Use {
+			case "", "encryption", "signing":
+			default:
+				s.logger.Printf("ERROR: metadata has a key descriptor with an unrecognized use %q", keyDescriptor.Use)
+				http.Error(w, http.StatusText(http.StatusBadRequest), http.StatusBadRequest)
+				return
+			}
+		}
+	}
+
 	service.Metadata = *metadata
 
 	s.idpConfigMu.Lock()
