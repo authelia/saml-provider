@@ -54,6 +54,7 @@ linters:
         text: G104 # 'Errors unhandled. (gosec)
     paths:
       - example/.*\.go$
+      - internal/dsig/.*\.go$
 formatters:
   enable:
     - gofmt

@@ -17,10 +17,11 @@ import (
 	"testing"
 	"time"
 
-	dsig "github.com/russellhaering/goxmldsig"
 	"gotest.tools/assert"
 	is "gotest.tools/assert/cmp"
 	"gotest.tools/golden"
+
+	"authelia.com/provider/saml/internal/dsig"
 
 	"authelia.com/provider/saml"
 	"authelia.com/provider/saml/testsaml"

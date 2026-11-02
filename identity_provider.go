@@ -19,7 +19,8 @@ import (
 
 	"github.com/beevik/etree"
 	xrv "github.com/mattermost/xml-roundtrip-validator"
-	dsig "github.com/russellhaering/goxmldsig"
+
+	"authelia.com/provider/saml/internal/dsig"
 
 	"authelia.com/provider/saml/logger"
 	"authelia.com/provider/saml/xmlenc"

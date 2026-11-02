@@ -6,9 +6,10 @@ import (
 	"crypto/rand"
 	"testing"
 
-	dsig "github.com/russellhaering/goxmldsig"
 	"gotest.tools/assert"
 	is "gotest.tools/assert/cmp"
+
+	"authelia.com/provider/saml/internal/dsig"
 )
 
 func interopSignatureMethod(t *testing.T, test *IdentityProviderTest) (signature, digest string) {

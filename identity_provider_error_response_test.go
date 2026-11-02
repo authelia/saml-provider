@@ -9,9 +9,10 @@ import (
 	"testing"
 
 	"github.com/beevik/etree"
-	dsig "github.com/russellhaering/goxmldsig"
 	"gotest.tools/assert"
 	is "gotest.tools/assert/cmp"
+
+	"authelia.com/provider/saml/internal/dsig"
 )
 
 // errorResponseRequest returns a validated request, which has selected an ACS endpoint.
