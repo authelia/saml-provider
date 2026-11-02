@@ -778,7 +778,7 @@ func (sp *ServiceProvider) handleArtifactRequest(ctx context.Context, artifactID
 	if httpClient == nil {
 		httpClient = http.DefaultClient
 	}
-	response, err := httpClient.Do(req)
+	response, err := httpClient.Do(req) //nolint:gosec // G704: the URL is from the IdP metadata, and the artifact is only in the body.
 	if err != nil {
 		retErr.PrivateErr = fmt.Errorf("cannot resolve artifact: %s", err)
 		return nil, retErr
