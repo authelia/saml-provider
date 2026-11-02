@@ -13,6 +13,9 @@ import (
 	"encoding/pem"
 	"io"
 	"math/big"
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -80,8 +83,51 @@ func validateECDSAFixture(t *testing.T, fn func([]byte) []byte) error {
 	return err
 }
 
-func TestValidateECDSAAcceptsRawSignature(t *testing.T) {
-	assert.NoError(t, validateECDSAFixture(t, derToRawForTest(t, 32)))
+// validateXmlsec1Fixture validates a response signed by xmlsec1 1.3.13 (OpenSSL), which checks this
+// package against an independent implementation of XML Signature. The fixtures were signed with:
+//
+//	xmlsec1 --sign --lax-key-search --privkey-pem key.pem,cert.pem \
+//	  --id-attr:ID urn:oasis:names:tc:SAML:2.0:protocol:Response --output signed.xml template.xml
+//
+// The private keys were discarded, and the certificates are only valid at their own NotBefore time.
+func validateXmlsec1Fixture(t *testing.T, name string, modify func(string) string) error {
+	t.Helper()
+	certPEM, err := os.ReadFile(filepath.Join("testdata", "xmlsec1", name+".cert.pem"))
+	require.NoError(t, err)
+	block, _ := pem.Decode(certPEM)
+	require.NotNil(t, block)
+	cert, err := x509.ParseCertificate(block.Bytes)
+	require.NoError(t, err)
+
+	signed, err := os.ReadFile(filepath.Join("testdata", "xmlsec1", name+".xml"))
+	require.NoError(t, err)
+	doc := etree.NewDocument()
+	require.NoError(t, doc.ReadFromString(modify(string(signed))))
+
+	vc := NewDefaultValidationContext(&MemoryX509CertificateStore{Roots: []*x509.Certificate{cert}})
+	vc.Clock = NewFakeClockAt(cert.NotBefore)
+	_, err = vc.Validate(doc.Root())
+	return err
+}
+
+func TestValidateECDSAAcceptsXmlsec1Signature(t *testing.T) {
+	for _, name := range []string{"P-256", "P-384", "P-521"} {
+		t.Run(name, func(t *testing.T) {
+			assert.NoError(t, validateXmlsec1Fixture(t, name, func(signed string) string { return signed }))
+		})
+	}
+}
+
+func TestValidateECDSARejectsTamperedXmlsec1Signature(t *testing.T) {
+	for _, name := range []string{"P-256", "P-384", "P-521"} {
+		t.Run(name, func(t *testing.T) {
+			err := validateXmlsec1Fixture(t, name, func(signed string) string {
+				require.Contains(t, signed, "alice")
+				return strings.Replace(signed, "alice", "mallory", 1)
+			})
+			assert.Error(t, err)
+		})
+	}
 }
 
 func TestValidateECDSARejectsOtherEncodings(t *testing.T) {

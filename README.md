@@ -103,7 +103,8 @@ least the subset of SAML known as [interoperable SAML](https://kantarainitiative
 
 [^ecdsa]: Signatures use the `r||s` encoding XML Signature requires, and DER signatures are rejected unless
     `SignatureVerifier` is set. ECDSA keys cannot be used for assertion encryption or decryption, which require RSA,
-    so metadata does not advertise encryption for an ECDSA certificate.
+    so metadata does not advertise encryption for an ECDSA certificate. XML signatures are verified against `xmlsec1` 1.3.13
+    in both directions, on P-256, P-384 and P-521. Other implementations and HTTP-Redirect signatures have not been tested.
 
 #### Metadata
 
