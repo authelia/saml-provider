@@ -14,19 +14,37 @@ import (
 
 // RequestedAuthnContext represents the SAML object of the same name, an indication of the
 // requirements on the authentication process.
+//
+// It holds either class references or declaration references, which SAMLCore §3.3.2.2.1 treats as
+// alternatives: the request is satisfied by any one of them, according to the Comparison.
 type RequestedAuthnContext struct {
-	XMLName              xml.Name `xml:"urn:oasis:names:tc:SAML:2.0:protocol RequestedAuthnContext"`
-	Comparison           string   `xml:",attr"`
-	AuthnContextClassRef string   `xml:"urn:oasis:names:tc:SAML:2.0:assertion AuthnContextClassRef"`
+	XMLName               xml.Name `xml:"urn:oasis:names:tc:SAML:2.0:protocol RequestedAuthnContext"`
+	Comparison            string   `xml:",attr,omitempty"`
+	AuthnContextClassRefs []string `xml:"urn:oasis:names:tc:SAML:2.0:assertion AuthnContextClassRef"`
+	AuthnContextDeclRefs  []string `xml:"urn:oasis:names:tc:SAML:2.0:assertion AuthnContextDeclRef"`
 }
+
+// The values of RequestedAuthnContext.Comparison, from SAMLCore §3.3.2.2.1. An empty Comparison
+// means AuthnContextComparisonExact.
+const (
+	AuthnContextComparisonExact   = "exact"
+	AuthnContextComparisonMinimum = "minimum"
+	AuthnContextComparisonMaximum = "maximum"
+	AuthnContextComparisonBetter  = "better"
+)
 
 // Element returns an etree.Element representing the object in XML form.
 func (r *RequestedAuthnContext) Element() *etree.Element {
 	el := etree.NewElement("samlp:RequestedAuthnContext")
-	el.CreateAttr("Comparison", r.Comparison)
-	elContext := etree.NewElement("saml:AuthnContextClassRef")
-	elContext.SetText(r.AuthnContextClassRef)
-	el.AddChild(elContext)
+	if r.Comparison != "" {
+		el.CreateAttr("Comparison", r.Comparison)
+	}
+	for _, ref := range r.AuthnContextClassRefs {
+		el.CreateElement("saml:AuthnContextClassRef").SetText(ref)
+	}
+	for _, ref := range r.AuthnContextDeclRefs {
+		el.CreateElement("saml:AuthnContextDeclRef").SetText(ref)
+	}
 	return el
 }
 

@@ -134,11 +134,14 @@ least the subset of SAML known as [interoperable SAML](https://kantarainitiative
 - **`ForceAuthn` / `IsPassive`:** a `SessionProvider` must also implement `ForceAuthnSessionProvider` or
   `PassiveSessionProvider` to serve these requests. Otherwise they receive an `AuthnFailed` or `NoPassive` status.
   `samlidp` implements both, and returns `NoPassive` if both are set, as it can only authenticate with a login form.
-- **`RequestedAuthnContext`:** ignored by `DefaultAssertionMaker`, which always asserts
-  `PasswordProtectedTransport`. A custom `AssertionMaker` can set a different context.
+- **`RequestedAuthnContext`:** a request that the assertion can't satisfy receives a `NoAuthnContext` status.
+  `DefaultAssertionMaker` always asserts `PasswordProtectedTransport`, and a custom `AssertionMaker` can set a different
+  class. `minimum`, `maximum` and `better` need `DefaultAuthnContextEnforcer.Strength` to rank classes. Without it,
+  `minimum` and `maximum` only match a listed class, and `better` never matches. `AuthnContextDeclRef` is not supported and is always refused. Set
+  `IdentityProvider.AuthnContextEnforcer` to decide differently.
 - **Error status responses:** `IdpAuthnRequest.WriteErrorResponse` sends a SAML `Response` with a non-success status once
-  the ACS has been validated, and `NameIDPolicy`, `ForceAuthn` and `IsPassive` refusals use it. Other failures produce an
-  HTTP error.
+  the ACS has been validated, and `NameIDPolicy`, `ForceAuthn`, `IsPassive` and `RequestedAuthnContext` refusals use it.
+  Other failures produce an HTTP error.
 - **Replay detection:** `AuthnRequest` IDs are not checked for reuse.
 - **Encrypt `Assertion`:** key transport always uses RSA-OAEP-MGF1P (SHA-1). Content encryption uses the first of
   AES-128-GCM and AES-128/192/256-CBC the SP lists in `EncryptionMethod`, or AES-128-CBC if it lists none of them.
