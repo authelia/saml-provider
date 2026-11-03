@@ -1019,6 +1019,10 @@ type DefaultAssertionMaker struct {
 // MakeAssertion implements AssertionMaker. It produces a SAML assertion from the
 // given request and assigns it to req.Assertion.
 func (DefaultAssertionMaker) MakeAssertion(req *IdpAuthnRequest, session *Session) error {
+	if session.NameID == "" {
+		return fmt.Errorf("the session has no NameID")
+	}
+
 	attributes := []Attribute{}
 
 	var attributeConsumingService *AttributeConsumingService

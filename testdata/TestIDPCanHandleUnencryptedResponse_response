@@ -10,10 +10,10 @@
           <ds:Transform Algorithm="http://www.w3.org/2001/10/xml-exc-c14n#"/>
         </ds:Transforms>
         <ds:DigestMethod Algorithm="http://www.w3.org/2001/04/xmlenc#sha256"/>
-        <ds:DigestValue>9sJ1osUzRbF7C/qgkpxQQKOqdC+4g8hOBbkeVV9sVXA=</ds:DigestValue>
+        <ds:DigestValue>R1NhL9+zEfJrLSHQBLAUfWq4Lp7fFJUSbPQPz6Fwq0I=</ds:DigestValue>
       </ds:Reference>
     </ds:SignedInfo>
-    <ds:SignatureValue>DpG6OuRla6T5KymNlwXjsd0SajiLG9TaGl/9ck1a9IyDRMLav4o0azW7mj1mG5iVdV3sEWjCzwcMwlVqittYtwU8OsSXbHri6/4f3OIRO+uMDi3b1mExORTfQvAx2jnd5KNQwzvL7BctMJ5NzLhCMYdFitJ3zv7rd1q7C8gv7c8=</ds:SignatureValue>
+    <ds:SignatureValue>Gl2dGTTdGe8vBHSKOKHr0VsEznofVKb+IbUoA8Ru774Owp6JyF1fYZRUWwcsCCH9nIR346mQxIvvuJVmx0Uw4ceMghjFC3esbP0DJm5b2SvdXugSKts6QsdEP/CSvJVeoGuVj3jVsD/VIXmCOpo9/EwoV3TiSXcb/EkuAcNCCAg=</ds:SignatureValue>
     <ds:KeyInfo>
       <ds:X509Data>
         <ds:X509Certificate>MIIB7zCCAVgCCQDFzbKIp7b3MTANBgkqhkiG9w0BAQUFADA8MQswCQYDVQQGEwJVUzELMAkGA1UECAwCR0ExDDAKBgNVBAoMA2ZvbzESMBAGA1UEAwwJbG9jYWxob3N0MB4XDTEzMTAwMjAwMDg1MVoXDTE0MTAwMjAwMDg1MVowPDELMAkGA1UEBhMCVVMxCzAJBgNVBAgMAkdBMQwwCgYDVQQKDANmb28xEjAQBgNVBAMMCWxvY2FsaG9zdDCBnzANBgkqhkiG9w0BAQEFAAOBjQAwgYkCgYEA1PMHYmhZj308kWLhZVT4vOulqx/9ibm5B86fPWwUKKQ2i12MYtz07tzukPymisTDhQaqyJ8Kqb/6JjhmeMnEOdTvSPmHO8m1ZVveJU6NoKRn/mP/BD7FW52WhbrUXLSeHVSKfWkNk6S4hk9MV9TswTvyRIKvRsw0X/gfnqkroJcCAwEAATANBgkqhkiG9w0BAQUFAAOBgQCMMlIO+GNcGekevKgkakpMdAqJfs24maGb90DvTLbRZRD7Xvn1MnVBBS9hzlXiFLYOInXACMW5gcoRFfeTQLSouMM8o57h0uKjfTmuoWHLQLi6hnF+cvCsEFiJZ4AbF+DgmO6TarJ8O05t8zvnOwJlNCASPZRH/JmF8tX0hoHuAQ==</ds:X509Certificate>
@@ -35,10 +35,10 @@
             <ds:Transform Algorithm="http://www.w3.org/2001/10/xml-exc-c14n#"/>
           </ds:Transforms>
           <ds:DigestMethod Algorithm="http://www.w3.org/2001/04/xmlenc#sha256"/>
-          <ds:DigestValue>goNlTXXrXMCfYfdOyRxCSd8yFZwGYAMnAnxE8oeqg64=</ds:DigestValue>
+          <ds:DigestValue>FMiwfBiIAluLFTbIPsFa8ak//zH1r99KXR7DrF34/4o=</ds:DigestValue>
         </ds:Reference>
       </ds:SignedInfo>
-      <ds:SignatureValue>j1FwdJV56nFQoRHVk7jgEuhoeChPNSKlMHZYtwvlYQe49LBvl4ibxLvj3KuYKgr4SC51bxdNhQGFvMLX+RxYHeQtmtm6krE6QQ//oO63iCTLw2Gw5dUPOnU9YYYssHUq93YISanmFVPLSlGLnzXt6xUwpyw2yczWZI6WjCo+SRA=</ds:SignatureValue>
+      <ds:SignatureValue>Utzh3JoaDr9fooLDdTMVZhtNeXOkGA9K90XjYO/SXStr7fiGB4QElfpq1GdtOGbMrmJbWgT2GjaBtt/QR1rV0gebdyIzm6zhnTyJhSDPuotE9zhtWTk9j67KRwzZDgJbTtqO6hZ8O37a8EPoln/21YO1pNZ/y60aNg2T3xvC1y4=</ds:SignatureValue>
       <ds:KeyInfo>
         <ds:X509Data>
           <ds:X509Certificate>MIIB7zCCAVgCCQDFzbKIp7b3MTANBgkqhkiG9w0BAQUFADA8MQswCQYDVQQGEwJVUzELMAkGA1UECAwCR0ExDDAKBgNVBAoMA2ZvbzESMBAGA1UEAwwJbG9jYWxob3N0MB4XDTEzMTAwMjAwMDg1MVoXDTE0MTAwMjAwMDg1MVowPDELMAkGA1UEBhMCVVMxCzAJBgNVBAgMAkdBMQwwCgYDVQQKDANmb28xEjAQBgNVBAMMCWxvY2FsaG9zdDCBnzANBgkqhkiG9w0BAQEFAAOBjQAwgYkCgYEA1PMHYmhZj308kWLhZVT4vOulqx/9ibm5B86fPWwUKKQ2i12MYtz07tzukPymisTDhQaqyJ8Kqb/6JjhmeMnEOdTvSPmHO8m1ZVveJU6NoKRn/mP/BD7FW52WhbrUXLSeHVSKfWkNk6S4hk9MV9TswTvyRIKvRsw0X/gfnqkroJcCAwEAATANBgkqhkiG9w0BAQUFAAOBgQCMMlIO+GNcGekevKgkakpMdAqJfs24maGb90DvTLbRZRD7Xvn1MnVBBS9hzlXiFLYOInXACMW5gcoRFfeTQLSouMM8o57h0uKjfTmuoWHLQLi6hnF+cvCsEFiJZ4AbF+DgmO6TarJ8O05t8zvnOwJlNCASPZRH/JmF8tX0hoHuAQ==</ds:X509Certificate>
@@ -46,7 +46,7 @@
       </ds:KeyInfo>
     </ds:Signature>
     <saml:Subject>
-      <saml:NameID Format="urn:oasis:names:tc:SAML:2.0:nameid-format:transient" NameQualifier="https://idp.example.com/saml/metadata" SPNameQualifier="https://gitlab.example.com/users/auth/saml/metadata"/>
+      <saml:NameID Format="urn:oasis:names:tc:SAML:2.0:nameid-format:transient" NameQualifier="https://idp.example.com/saml/metadata" SPNameQualifier="https://gitlab.example.com/users/auth/saml/metadata">alice</saml:NameID>
       <saml:SubjectConfirmation Method="urn:oasis:names:tc:SAML:2.0:cm:bearer">
         <saml:SubjectConfirmationData InResponseTo="id-00020406080a0c0e10121416181a1c1e" NotOnOrAfter="2015-12-01T01:58:39Z" Recipient="https://gitlab.example.com/users/auth/saml/callback"/>
       </saml:SubjectConfirmation>

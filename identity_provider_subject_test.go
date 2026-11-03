@@ -255,9 +255,10 @@ func TestServeSSOUsesConfiguredSubjectEnforcer(t *testing.T) {
 	})
 }
 
-// An empty identifier names no principal, even if the session has none either.
+// An empty identifier names no principal, even if the session has none either: no assertion is made.
 func TestServeSSORejectsEmptySubject(t *testing.T) {
 	test := NewIdentityProviderTest(t, applyKey)
 	w := serveSSOWithSubject(t, test, &Session{ID: "s"}, &Subject{NameID: &NameID{}})
-	assertAuthnFailed(t, subjectResponse(t, w))
+	assert.Check(t, is.Equal(w.Code, http.StatusInternalServerError))
+	assert.Check(t, !strings.Contains(w.Body.String(), "SAMLResponse"))
 }

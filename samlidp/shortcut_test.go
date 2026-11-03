@@ -62,7 +62,7 @@ func TestShortcut(t *testing.T) {
 
 	w = httptest.NewRecorder()
 	r, _ = http.NewRequest("PUT", "https://idp.example.com/users/alice",
-		strings.NewReader(`{"name": "alice", "password": "hunter2"}`+"\n"))
+		strings.NewReader(`{"name": "alice", "password": "hunter2", "email": "alice@example.com"}`+"\n"))
 	test.Server.ServeHTTP(w, r)
 	assert.Check(t, is.Equal(http.StatusNoContent, w.Code))
 

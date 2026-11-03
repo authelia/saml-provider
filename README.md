@@ -130,7 +130,8 @@ least the subset of SAML known as [interoperable SAML](https://kantarainitiative
   signatures are accepted. A custom login form must send `IdpAuthnRequest.RedirectQuery` in the `SAMLRedirectQuery`
   field, because the signature of a redirect does not survive being re-presented as a POST.
 - **`NameIDPolicy`:** a request that the assertion can't satisfy receives an `InvalidNameIDPolicy` status. The `NameID`
-  format comes from `Session.NameIDFormat` and defaults to transient, and the metadata only advertises transient, so a
+  comes from `Session.NameID`, and `DefaultAssertionMaker` refuses a session without one. Its format comes from
+  `Session.NameIDFormat` and defaults to transient, and the metadata only advertises transient, so a
   request for any other format is refused unless the session provides it. `EncryptedID` is not supported, so the
   encrypted format is always refused. `AllowCreate` is not checked by default: set
   `IdentityProvider.NameIDPolicyEnforcer` to check it, or to decide differently for each SP.
