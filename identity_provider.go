@@ -76,6 +76,28 @@ type SessionProvider interface {
 	GetSession(w http.ResponseWriter, r *http.Request, req *IdpAuthnRequest) *Session
 }
 
+// PassiveSessionProvider is an optional interface of a SessionProvider, which is required to serve
+// a request with IsPassive set. Without it those requests receive a NoPassive status, because
+// GetSession is allowed to interact with the user.
+type PassiveSessionProvider interface {
+	// GetPassiveSession returns the session of the remote user without any interaction, or nil if
+	// that isn't possible. It has no http.ResponseWriter because it must not write a response. If
+	// req.Request.ForceAuthn is also set, it must return nil unless it can authenticate the user
+	// directly with no interaction.
+	GetPassiveSession(r *http.Request, req *IdpAuthnRequest) *Session
+}
+
+// ForceAuthnSessionProvider is an optional interface of a SessionProvider, which is required to serve
+// a request with ForceAuthn set. Without it those requests receive an AuthnFailed status, because
+// GetSession is allowed to rely on an existing session.
+type ForceAuthnSessionProvider interface {
+	// GetForcedSession authenticates the remote user directly and returns the resulting session. It
+	// must not rely on an existing session. Otherwise it follows the rules of GetSession: if it has
+	// no session yet, it must complete the HTTP request and return nil. That includes when a login
+	// form re-presents the request, which arrives here again.
+	GetForcedSession(w http.ResponseWriter, r *http.Request, req *IdpAuthnRequest) *Session
+}
+
 // ServiceProviderProvider is an interface used by IdentityProvider to look up
 // service provider metadata for a request.
 type ServiceProviderProvider interface {
@@ -292,7 +314,7 @@ func (idp *IdentityProvider) ServeSSO(w http.ResponseWriter, r *http.Request) {
 	// TODO(ross): we must check that the request ID has not been previously
 	//   issued.
 
-	session := idp.SessionProvider.GetSession(w, r, req)
+	session := req.getSession(w, r)
 	if session == nil {
 		return
 	}
@@ -324,6 +346,43 @@ func (idp *IdentityProvider) ServeSSO(w http.ResponseWriter, r *http.Request) {
 		idp.Logger.Printf("failed to write response: %s", err)
 		http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
 		return
+	}
+}
+
+// getSession returns the session for the request, following its IsPassive and ForceAuthn attributes.
+// If it returns nil then the HTTP request has been completed. IsPassive comes first, as SAMLCore
+// §3.4.1 requires that ForceAuthn doesn't cause any authentication that it would forbid.
+func (req *IdpAuthnRequest) getSession(w http.ResponseWriter, r *http.Request) *Session {
+	idp := req.IDP
+
+	if req.Request.IsPassive != nil && *req.Request.IsPassive {
+		var session *Session
+		if provider, ok := idp.SessionProvider.(PassiveSessionProvider); ok {
+			session = provider.GetPassiveSession(r, req)
+		}
+		if session == nil {
+			req.writeErrorStatus(w, StatusNoPassive)
+		}
+		return session
+	}
+
+	if req.Request.ForceAuthn != nil && *req.Request.ForceAuthn {
+		provider, ok := idp.SessionProvider.(ForceAuthnSessionProvider)
+		if !ok {
+			req.writeErrorStatus(w, StatusAuthnFailed)
+			return nil
+		}
+		return provider.GetForcedSession(w, r, req)
+	}
+
+	return idp.SessionProvider.GetSession(w, r, req)
+}
+
+// writeErrorStatus completes the HTTP request with a Responder status and the given second-level status.
+func (req *IdpAuthnRequest) writeErrorStatus(w http.ResponseWriter, secondLevelStatus string) {
+	if err := req.WriteErrorResponse(w, StatusResponder, secondLevelStatus, ""); err != nil {
+		req.IDP.Logger.Printf("failed to write response: %s", err)
+		http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
 	}
 }
 

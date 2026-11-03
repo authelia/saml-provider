@@ -33,77 +33,127 @@ var sessionMaxAge = time.Hour
 // If neither credentials nor a valid session cookie exist, this function
 // sends a login form and returns nil.
 func (s *Server) GetSession(w http.ResponseWriter, r *http.Request, req *saml.IdpAuthnRequest) *saml.Session {
-	// if we received login credentials then maybe we can create a session
-	if r.Method == "POST" && r.PostForm.Get("user") != "" {
-		user := User{}
-		if err := s.Store.Get(fmt.Sprintf("/users/%s", r.PostForm.Get("user")), &user); err != nil {
-			s.logger.Printf("ERROR: User '%s' doesn't exists", r.PostForm.Get("user"))
-			s.sendLoginForm(w, req, "Invalid username or password")
-			return nil
-		}
-
-		if err := bcrypt.CompareHashAndPassword(user.HashedPassword, []byte(r.PostForm.Get("password"))); err != nil {
-			s.logger.Printf("ERROR: Invalid password for user '%s'", r.PostForm.Get("user"))
-			s.sendLoginForm(w, req, "Invalid username or password")
-			return nil
-		}
-
-		session := &saml.Session{
-			ID:         base64.StdEncoding.EncodeToString(randomBytes(32)),
-			NameID:     user.Email,
-			CreateTime: saml.TimeNow(),
-			ExpireTime: saml.TimeNow().Add(sessionMaxAge),
-			Index:      hex.EncodeToString(randomBytes(32)),
-			UserName:   user.Name,
-			// nolint:gocritic // Groups should be a slice here.
-			Groups:                user.Groups[:],
-			UserEmail:             user.Email,
-			UserCommonName:        user.CommonName,
-			UserSurname:           user.Surname,
-			UserGivenName:         user.GivenName,
-			UserScopedAffiliation: user.ScopedAffiliation,
-		}
-		if err := s.Store.Put(fmt.Sprintf("/sessions/%s", session.ID), &session); err != nil {
-			http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
-			return nil
-		}
-
-		http.SetCookie(w, &http.Cookie{
-			Name:     "session",
-			Value:    session.ID,
-			MaxAge:   int(sessionMaxAge.Seconds()),
-			HttpOnly: true,
-			// r.URL.Scheme is empty on server requests. The configured URL covers TLS terminated
-			// by a proxy.
-			Secure:   r.TLS != nil || s.IDP.SSOURL.Scheme == "https",
-			SameSite: http.SameSiteLaxMode,
-			Path:     "/",
-		})
-
-		s.logger.Printf("User '%s' authenticated successfully", r.PostForm.Get("user"))
-		return session
+	if hasCredentials(r) {
+		return s.authenticate(w, r, req)
 	}
 
-	if sessionCookie, err := r.Cookie("session"); err == nil {
-		session := &saml.Session{}
-		if err := s.Store.Get(fmt.Sprintf("/sessions/%s", sessionCookie.Value), session); err != nil {
-			if err == ErrNotFound {
-				s.sendLoginForm(w, req, "")
-				return nil
-			}
-			http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
-			return nil
-		}
-
-		if saml.TimeNow().After(session.ExpireTime) {
-			s.sendLoginForm(w, req, "")
-			return nil
-		}
+	session, err := s.existingSession(r)
+	if err != nil {
+		http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
+		return nil
+	}
+	if session != nil {
 		return session
 	}
 
 	s.sendLoginForm(w, req, "")
 	return nil
+}
+
+// GetPassiveSession implements saml.PassiveSessionProvider. It returns the existing session. This
+// server only authenticates with a login form, so it can't satisfy ForceAuthn without interaction.
+func (s *Server) GetPassiveSession(r *http.Request, req *saml.IdpAuthnRequest) *saml.Session {
+	if req.Request.ForceAuthn != nil && *req.Request.ForceAuthn {
+		return nil
+	}
+
+	session, err := s.existingSession(r)
+	if err != nil {
+		s.logger.Printf("ERROR: cannot read session: %s", err)
+		return nil
+	}
+	return session
+}
+
+// GetForcedSession implements saml.ForceAuthnSessionProvider. It authenticates with the credentials in
+// the request or else sends a login form, and doesn't consider any existing session.
+func (s *Server) GetForcedSession(w http.ResponseWriter, r *http.Request, req *saml.IdpAuthnRequest) *saml.Session {
+	if hasCredentials(r) {
+		return s.authenticate(w, r, req)
+	}
+
+	s.sendLoginForm(w, req, "")
+	return nil
+}
+
+// hasCredentials returns true if the request contains login credentials.
+func hasCredentials(r *http.Request) bool {
+	return r.Method == "POST" && r.PostForm.Get("user") != ""
+}
+
+// authenticate creates a session from the credentials in the request, or else sends a login form with
+// an English-language toast telling the user their password was invalid and returns nil.
+func (s *Server) authenticate(w http.ResponseWriter, r *http.Request, req *saml.IdpAuthnRequest) *saml.Session {
+	user := User{}
+	if err := s.Store.Get(fmt.Sprintf("/users/%s", r.PostForm.Get("user")), &user); err != nil {
+		s.logger.Printf("ERROR: User '%s' doesn't exists", r.PostForm.Get("user"))
+		s.sendLoginForm(w, req, "Invalid username or password")
+		return nil
+	}
+
+	if err := bcrypt.CompareHashAndPassword(user.HashedPassword, []byte(r.PostForm.Get("password"))); err != nil {
+		s.logger.Printf("ERROR: Invalid password for user '%s'", r.PostForm.Get("user"))
+		s.sendLoginForm(w, req, "Invalid username or password")
+		return nil
+	}
+
+	session := &saml.Session{
+		ID:         base64.StdEncoding.EncodeToString(randomBytes(32)),
+		NameID:     user.Email,
+		CreateTime: saml.TimeNow(),
+		ExpireTime: saml.TimeNow().Add(sessionMaxAge),
+		Index:      hex.EncodeToString(randomBytes(32)),
+		UserName:   user.Name,
+		// nolint:gocritic // Groups should be a slice here.
+		Groups:                user.Groups[:],
+		UserEmail:             user.Email,
+		UserCommonName:        user.CommonName,
+		UserSurname:           user.Surname,
+		UserGivenName:         user.GivenName,
+		UserScopedAffiliation: user.ScopedAffiliation,
+	}
+	if err := s.Store.Put(fmt.Sprintf("/sessions/%s", session.ID), &session); err != nil {
+		http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
+		return nil
+	}
+
+	//nolint:gosec // Secure and SameSite are set below, from the request and the configured URL.
+	http.SetCookie(w, &http.Cookie{
+		Name:     "session",
+		Value:    session.ID,
+		MaxAge:   int(sessionMaxAge.Seconds()),
+		HttpOnly: true,
+		// r.URL.Scheme is empty on server requests. The configured URL covers TLS terminated
+		// by a proxy.
+		Secure:   r.TLS != nil || s.IDP.SSOURL.Scheme == "https",
+		SameSite: http.SameSiteLaxMode,
+		Path:     "/",
+	})
+
+	s.logger.Printf("User '%s' authenticated successfully", r.PostForm.Get("user"))
+	return session
+}
+
+// existingSession returns the session of the cookie in the request, or nil if it doesn't have a
+// current one.
+func (s *Server) existingSession(r *http.Request) (*saml.Session, error) {
+	sessionCookie, err := r.Cookie("session")
+	if err != nil {
+		return nil, nil //nolint:nilerr // A missing cookie means that there is no session.
+	}
+
+	session := &saml.Session{}
+	if err := s.Store.Get(fmt.Sprintf("/sessions/%s", sessionCookie.Value), session); err != nil {
+		if err == ErrNotFound {
+			return nil, nil
+		}
+		return nil, err
+	}
+
+	if saml.TimeNow().After(session.ExpireTime) {
+		return nil, nil
+	}
+	return session, nil
 }
 
 var defaultLoginFormTemplate = template.Must(template.New("saml-post-form").Parse(`` +

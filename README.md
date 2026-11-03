@@ -80,7 +80,7 @@ least the subset of SAML known as [interoperable SAML](https://kantarainitiative
 | `AssertionConsumerServiceURL` / `Index` selection | ✅  | N/A |
 | `RelayState`                                      | ✅  | ✅  |
 | `NameIDPolicy`                                    | ⚠️  | ✅  |
-| `ForceAuthn` / `IsPassive`                        | ⚠️  | ✅  |
+| `ForceAuthn` / `IsPassive`                        | ✅  | ✅  |
 | `RequestedAuthnContext`                           | ⚠️  | ✅  |
 | `Scoping` (proxying)                              | ❌  | ❌  |
 | Error status responses                            | ⚠️  | ✅  |
@@ -131,12 +131,14 @@ least the subset of SAML known as [interoperable SAML](https://kantarainitiative
   request for any other format is refused unless the session provides it. `EncryptedID` is not supported, so the
   encrypted format is always refused. `AllowCreate` is not checked by default: set
   `IdentityProvider.NameIDPolicyEnforcer` to check it, or to decide differently for each SP.
-- **`ForceAuthn` / `IsPassive`:** not enforced by the library. The parsed request is passed to
-  `SessionProvider.GetSession`, so enforcing them is left to the implementation.
+- **`ForceAuthn` / `IsPassive`:** a `SessionProvider` must also implement `ForceAuthnSessionProvider` or
+  `PassiveSessionProvider` to serve these requests. Otherwise they receive an `AuthnFailed` or `NoPassive` status.
+  `samlidp` implements both, and returns `NoPassive` if both are set, as it can only authenticate with a login form.
 - **`RequestedAuthnContext`:** ignored by `DefaultAssertionMaker`, which always asserts
   `PasswordProtectedTransport`. A custom `AssertionMaker` can set a different context.
 - **Error status responses:** `IdpAuthnRequest.WriteErrorResponse` sends a SAML `Response` with a non-success status once
-  the ACS has been validated, and `NameIDPolicy` refusals use it. Other failures produce an HTTP error.
+  the ACS has been validated, and `NameIDPolicy`, `ForceAuthn` and `IsPassive` refusals use it. Other failures produce an
+  HTTP error.
 - **Replay detection:** `AuthnRequest` IDs are not checked for reuse.
 - **Encrypt `Assertion`:** key transport always uses RSA-OAEP-MGF1P (SHA-1). Content encryption uses the first of
   AES-128-GCM and AES-128/192/256-CBC the SP lists in `EncryptionMethod`, or AES-128-CBC if it lists none of them.
