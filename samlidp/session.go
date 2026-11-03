@@ -19,6 +19,9 @@ import (
 
 var sessionMaxAge = time.Hour
 
+// loginOriginProtection refuses login credentials which a browser posts from another origin.
+var loginOriginProtection = http.NewCrossOriginProtection()
+
 // GetSession returns the *Session for this request.
 //
 // If the remote user has specified a username and password in the request
@@ -86,6 +89,15 @@ func hasCredentials(r *http.Request) bool {
 // authenticate creates a session from the credentials in the request, or else sends a login form with
 // an English-language toast telling the user their password was invalid and returns nil.
 func (s *Server) authenticate(w http.ResponseWriter, r *http.Request, req *saml.IdpAuthnRequest) *saml.Session {
+	// Credentials from another site would log the browser in as a user of that site's choosing.
+	// Service providers post their requests from their own sites, so only a post with credentials
+	// is checked.
+	if err := loginOriginProtection.Check(r); err != nil {
+		s.logger.Printf("ERROR: refused credentials from another origin: %s", err)
+		http.Error(w, http.StatusText(http.StatusForbidden), http.StatusForbidden)
+		return nil
+	}
+
 	user := User{}
 	if err := s.Store.Get(fmt.Sprintf("/users/%s", r.PostForm.Get("user")), &user); err != nil {
 		s.logger.Printf("ERROR: User '%s' doesn't exists", r.PostForm.Get("user"))
