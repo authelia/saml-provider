@@ -2,6 +2,7 @@ package saml
 
 import (
 	"bytes"
+	"cmp"
 	"crypto"
 	"crypto/ecdsa"
 	"crypto/rsa"
@@ -15,6 +16,7 @@ import (
 	"net/url"
 	"os"
 	"regexp"
+	"slices"
 	"strconv"
 	"time"
 
@@ -130,6 +132,76 @@ type NameIDPolicyEnforcer interface {
 	EnforceNameIDPolicy(req *IdpAuthnRequest, session *Session) error
 }
 
+// AuthnContextEnforcer is an interface used by IdentityProvider to decide whether an assertion
+// satisfies the RequestedAuthnContext of its request. The default implementation is
+// DefaultAuthnContextEnforcer, which is used if no AuthnContextEnforcer is specified.
+type AuthnContextEnforcer interface {
+	// EnforceAuthnContext returns an error if req.Assertion doesn't satisfy
+	// req.Request.RequestedAuthnContext, which is not nil. The service provider receives a
+	// NoAuthnContext status, not the error.
+	EnforceAuthnContext(req *IdpAuthnRequest, session *Session) error
+}
+
+// DefaultAuthnContextEnforcer applies the comparison rules of SAMLCore §3.3.2.2.1 to the class
+// reference of every AuthnStatement in the assertion.
+type DefaultAuthnContextEnforcer struct {
+	// Strength ranks authentication context classes, where a greater value is stronger. It is
+	// needed for the minimum, maximum and better comparisons, as the specification leaves the
+	// ordering to the identity provider. Classes may share a value. A class that isn't listed is
+	// only equal to itself.
+	Strength map[string]int
+}
+
+// EnforceAuthnContext implements AuthnContextEnforcer.
+// Declaration references are always refused, because the assertions made here only state a class.
+// With minimum and maximum the asserted class must be at least as strong as, or no stronger than,
+// one of the requested classes, and with better it must be stronger than one of them.
+func (e DefaultAuthnContextEnforcer) EnforceAuthnContext(req *IdpAuthnRequest, _ *Session) error {
+	requested := req.Request.RequestedAuthnContext
+	if len(requested.AuthnContextDeclRefs) != 0 {
+		return fmt.Errorf("the request requires an AuthnContextDeclRef, which is not supported")
+	}
+
+	var satisfies func(asserted, class string) bool
+	switch requested.Comparison {
+	case "", AuthnContextComparisonExact:
+		satisfies = func(asserted, class string) bool { return asserted == class }
+	case AuthnContextComparisonMinimum:
+		satisfies = func(asserted, class string) bool { return asserted == class || e.compare(asserted, class) > 0 }
+	case AuthnContextComparisonMaximum:
+		satisfies = func(asserted, class string) bool { return asserted == class || e.compare(asserted, class) < 0 }
+	case AuthnContextComparisonBetter:
+		satisfies = func(asserted, class string) bool { return e.compare(asserted, class) > 0 }
+	default:
+		return fmt.Errorf("unknown comparison %q", requested.Comparison)
+	}
+
+	if req.Assertion == nil || len(req.Assertion.AuthnStatements) == 0 {
+		return fmt.Errorf("assertion has no AuthnStatement")
+	}
+	for _, statement := range req.Assertion.AuthnStatements {
+		if statement.AuthnContext.AuthnContextClassRef == nil {
+			return fmt.Errorf("an AuthnStatement has no AuthnContextClassRef")
+		}
+		asserted := statement.AuthnContext.AuthnContextClassRef.Value
+		if !slices.ContainsFunc(requested.AuthnContextClassRefs, func(class string) bool { return satisfies(asserted, class) }) {
+			return fmt.Errorf("the asserted class %q doesn't satisfy the %q comparison", asserted, requested.Comparison)
+		}
+	}
+	return nil
+}
+
+// compare returns a positive number if a is stronger than b, a negative number if it is weaker, and
+// zero if they are equal or either is not ranked.
+func (e DefaultAuthnContextEnforcer) compare(a, b string) int {
+	strengthA, okA := e.Strength[a]
+	strengthB, okB := e.Strength[b]
+	if !okA || !okB {
+		return 0
+	}
+	return cmp.Compare(strengthA, strengthB)
+}
+
 // IdentityProvider implements the SAML Identity Provider role (IDP).
 //
 // An identity provider receives SAML assertion requests and responds
@@ -172,6 +244,11 @@ type IdentityProvider struct {
 	// NameIDPolicyEnforcer decides whether an assertion satisfies the NameIDPolicy of its request.
 	// Defaults to DefaultNameIDPolicyEnforcer.
 	NameIDPolicyEnforcer NameIDPolicyEnforcer
+
+	// AuthnContextEnforcer decides whether an assertion satisfies the RequestedAuthnContext of its
+	// request. Defaults to a DefaultAuthnContextEnforcer with no Strength, which only accepts a
+	// class that the request lists, and never satisfies the better comparison.
+	AuthnContextEnforcer AuthnContextEnforcer
 }
 
 // Metadata returns the metadata structure for this identity provider.
@@ -336,6 +413,20 @@ func (idp *IdentityProvider) ServeSSO(w http.ResponseWriter, r *http.Request) {
 		if err := nameIDPolicyEnforcer.EnforceNameIDPolicy(req, session); err != nil {
 			idp.Logger.Printf("cannot satisfy name id policy: %s", err)
 			if err := req.WriteErrorResponse(w, StatusRequester, StatusInvalidNameIDPolicy, ""); err != nil {
+				idp.Logger.Printf("failed to write response: %s", err)
+				http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
+			}
+			return
+		}
+	}
+	if req.Request.RequestedAuthnContext != nil {
+		authnContextEnforcer := idp.AuthnContextEnforcer
+		if authnContextEnforcer == nil {
+			authnContextEnforcer = DefaultAuthnContextEnforcer{}
+		}
+		if err := authnContextEnforcer.EnforceAuthnContext(req, session); err != nil {
+			idp.Logger.Printf("cannot satisfy requested authn context: %s", err)
+			if err := req.WriteErrorResponse(w, StatusResponder, StatusNoAuthnContext, ""); err != nil {
 				idp.Logger.Printf("failed to write response: %s", err)
 				http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
 			}

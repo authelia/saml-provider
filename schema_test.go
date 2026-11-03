@@ -123,7 +123,7 @@ func TestRequestedAuthnContext(t *testing.T) {
 	doc.SetRoot(expected.Element())
 	x, err := doc.WriteToBytes()
 	assert.Check(t, err)
-	assert.Check(t, is.Equal(`<samlp:RequestedAuthnContext Comparison="comparison"><saml:AuthnContextClassRef/></samlp:RequestedAuthnContext>`,
+	assert.Check(t, is.Equal(`<samlp:RequestedAuthnContext Comparison="comparison"/>`,
 		string(x)))
 }
 
