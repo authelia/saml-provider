@@ -151,6 +151,19 @@ type AuthnContextEnforcer interface {
 	EnforceAuthnContext(req *IdpAuthnRequest, session *Session) error
 }
 
+// SubjectEnforcer is an interface used by IdentityProvider to decide whether an assertion is about
+// the principal that its request names. The default implementation is DefaultSubjectEnforcer, which
+// is used if no SubjectEnforcer is specified.
+type SubjectEnforcer interface {
+	// EnforceSubject returns an error if req.Assertion doesn't strongly match req.Request.Subject,
+	// which is not nil, as SAMLCore §3.4.1 requires. The service provider receives an AuthnFailed
+	// status, not the error.
+	//
+	// This is where to accept an identifier in another format which refers to the same principal,
+	// which the default implementation can't recognise.
+	EnforceSubject(req *IdpAuthnRequest, session *Session) error
+}
+
 // DefaultAuthnContextEnforcer applies the comparison rules of SAMLCore §3.3.2.2.1 to the class
 // reference of every AuthnStatement in the assertion.
 type DefaultAuthnContextEnforcer struct {
@@ -258,6 +271,10 @@ type IdentityProvider struct {
 	// request. Defaults to a DefaultAuthnContextEnforcer with no Strength, which only accepts a
 	// class that the request lists, and never satisfies the better comparison.
 	AuthnContextEnforcer AuthnContextEnforcer
+
+	// SubjectEnforcer decides whether an assertion matches the Subject of its request. Defaults to
+	// DefaultSubjectEnforcer.
+	SubjectEnforcer SubjectEnforcer
 }
 
 // Metadata returns the metadata structure for this identity provider.
@@ -420,6 +437,20 @@ func (idp *IdentityProvider) ServeSSO(w http.ResponseWriter, r *http.Request) {
 		idp.Logger.Printf("failed to make assertion: %s", err)
 		http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
 		return
+	}
+	if req.Request.Subject != nil {
+		subjectEnforcer := idp.SubjectEnforcer
+		if subjectEnforcer == nil {
+			subjectEnforcer = DefaultSubjectEnforcer{}
+		}
+		if err := subjectEnforcer.EnforceSubject(req, session); err != nil {
+			idp.Logger.Printf("cannot match the request subject: %s", err)
+			if err := req.WriteErrorResponse(w, StatusResponder, StatusAuthnFailed, ""); err != nil {
+				idp.Logger.Printf("failed to write response: %s", err)
+				http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
+			}
+			return
+		}
 	}
 	if req.Request.NameIDPolicy != nil {
 		nameIDPolicyEnforcer := idp.NameIDPolicyEnforcer
@@ -826,6 +857,100 @@ func (req *IdpAuthnRequest) useDefaultACSEndpoint() error {
 	return nil
 }
 
+// DefaultSubjectEnforcer applies the strong matching rule of SAMLCore §3.3.4 to the request Subject.
+type DefaultSubjectEnforcer struct {
+}
+
+// EnforceSubject implements SubjectEnforcer. The request must name the principal with a NameID, which
+// must have the value of the asserted NameID. Its format, unless left unspecified, and any qualifier
+// or SPProvidedID it has must also be the same. If the request has SubjectConfirmation elements, the
+// assertion must have a bearer confirmation which meets the conditions of one of them.
+func (DefaultSubjectEnforcer) EnforceSubject(req *IdpAuthnRequest, _ *Session) error {
+	requested := req.Request.Subject.NameID
+	if requested == nil || requested.Value == "" {
+		return fmt.Errorf("the request Subject has no NameID")
+	}
+	if req.Assertion == nil || req.Assertion.Subject == nil || req.Assertion.Subject.NameID == nil {
+		return fmt.Errorf("assertion has no NameID")
+	}
+	asserted := req.Assertion.Subject.NameID
+
+	if asserted.Value != requested.Value {
+		return fmt.Errorf("the assertion is for another principal than the request names")
+	}
+	switch requested.Format {
+	case "", string(UnspecifiedNameIDFormat), unspecifiedNameIDFormat:
+	default:
+		if asserted.Format != requested.Format {
+			return fmt.Errorf("the NameID format is %q and the request names %q", asserted.Format, requested.Format)
+		}
+	}
+	for _, qualifier := range []struct{ name, requested, asserted string }{
+		{"NameQualifier", requested.NameQualifier, asserted.NameQualifier},
+		{"SPNameQualifier", requested.SPNameQualifier, asserted.SPNameQualifier},
+		{"SPProvidedID", requested.SPProvidedID, asserted.SPProvidedID},
+	} {
+		if qualifier.requested != "" && qualifier.requested != qualifier.asserted {
+			return fmt.Errorf("the NameID %s is %q and the request names %q", qualifier.name, qualifier.asserted, qualifier.requested)
+		}
+	}
+	if !confirmsSubject(req.Request.Subject.SubjectConfirmations, req.Assertion.Subject.SubjectConfirmations) {
+		return fmt.Errorf("the assertion can't be confirmed in a manner the request accepts")
+	}
+	return nil
+}
+
+// confirmsSubject reports whether the assertion can be confirmed in the manner of one of the
+// SubjectConfirmation elements of the request, as SAMLCore §3.3.4 requires. A request with none
+// accepts any. Only a bearer confirmation is matched, because the data of the other methods, such as
+// the key of holder-of-key, isn't parsed and so can't be compared.
+func confirmsSubject(requested []SubjectConfirmation, asserted []SubjectConfirmation) bool {
+	if len(requested) == 0 {
+		return true
+	}
+	return slices.ContainsFunc(requested, func(want SubjectConfirmation) bool {
+		return want.Method == bearerSubjectConfirmationMethod && slices.ContainsFunc(asserted, func(have SubjectConfirmation) bool {
+			return have.Method == want.Method && sameNameID(want.NameID, have.NameID) && satisfiesConfirmationData(want.SubjectConfirmationData, have.SubjectConfirmationData)
+		})
+	})
+}
+
+// sameNameID reports whether a NameID the request gives, if any, is identical to the asserted one.
+func sameNameID(requested, asserted *NameID) bool {
+	return requested == nil || (asserted != nil && *requested == *asserted)
+}
+
+// satisfiesConfirmationData reports whether the asserted confirmation data meets every condition the
+// requested data gives: the same recipient, request and address, and a validity period within the
+// requested one.
+func satisfiesConfirmationData(requested, asserted *SubjectConfirmationData) bool {
+	if requested == nil {
+		return true
+	}
+	if asserted == nil {
+		return false
+	}
+	for _, value := range [][2]string{
+		{requested.Recipient, asserted.Recipient},
+		{requested.InResponseTo, asserted.InResponseTo},
+		{requested.Address, asserted.Address},
+	} {
+		if value[0] != "" && value[0] != value[1] {
+			return false
+		}
+	}
+	if !requested.NotBefore.IsZero() && asserted.NotBefore.Before(requested.NotBefore) {
+		return false
+	}
+	if !requested.NotOnOrAfter.IsZero() && (asserted.NotOnOrAfter.IsZero() || asserted.NotOnOrAfter.After(requested.NotOnOrAfter)) {
+		return false
+	}
+	return true
+}
+
+// bearerSubjectConfirmationMethod is the only confirmation method of the assertions made here.
+const bearerSubjectConfirmationMethod = "urn:oasis:names:tc:SAML:2.0:cm:bearer" //nolint:gosec // A SAML method identifier, not a credential.
+
 // DefaultNameIDPolicyEnforcer applies the rules of SAMLCore §3.4.1.1, as changed by errata E15.
 type DefaultNameIDPolicyEnforcer struct {
 }
@@ -1116,7 +1241,7 @@ func (DefaultAssertionMaker) MakeAssertion(req *IdpAuthnRequest, session *Sessio
 			},
 			SubjectConfirmations: []SubjectConfirmation{
 				{
-					Method: "urn:oasis:names:tc:SAML:2.0:cm:bearer",
+					Method: bearerSubjectConfirmationMethod,
 					SubjectConfirmationData: &SubjectConfirmationData{
 						Address:      req.HTTPRequest.RemoteAddr,
 						InResponseTo: req.Request.ID,
