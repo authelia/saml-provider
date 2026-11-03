@@ -1633,25 +1633,31 @@ func (sp *ServiceProvider) nameIDFormat() string {
 	return nameIDFormat
 }
 
-// ValidateLogoutResponseRequest validates the LogoutResponse content from the request
-func (sp *ServiceProvider) ValidateLogoutResponseRequest(req *http.Request) error {
+// ValidateLogoutResponseRequest validates the LogoutResponse content from the request. See
+// ValidateLogoutResponseForm for possibleRequestIDs.
+func (sp *ServiceProvider) ValidateLogoutResponseRequest(req *http.Request, possibleRequestIDs []string) error {
 	parameters, err := redirectParameters(req.URL.RawQuery)
 	if err != nil {
 		return &InvalidResponseError{Now: TimeNow(), PrivateErr: err}
 	}
 	if parameters["SAMLResponse"] != "" {
-		return sp.ValidateLogoutResponseRedirect(req.URL)
+		return sp.ValidateLogoutResponseRedirect(req.URL, possibleRequestIDs)
 	}
 
 	if err = req.ParseForm(); err != nil {
 		return fmt.Errorf("unable to parse form: %v", err)
 	}
 
-	return sp.ValidateLogoutResponseForm(req.PostForm.Get("SAMLResponse"))
+	return sp.ValidateLogoutResponseForm(req.PostForm.Get("SAMLResponse"), possibleRequestIDs)
 }
 
 // ValidateLogoutResponseForm returns a nil error if the logout response is valid.
-func (sp *ServiceProvider) ValidateLogoutResponseForm(postFormData string) error {
+//
+// The response must be in response to one of possibleRequestIDs, which are the IDs of the requests the
+// caller has sent and not yet received a response to. Use MakeLogoutRequest to obtain the ID of a
+// request, then send it with its Redirect or Post method. A caller should stop accepting an ID once it
+// has been used, or a response can be replayed until it expires.
+func (sp *ServiceProvider) ValidateLogoutResponseForm(postFormData string, possibleRequestIDs []string) error {
 	retErr := &InvalidResponseError{
 		Now: TimeNow(),
 	}
@@ -1685,18 +1691,19 @@ func (sp *ServiceProvider) ValidateLogoutResponseForm(postFormData string) error
 		retErr.PrivateErr = err
 		return retErr
 	}
-	return sp.validateLogoutResponse(&resp)
+	return sp.validateLogoutResponse(&resp, possibleRequestIDs)
 }
 
 // ValidateLogoutResponseRedirect returns a nil error if the logout response in the query of the URL
 // is valid. The URL must be as it was received, because the signature covers the query as it was sent.
+// See ValidateLogoutResponseForm for possibleRequestIDs.
 //
 // The signature must be in the SigAlg and Signature parameters as SAMLBind §3.4.4.1 requires, or else
 // embedded in the message, which that section does not allow but some identity providers send.
 //
 // URL Binding appears to be gzip / flate encoded
 // See https://www.oasis-open.org/committees/download.php/20645/sstc-saml-tech-overview-2%200-draft-10.pdf  6.6
-func (sp *ServiceProvider) ValidateLogoutResponseRedirect(u *url.URL) error {
+func (sp *ServiceProvider) ValidateLogoutResponseRedirect(u *url.URL, possibleRequestIDs []string) error {
 	retErr := &InvalidResponseError{
 		Now: TimeNow(),
 	}
@@ -1766,7 +1773,7 @@ func (sp *ServiceProvider) ValidateLogoutResponseRedirect(u *url.URL) error {
 		retErr.PrivateErr = err
 		return retErr
 	}
-	return sp.validateLogoutResponse(&resp)
+	return sp.validateLogoutResponse(&resp, possibleRequestIDs)
 }
 
 // redirectSigningCertificates returns the certificates which can verify a signature in the query. A
@@ -1809,17 +1816,21 @@ func (sp *ServiceProvider) redirectSigningCertificates() ([]*x509.Certificate, e
 }
 
 // validateLogoutResponse validates the LogoutResponse fields. Returns a nil error if the LogoutResponse is valid.
-func (sp *ServiceProvider) validateLogoutResponse(resp *LogoutResponse) error {
+func (sp *ServiceProvider) validateLogoutResponse(resp *LogoutResponse, possibleRequestIDs []string) error {
 	if resp.Destination != sp.SloURL.String() {
 		return fmt.Errorf("`Destination` does not match SloURL (expected %q)", sp.SloURL.String())
 	}
 
-	now := time.Now()
+	now := TimeNow()
 	if resp.IssueInstant.Add(MaxIssueDelay).Before(now) {
 		return fmt.Errorf("issueInstant expired at %s", resp.IssueInstant.Add(MaxIssueDelay))
 	}
-	if resp.Issuer.Value != sp.IDPMetadata.EntityID {
+	if resp.Issuer == nil || resp.Issuer.Value != sp.IDPMetadata.EntityID {
 		return fmt.Errorf("issuer does not match the IDP metadata (expected %q)", sp.IDPMetadata.EntityID)
+	}
+	// Logout is always in response to a request, so unlike a Response there is no unsolicited form.
+	if resp.InResponseTo == "" || !slices.Contains(possibleRequestIDs, resp.InResponseTo) {
+		return fmt.Errorf("`InResponseTo` does not match any of the possible request IDs (expected %v)", possibleRequestIDs)
 	}
 	if resp.Status.StatusCode.Value != StatusSuccess {
 		return fmt.Errorf("status code was not %s", StatusSuccess)
