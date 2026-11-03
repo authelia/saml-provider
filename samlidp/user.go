@@ -68,7 +68,7 @@ func (s *Server) HandlePutUser(w http.ResponseWriter, r *http.Request) {
 	user := User{}
 	if err := json.NewDecoder(r.Body).Decode(&user); err != nil {
 		s.logger.Printf("ERROR: %s", err)
-		http.Error(w, http.StatusText(http.StatusBadRequest), http.StatusBadRequest)
+		writeBodyError(w, err)
 		return
 	}
 	user.Name = r.PathValue("id")

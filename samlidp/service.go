@@ -81,7 +81,7 @@ func (s *Server) HandlePutService(w http.ResponseWriter, r *http.Request) {
 	metadata, err := getSPMetadata(r.Body)
 	if err != nil {
 		s.logger.Printf("ERROR: %s", err)
-		http.Error(w, http.StatusText(http.StatusBadRequest), http.StatusBadRequest)
+		writeBodyError(w, err)
 		return
 	}
 
