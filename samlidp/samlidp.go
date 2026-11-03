@@ -75,6 +75,8 @@ func New(opts Options) (*Server, error) {
 	ssoURL.Path += "/sso"
 	loginURL := opts.URL
 	loginURL.Path += "/login"
+	logoutURL := opts.URL
+	logoutURL.Path += "/logout"
 	logr := opts.Logger
 	if logr == nil {
 		logr = logger.DefaultLogger
@@ -91,6 +93,7 @@ func New(opts Options) (*Server, error) {
 			MetadataURL: metadataURL,
 			SSOURL:      ssoURL,
 			LoginURL:    loginURL,
+			LogoutURL:   logoutURL,
 
 			MaxAuthnRequestAge: maxLoginDuration,
 		},
@@ -124,6 +127,9 @@ func (s *Server) InitializeHTTP() {
 	})
 	mux.HandleFunc("/sso", func(w http.ResponseWriter, r *http.Request) {
 		s.IDP.ServeSSO(w, r)
+	})
+	mux.HandleFunc("/logout", func(w http.ResponseWriter, r *http.Request) {
+		s.IDP.ServeSLO(w, r)
 	})
 
 	mux.HandleFunc("/login", s.HandleLogin)

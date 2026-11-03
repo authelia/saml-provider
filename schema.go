@@ -76,7 +76,7 @@ type LogoutRequest struct {
 	NameID       *NameID
 	Signature    *etree.Element
 
-	SessionIndex *SessionIndex `xml:"SessionIndex"`
+	SessionIndexes []SessionIndex `xml:"urn:oasis:names:tc:SAML:2.0:protocol SessionIndex"`
 }
 
 // Element returns an etree.Element representing the object in XML form.
@@ -102,8 +102,8 @@ func (r *LogoutRequest) Element() *etree.Element {
 	if r.NameID != nil {
 		el.AddChild(r.NameID.Element())
 	}
-	if r.SessionIndex != nil {
-		el.AddChild(r.SessionIndex.Element())
+	for i := range r.SessionIndexes {
+		el.AddChild(r.SessionIndexes[i].Element())
 	}
 	return el
 }

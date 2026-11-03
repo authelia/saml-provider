@@ -118,8 +118,14 @@ func (req *IdpAuthnRequest) serviceProviderSignsAuthnRequests() bool {
 
 // serviceProviderSigningCertificates returns the certificates that the service provider may sign with.
 func (req *IdpAuthnRequest) serviceProviderSigningCertificates() ([]*x509.Certificate, error) {
+	return serviceProviderSigningCertificates(req.ServiceProviderMetadata)
+}
+
+// serviceProviderSigningCertificates returns the certificates that a service provider may sign with,
+// according to its metadata.
+func serviceProviderSigningCertificates(metadata *EntityDescriptor) ([]*x509.Certificate, error) {
 	var certificates []*x509.Certificate
-	for _, descriptor := range req.ServiceProviderMetadata.SPSSODescriptors {
+	for _, descriptor := range metadata.SPSSODescriptors {
 		for _, keyDescriptor := range descriptor.KeyDescriptors {
 			if keyDescriptor.Use != "signing" && keyDescriptor.Use != "" {
 				continue
