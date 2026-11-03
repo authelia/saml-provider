@@ -32,9 +32,15 @@ func (f authnContextEnforcerFunc) EnforceAuthnContext(req *IdpAuthnRequest, sess
 // response sent to the service provider.
 func serveSSOWithAuthnContext(t *testing.T, test *IdentityProviderTest, requested *RequestedAuthnContext) Response {
 	t.Helper()
+	return serveSSOWithSession(t, test, &Session{ID: "s", NameID: "alice"}, requested)
+}
+
+// serveSSOWithSession is serveSSOWithAuthnContext for the given session.
+func serveSSOWithSession(t *testing.T, test *IdentityProviderTest, session *Session, requested *RequestedAuthnContext) Response {
+	t.Helper()
 	test.IDP.SessionProvider = &mockSessionProvider{
 		GetSessionFunc: func(http.ResponseWriter, *http.Request, *IdpAuthnRequest) *Session {
-			return &Session{ID: "s", NameID: "alice"}
+			return session
 		},
 	}
 
@@ -100,6 +106,35 @@ func TestServeSSORejectsUnsatisfiableAuthnContext(t *testing.T) {
 			assertNoAuthnContext(t, serveSSOWithAuthnContext(t, test, requested))
 		})
 	}
+}
+
+// The assertion carries the class of the session, or PasswordProtectedTransport when the session has
+// none, so a session provider can assert a stronger authentication truthfully.
+func TestDefaultAssertionMakerUsesSessionAuthnContext(t *testing.T) {
+	for name, tc := range map[string]struct{ session, asserted string }{
+		"session class": {session: strongClass, asserted: strongClass},
+		"default class": {session: "", asserted: transportClass},
+	} {
+		t.Run(name, func(t *testing.T) {
+			test := NewIdentityProviderTest(t, applyKey)
+			req, err := hardeningValidate(test, hardeningRequest(`ID="id-1"`, TimeNow(), hardeningIssuer))
+			assert.NilError(t, err)
+			assert.NilError(t, DefaultAssertionMaker{}.MakeAssertion(req, &Session{ID: "f00d", NameID: "alice", AuthnContextClassRef: tc.session}))
+			assert.Assert(t, is.Len(req.Assertion.AuthnStatements, 1))
+			assert.Assert(t, req.Assertion.AuthnStatements[0].AuthnContext.AuthnContextClassRef != nil)
+			assert.Check(t, is.Equal(req.Assertion.AuthnStatements[0].AuthnContext.AuthnContextClassRef.Value, tc.asserted))
+		})
+	}
+}
+
+func TestServeSSOAcceptsSessionAuthnContext(t *testing.T) {
+	test := NewIdentityProviderTest(t, applyKey)
+	session := &Session{ID: "s", NameID: "alice", AuthnContextClassRef: strongClass}
+	response := serveSSOWithSession(t, test, session, &RequestedAuthnContext{AuthnContextClassRefs: []string{strongClass}})
+	assert.Check(t, is.Equal(response.Status.StatusCode.Value, StatusSuccess))
+
+	response = serveSSOWithSession(t, test, session, &RequestedAuthnContext{AuthnContextClassRefs: []string{transportClass}})
+	assertNoAuthnContext(t, response)
 }
 
 func TestServeSSOUsesConfiguredAuthnContextEnforcer(t *testing.T) {

@@ -138,8 +138,8 @@ least the subset of SAML known as [interoperable SAML](https://kantarainitiative
   `PassiveSessionProvider` to serve these requests. Otherwise they receive an `AuthnFailed` or `NoPassive` status.
   `samlidp` implements both, and returns `NoPassive` if both are set, as it can only authenticate with a login form.
 - **`RequestedAuthnContext`:** a request that the assertion can't satisfy receives a `NoAuthnContext` status.
-  `DefaultAssertionMaker` always asserts `PasswordProtectedTransport`, and a custom `AssertionMaker` can set a different
-  class. `minimum`, `maximum` and `better` need `DefaultAuthnContextEnforcer.Strength` to rank classes. Without it,
+  `DefaultAssertionMaker` asserts `Session.AuthnContextClassRef`, or `PasswordProtectedTransport` when the session sets
+  none, and a custom `AssertionMaker` can set a different class. `minimum`, `maximum` and `better` need `DefaultAuthnContextEnforcer.Strength` to rank classes. Without it,
   `minimum` and `maximum` only match a listed class, and `better` never matches. `AuthnContextDeclRef` is not supported and is always refused. Set
   `IdentityProvider.AuthnContextEnforcer` to decide differently.
 - **Error status responses:** `IdpAuthnRequest.WriteErrorResponse` sends a SAML `Response` with a non-success status once
