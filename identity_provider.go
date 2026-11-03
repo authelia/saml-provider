@@ -1273,10 +1273,18 @@ func (req *IdpAuthnRequest) WriteResponse(w http.ResponseWriter) error {
 	if err := tmpl.Execute(buf, form); err != nil {
 		return err
 	}
+	setNoCacheHeaders(w)
 	if _, err := io.Copy(w, buf); err != nil {
 		return err
 	}
 	return nil
+}
+
+// setNoCacheHeaders stops a browser or proxy keeping a page which carries a SAML message, as
+// SAMLBind §3.5.5.1 and §3.4.5.1 ask.
+func setNoCacheHeaders(w http.ResponseWriter) {
+	w.Header().Set("Cache-Control", "no-cache, no-store")
+	w.Header().Set("Pragma", "no-cache")
 }
 
 // contentEncryptionMethods are the content encryption algorithms this identity provider can use.

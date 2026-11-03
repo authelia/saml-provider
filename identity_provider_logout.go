@@ -297,8 +297,7 @@ func (req *IdpLogoutRequest) WriteResponse(w http.ResponseWriter, status Status)
 		return err
 	}
 
-	w.Header().Set("Cache-Control", "no-cache, no-store")
-	w.Header().Set("Pragma", "no-cache")
+	setNoCacheHeaders(w)
 
 	switch req.SLOEndpoint.Binding {
 	case HTTPRedirectBinding:
