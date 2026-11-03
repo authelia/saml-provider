@@ -12,7 +12,9 @@ import (
 	"fmt"
 	"html/template"
 	"io"
+	"net"
 	"net/http"
+	"net/netip"
 	"net/url"
 	"os"
 	"regexp"
@@ -70,6 +72,12 @@ type Session struct {
 	// https://refeds.org/profile/mfa, which DefaultAssertionMaker asserts. If it is empty the
 	// assertion states PasswordProtectedTransport.
 	AuthnContextClassRef string `json:",omitempty"`
+
+	// ClientAddress is the IP address of the user, which assertions state. Set it when the identity
+	// provider is behind a proxy, as the address of the HTTP request is then the proxy's. If it is
+	// empty the address of the HTTP request is used. An address which isn't an IP address is left
+	// out of the assertion.
+	ClientAddress string `json:",omitempty"`
 }
 
 // defaultAuthnContextClassRef is the authentication context class asserted for a session that sets
@@ -1224,6 +1232,8 @@ func (DefaultAssertionMaker) MakeAssertion(req *IdpAuthnRequest, session *Sessio
 		nameIDFormat = session.NameIDFormat
 	}
 
+	address := clientAddress(req.HTTPRequest, session)
+
 	req.Assertion = &Assertion{
 		ID:           fmt.Sprintf("id-%x", randomBytes(20)),
 		IssueInstant: TimeNow(),
@@ -1243,7 +1253,7 @@ func (DefaultAssertionMaker) MakeAssertion(req *IdpAuthnRequest, session *Sessio
 				{
 					Method: bearerSubjectConfirmationMethod,
 					SubjectConfirmationData: &SubjectConfirmationData{
-						Address:      req.HTTPRequest.RemoteAddr,
+						Address:      address,
 						InResponseTo: req.Request.ID,
 						NotOnOrAfter: req.Now.Add(MaxIssueDelay),
 						Recipient:    req.ACSEndpoint.Location,
@@ -1265,7 +1275,7 @@ func (DefaultAssertionMaker) MakeAssertion(req *IdpAuthnRequest, session *Sessio
 				AuthnInstant: session.CreateTime,
 				SessionIndex: session.Index,
 				SubjectLocality: &SubjectLocality{
-					Address: req.HTTPRequest.RemoteAddr,
+					Address: address,
 				},
 				AuthnContext: AuthnContext{
 					AuthnContextClassRef: &AuthnContextClassRef{
@@ -1282,6 +1292,24 @@ func (DefaultAssertionMaker) MakeAssertion(req *IdpAuthnRequest, session *Sessio
 	}
 
 	return nil
+}
+
+// clientAddress returns the IP address of the user for an assertion, which SAMLCore §2.4.1.2 and
+// §2.7.2.1 require to have no port. It is the ClientAddress of the session, or else the host of the
+// RemoteAddr of the HTTP request. It returns "" if that isn't an IP address.
+func clientAddress(r *http.Request, session *Session) string {
+	address := session.ClientAddress
+	if address == "" {
+		address = r.RemoteAddr
+		if host, _, err := net.SplitHostPort(address); err == nil {
+			address = host
+		}
+	}
+	ip, err := netip.ParseAddr(address)
+	if err != nil {
+		return ""
+	}
+	return ip.WithZone("").String()
 }
 
 // The Canonicalizer prefix list MUST be empty. Various implementations
