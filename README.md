@@ -142,8 +142,15 @@ least the subset of SAML known as [interoperable SAML](https://kantarainitiative
   none, and a custom `AssertionMaker` can set a different class. `minimum`, `maximum` and `better` need `DefaultAuthnContextEnforcer.Strength` to rank classes. Without it,
   `minimum` and `maximum` only match a listed class, and `better` never matches. `AuthnContextDeclRef` is not supported and is always refused. Set
   `IdentityProvider.AuthnContextEnforcer` to decide differently.
+- **Request `Subject`:** the assertion must strongly match the subject the request names, or the request receives an
+  `AuthnFailed` status. The request must name the principal with a `NameID` of the same value, and the same format,
+  qualifiers and `SPProvidedID` where it gives them. If it lists `SubjectConfirmation` elements, the assertion must have
+  a bearer confirmation meeting one of them, so a request that only accepts holder-of-key is refused. A requested
+  `Address` never matches, because the asserted one includes the client's port. Set `IdentityProvider.SubjectEnforcer`
+  to accept another identifier for the same principal, or the confirmations of a custom `AssertionMaker`.
 - **Error status responses:** `IdpAuthnRequest.WriteErrorResponse` sends a SAML `Response` with a non-success status once
-  the ACS has been validated, and `NameIDPolicy`, `ForceAuthn`, `IsPassive` and `RequestedAuthnContext` refusals use it.
+  the ACS has been validated, and `Subject`, `NameIDPolicy`, `ForceAuthn`, `IsPassive` and `RequestedAuthnContext`
+  refusals use it.
   Other failures produce an HTTP error.
 - **Replay detection:** `AuthnRequest` IDs are not checked for reuse.
 - **Encrypt `Assertion`:** key transport always uses RSA-OAEP-MGF1P (SHA-1). Content encryption uses the first of
