@@ -65,7 +65,16 @@ type Session struct {
 	EduPersonPrincipalName string `json:",omitempty"`
 
 	CustomAttributes []Attribute
+
+	// AuthnContextClassRef is the authentication context class of the session, such as
+	// https://refeds.org/profile/mfa, which DefaultAssertionMaker asserts. If it is empty the
+	// assertion states PasswordProtectedTransport.
+	AuthnContextClassRef string `json:",omitempty"`
 }
+
+// defaultAuthnContextClassRef is the authentication context class asserted for a session that sets
+// none.
+const defaultAuthnContextClassRef = "urn:oasis:names:tc:SAML:2.0:ac:classes:PasswordProtectedTransport"
 
 // SessionProvider is an interface used by IdentityProvider to determine the
 // Session associated with a request. For an example implementation, see
@@ -1135,7 +1144,7 @@ func (DefaultAssertionMaker) MakeAssertion(req *IdpAuthnRequest, session *Sessio
 				},
 				AuthnContext: AuthnContext{
 					AuthnContextClassRef: &AuthnContextClassRef{
-						Value: "urn:oasis:names:tc:SAML:2.0:ac:classes:PasswordProtectedTransport",
+						Value: cmp.Or(session.AuthnContextClassRef, defaultAuthnContextClassRef),
 					},
 				},
 			},
