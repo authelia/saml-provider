@@ -64,8 +64,8 @@ func (s *Server) HandleGetShortcut(w http.ResponseWriter, r *http.Request) {
 // shortcut object in the request body and stores it.
 func (s *Server) HandlePutShortcut(w http.ResponseWriter, r *http.Request) {
 	shortcut := Shortcut{}
-	if err := json.NewDecoder(r.Body).Decode(&shortcut); err != nil {
-		http.Error(w, http.StatusText(http.StatusBadRequest), http.StatusBadRequest)
+	if err := decodeJSONBody(r.Body, &shortcut); err != nil {
+		writeBodyError(w, err)
 		return
 	}
 	shortcut.Name = r.PathValue("id")
