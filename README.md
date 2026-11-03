@@ -51,7 +51,7 @@ least the subset of SAML known as [interoperable SAML](https://kantarainitiative
 |:--------------------------------------------|:---:|:--:|
 | Web Browser SSO (SP-initiated)              | ✅  | ✅ |
 | Web Browser SSO (IdP-initiated/unsolicited) | ✅  | ✅ |
-| Single Logout                               | ❌  | ⚠️ |
+| Single Logout                               | ⚠️  | ⚠️ |
 | Artifact Resolution                         | ❌  | ✅ |
 | Enhanced Client or Proxy (ECP)              | ❌  | ❌ |
 | Holder-of-Key Web Browser SSO               | ❌  | ❌ |
@@ -118,8 +118,11 @@ least the subset of SAML known as [interoperable SAML](https://kantarainitiative
 
 ### Identity Provider Limitations
 
-- **Single Logout:** there is no SLO endpoint. Setting `IdentityProvider.LogoutURL` only advertises an HTTP Redirect
-  `SingleLogoutService` in the metadata; `LogoutRequest` and `LogoutResponse` messages are neither handled nor sent.
+- **Single Logout:** `IdentityProvider.ServeSLO` handles a `LogoutRequest` from an SP on the HTTP Redirect or HTTP POST
+  binding at `IdentityProvider.LogoutURL`, and answers with a signed `LogoutResponse`. The request must be signed. Only
+  the session at the IdP ends, by a `SessionProvider` that implements `LogoutSessionProvider`, and other SPs are not
+  told. The IdP can't start a logout. `samlidp` ends the session of the browser if the request names its principal,
+  but its `SameSite=Lax` cookie isn't sent with a cross-site POST, so SPs must use HTTP Redirect to end it.
 - **Artifact Resolution, HTTP Artifact and SOAP:** responses are only ever delivered via HTTP POST, and there is no
   `ArtifactResolutionService`.
 - **Verify signed `AuthnRequest`:** any signature on the HTTP Redirect or HTTP POST bindings is verified, and one is

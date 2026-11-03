@@ -299,6 +299,19 @@ func (r *AuthnRequest) Redirect(relayState string, sp *ServiceProvider) (*url.UR
 // redirectURL returns a URL for the HTTP-Redirect binding which delivers the message, signed in the
 // query if the service provider has a signature method, as SAMLBind §3.4.4.1 describes.
 func redirectURL(destination, parameter string, message *etree.Element, relayState string, sp *ServiceProvider) (*url.URL, error) {
+	var signingContext *dsig.SigningContext
+	if sp != nil && len(sp.SignatureMethod) > 0 {
+		var err error
+		if signingContext, err = GetSigningContext(sp); err != nil {
+			return nil, err
+		}
+	}
+	return redirectURLWithContext(destination, parameter, message, relayState, signingContext)
+}
+
+// redirectURLWithContext returns a URL for the HTTP-Redirect binding which delivers the message, signed in
+// the query with signingContext unless it is nil.
+func redirectURLWithContext(destination, parameter string, message *etree.Element, relayState string, signingContext *dsig.SigningContext) (*url.URL, error) {
 	var encoded strings.Builder
 	base64Writer := base64.NewEncoder(base64.StdEncoding, &encoded)
 	compressedWriter, _ := flate.NewWriter(base64Writer, 9)
@@ -325,14 +338,8 @@ func redirectURL(destination, parameter string, message *etree.Element, relaySta
 	if relayState != "" {
 		query += "&RelayState=" + url.QueryEscape(relayState)
 	}
-	if sp != nil && len(sp.SignatureMethod) > 0 {
-		query += "&SigAlg=" + url.QueryEscape(sp.SignatureMethod)
-		signingContext, err := GetSigningContext(sp)
-
-		if err != nil {
-			return nil, err
-		}
-
+	if signingContext != nil {
+		query += "&SigAlg=" + url.QueryEscape(signingContext.GetSignatureMethodIdentifier())
 		sig, err := signingContext.SignString(query)
 		if err != nil {
 			return nil, err

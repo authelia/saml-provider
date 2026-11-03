@@ -332,18 +332,25 @@ func (idp *IdentityProvider) Metadata() *EntityDescriptor {
 				Binding:  HTTPRedirectBinding,
 				Location: idp.LogoutURL.String(),
 			},
+			{
+				Binding:  HTTPPostBinding,
+				Location: idp.LogoutURL.String(),
+			},
 		}
 	}
 
 	return ed
 }
 
-// Handler returns an http.Handler that serves the metadata and SSO
-// URLs
+// Handler returns an http.Handler that serves the metadata and SSO URLs, and the logout URL if it
+// is set.
 func (idp *IdentityProvider) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc(idp.MetadataURL.Path, idp.ServeMetadata)
 	mux.HandleFunc(idp.SSOURL.Path, idp.ServeSSO)
+	if idp.LogoutURL.String() != "" {
+		mux.HandleFunc(idp.LogoutURL.Path, idp.ServeSLO)
+	}
 	return mux
 }
 
@@ -602,28 +609,39 @@ func NewIdpAuthnRequest(idp *IdentityProvider, r *http.Request) (*IdpAuthnReques
 
 // readRedirectQuery reads the request from the query string of the HTTP-Redirect binding.
 func (req *IdpAuthnRequest) readRedirectQuery(rawQuery string) error {
+	buf, relayState, signedQuery, err := readRedirectRequest(rawQuery)
+	if err != nil {
+		return err
+	}
+	req.RequestBuffer, req.RelayState, req.RedirectQuery = buf, relayState, signedQuery
+	return nil
+}
+
+// readRedirectRequest returns the decoded request and the RelayState from the query string of the
+// HTTP-Redirect binding, and the query string itself if it carries a signature.
+func readRedirectRequest(rawQuery string) (buf []byte, relayState, signedQuery string, err error) {
 	// As with url.URL.Query, malformed pairs are dropped. Those can't affect a signed request, which
 	// verifyRedirectSignature rejects if the query has a malformed key.
 	values, _ := url.ParseQuery(rawQuery)
 
 	compressedRequest, err := base64.StdEncoding.DecodeString(values.Get("SAMLRequest"))
 	if err != nil {
-		return fmt.Errorf("cannot decode request: %s", err)
+		return nil, "", "", fmt.Errorf("cannot decode request: %s", err)
 	}
 	// Read one byte past the limit so that an oversized request can be told apart from one
 	// that is exactly at the limit, without inflating any more of it.
-	req.RequestBuffer, err = io.ReadAll(io.LimitReader(newSaferFlateReader(bytes.NewReader(compressedRequest)), maxAuthnRequestSize+1))
+	buf, err = io.ReadAll(io.LimitReader(newSaferFlateReader(bytes.NewReader(compressedRequest)), maxAuthnRequestSize+1))
 	if err != nil {
-		return fmt.Errorf("cannot decompress request: %s", err)
+		return nil, "", "", fmt.Errorf("cannot decompress request: %s", err)
 	}
-	if err := checkAuthnRequestSize(req.RequestBuffer); err != nil {
-		return err
+	if err := checkAuthnRequestSize(buf); err != nil {
+		return nil, "", "", err
 	}
-	req.RelayState = values.Get("RelayState")
+	relayState = values.Get("RelayState")
 	if values.Has("Signature") || values.Has("SigAlg") {
-		req.RedirectQuery = rawQuery
+		signedQuery = rawQuery
 	}
-	return nil
+	return buf, relayState, signedQuery, nil
 }
 
 // Validate checks that the authentication request is valid and assigns
@@ -1484,18 +1502,24 @@ func (req *IdpAuthnRequest) signResponse(response *Response, assertionEl *etree.
 
 // signingContext will create a signing context for the request.
 func (req *IdpAuthnRequest) signingContext() (*dsig.SigningContext, error) {
+	return req.IDP.signingContext()
+}
+
+// signingContext returns a context which signs with the key of the identity provider.
+func (idp *IdentityProvider) signingContext() (*dsig.SigningContext, error) {
 	// Create a cert chain based off of the IDP cert and its intermediates.
-	certificates := [][]byte{req.IDP.Certificate.Raw}
-	for _, cert := range req.IDP.Intermediates {
+	certificates := make([][]byte, 0, 1+len(idp.Intermediates))
+	certificates = append(certificates, idp.Certificate.Raw)
+	for _, cert := range idp.Intermediates {
 		certificates = append(certificates, cert.Raw)
 	}
 
 	// If signer is set, use it instead of the private key.
-	signer := req.IDP.Signer
+	signer := idp.Signer
 	if signer == nil {
 		var ok bool
-		if signer, ok = req.IDP.Key.(crypto.Signer); !ok {
-			return nil, fmt.Errorf("identity provider key of type %T does not implement crypto.Signer", req.IDP.Key)
+		if signer, ok = idp.Key.(crypto.Signer); !ok {
+			return nil, fmt.Errorf("identity provider key of type %T does not implement crypto.Signer", idp.Key)
 		}
 	}
 
@@ -1505,7 +1529,7 @@ func (req *IdpAuthnRequest) signingContext() (*dsig.SigningContext, error) {
 	}
 
 	// Default to RSA with SHA-256, or ECDSA with the hash matching the curve of the key.
-	signatureMethod := req.IDP.SignatureMethod
+	signatureMethod := idp.SignatureMethod
 	if signatureMethod == "" {
 		signatureMethod = dsig.RSASHA256SignatureMethod
 		if public, ok := signer.Public().(*ecdsa.PublicKey); ok {

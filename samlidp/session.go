@@ -4,10 +4,12 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"html/template"
 	"net/http"
 	"net/url"
+	"slices"
 	"time"
 
 	"golang.org/x/crypto/bcrypt"
@@ -117,18 +119,7 @@ func (s *Server) authenticate(w http.ResponseWriter, r *http.Request, req *saml.
 		return nil
 	}
 
-	//nolint:gosec // Secure and SameSite are set below, from the request and the configured URL.
-	http.SetCookie(w, &http.Cookie{
-		Name:     "session",
-		Value:    session.ID,
-		MaxAge:   int(sessionMaxAge.Seconds()),
-		HttpOnly: true,
-		// r.URL.Scheme is empty on server requests. The configured URL covers TLS terminated
-		// by a proxy.
-		Secure:   r.TLS != nil || s.IDP.SSOURL.Scheme == "https",
-		SameSite: http.SameSiteLaxMode,
-		Path:     "/",
-	})
+	http.SetCookie(w, s.sessionCookie(r, session.ID, int(sessionMaxAge.Seconds())))
 
 	s.logger.Printf("User '%s' authenticated successfully", r.PostForm.Get("user"))
 	return session
@@ -281,4 +272,56 @@ func (s *Server) HandleDeleteSession(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// sessionCookie returns the session cookie with the given value and MaxAge.
+func (s *Server) sessionCookie(r *http.Request, value string, maxAge int) *http.Cookie {
+	//nolint:gosec // Secure and SameSite are set below, from the request and the configured URL.
+	return &http.Cookie{
+		Name:     "session",
+		Value:    value,
+		MaxAge:   maxAge,
+		HttpOnly: true,
+		// r.URL.Scheme is empty on server requests. The configured URL covers TLS terminated
+		// by a proxy.
+		Secure:   r.TLS != nil || s.IDP.SSOURL.Scheme == "https",
+		SameSite: http.SameSiteLaxMode,
+		Path:     "/",
+	}
+}
+
+// TerminateSession implements saml.LogoutSessionProvider. It ends the session of the cookie in the
+// request, if the request names its principal and, when it lists any, its session index. Sessions in
+// other browsers are not ended.
+//
+// The cookie is SameSite=Lax, so a browser doesn't send it with the cross-site POST of the HTTP-POST
+// binding. That request gets an error rather than a success that would leave the session in place,
+// and service providers must use the HTTP-Redirect binding to end the session.
+func (s *Server) TerminateSession(w http.ResponseWriter, r *http.Request, req *saml.IdpLogoutRequest) error {
+	if _, err := r.Cookie("session"); err != nil && r.Method == http.MethodPost {
+		return errors.New("the session cookie is not sent with a cross-site POST")
+	}
+
+	session, err := s.existingSession(r)
+	if err != nil {
+		return err
+	}
+	if session == nil {
+		return nil
+	}
+
+	if session.NameID != req.Request.NameID.Value {
+		return errors.New("the session belongs to another principal")
+	}
+	if len(req.Request.SessionIndexes) != 0 && !slices.ContainsFunc(req.Request.SessionIndexes, func(index saml.SessionIndex) bool {
+		return index.Value == session.Index
+	}) {
+		return errors.New("the session index of the session is not in the request")
+	}
+
+	if err := s.Store.Delete(fmt.Sprintf("/sessions/%s", session.ID)); err != nil {
+		return err
+	}
+	http.SetCookie(w, s.sessionCookie(r, "", -1))
+	return nil
 }
