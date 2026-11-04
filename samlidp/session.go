@@ -124,7 +124,8 @@ func (s *Server) authenticate(w http.ResponseWriter, r *http.Request, req *saml.
 		UserGivenName:         user.GivenName,
 		UserScopedAffiliation: user.ScopedAffiliation,
 	}
-	if err := s.Store.Put(fmt.Sprintf("/sessions/%s", session.ID), &session); err != nil {
+	stored := storedSession{Session: *session, UserRevision: user.Revision}
+	if err := s.Store.Put(fmt.Sprintf("/sessions/%s", session.ID), &stored); err != nil {
 		http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
 		return nil
 	}
@@ -167,18 +168,39 @@ func (s *Server) existingSession(r *http.Request) (*saml.Session, error) {
 		return nil, nil //nolint:nilerr // A missing cookie means that there is no session.
 	}
 
-	session := &saml.Session{}
-	if err := s.Store.Get(fmt.Sprintf("/sessions/%s", sessionCookie.Value), session); err != nil {
+	stored := storedSession{}
+	if err := s.Store.Get(fmt.Sprintf("/sessions/%s", sessionCookie.Value), &stored); err != nil {
 		if err == ErrNotFound {
 			return nil, nil
 		}
 		return nil, err
 	}
 
-	if saml.TimeNow().After(session.ExpireTime) {
+	if saml.TimeNow().After(stored.ExpireTime) {
 		return nil, nil
 	}
-	return session, nil
+
+	// The session asserts the details of the user when it was created, so it is only used while the
+	// user is unchanged. A login which was in progress when the user changed stores a session after
+	// the change has ended the others.
+	user := User{}
+	if err := s.Store.Get(fmt.Sprintf("/users/%s", stored.UserName), &user); err != nil {
+		if errors.Is(err, ErrNotFound) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	if user.Revision != stored.UserRevision {
+		return nil, nil
+	}
+	return &stored.Session, nil
+}
+
+// storedSession is a session as it is stored, with the revision of the user it was created from. It
+// reads as a saml.Session.
+type storedSession struct {
+	saml.Session
+	UserRevision string `json:",omitempty"`
 }
 
 var defaultLoginFormTemplate = template.Must(template.New("saml-post-form").Parse(`` +
