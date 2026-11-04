@@ -56,6 +56,9 @@ func TestLoginRefusesCrossOriginCredentials(t *testing.T) {
 		"cross site":   {"Sec-Fetch-Site": "cross-site"},
 		"same site":    {"Sec-Fetch-Site": "same-site"},
 		"other origin": {"Origin": "https://attacker.example.com"},
+		"other scheme": {"Origin": "http://idp.example.com"},
+		"other port":   {"Origin": "https://idp.example.com:8443"},
+		"opaque":       {"Origin": "null"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			test := NewServerTest(t)
@@ -102,4 +105,31 @@ func TestCrossSiteAuthnRequestStillShowsLoginForm(t *testing.T) {
 	test.Server.ServeHTTP(w, r)
 	assert.Check(t, is.Equal(w.Code, http.StatusOK))
 	assert.Check(t, strings.Contains(w.Body.String(), `name="password"`), w.Body.String())
+}
+
+// Without Sec-Fetch-Site, the Origin is compared with the configured URL, not the Host header or any
+// forwarded header, which a proxy or the client chooses.
+func TestLoginComparesOriginWithConfiguredURL(t *testing.T) {
+	for name, tc := range map[string]struct {
+		host, origin string
+		code         int
+	}{
+		"proxied host":     {"127.0.0.1:8080", "https://idp.example.com", http.StatusOK},
+		"origin from host": {"127.0.0.1:8080", "https://127.0.0.1:8080", http.StatusForbidden},
+	} {
+		t.Run(name, func(t *testing.T) {
+			test := NewServerTest(t)
+			hardeningAddUser(t, test)
+			values := url.Values{"user": {"alice"}, "password": {"hunter2"}}
+			r := httptest.NewRequest(http.MethodPost, "https://idp.example.com/login", strings.NewReader(values.Encode()))
+			r.Host = tc.host
+			r.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+			r.Header.Set("Origin", tc.origin)
+			r.Header.Set("X-Forwarded-Host", "127.0.0.1:8080")
+			r.Header.Set("X-Forwarded-Proto", "https")
+			w := httptest.NewRecorder()
+			test.Server.ServeHTTP(w, r)
+			assert.Check(t, is.Equal(w.Code, tc.code))
+		})
+	}
 }

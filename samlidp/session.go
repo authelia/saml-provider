@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"net/url"
 	"slices"
+	"strings"
 	"time"
 
 	"golang.org/x/crypto/bcrypt"
@@ -18,9 +19,6 @@ import (
 )
 
 var sessionMaxAge = time.Hour
-
-// loginOriginProtection refuses login credentials which a browser posts from another origin.
-var loginOriginProtection = http.NewCrossOriginProtection()
 
 // GetSession returns the *Session for this request.
 //
@@ -92,7 +90,7 @@ func (s *Server) authenticate(w http.ResponseWriter, r *http.Request, req *saml.
 	// Credentials from another site would log the browser in as a user of that site's choosing.
 	// Service providers post their requests from their own sites, so only a post with credentials
 	// is checked.
-	if err := loginOriginProtection.Check(r); err != nil {
+	if err := s.checkLoginOrigin(r); err != nil {
 		s.logger.Printf("ERROR: refused credentials from another origin: %s", err)
 		http.Error(w, http.StatusText(http.StatusForbidden), http.StatusForbidden)
 		return nil
@@ -135,6 +133,30 @@ func (s *Server) authenticate(w http.ResponseWriter, r *http.Request, req *saml.
 
 	s.logger.Printf("User '%s' authenticated successfully", r.PostForm.Get("user"))
 	return session
+}
+
+// checkLoginOrigin returns an error if a browser posted the request from another origin. Browsers
+// which don't send Sec-Fetch-Site have their Origin compared with the configured URL, scheme
+// included, rather than with the Host header or forwarded headers, which the client or a proxy
+// chooses. A request with neither header isn't from a browser that could be made to send it.
+func (s *Server) checkLoginOrigin(r *http.Request) error {
+	switch site := r.Header.Get("Sec-Fetch-Site"); site {
+	case "same-origin", "none":
+		return nil
+	case "":
+	default:
+		return fmt.Errorf("Sec-Fetch-Site is %q", site)
+	}
+
+	origin := r.Header.Get("Origin")
+	if origin == "" {
+		return nil
+	}
+	want := s.IDP.SSOURL.Scheme + "://" + s.IDP.SSOURL.Host
+	if !strings.EqualFold(origin, want) {
+		return fmt.Errorf("origin %q is not %q", origin, want)
+	}
+	return nil
 }
 
 // existingSession returns the session of the cookie in the request, or nil if it doesn't have a
