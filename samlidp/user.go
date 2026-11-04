@@ -215,6 +215,8 @@ func (s *Server) checkUserEmails() error {
 		return err
 	}
 	slices.Sort(names)
+	type userEmail struct{ name, email string }
+	emails := make([]userEmail, 0, len(names))
 	for _, name := range names {
 		user := User{}
 		if err := s.Store.Get(fmt.Sprintf("/users/%s", name), &user); err != nil {
@@ -223,14 +225,12 @@ func (s *Server) checkUserEmails() error {
 		if user.Email == "" {
 			continue
 		}
-		owner, err := s.emailOwner(user.Email, name)
-		if err != nil {
-			return err
+		for _, other := range emails {
+			if strings.EqualFold(other.email, user.Email) {
+				return fmt.Errorf("users %q and %q have the same email, which is their NameID: change one of them in the store", other.name, name)
+			}
 		}
-		if owner != "" {
-			first, second := min(name, owner), max(name, owner)
-			return fmt.Errorf("users %q and %q have the same email, which is their NameID: change one of them in the store", first, second)
-		}
+		emails = append(emails, userEmail{name: name, email: user.Email})
 	}
 	return nil
 }
