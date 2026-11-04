@@ -208,6 +208,11 @@ func TestSatisfiesConfirmationDataPeriod(t *testing.T) {
 		"no asserted not before":      {SubjectConfirmationData{NotBefore: now}, &SubjectConfirmationData{}, false},
 		"same not on or after":        {SubjectConfirmationData{NotOnOrAfter: now}, &SubjectConfirmationData{NotOnOrAfter: now}, true},
 		"no asserted not on or after": {SubjectConfirmationData{NotOnOrAfter: now}, &SubjectConfirmationData{}, false},
+		"same address":                {SubjectConfirmationData{Address: "192.0.2.1"}, &SubjectConfirmationData{Address: "192.0.2.1"}, true},
+		"address in other notation":   {SubjectConfirmationData{Address: "2001:DB8:0::1"}, &SubjectConfirmationData{Address: "2001:db8::1"}, true},
+		"other address":               {SubjectConfirmationData{Address: "2001:db8::1"}, &SubjectConfirmationData{Address: "2001:db8::2"}, false},
+		"invalid requested address":   {SubjectConfirmationData{Address: "192.0.2.1:443"}, &SubjectConfirmationData{Address: "192.0.2.1"}, false},
+		"no asserted address":         {SubjectConfirmationData{Address: "192.0.2.1"}, &SubjectConfirmationData{}, false},
 	} {
 		t.Run(name, func(t *testing.T) {
 			requested := tc.requested
