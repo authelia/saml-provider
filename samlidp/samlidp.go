@@ -55,6 +55,7 @@ type Options struct {
 type Server struct {
 	http.Handler
 	idpConfigMu       sync.RWMutex // protects calls into the IDP
+	usersMu           sync.Mutex   // serializes changes to users, so that emails stay unique
 	logger            logger.Interface
 	serviceProviders  map[string]*saml.EntityDescriptor
 	serviceIDs        map[string]string
@@ -110,6 +111,9 @@ func New(opts Options) (*Server, error) {
 	s.IDP.ServiceProviderProvider = s
 
 	if err := s.initializeServices(); err != nil {
+		return nil, err
+	}
+	if err := s.checkUserEmails(); err != nil {
 		return nil, err
 	}
 	s.InitializeHTTP()

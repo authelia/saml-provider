@@ -6,6 +6,8 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"slices"
+	"strings"
 
 	"golang.org/x/crypto/bcrypt"
 
@@ -81,6 +83,23 @@ func (s *Server) HandlePutUser(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	user.Name = r.PathValue("id")
+
+	// The email is the NameID of the user, so it must not be another user's.
+	s.usersMu.Lock()
+	defer s.usersMu.Unlock()
+	if user.Email != "" {
+		owner, err := s.emailOwner(user.Email, user.Name)
+		if err != nil {
+			s.logger.Printf("ERROR: %s", err)
+			http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
+			return
+		}
+		if owner != "" {
+			s.logger.Printf("ERROR: the email of user %q is already the email of user %q", user.Name, owner)
+			http.Error(w, http.StatusText(http.StatusConflict), http.StatusConflict)
+			return
+		}
+	}
 
 	if user.PlaintextPassword != nil {
 		var err error
@@ -159,6 +178,59 @@ func (s *Server) endUserSessions(name string) error {
 		if err := s.Store.Delete(fmt.Sprintf("/sessions/%s", id)); err != nil && !errors.Is(err, ErrNotFound) {
 			return err
 		}
+	}
+	return nil
+}
+
+// emailOwner returns the name of a user other than except whose email is email, ignoring case, or ""
+// if there is none.
+func (s *Server) emailOwner(email, except string) (string, error) {
+	names, err := s.Store.List("/users/")
+	if err != nil {
+		return "", err
+	}
+	for _, name := range names {
+		if name == except {
+			continue
+		}
+		other := User{}
+		if err := s.Store.Get(fmt.Sprintf("/users/%s", name), &other); err != nil {
+			if errors.Is(err, ErrNotFound) {
+				continue
+			}
+			return "", err
+		}
+		if strings.EqualFold(other.Email, email) {
+			return name, nil
+		}
+	}
+	return "", nil
+}
+
+// checkUserEmails returns an error if two stored users have the same email, which would make them
+// one principal at every service provider.
+func (s *Server) checkUserEmails() error {
+	names, err := s.Store.List("/users/")
+	if err != nil {
+		return err
+	}
+	slices.Sort(names)
+	type userEmail struct{ name, email string }
+	emails := make([]userEmail, 0, len(names))
+	for _, name := range names {
+		user := User{}
+		if err := s.Store.Get(fmt.Sprintf("/users/%s", name), &user); err != nil {
+			return err
+		}
+		if user.Email == "" {
+			continue
+		}
+		for _, other := range emails {
+			if strings.EqualFold(other.email, user.Email) {
+				return fmt.Errorf("users %q and %q have the same email, which is their NameID: change one of them in the store", other.name, name)
+			}
+		}
+		emails = append(emails, userEmail{name: name, email: user.Email})
 	}
 	return nil
 }

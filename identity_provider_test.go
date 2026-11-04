@@ -270,6 +270,7 @@ func TestIDPCanHandleRequestWithExistingSession(t *testing.T) {
 		GetSessionFunc: func(_ http.ResponseWriter, _ *http.Request, _ *IdpAuthnRequest) *Session {
 			return &Session{
 				ID:       "f00df00df00d",
+				NameID:   "alice",
 				UserName: "alice",
 			}
 		},
@@ -295,6 +296,7 @@ func TestIDPCanHandlePostRequestWithExistingSession(t *testing.T) {
 		GetSessionFunc: func(_ http.ResponseWriter, _ *http.Request, _ *IdpAuthnRequest) *Session {
 			return &Session{
 				ID:       "f00df00df00d",
+				NameID:   "alice",
 				UserName: "alice",
 			}
 		},
@@ -509,6 +511,7 @@ func TestIDPMakeAssertion(t *testing.T) {
 
 	err := DefaultAssertionMaker{}.MakeAssertion(&req, &Session{
 		ID:       "f00df00df00d",
+		NameID:   "alice",
 		UserName: "alice",
 	})
 	assert.Check(t, err)
@@ -523,7 +526,7 @@ func TestIDPMakeAssertion(t *testing.T) {
 		},
 		Signature: nil,
 		Subject: &Subject{
-			NameID: &NameID{Format: "urn:oasis:names:tc:SAML:2.0:nameid-format:transient", NameQualifier: "https://idp.example.com/saml/metadata", SPNameQualifier: "https://sp.example.com/saml2/metadata", Value: ""},
+			NameID: &NameID{Format: "urn:oasis:names:tc:SAML:2.0:nameid-format:transient", NameQualifier: "https://idp.example.com/saml/metadata", SPNameQualifier: "https://sp.example.com/saml2/metadata", Value: "alice"},
 			SubjectConfirmations: []SubjectConfirmation{
 				{
 					Method: "urn:oasis:names:tc:SAML:2.0:cm:bearer",
@@ -703,6 +706,7 @@ func TestIDPMarshalAssertion(t *testing.T) {
 	assert.Check(t, err)
 	err = DefaultAssertionMaker{}.MakeAssertion(&req, &Session{
 		ID:       "f00df00df00d",
+		NameID:   "alice",
 		UserName: "alice",
 	})
 	assert.Check(t, err)
@@ -710,7 +714,7 @@ func TestIDPMarshalAssertion(t *testing.T) {
 	assert.Check(t, err)
 
 	// Compare the plaintext first
-	expectedPlaintext := "<saml:Assertion xmlns:saml=\"urn:oasis:names:tc:SAML:2.0:assertion\" ID=\"id-00020406080a0c0e10121416181a1c1e20222426\" IssueInstant=\"2015-12-01T01:57:09Z\" Version=\"2.0\" xmlns:xs=\"http://www.w3.org/2001/XMLSchema\"><saml:Issuer Format=\"urn:oasis:names:tc:SAML:2.0:nameid-format:entity\">https://idp.example.com/saml/metadata</saml:Issuer><ds:Signature xmlns:ds=\"http://www.w3.org/2000/09/xmldsig#\"><ds:SignedInfo><ds:CanonicalizationMethod Algorithm=\"http://www.w3.org/2001/10/xml-exc-c14n#\"/><ds:SignatureMethod Algorithm=\"http://www.w3.org/2001/04/xmldsig-more#rsa-sha256\"/><ds:Reference URI=\"#id-00020406080a0c0e10121416181a1c1e20222426\"><ds:Transforms><ds:Transform Algorithm=\"http://www.w3.org/2000/09/xmldsig#enveloped-signature\"/><ds:Transform Algorithm=\"http://www.w3.org/2001/10/xml-exc-c14n#\"/></ds:Transforms><ds:DigestMethod Algorithm=\"http://www.w3.org/2001/04/xmlenc#sha256\"/><ds:DigestValue>Kv2KtxOOfLkjd/XNkjBawb7kNSDm2vZ+Svi/vBgv4wk=</ds:DigestValue></ds:Reference></ds:SignedInfo><ds:SignatureValue>CgsObXJapyQpOoC+O7Yy+FBGz7UazC6y7fKwZbkwtmGpgzx95RRd8zDkI0v06Q+LCnl2CpFEqdNTMVNl37bAjyqcAbFtQW8yTkhdpUbYlxmFtwpE7JnmIBrBLjVVOmb01UTfkxFhbCL02h9HU8+YafXVRuMHN54LWyxg4DfcU2Q=</ds:SignatureValue><ds:KeyInfo><ds:X509Data><ds:X509Certificate>MIIB7zCCAVgCCQDFzbKIp7b3MTANBgkqhkiG9w0BAQUFADA8MQswCQYDVQQGEwJVUzELMAkGA1UECAwCR0ExDDAKBgNVBAoMA2ZvbzESMBAGA1UEAwwJbG9jYWxob3N0MB4XDTEzMTAwMjAwMDg1MVoXDTE0MTAwMjAwMDg1MVowPDELMAkGA1UEBhMCVVMxCzAJBgNVBAgMAkdBMQwwCgYDVQQKDANmb28xEjAQBgNVBAMMCWxvY2FsaG9zdDCBnzANBgkqhkiG9w0BAQEFAAOBjQAwgYkCgYEA1PMHYmhZj308kWLhZVT4vOulqx/9ibm5B86fPWwUKKQ2i12MYtz07tzukPymisTDhQaqyJ8Kqb/6JjhmeMnEOdTvSPmHO8m1ZVveJU6NoKRn/mP/BD7FW52WhbrUXLSeHVSKfWkNk6S4hk9MV9TswTvyRIKvRsw0X/gfnqkroJcCAwEAATANBgkqhkiG9w0BAQUFAAOBgQCMMlIO+GNcGekevKgkakpMdAqJfs24maGb90DvTLbRZRD7Xvn1MnVBBS9hzlXiFLYOInXACMW5gcoRFfeTQLSouMM8o57h0uKjfTmuoWHLQLi6hnF+cvCsEFiJZ4AbF+DgmO6TarJ8O05t8zvnOwJlNCASPZRH/JmF8tX0hoHuAQ==</ds:X509Certificate></ds:X509Data></ds:KeyInfo></ds:Signature><saml:Subject><saml:NameID Format=\"urn:oasis:names:tc:SAML:2.0:nameid-format:transient\" NameQualifier=\"https://idp.example.com/saml/metadata\" SPNameQualifier=\"https://sp.example.com/saml2/metadata\"/><saml:SubjectConfirmation Method=\"urn:oasis:names:tc:SAML:2.0:cm:bearer\"><saml:SubjectConfirmationData InResponseTo=\"id-00020406080a0c0e10121416181a1c1e\" NotOnOrAfter=\"2015-12-01T01:58:39Z\" Recipient=\"https://sp.example.com/saml2/acs\"/></saml:SubjectConfirmation></saml:Subject><saml:Conditions NotBefore=\"2015-12-01T01:54:09Z\" NotOnOrAfter=\"2015-12-01T01:58:39Z\"><saml:AudienceRestriction><saml:Audience>https://sp.example.com/saml2/metadata</saml:Audience></saml:AudienceRestriction></saml:Conditions><saml:AuthnStatement AuthnInstant=\"0001-01-01T00:00:00Z\"><saml:SubjectLocality/><saml:AuthnContext><saml:AuthnContextClassRef>urn:oasis:names:tc:SAML:2.0:ac:classes:PasswordProtectedTransport</saml:AuthnContextClassRef></saml:AuthnContext></saml:AuthnStatement><saml:AttributeStatement><saml:Attribute FriendlyName=\"uid\" Name=\"urn:oid:0.9.2342.19200300.100.1.1\" NameFormat=\"urn:oasis:names:tc:SAML:2.0:attrname-format:uri\"><saml:AttributeValue xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\" xsi:type=\"xs:string\">alice</saml:AttributeValue></saml:Attribute></saml:AttributeStatement></saml:Assertion>"
+	expectedPlaintext := "<saml:Assertion xmlns:saml=\"urn:oasis:names:tc:SAML:2.0:assertion\" ID=\"id-00020406080a0c0e10121416181a1c1e20222426\" IssueInstant=\"2015-12-01T01:57:09Z\" Version=\"2.0\" xmlns:xs=\"http://www.w3.org/2001/XMLSchema\"><saml:Issuer Format=\"urn:oasis:names:tc:SAML:2.0:nameid-format:entity\">https://idp.example.com/saml/metadata</saml:Issuer><ds:Signature xmlns:ds=\"http://www.w3.org/2000/09/xmldsig#\"><ds:SignedInfo><ds:CanonicalizationMethod Algorithm=\"http://www.w3.org/2001/10/xml-exc-c14n#\"/><ds:SignatureMethod Algorithm=\"http://www.w3.org/2001/04/xmldsig-more#rsa-sha256\"/><ds:Reference URI=\"#id-00020406080a0c0e10121416181a1c1e20222426\"><ds:Transforms><ds:Transform Algorithm=\"http://www.w3.org/2000/09/xmldsig#enveloped-signature\"/><ds:Transform Algorithm=\"http://www.w3.org/2001/10/xml-exc-c14n#\"/></ds:Transforms><ds:DigestMethod Algorithm=\"http://www.w3.org/2001/04/xmlenc#sha256\"/><ds:DigestValue>XbkI5VdK1hPugg87p7Z6V/XMKdLulp/eyGN/+pCu7kU=</ds:DigestValue></ds:Reference></ds:SignedInfo><ds:SignatureValue>MNOM63iFCfGHw83TBzvkG3xPmP6SMO/Z2lKWQFMLwZaIbmPShH+g8E8hAtswXehzvRMldh5A9DSzp7Lo5AkFsjO5GOBl1KBk7EvjbeVkJhjwSYHsO+B1J8NX3Ce+9M38tQ98YSZwntNqwtgfaNIQn+wBdQciraIfN0lRO+y9z6Q=</ds:SignatureValue><ds:KeyInfo><ds:X509Data><ds:X509Certificate>MIIB7zCCAVgCCQDFzbKIp7b3MTANBgkqhkiG9w0BAQUFADA8MQswCQYDVQQGEwJVUzELMAkGA1UECAwCR0ExDDAKBgNVBAoMA2ZvbzESMBAGA1UEAwwJbG9jYWxob3N0MB4XDTEzMTAwMjAwMDg1MVoXDTE0MTAwMjAwMDg1MVowPDELMAkGA1UEBhMCVVMxCzAJBgNVBAgMAkdBMQwwCgYDVQQKDANmb28xEjAQBgNVBAMMCWxvY2FsaG9zdDCBnzANBgkqhkiG9w0BAQEFAAOBjQAwgYkCgYEA1PMHYmhZj308kWLhZVT4vOulqx/9ibm5B86fPWwUKKQ2i12MYtz07tzukPymisTDhQaqyJ8Kqb/6JjhmeMnEOdTvSPmHO8m1ZVveJU6NoKRn/mP/BD7FW52WhbrUXLSeHVSKfWkNk6S4hk9MV9TswTvyRIKvRsw0X/gfnqkroJcCAwEAATANBgkqhkiG9w0BAQUFAAOBgQCMMlIO+GNcGekevKgkakpMdAqJfs24maGb90DvTLbRZRD7Xvn1MnVBBS9hzlXiFLYOInXACMW5gcoRFfeTQLSouMM8o57h0uKjfTmuoWHLQLi6hnF+cvCsEFiJZ4AbF+DgmO6TarJ8O05t8zvnOwJlNCASPZRH/JmF8tX0hoHuAQ==</ds:X509Certificate></ds:X509Data></ds:KeyInfo></ds:Signature><saml:Subject><saml:NameID Format=\"urn:oasis:names:tc:SAML:2.0:nameid-format:transient\" NameQualifier=\"https://idp.example.com/saml/metadata\" SPNameQualifier=\"https://sp.example.com/saml2/metadata\">alice</saml:NameID><saml:SubjectConfirmation Method=\"urn:oasis:names:tc:SAML:2.0:cm:bearer\"><saml:SubjectConfirmationData InResponseTo=\"id-00020406080a0c0e10121416181a1c1e\" NotOnOrAfter=\"2015-12-01T01:58:39Z\" Recipient=\"https://sp.example.com/saml2/acs\"/></saml:SubjectConfirmation></saml:Subject><saml:Conditions NotBefore=\"2015-12-01T01:54:09Z\" NotOnOrAfter=\"2015-12-01T01:58:39Z\"><saml:AudienceRestriction><saml:Audience>https://sp.example.com/saml2/metadata</saml:Audience></saml:AudienceRestriction></saml:Conditions><saml:AuthnStatement AuthnInstant=\"0001-01-01T00:00:00Z\"><saml:SubjectLocality/><saml:AuthnContext><saml:AuthnContextClassRef>urn:oasis:names:tc:SAML:2.0:ac:classes:PasswordProtectedTransport</saml:AuthnContextClassRef></saml:AuthnContext></saml:AuthnStatement><saml:AttributeStatement><saml:Attribute FriendlyName=\"uid\" Name=\"urn:oid:0.9.2342.19200300.100.1.1\" NameFormat=\"urn:oasis:names:tc:SAML:2.0:attrname-format:uri\"><saml:AttributeValue xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\" xsi:type=\"xs:string\">alice</saml:AttributeValue></saml:Attribute></saml:AttributeStatement></saml:Assertion>"
 	actualPlaintext := ""
 	{
 		doc := etree.NewDocument()
@@ -752,6 +756,7 @@ func testMakeResponse(t *testing.T, test *IdentityProviderTest) {
 	assert.Check(t, err)
 	err = DefaultAssertionMaker{}.MakeAssertion(&req, &Session{
 		ID:       "f00df00df00d",
+		NameID:   "alice",
 		UserName: "alice",
 	})
 	assert.Check(t, err)
@@ -827,6 +832,7 @@ func TestIDPIDPInitiatedExistingSession(t *testing.T) {
 		GetSessionFunc: func(_ http.ResponseWriter, _ *http.Request, _ *IdpAuthnRequest) *Session {
 			return &Session{
 				ID:       "f00df00df00d",
+				NameID:   "alice",
 				UserName: "alice",
 			}
 		},
@@ -845,6 +851,7 @@ func TestIDPIDPInitiatedBadServiceProvider(t *testing.T) {
 		GetSessionFunc: func(_ http.ResponseWriter, _ *http.Request, _ *IdpAuthnRequest) *Session {
 			return &Session{
 				ID:       "f00df00df00d",
+				NameID:   "alice",
 				UserName: "alice",
 			}
 		},
@@ -888,6 +895,7 @@ func TestIDPCanHandleUnencryptedResponse(t *testing.T) {
 	assert.Check(t, err)
 	err = DefaultAssertionMaker{}.MakeAssertion(&req, &Session{
 		ID:       "f00df00df00d",
+		NameID:   "alice",
 		UserName: "alice",
 	})
 	assert.Check(t, err)
@@ -921,6 +929,7 @@ func TestIDPRequestedAttributes(t *testing.T) {
 	assert.Check(t, err)
 	err = DefaultAssertionMaker{}.MakeAssertion(req, &Session{
 		ID:             "f00df00df00d",
+		NameID:         "alice",
 		UserName:       "alice",
 		UserEmail:      "alice@example.com",
 		UserGivenName:  "Alice",
@@ -1076,6 +1085,7 @@ func TestIDPNoDestination(t *testing.T) {
 	assert.Check(t, err)
 	err = DefaultAssertionMaker{}.MakeAssertion(&req, &Session{
 		ID:       "f00df00df00d",
+		NameID:   "alice",
 		UserName: "alice",
 	})
 	assert.Check(t, err)
