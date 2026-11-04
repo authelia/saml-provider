@@ -49,6 +49,9 @@ type Options struct {
 //
 // The RESTful interfaces can create users, read session identifiers and redirect assertions, so
 // they respond with 403 Forbidden unless AdminAuthorizer approves the request.
+//
+// Service provider metadata is refused once its validUntil has passed, including the validUntil of an
+// EntitiesDescriptor around it, so a service must be registered again with fresh metadata before then.
 type Server struct {
 	http.Handler
 	idpConfigMu       sync.RWMutex // protects calls into the IDP

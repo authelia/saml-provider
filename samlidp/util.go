@@ -39,6 +39,10 @@ func getSPMetadata(r io.Reader) (spMetadata *saml.EntityDescriptor, err error) {
 
 			for _, e := range entities.EntityDescriptors {
 				if len(e.SPSSODescriptors) > 0 {
+					// The expiry of the group covers the entities it contains, SAMLMeta §2.3.1.
+					if entities.ValidUntil != nil && !entities.ValidUntil.IsZero() && (e.ValidUntil.IsZero() || entities.ValidUntil.Before(e.ValidUntil)) {
+						e.ValidUntil = *entities.ValidUntil
+					}
 					return &e, nil
 				}
 			}

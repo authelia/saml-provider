@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"slices"
+	"time"
 
 	"authelia.com/provider/saml"
 )
@@ -32,7 +33,31 @@ func (s *Server) GetServiceProvider(_ *http.Request, serviceProviderID string) (
 	if !ok {
 		return nil, os.ErrNotExist
 	}
-	return rv, nil
+	current := currentMetadata(rv, saml.TimeNow())
+	if current == nil {
+		s.logger.Printf("ERROR: the metadata of service provider %q has expired", serviceProviderID)
+		return nil, os.ErrNotExist
+	}
+	return current, nil
+}
+
+// currentMetadata returns metadata without the service provider descriptors whose validUntil is not
+// after now, or nil if the metadata itself has expired or has no descriptor left, SAMLMeta §2.3.2 and
+// §2.4.1. The zero time counts as no validUntil, as earlier versions of this package wrote it for a
+// descriptor that had none.
+func currentMetadata(metadata *saml.EntityDescriptor, now time.Time) *saml.EntityDescriptor {
+	expired := func(validUntil time.Time) bool { return !validUntil.IsZero() && !now.Before(validUntil) }
+	if expired(metadata.ValidUntil) {
+		return nil
+	}
+	current := *metadata
+	current.SPSSODescriptors = slices.DeleteFunc(slices.Clone(metadata.SPSSODescriptors), func(descriptor saml.SPSSODescriptor) bool {
+		return descriptor.ValidUntil != nil && expired(*descriptor.ValidUntil)
+	})
+	if len(current.SPSSODescriptors) == 0 {
+		return nil
+	}
+	return &current
 }
 
 // HandleListServices handles the `GET /services/` request and responds with a JSON formatted list
@@ -95,6 +120,12 @@ func (s *Server) HandlePutService(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 		}
+	}
+
+	if currentMetadata(metadata, saml.TimeNow()) == nil {
+		s.logger.Printf("ERROR: the metadata has expired")
+		http.Error(w, http.StatusText(http.StatusBadRequest), http.StatusBadRequest)
+		return
 	}
 
 	service.Metadata = *metadata
