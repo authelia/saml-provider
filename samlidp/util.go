@@ -5,6 +5,7 @@ import (
 	"encoding/xml"
 	"errors"
 	"io"
+	"net/http"
 
 	xrv "github.com/mattermost/xml-roundtrip-validator"
 
@@ -55,4 +56,14 @@ func getSPMetadata(r io.Reader) (spMetadata *saml.EntityDescriptor, err error) {
 	}
 
 	return spMetadata, nil
+}
+
+// writeBodyError responds to a request whose body can't be read or parsed, with 413 Request Entity
+// Too Large if it is over maxAdminBodySize, or else 400 Bad Request.
+func writeBodyError(w http.ResponseWriter, err error) {
+	if _, ok := errors.AsType[*http.MaxBytesError](err); ok {
+		http.Error(w, http.StatusText(http.StatusRequestEntityTooLarge), http.StatusRequestEntityTooLarge)
+		return
+	}
+	http.Error(w, http.StatusText(http.StatusBadRequest), http.StatusBadRequest)
 }
