@@ -9,7 +9,7 @@ require (
 	github.com/jonboulle/clockwork v0.5.0
 	github.com/mattermost/xml-roundtrip-validator v0.1.0
 	github.com/stretchr/testify v1.12.1
-	golang.org/x/crypto v0.58.0
+	golang.org/x/crypto v0.59.0
 	gotest.tools v2.2.0+incompatible
 )
 
