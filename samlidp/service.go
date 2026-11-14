@@ -60,6 +60,26 @@ func currentMetadata(metadata *saml.EntityDescriptor, now time.Time) *saml.Entit
 	return &current
 }
 
+// checkACSEndpoints returns an error if metadata has HTTP-POST assertion consumer services, and the
+// identity provider would refuse to send a response to every one of them, as the service could then
+// never receive an assertion. See saml.IdentityProvider.AllowInsecureServiceProviderEndpoints.
+func (s *Server) checkACSEndpoints(metadata *saml.EntityDescriptor) error {
+	var refused error
+	for _, descriptor := range metadata.SPSSODescriptors {
+		for _, endpoint := range descriptor.AssertionConsumerServices {
+			if endpoint.Binding != saml.HTTPPostBinding {
+				continue
+			}
+			if err := s.IDP.CheckServiceProviderEndpoint(endpoint.Location); err != nil {
+				refused = err
+				continue
+			}
+			return nil
+		}
+	}
+	return refused
+}
+
 // HandleListServices handles the `GET /services/` request and responds with a JSON formatted list
 // of service names.
 func (s *Server) HandleListServices(w http.ResponseWriter, _ *http.Request) {
@@ -124,6 +144,12 @@ func (s *Server) HandlePutService(w http.ResponseWriter, r *http.Request) {
 
 	if currentMetadata(metadata, saml.TimeNow()) == nil {
 		s.logger.Printf("ERROR: the metadata has expired")
+		http.Error(w, http.StatusText(http.StatusBadRequest), http.StatusBadRequest)
+		return
+	}
+
+	if err := s.checkACSEndpoints(metadata); err != nil {
+		s.logger.Printf("ERROR: %s", err)
 		http.Error(w, http.StatusText(http.StatusBadRequest), http.StatusBadRequest)
 		return
 	}

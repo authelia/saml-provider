@@ -9,6 +9,7 @@ import (
 	"crypto/x509"
 	"encoding/base64"
 	"encoding/xml"
+	"errors"
 	"fmt"
 	"html/template"
 	"io"
@@ -20,6 +21,7 @@ import (
 	"regexp"
 	"slices"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/beevik/etree"
@@ -283,6 +285,79 @@ type IdentityProvider struct {
 	// SubjectEnforcer decides whether an assertion matches the Subject of its request. Defaults to
 	// DefaultSubjectEnforcer.
 	SubjectEnforcer SubjectEnforcer
+
+	// AllowInsecureServiceProviderEndpoints allows responses to be sent to an endpoint of a service
+	// provider whose URL is plain http, on a host which is not loopback. That is an
+	// AssertionConsumerService, or the SingleLogoutService that a LogoutResponse is sent to. By
+	// default such an endpoint is never selected, and a request which asks for one is refused.
+	//
+	// Enabling this is a risk. The assertions in a response are bearer tokens, so anyone who can
+	// read one in transit can use it to log in as the user until it expires. SAMLSec §6.4.1 requires
+	// confidentiality whenever a response passes between a site and the browser, SAMLProf §4.1.3.5
+	// recommends TLS for the delivery of a Response to the service provider, and §4.4.3.4 does so
+	// for a LogoutResponse. It is only meant for testing, or for a network where something other
+	// than TLS provides that confidentiality.
+	//
+	// Loopback hosts, which are localhost, names ending in .localhost, 127.0.0.0/8 and ::1, are
+	// always allowed over http, as the traffic never leaves the machine of the user and browsers
+	// treat them as secure contexts. URLs which are not absolute http or https URLs with a host are
+	// always refused. To decide for each service provider, leave this unset and have the
+	// ServiceProviderProvider rewrite or remove the endpoints of the metadata it returns.
+	AllowInsecureServiceProviderEndpoints bool
+}
+
+// ErrInsecureEndpoint is returned when the endpoint that a response would be sent to is not secure.
+// See IdentityProvider.AllowInsecureServiceProviderEndpoints.
+var ErrInsecureEndpoint = errors.New("the endpoint is not https")
+
+// CheckServiceProviderEndpoint returns an error that wraps ErrInsecureEndpoint if the identity
+// provider would refuse to send a response to location, which must be an absolute https URL or an
+// http URL on a loopback host, unless AllowInsecureServiceProviderEndpoints allows any http URL.
+// A ServiceProviderProvider can use it to refuse unusable metadata when it is registered.
+func (idp *IdentityProvider) CheckServiceProviderEndpoint(location string) error {
+	if isSecureEndpointLocation(location) {
+		return nil
+	}
+	if idp.AllowInsecureServiceProviderEndpoints && endpointScheme(location) == "http" {
+		return nil
+	}
+	return fmt.Errorf("cannot send a response to %q: %w", location, ErrInsecureEndpoint)
+}
+
+// endpointScheme returns the lower case scheme of location if it is an absolute URL with a host, or
+// otherwise the empty string. The scheme is case-insensitive, RFC 3986 §3.1.
+func endpointScheme(location string) string {
+	u, err := url.Parse(location)
+	if err != nil || u.Opaque != "" || u.Hostname() == "" {
+		return ""
+	}
+	return strings.ToLower(u.Scheme)
+}
+
+// isSecureEndpointLocation returns true if location is an absolute https URL, or an http URL whose
+// host is loopback. Browsers treat both as secure contexts, W3C Secure Contexts §3.2, and so does
+// this identity provider.
+func isSecureEndpointLocation(location string) bool {
+	switch endpointScheme(location) {
+	case "https":
+		return true
+	case "http":
+		u, _ := url.Parse(location)
+		return isLoopbackHost(u.Hostname())
+	default:
+		return false
+	}
+}
+
+// isLoopbackHost returns true if host is localhost or a name within it, RFC 6761 §6.3, or a loopback
+// IP address, which includes an IPv4 loopback address mapped to IPv6.
+func isLoopbackHost(host string) bool {
+	host = strings.ToLower(host)
+	if host == "localhost" || strings.HasSuffix(host, ".localhost") {
+		return true
+	}
+	addr, err := netip.ParseAddr(host)
+	return err == nil && addr.Unmap().IsLoopback()
 }
 
 // Metadata returns the metadata structure for this identity provider.
@@ -562,9 +637,10 @@ func (idp *IdentityProvider) ServeIDPInitiated(w http.ResponseWriter, r *http.Re
 		return
 	}
 
-	// find an ACS endpoint that we can use
+	// Find an ACS endpoint that we can use. Insecure endpoints are skipped, and if there is no other
+	// the request fails here, before any assertion is made.
 	if err := req.useDefaultACSEndpoint(); err != nil {
-		idp.Logger.Printf("saml metadata does not contain an Assertion Customer Service url")
+		idp.Logger.Printf("cannot find assertion consumer service for %s: %v", serviceProviderID, err)
 		http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
 		return
 	}
@@ -730,7 +806,7 @@ func (req *IdpAuthnRequest) Validate() error {
 
 	// Check that the ACS URL matches an ACS endpoint in the SP metadata.
 	if err := req.getACSEndpoint(); err != nil {
-		return fmt.Errorf("cannot find assertion consumer service: %v", err)
+		return fmt.Errorf("cannot find assertion consumer service: %w", err)
 	}
 
 	return nil
@@ -810,6 +886,11 @@ func isValidAuthnRequestID(id string) bool {
 
 // getACSEndpoint finds the endpoint to deliver the response to. HTTP-POST is the only binding this
 // identity provider can send a response with, so other endpoints are never selected.
+//
+// An endpoint that the request names, by index or URL, is refused if it is insecure, as described by
+// IdentityProvider.AllowInsecureServiceProviderEndpoints, rather than replaced by another endpoint.
+// The response, whether an assertion or an error status, would be sent to that endpoint, so the
+// request can only fail with an HTTP error.
 func (req *IdpAuthnRequest) getACSEndpoint() error {
 	index, location := req.Request.AssertionConsumerServiceIndex, req.Request.AssertionConsumerServiceURL
 
@@ -821,6 +902,9 @@ func (req *IdpAuthnRequest) getACSEndpoint() error {
 			for _, spssoDescriptor := range req.ServiceProviderMetadata.SPSSODescriptors {
 				for _, endpoint := range spssoDescriptor.AssertionConsumerServices {
 					if endpoint.Binding == HTTPPostBinding && match(endpoint) {
+						if err := req.IDP.CheckServiceProviderEndpoint(endpoint.Location); err != nil {
+							return err
+						}
 						req.SPSSODescriptor, req.ACSEndpoint = &spssoDescriptor, &endpoint
 						return nil
 					}
@@ -838,6 +922,12 @@ func (req *IdpAuthnRequest) getACSEndpoint() error {
 // useDefaultACSEndpoint selects the default HTTP-POST endpoint as defined by SAMLMetadata §2.2.3: the
 // first with isDefault set to true, otherwise the first without isDefault set to false, otherwise
 // the first.
+//
+// Insecure endpoints, as described by IdentityProvider.AllowInsecureServiceProviderEndpoints, are
+// left out of that sequence, as endpoints of a binding that this identity provider doesn't support
+// are. So a service provider which lists an http endpoint as the default, alongside an https one,
+// receives the response at the https endpoint. If every HTTP-POST endpoint is insecure it returns an
+// error which wraps ErrInsecureEndpoint.
 func (req *IdpAuthnRequest) useDefaultACSEndpoint() error {
 	preference := func(endpoint IndexedEndpoint) int {
 		switch {
@@ -851,15 +941,24 @@ func (req *IdpAuthnRequest) useDefaultACSEndpoint() error {
 	}
 
 	best := 0
+	var insecure error
 	for _, spssoDescriptor := range req.ServiceProviderMetadata.SPSSODescriptors {
 		for _, endpoint := range spssoDescriptor.AssertionConsumerServices {
-			if endpoint.Binding == HTTPPostBinding && preference(endpoint) > best {
-				best = preference(endpoint)
-				req.SPSSODescriptor, req.ACSEndpoint = &spssoDescriptor, &endpoint
+			if endpoint.Binding != HTTPPostBinding || preference(endpoint) <= best {
+				continue
 			}
+			if err := req.IDP.CheckServiceProviderEndpoint(endpoint.Location); err != nil {
+				insecure = err
+				continue
+			}
+			best = preference(endpoint)
+			req.SPSSODescriptor, req.ACSEndpoint = &spssoDescriptor, &endpoint
 		}
 	}
 	if best == 0 {
+		if insecure != nil {
+			return insecure
+		}
 		return os.ErrNotExist
 	}
 	return nil
@@ -1396,8 +1495,19 @@ type IdpAuthnRequestForm struct {
 // PostBinding creates the HTTP POST form information for this
 // `IdpAuthnRequest`. If `Response` is not already set, it calls MakeResponse
 // to produce it.
+//
+// It returns an error which wraps ErrInsecureEndpoint, before any response is made, if ACSEndpoint is
+// insecure, as described by IdentityProvider.AllowInsecureServiceProviderEndpoints. That only
+// happens if ACSEndpoint was set other than by Validate or ServeIDPInitiated, which never select one.
 func (req *IdpAuthnRequest) PostBinding() (IdpAuthnRequestForm, error) {
 	var form IdpAuthnRequestForm
+
+	if req.ACSEndpoint != nil {
+		if err := req.IDP.CheckServiceProviderEndpoint(req.ACSEndpoint.Location); err != nil {
+			req.ResponseEl = nil
+			return form, err
+		}
+	}
 
 	if req.ResponseEl == nil {
 		if err := req.MakeResponse(); err != nil {
@@ -1609,6 +1719,9 @@ func (req *IdpAuthnRequest) MakeErrorResponse(topLevelStatus, secondLevelStatus,
 
 	if req.ACSEndpoint == nil {
 		return fmt.Errorf("cannot make an error response without a validated assertion consumer service")
+	}
+	if err := req.IDP.CheckServiceProviderEndpoint(req.ACSEndpoint.Location); err != nil {
+		return err
 	}
 
 	switch topLevelStatus {
