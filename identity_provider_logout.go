@@ -281,7 +281,7 @@ func (req *IdpLogoutRequest) MakeResponse(status Status) *LogoutResponse {
 		Destination:  req.responseLocation(),
 		Issuer: &Issuer{
 			Format: "urn:oasis:names:tc:SAML:2.0:nameid-format:entity",
-			Value:  req.IDP.MetadataURL.String(),
+			Value:  req.IDP.entityID(),
 		},
 		Status: status,
 	}
