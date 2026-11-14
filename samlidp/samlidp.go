@@ -40,6 +40,12 @@ type Options struct {
 	// metadata of the service provider requests, so a service registered with metadata that requests
 	// none receives only the NameID.
 	AttributeReleasePolicy saml.AttributeReleasePolicy
+
+	// AllowInsecureServiceProviderEndpoints sets saml.IdentityProvider.AllowInsecureServiceProviderEndpoints,
+	// which allows assertions and logout responses to be sent to plain http endpoints of a service
+	// provider on a host which is not loopback. The assertions can then be read and used by anyone on
+	// the network path, so it is only meant for testing.
+	AllowInsecureServiceProviderEndpoints bool
 }
 
 // Server represents an IDP server. The server provides the following URLs:
@@ -111,6 +117,8 @@ func New(opts Options) (*Server, error) {
 
 			MaxAuthnRequestAge:     maxLoginDuration,
 			AttributeReleasePolicy: opts.AttributeReleasePolicy,
+
+			AllowInsecureServiceProviderEndpoints: opts.AllowInsecureServiceProviderEndpoints,
 		},
 		logger:            logr,
 		Store:             opts.Store,
