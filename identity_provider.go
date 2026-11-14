@@ -254,7 +254,29 @@ type IdentityProvider struct {
 	Intermediates []*x509.Certificate
 	// MaxAuthnRequestAge is the oldest AuthnRequest that will be accepted, which must allow for a
 	// SessionProvider that re-presents the request after a login form. Defaults to MaxIssueDelay.
-	MaxAuthnRequestAge      time.Duration
+	//
+	// It is independent of AssertionLifetime: MaxAuthnRequestAge bounds the time from the issue of
+	// the request to the response, and AssertionLifetime the time from the response to its delivery
+	// at the service provider. An assertion always takes its validity from the clock of the identity
+	// provider when it is made, so an old request does not shorten it.
+	MaxAuthnRequestAge time.Duration
+
+	// AssertionLifetime is how long after it is made that an assertion states it is valid, in both
+	// the NotOnOrAfter of its Conditions and the NotOnOrAfter of its bearer SubjectConfirmationData.
+	// Defaults to MaxIssueDelay, and must not be negative. NotBefore is MaxClockSkew before the
+	// assertion is made, to allow for a service provider whose clock is behind.
+	//
+	// SAMLProf §4.1.4.2 requires the bearer SubjectConfirmationData to contain "a NotOnOrAfter
+	// attribute that limits the window during which the assertion can be delivered", and SAMLSecurity
+	// §6.4.1 recommends that the NotBefore and NotOnOrAfter of SSO assertions "SHOULD have the
+	// shortest possible validity period consistent with successful communication of the assertion
+	// from Identity Provider to Service Provider site", which "is typically on the order of a few
+	// minutes". Both are set from this one value because a Web SSO assertion is only used when it is
+	// delivered, and SAMLProf §4.1.4.3 requires the service provider to check both. A service
+	// provider may also refuse an assertion whose IssueInstant is older than its own limit, as this
+	// package's ServiceProvider does with MaxIssueDelay, so a longer lifetime may not be honoured.
+	AssertionLifetime time.Duration
+
 	MetadataURL             url.URL
 	SSOURL                  url.URL
 	LoginURL                url.URL
@@ -1238,10 +1260,18 @@ func (DefaultAssertionMaker) MakeAssertion(req *IdpAuthnRequest, session *Sessio
 		})
 	}
 
+	lifetime := req.IDP.AssertionLifetime
+	if lifetime < 0 {
+		return fmt.Errorf("AssertionLifetime must not be negative")
+	}
+	if lifetime == 0 {
+		lifetime = MaxIssueDelay
+	}
+
 	// allow for some clock skew in the validity period. This uses our own clock, because the
 	// request and therefore its IssueInstant are not authenticated.
 	notBefore := req.Now.Add(-1 * MaxClockSkew)
-	notOnOrAfterAfter := req.Now.Add(MaxIssueDelay)
+	notOnOrAfter := req.Now.Add(lifetime)
 
 	nameIDFormat := "urn:oasis:names:tc:SAML:2.0:nameid-format:transient"
 
@@ -1272,7 +1302,7 @@ func (DefaultAssertionMaker) MakeAssertion(req *IdpAuthnRequest, session *Sessio
 					SubjectConfirmationData: &SubjectConfirmationData{
 						Address:      address,
 						InResponseTo: req.Request.ID,
-						NotOnOrAfter: req.Now.Add(MaxIssueDelay),
+						NotOnOrAfter: notOnOrAfter,
 						Recipient:    req.ACSEndpoint.Location,
 					},
 				},
@@ -1280,7 +1310,7 @@ func (DefaultAssertionMaker) MakeAssertion(req *IdpAuthnRequest, session *Sessio
 		},
 		Conditions: &Conditions{
 			NotBefore:    notBefore,
-			NotOnOrAfter: notOnOrAfterAfter,
+			NotOnOrAfter: notOnOrAfter,
 			AudienceRestrictions: []AudienceRestriction{
 				{
 					Audiences: []Audience{{Value: req.ServiceProviderMetadata.EntityID}},

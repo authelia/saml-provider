@@ -151,6 +151,11 @@ least the subset of SAML known as [interoperable SAML](https://kantarainitiative
   custom `AssertionMaker`.
 - **Client address:** assertions state the IP address of the HTTP request. Behind a proxy that is the proxy's address,
   so the `SessionProvider` should set `Session.ClientAddress` to the address of the user.
+- **Assertion lifetime:** an assertion is valid from `MaxClockSkew` before it is made until
+  `IdentityProvider.AssertionLifetime` after, which defaults to `MaxIssueDelay` and sets both the `Conditions` and the
+  bearer `SubjectConfirmationData` `NotOnOrAfter`. It is independent of `IdentityProvider.MaxAuthnRequestAge`, the
+  oldest `AuthnRequest` accepted, which also defaults to `MaxIssueDelay`. A `LogoutRequest` older than `MaxIssueDelay`
+  is refused.
 - **Error status responses:** `IdpAuthnRequest.WriteErrorResponse` sends a SAML `Response` with a non-success status once
   the ACS has been validated, and `Subject`, `NameIDPolicy`, `ForceAuthn`, `IsPassive` and `RequestedAuthnContext`
   refusals use it.
