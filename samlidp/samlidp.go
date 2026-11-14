@@ -25,6 +25,10 @@ type Options struct {
 	Certificate *x509.Certificate
 	Store       Store
 
+	// EntityID is the entity identifier of the identity provider. Defaults to the URL of the
+	// metadata, which is URL with /metadata appended. See saml.IdentityProvider.EntityID.
+	EntityID string
+
 	// LoginFormTemplate replaces the login form. It must post to {{.URL}} and include the
 	// SAMLRequest and RelayState hidden fields, which resume the flow once the user has logged in. It
 	// must also include {{.RedirectQuery}} in a SAMLRedirectQuery hidden field when that is not empty,
@@ -94,6 +98,7 @@ func New(opts Options) (*Server, error) {
 			Signer:      opts.Signer,
 			Logger:      logr,
 			Certificate: opts.Certificate,
+			EntityID:    opts.EntityID,
 			MetadataURL: metadataURL,
 			SSOURL:      ssoURL,
 			LoginURL:    loginURL,

@@ -20,7 +20,10 @@ import (
 	"regexp"
 	"slices"
 	"strconv"
+	"strings"
 	"time"
+	"unicode"
+	"unicode/utf8"
 
 	"github.com/beevik/etree"
 	xrv "github.com/mattermost/xml-roundtrip-validator"
@@ -266,6 +269,13 @@ type IdentityProvider struct {
 	ValidDuration           *time.Duration
 	ResponseFormTemplate    *template.Template
 
+	// EntityID is the entity identifier of the identity provider, which is the entityID of its
+	// metadata, the Issuer of every assertion, response and logout response, and the NameQualifier
+	// of every NameID that it asserts. SAMLCore §8.3.6 requires it to be an absolute URI of no more
+	// than 1024 characters, and a message is refused if it is not. Defaults to MetadataURL, which
+	// remains the URL at which the metadata is served whatever the entity ID is.
+	EntityID string
+
 	// WantAuthnRequestsSigned requires every AuthnRequest to be signed, and is declared in the
 	// metadata. A request is also required to be signed if the metadata of its service provider
 	// sets AuthnRequestsSigned, and any signature that is present is always verified.
@@ -329,7 +339,7 @@ func (idp *IdentityProvider) Metadata() *EntityDescriptor {
 	}
 
 	ed := &EntityDescriptor{
-		EntityID:      idp.MetadataURL.String(),
+		EntityID:      idp.entityID(),
 		ValidUntil:    TimeNow().Add(validDuration),
 		CacheDuration: validDuration,
 		IDPSSODescriptors: []IDPSSODescriptor{
@@ -376,6 +386,34 @@ func (idp *IdentityProvider) Metadata() *EntityDescriptor {
 	return ed
 }
 
+// entityID returns the entity identifier of the identity provider, which is EntityID, or
+// MetadataURL if that is empty.
+func (idp *IdentityProvider) entityID() string {
+	if idp.EntityID != "" {
+		return idp.EntityID
+	}
+	return idp.MetadataURL.String()
+}
+
+// maxEntityIDLength is the longest entity identifier that SAMLCore §8.3.6 allows, in characters.
+const maxEntityIDLength = 1024
+
+// checkEntityID returns an error unless the entity identifier is an absolute URI, as SAMLCore
+// §1.3.2 requires, of no more than 1024 characters, as SAMLCore §8.3.6 requires.
+func (idp *IdentityProvider) checkEntityID() error {
+	entityID := idp.entityID()
+	if utf8.RuneCountInString(entityID) > maxEntityIDLength {
+		return fmt.Errorf("the entity ID is longer than %d characters", maxEntityIDLength)
+	}
+	if strings.ContainsFunc(entityID, unicode.IsSpace) {
+		return fmt.Errorf("the entity ID %q contains whitespace", entityID)
+	}
+	if u, err := url.Parse(entityID); err != nil || !u.IsAbs() {
+		return fmt.Errorf("the entity ID %q is not an absolute URI", entityID)
+	}
+	return nil
+}
+
 // Handler returns an http.Handler that serves the metadata and SSO URLs, and the logout URL if it
 // is set.
 func (idp *IdentityProvider) Handler() http.Handler {
@@ -388,8 +426,14 @@ func (idp *IdentityProvider) Handler() http.Handler {
 	return mux
 }
 
-// ServeMetadata is an http.HandlerFunc that serves the IDP metadata
+// ServeMetadata is an http.HandlerFunc that serves the IDP metadata. It responds with
+// StatusInternalServerError if the entity ID is not valid.
 func (idp *IdentityProvider) ServeMetadata(w http.ResponseWriter, _ *http.Request) {
+	if err := idp.checkEntityID(); err != nil {
+		idp.Logger.Printf("ERROR: %s", err)
+		http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
+		return
+	}
 	buf, _ := xml.MarshalIndent(idp.Metadata(), "", "  ")
 	w.Header().Set("Content-Type", "application/samlmetadata+xml")
 	if _, err := w.Write(buf); err != nil {
@@ -1257,12 +1301,12 @@ func (DefaultAssertionMaker) MakeAssertion(req *IdpAuthnRequest, session *Sessio
 		Version:      "2.0",
 		Issuer: Issuer{
 			Format: "urn:oasis:names:tc:SAML:2.0:nameid-format:entity",
-			Value:  req.IDP.Metadata().EntityID,
+			Value:  req.IDP.entityID(),
 		},
 		Subject: &Subject{
 			NameID: &NameID{
 				Format:          nameIDFormat,
-				NameQualifier:   req.IDP.Metadata().EntityID,
+				NameQualifier:   req.IDP.entityID(),
 				SPNameQualifier: req.ServiceProviderMetadata.EntityID,
 				Value:           session.NameID,
 			},
@@ -1654,7 +1698,7 @@ func (req *IdpAuthnRequest) newResponse(status Status) *Response {
 		Version:      "2.0",
 		Issuer: &Issuer{
 			Format: "urn:oasis:names:tc:SAML:2.0:nameid-format:entity",
-			Value:  req.IDP.MetadataURL.String(),
+			Value:  req.IDP.entityID(),
 		},
 		Status: status,
 	}
@@ -1692,8 +1736,14 @@ func (req *IdpAuthnRequest) signingContext() (*dsig.SigningContext, error) {
 	return req.IDP.signingContext()
 }
 
-// signingContext returns a context which signs with the key of the identity provider.
+// signingContext returns a context which signs with the key of the identity provider. Every
+// message that the identity provider sends is signed and has its entity ID as the Issuer, so this
+// is also where an invalid entity ID is refused.
 func (idp *IdentityProvider) signingContext() (*dsig.SigningContext, error) {
+	if err := idp.checkEntityID(); err != nil {
+		return nil, err
+	}
+
 	// Create a cert chain based off of the IDP cert and its intermediates.
 	certificates := make([][]byte, 0, 1+len(idp.Intermediates))
 	certificates = append(certificates, idp.Certificate.Raw)
