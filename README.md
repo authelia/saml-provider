@@ -103,7 +103,8 @@ least the subset of SAML known as [interoperable SAML](https://kantarainitiative
 
 [^ecdsa]: Signatures use the `r||s` encoding XML Signature requires, and DER signatures are rejected unless
     `SignatureVerifier` is set. ECDSA keys cannot be used for assertion encryption or decryption, which require RSA,
-    so metadata does not advertise encryption for an ECDSA certificate. XML signatures are verified against `xmlsec1` 1.3.13
+    so SP metadata does not advertise encryption for an ECDSA certificate. IdP metadata never advertises encryption,
+    whatever the key. XML signatures are verified against `xmlsec1` 1.3.13
     in both directions, on P-256, P-384 and P-521. Other implementations and HTTP-Redirect signatures have not been tested.
 
 #### Metadata
@@ -160,6 +161,9 @@ least the subset of SAML known as [interoperable SAML](https://kantarainitiative
   AES-128-GCM and AES-128/192/256-CBC the SP lists in `EncryptionMethod`, or AES-128-CBC if it lists none of them.
 - **Signature defaults:** `SignatureMethod` defaults to RSA-SHA256 for RSA keys, and SHA-1 is only used if set explicitly.
   For ECDSA keys it defaults to the hash matching the curve: SHA-256 for P-256, SHA-384 for P-384 and SHA-512 for P-521.
+- **Published keys:** the metadata only publishes `Certificate` for signing. The IdP never receives an encrypted
+  message, as it supports neither `EncryptedID` nor any binding that would carry one, so it publishes no encryption key
+  or `EncryptionMethod`, and SPs must not encrypt to it.
 - **SPs with ECDSA certificates:** a service provider whose metadata allows encryption with an ECDSA certificate is
   rejected, including a certificate with no `use`, because assertions cannot be encrypted to it. It must set
   `use="signing"`.
