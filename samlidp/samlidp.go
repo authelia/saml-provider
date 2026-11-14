@@ -65,6 +65,10 @@ type Server struct {
 	AdminAuthorizer   func(r *http.Request) bool // approves requests to the RESTful interfaces
 }
 
+// maxAdminBodySize is the largest request body that the RESTful interfaces accept, which leaves room
+// for the metadata of a service provider.
+const maxAdminBodySize = 1 << 20
+
 // maxLoginDuration is how long a user has to complete the login form. The form re-presents the
 // original AuthnRequest, which must still be acceptable when the credentials arrive.
 const maxLoginDuration = 5 * time.Minute
@@ -149,6 +153,7 @@ func (s *Server) InitializeHTTP() {
 				http.Error(w, http.StatusText(http.StatusForbidden), http.StatusForbidden)
 				return
 			}
+			r.Body = http.MaxBytesReader(w, r.Body, maxAdminBodySize)
 			handler(w, r)
 		})
 	}
