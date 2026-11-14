@@ -163,6 +163,12 @@ least the subset of SAML known as [interoperable SAML](https://kantarainitiative
 - **SPs with ECDSA certificates:** a service provider whose metadata allows encryption with an ECDSA certificate is
   rejected, including a certificate with no `use`, because assertions cannot be encrypted to it. It must set
   `use="signing"`.
+- **Signing key rollover:** `IdentityProvider.RolloverCertificates` (`samlidp.Options.RolloverCertificates`) publishes
+  further signing certificates in the metadata after `Certificate`, each in its own `KeyDescriptor`, as the Metadata
+  Interoperability Profile §2.5 allows, but never signs with them. Publish the next certificate there until every SP has
+  refreshed the metadata, then swap it into `Certificate` and keep the previous one there for a while. They are not
+  published for encryption, and `Intermediates` are only sent with signatures, for `Certificate`. An SP that only
+  reads the first signing key only trusts the next one once it is `Certificate` and the SP has refreshed the metadata.
 
 ### Service Provider Limitations
 
