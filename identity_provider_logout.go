@@ -249,26 +249,45 @@ func (req *IdpLogoutRequest) verifySignature() error {
 
 // getSLOEndpoint finds the endpoint to deliver the response to. It prefers the binding of the request,
 // and otherwise HTTP-Redirect and then HTTP-POST, which are the only bindings supported.
+//
+// An endpoint whose response location is insecure, as described by
+// IdentityProvider.AllowInsecureServiceProviderEndpoints, is skipped. If no other endpoint remains it
+// returns an error which wraps ErrInsecureEndpoint, so the request is refused before the session is
+// ended or a response is made.
 func (req *IdpLogoutRequest) getSLOEndpoint() error {
+	var insecure error
 	for _, binding := range []string{req.binding, HTTPRedirectBinding, HTTPPostBinding} {
 		for _, descriptor := range req.ServiceProviderMetadata.SPSSODescriptors {
 			for _, endpoint := range descriptor.SingleLogoutServices {
-				if endpoint.Binding == binding {
-					req.SLOEndpoint = &endpoint
-					return nil
+				if endpoint.Binding != binding {
+					continue
 				}
+				if err := req.IDP.CheckServiceProviderEndpoint(endpointResponseLocation(endpoint)); err != nil {
+					insecure = err
+					continue
+				}
+				req.SLOEndpoint = &endpoint
+				return nil
 			}
 		}
+	}
+	if insecure != nil {
+		return fmt.Errorf("service provider %s has no secure SingleLogoutService: %w", req.ServiceProviderMetadata.EntityID, insecure)
 	}
 	return fmt.Errorf("service provider %s has no SingleLogoutService with a supported binding", req.ServiceProviderMetadata.EntityID)
 }
 
 // responseLocation returns the location of SLOEndpoint which receives responses.
 func (req *IdpLogoutRequest) responseLocation() string {
-	if req.SLOEndpoint.ResponseLocation != "" {
-		return req.SLOEndpoint.ResponseLocation
+	return endpointResponseLocation(*req.SLOEndpoint)
+}
+
+// endpointResponseLocation returns the location of endpoint which receives responses, SAMLMeta §2.2.2.
+func endpointResponseLocation(endpoint Endpoint) string {
+	if endpoint.ResponseLocation != "" {
+		return endpoint.ResponseLocation
 	}
-	return req.SLOEndpoint.Location
+	return endpoint.Location
 }
 
 // MakeResponse returns the unsigned LogoutResponse to the request with the given status.

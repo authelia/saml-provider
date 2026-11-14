@@ -123,6 +123,13 @@ least the subset of SAML known as [interoperable SAML](https://kantarainitiative
   the session at the IdP ends, by a `SessionProvider` that implements `LogoutSessionProvider`, and other SPs are not
   told. The IdP can't start a logout. `samlidp` ends the session of the browser if the request names its principal,
   but its `SameSite=Lax` cookie isn't sent with a cross-site POST, so SPs must use HTTP Redirect to end it.
+- **Insecure endpoints:** assertions are bearer tokens, so responses are only sent to an SP endpoint that is `https`, or
+  `http` on a loopback host (`localhost`, `*.localhost`, `127.0.0.0/8` or `::1`). This covers the
+  `AssertionConsumerService` and the `SingleLogoutService` that receives a `LogoutResponse`. A request that names an
+  `http` ACS by URL or index is refused with an HTTP error, and when none is named an `http` endpoint is skipped for a
+  secure one, even if it is the default. Set `IdentityProvider.AllowInsecureServiceProviderEndpoints`, or
+  `samlidp.Options.AllowInsecureServiceProviderEndpoints`, to allow any `http` URL, only for testing. `samlidp` refuses
+  to register an SP whose HTTP-POST ACS endpoints are all refused.
 - **Artifact Resolution, HTTP Artifact and SOAP:** responses are only ever delivered via HTTP POST, and there is no
   `ArtifactResolutionService`.
 - **Verify signed `AuthnRequest`:** any signature on the HTTP Redirect or HTTP POST bindings is verified, and one is

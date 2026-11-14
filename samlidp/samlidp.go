@@ -34,6 +34,12 @@ type Options struct {
 	// AdminAuthorizer decides whether a request may use the /services, /users, /sessions and
 	// /shortcuts interfaces. If it is nil, every such request is refused.
 	AdminAuthorizer func(r *http.Request) bool
+
+	// AllowInsecureServiceProviderEndpoints sets saml.IdentityProvider.AllowInsecureServiceProviderEndpoints,
+	// which allows assertions and logout responses to be sent to plain http endpoints of a service
+	// provider on a host which is not loopback. The assertions can then be read and used by anyone on
+	// the network path, so it is only meant for testing.
+	AllowInsecureServiceProviderEndpoints bool
 }
 
 // Server represents an IDP server. The server provides the following URLs:
@@ -100,6 +106,8 @@ func New(opts Options) (*Server, error) {
 			LogoutURL:   logoutURL,
 
 			MaxAuthnRequestAge: maxLoginDuration,
+
+			AllowInsecureServiceProviderEndpoints: opts.AllowInsecureServiceProviderEndpoints,
 		},
 		logger:            logr,
 		Store:             opts.Store,
