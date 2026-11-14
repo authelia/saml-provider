@@ -558,26 +558,13 @@ func TestIDPMakeAssertion(t *testing.T) {
 				},
 			},
 		},
-		AttributeStatements: []AttributeStatement{
-			{
-				Attributes: []Attribute{
-					{
-						FriendlyName: "uid",
-						Name:         "urn:oid:0.9.2342.19200300.100.1.1",
-						NameFormat:   "urn:oasis:names:tc:SAML:2.0:attrname-format:uri",
-						Values: []AttributeValue{
-							{
-								Type:  "xs:string",
-								Value: "alice",
-							},
-						},
-					},
-				},
-			},
-		},
+		// The service provider requests no attributes, so none are released.
+		AttributeStatements: nil,
 	}
 	assert.Check(t, is.DeepEqual(expected, req.Assertion))
 
+	// Every candidate attribute, when the policy releases them all.
+	test.IDP.AttributeReleasePolicy = releaseEveryAttribute
 	err = DefaultAssertionMaker{}.MakeAssertion(&req, &Session{
 		ID:             "f00df00df00d",
 		CreateTime:     TimeNow(),
@@ -680,11 +667,14 @@ func TestIDPMakeAssertion(t *testing.T) {
 			},
 		},
 	}
+	assert.Assert(t, is.Len(req.Assertion.AttributeStatements, 1))
 	assert.Check(t, is.DeepEqual(expectedAttributes, req.Assertion.AttributeStatements[0].Attributes))
 }
 
 func TestIDPMarshalAssertion(t *testing.T) {
 	test := NewIdentityProviderTest(t, applyKey)
+	// This test is about how an attribute is marshalled, not which are released.
+	test.IDP.AttributeReleasePolicy = releaseEveryAttribute
 	req := IdpAuthnRequest{
 		Now: TimeNow(),
 		IDP: &test.IDP,
@@ -938,6 +928,7 @@ func TestIDPRequestedAttributes(t *testing.T) {
 	})
 	assert.Check(t, err)
 
+	// Only the attributes that the service provider requests are released, under its own names.
 	expectedAttributes := []AttributeStatement{{
 		Attributes: []Attribute{
 			{
@@ -981,72 +972,6 @@ func TestIDPRequestedAttributes(t *testing.T) {
 					{
 						Type:  "xs:string",
 						Value: "Smith",
-					},
-				},
-			},
-			{
-				FriendlyName: "uid",
-				Name:         "urn:oid:0.9.2342.19200300.100.1.1",
-				NameFormat:   "urn:oasis:names:tc:SAML:2.0:attrname-format:uri",
-				Values: []AttributeValue{
-					{
-						Type:  "xs:string",
-						Value: "alice",
-					},
-				},
-			},
-			{
-				FriendlyName: "mail",
-				Name:         "urn:oid:0.9.2342.19200300.100.1.3",
-				NameFormat:   "urn:oasis:names:tc:SAML:2.0:attrname-format:uri",
-				Values: []AttributeValue{
-					{
-						Type:  "xs:string",
-						Value: "alice@example.com",
-					},
-				},
-			},
-			{
-				FriendlyName: "eduPersonPrincipalName",
-				Name:         "urn:oid:1.3.6.1.4.1.5923.1.1.1.6",
-				NameFormat:   "urn:oasis:names:tc:SAML:2.0:attrname-format:uri",
-				Values: []AttributeValue{
-					{
-						Type:  "xs:string",
-						Value: "alice@example.com",
-					},
-				},
-			},
-			{
-				FriendlyName: "sn",
-				Name:         "urn:oid:2.5.4.4",
-				NameFormat:   "urn:oasis:names:tc:SAML:2.0:attrname-format:uri",
-				Values: []AttributeValue{
-					{
-						Type:  "xs:string",
-						Value: "Smith",
-					},
-				},
-			},
-			{
-				FriendlyName: "givenName",
-				Name:         "urn:oid:2.5.4.42",
-				NameFormat:   "urn:oasis:names:tc:SAML:2.0:attrname-format:uri",
-				Values: []AttributeValue{
-					{
-						Type:  "xs:string",
-						Value: "Alice",
-					},
-				},
-			},
-			{
-				FriendlyName: "cn",
-				Name:         "urn:oid:2.5.4.3",
-				NameFormat:   "urn:oasis:names:tc:SAML:2.0:attrname-format:uri",
-				Values: []AttributeValue{
-					{
-						Type:  "xs:string",
-						Value: "Alice Smith",
 					},
 				},
 			},

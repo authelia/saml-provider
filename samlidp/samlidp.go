@@ -34,6 +34,12 @@ type Options struct {
 	// AdminAuthorizer decides whether a request may use the /services, /users, /sessions and
 	// /shortcuts interfaces. If it is nil, every such request is refused.
 	AdminAuthorizer func(r *http.Request) bool
+
+	// AttributeReleasePolicy decides which attributes of a user each service provider receives. If it
+	// is nil, saml.DefaultAttributeReleasePolicy is used, which only releases the attributes that the
+	// metadata of the service provider requests, so a service registered with metadata that requests
+	// none receives only the NameID.
+	AttributeReleasePolicy saml.AttributeReleasePolicy
 }
 
 // Server represents an IDP server. The server provides the following URLs:
@@ -99,7 +105,8 @@ func New(opts Options) (*Server, error) {
 			LoginURL:    loginURL,
 			LogoutURL:   logoutURL,
 
-			MaxAuthnRequestAge: maxLoginDuration,
+			MaxAuthnRequestAge:     maxLoginDuration,
+			AttributeReleasePolicy: opts.AttributeReleasePolicy,
 		},
 		logger:            logr,
 		Store:             opts.Store,

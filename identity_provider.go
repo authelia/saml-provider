@@ -20,6 +20,7 @@ import (
 	"regexp"
 	"slices"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/beevik/etree"
@@ -172,6 +173,23 @@ type SubjectEnforcer interface {
 	EnforceSubject(req *IdpAuthnRequest, session *Session) error
 }
 
+// AttributeReleasePolicy is an interface used by DefaultAssertionMaker to decide which attributes of
+// the principal are stated to a service provider, which allows the decision to differ for each
+// service provider. The default implementation is DefaultAttributeReleasePolicy, which is used if no
+// AttributeReleasePolicy is specified.
+type AttributeReleasePolicy interface {
+	// ReleaseAttributes returns the attributes of candidates that the assertion for req states.
+	// candidates holds every attribute that DefaultAssertionMaker can state about the principal of
+	// session, and may be modified or returned. req.AttributeConsumingService returns the service
+	// that describes the attributes the service provider wants, if any.
+	//
+	// If no attributes are returned the assertion has no AttributeStatement, because SAMLCore
+	// §2.7.3 requires every AttributeStatement to hold at least one attribute. If an error is
+	// returned no assertion is made, and the user agent receives an HTTP error rather than a SAML
+	// response.
+	ReleaseAttributes(req *IdpAuthnRequest, session *Session, candidates []Attribute) ([]Attribute, error)
+}
+
 // DefaultAuthnContextEnforcer applies the comparison rules of SAMLCore §3.3.2.2.1 to the class
 // reference of every AuthnStatement in the assertion.
 type DefaultAuthnContextEnforcer struct {
@@ -283,6 +301,12 @@ type IdentityProvider struct {
 	// SubjectEnforcer decides whether an assertion matches the Subject of its request. Defaults to
 	// DefaultSubjectEnforcer.
 	SubjectEnforcer SubjectEnforcer
+
+	// AttributeReleasePolicy decides which attributes DefaultAssertionMaker states to each service
+	// provider. Defaults to DefaultAttributeReleasePolicy, which only releases the attributes that
+	// the AttributeConsumingService of the request lists, and none if there is no such service. It
+	// is not used by any other AssertionMaker.
+	AttributeReleasePolicy AttributeReleasePolicy
 }
 
 // Metadata returns the metadata structure for this identity provider.
@@ -1023,99 +1047,7 @@ func (DefaultAssertionMaker) MakeAssertion(req *IdpAuthnRequest, session *Sessio
 		return fmt.Errorf("the session has no NameID")
 	}
 
-	attributes := []Attribute{}
-
-	var attributeConsumingService *AttributeConsumingService
-	for _, acs := range req.SPSSODescriptor.AttributeConsumingServices {
-		if acs.IsDefault != nil && *acs.IsDefault {
-			// explicitly copy loop iterator variables
-			//
-			// c.f. https://github.com/golang/go/wiki/CommonMistakes#using-reference-to-loop-iterator-variable
-			//
-			// (note that I'm pretty sure this isn't strictly necessary because we break out of the loop immediately,
-			// but it certainly doesn't hurt anything and may prevent bugs in the future.)
-			acs := acs
-
-			attributeConsumingService = &acs
-			break
-		}
-	}
-	if attributeConsumingService == nil {
-		for _, acs := range req.SPSSODescriptor.AttributeConsumingServices {
-			// explicitly copy loop iterator variables
-			//
-			// c.f. https://github.com/golang/go/wiki/CommonMistakes#using-reference-to-loop-iterator-variable
-			//
-			// (note that I'm pretty sure this isn't strictly necessary because we break out of the loop immediately,
-			// but it certainly doesn't hurt anything and may prevent bugs in the future.)
-			acs := acs
-
-			attributeConsumingService = &acs
-			break
-		}
-	}
-	if attributeConsumingService == nil {
-		attributeConsumingService = &AttributeConsumingService{}
-	}
-
-	for _, requestedAttribute := range attributeConsumingService.RequestedAttributes {
-		if requestedAttribute.NameFormat == "urn:oasis:names:tc:SAML:2.0:attrname-format:basic" || requestedAttribute.NameFormat == "urn:oasis:names:tc:SAML:2.0:attrname-format:unspecified" {
-			attrName := requestedAttribute.Name
-			attrName = regexp.MustCompile("[^A-Za-z0-9]+").ReplaceAllString(attrName, "")
-			switch attrName {
-			case "email", "emailaddress":
-				attributes = append(attributes, Attribute{
-					FriendlyName: requestedAttribute.FriendlyName,
-					Name:         requestedAttribute.Name,
-					NameFormat:   requestedAttribute.NameFormat,
-					Values: []AttributeValue{{
-						Type:  "xs:string",
-						Value: session.UserEmail,
-					}},
-				})
-			case "name", "fullname", "cn", "commonname":
-				attributes = append(attributes, Attribute{
-					FriendlyName: requestedAttribute.FriendlyName,
-					Name:         requestedAttribute.Name,
-					NameFormat:   requestedAttribute.NameFormat,
-					Values: []AttributeValue{{
-						Type:  "xs:string",
-						Value: session.UserCommonName,
-					}},
-				})
-			case "givenname", "firstname":
-				attributes = append(attributes, Attribute{
-					FriendlyName: requestedAttribute.FriendlyName,
-					Name:         requestedAttribute.Name,
-					NameFormat:   requestedAttribute.NameFormat,
-					Values: []AttributeValue{{
-						Type:  "xs:string",
-						Value: session.UserGivenName,
-					}},
-				})
-			case "surname", "lastname", "familyname":
-				attributes = append(attributes, Attribute{
-					FriendlyName: requestedAttribute.FriendlyName,
-					Name:         requestedAttribute.Name,
-					NameFormat:   requestedAttribute.NameFormat,
-					Values: []AttributeValue{{
-						Type:  "xs:string",
-						Value: session.UserSurname,
-					}},
-				})
-			case "uid", "user", "userid":
-				attributes = append(attributes, Attribute{
-					FriendlyName: requestedAttribute.FriendlyName,
-					Name:         requestedAttribute.Name,
-					NameFormat:   requestedAttribute.NameFormat,
-					Values: []AttributeValue{{
-						Type:  "xs:string",
-						Value: session.UserName,
-					}},
-				})
-			}
-		}
-	}
+	attributes := requestedNameAttributes(req.AttributeConsumingService(), session)
 
 	if session.UserName != "" {
 		attributes = append(attributes, Attribute{
@@ -1238,6 +1170,15 @@ func (DefaultAssertionMaker) MakeAssertion(req *IdpAuthnRequest, session *Sessio
 		})
 	}
 
+	policy := req.IDP.AttributeReleasePolicy
+	if policy == nil {
+		policy = DefaultAttributeReleasePolicy{}
+	}
+	attributes, err := policy.ReleaseAttributes(req, session, attributes)
+	if err != nil {
+		return fmt.Errorf("cannot release attributes: %w", err)
+	}
+
 	// allow for some clock skew in the validity period. This uses our own clock, because the
 	// request and therefore its IssueInstant are not authenticated.
 	notBefore := req.Now.Add(-1 * MaxClockSkew)
@@ -1309,6 +1250,198 @@ func (DefaultAssertionMaker) MakeAssertion(req *IdpAuthnRequest, session *Sessio
 	}
 
 	return nil
+}
+
+// requestedNameAttributes returns the attributes of the user which service requests under a name of
+// its own choosing, such as "email", rather than under the name that DefaultAssertionMaker states
+// them with. Such a name is only recognised when its NameFormat is basic or unspecified, which leave
+// its interpretation to the identity provider (SAMLCore §8.2.1 and §8.2.3). It is compared without
+// regard to case or punctuation, so "Email", "email_address" and "EmailAddress" are all the email
+// address of the user. Each attribute has the FriendlyName, Name and NameFormat that service gives
+// it, and is omitted if the session has no value for it.
+func requestedNameAttributes(service *AttributeConsumingService, session *Session) []Attribute {
+	attributes := []Attribute{}
+	if service == nil {
+		return attributes
+	}
+
+	for _, requested := range service.RequestedAttributes {
+		switch requested.NameFormat {
+		case "", basicAttrNameFormat, unspecifiedAttrNameFormat:
+		default:
+			continue
+		}
+
+		var value string
+		switch strings.ToLower(nonAlphanumeric.ReplaceAllString(requested.Name, "")) {
+		case "email", "emailaddress":
+			value = session.UserEmail
+		case "name", "fullname", "cn", "commonname":
+			value = session.UserCommonName
+		case "givenname", "firstname":
+			value = session.UserGivenName
+		case "surname", "lastname", "familyname":
+			value = session.UserSurname
+		case "uid", "user", "userid":
+			value = session.UserName
+		}
+		if value == "" {
+			continue
+		}
+
+		if slices.ContainsFunc(attributes, func(attribute Attribute) bool {
+			return attribute.Name == requested.Name && attribute.NameFormat == requested.NameFormat
+		}) {
+			continue
+		}
+		attributes = append(attributes, Attribute{
+			FriendlyName: requested.FriendlyName,
+			Name:         requested.Name,
+			NameFormat:   requested.NameFormat,
+			Values:       []AttributeValue{{Type: "xs:string", Value: value}},
+		})
+	}
+	return attributes
+}
+
+// nonAlphanumeric matches the characters which are ignored in a name recognised by
+// requestedNameAttributes.
+var nonAlphanumeric = regexp.MustCompile("[^A-Za-z0-9]+")
+
+// basicAttrNameFormat and unspecifiedAttrNameFormat are the attribute name formats of SAMLCore §8.2.3
+// and §8.2.1.
+const (
+	basicAttrNameFormat       = "urn:oasis:names:tc:SAML:2.0:attrname-format:basic"
+	unspecifiedAttrNameFormat = "urn:oasis:names:tc:SAML:2.0:attrname-format:unspecified"
+)
+
+// AttributeConsumingService returns the AttributeConsumingService of req.SPSSODescriptor which
+// describes the attributes the service provider wants, or nil if there is none. The result is a copy
+// of the service in the metadata, but its RequestedAttributes are shared and must not be modified.
+//
+// If the request has an AttributeConsumingServiceIndex it names the service, as SAMLCore §3.4.1
+// describes. An index that doesn't name one of the services selects none, rather than the default:
+// the identity provider "MUST have a trusted means to map the index value", and the attributes of
+// another service were not asked for. The request still succeeds, as attributes are optional.
+//
+// Otherwise the default service is selected by SAMLMeta §2.4.4, as changed by errata E87: the first
+// with isDefault set to true, otherwise the first without isDefault set to false, otherwise the first.
+func (req *IdpAuthnRequest) AttributeConsumingService() *AttributeConsumingService {
+	if req.SPSSODescriptor == nil {
+		return nil
+	}
+	services := req.SPSSODescriptor.AttributeConsumingServices
+
+	if index := req.Request.AttributeConsumingServiceIndex; index != "" {
+		// The index has the xs:unsignedShort type.
+		n, err := strconv.ParseUint(index, 10, 16)
+		if err != nil {
+			return nil
+		}
+		for _, service := range services {
+			if service.Index == int(n) {
+				return &service
+			}
+		}
+		return nil
+	}
+
+	preference := func(service AttributeConsumingService) int {
+		switch {
+		case service.IsDefault == nil:
+			return 2
+		case *service.IsDefault:
+			return 3
+		default:
+			return 1
+		}
+	}
+	var selected *AttributeConsumingService
+	for _, service := range services {
+		if selected == nil || preference(service) > preference(*selected) {
+			selected = &service
+		}
+	}
+	return selected
+}
+
+// DefaultAttributeReleasePolicy releases only the attributes that the service provider requests in
+// the RequestedAttribute elements of its AttributeConsumingService, as selected by
+// IdpAuthnRequest.AttributeConsumingService. If there is no such service, no attributes are released,
+// and the assertion only identifies the principal by its NameID.
+//
+// A candidate is released if a RequestedAttribute has the same Name and a compatible NameFormat. The
+// Name must be identical, as SAMLCore §1.3.1 requires an exact binary comparison. FriendlyName is never
+// used, because SAMLCore §2.7.3.1 says it "MUST NOT be used as a basis for formally identifying SAML
+// attributes". A missing NameFormat is urn:oasis:names:tc:SAML:2.0:attrname-format:unspecified, as
+// SAMLCore §2.7.3.1 and errata E89 say, and the unspecified format is compatible with any other,
+// since it leaves the interpretation of the name to the implementation (SAMLCore §8.2.1).
+//
+// If the matching RequestedAttribute elements list values, only those values of the candidate are
+// released, as SAMLMeta §2.4.4.2 says that only matching values are relevant to the service, and the
+// candidate is withheld if it has none of them. Values are compared exactly.
+type DefaultAttributeReleasePolicy struct {
+}
+
+// ReleaseAttributes implements AttributeReleasePolicy.
+func (DefaultAttributeReleasePolicy) ReleaseAttributes(req *IdpAuthnRequest, _ *Session, candidates []Attribute) ([]Attribute, error) {
+	service := req.AttributeConsumingService()
+	if service == nil {
+		// The index is not included because the request may not be authenticated.
+		if req.Request.AttributeConsumingServiceIndex != "" && req.IDP != nil && req.IDP.Logger != nil {
+			req.IDP.Logger.Printf("releasing no attributes: the AttributeConsumingServiceIndex of the request names no service")
+		}
+		return nil, nil
+	}
+
+	var released []Attribute
+	for _, candidate := range candidates {
+		if attribute, ok := releaseRequestedAttribute(service.RequestedAttributes, candidate); ok {
+			released = append(released, attribute)
+		}
+	}
+	return released, nil
+}
+
+// releaseRequestedAttribute returns the part of candidate which requested asks for, and false if it
+// asks for none of it.
+func releaseRequestedAttribute(requested []RequestedAttribute, candidate Attribute) (Attribute, bool) {
+	matched, anyValue := false, false
+	var values []AttributeValue
+	for _, r := range requested {
+		if r.Name != candidate.Name || !compatibleAttrNameFormats(r.NameFormat, candidate.NameFormat) {
+			continue
+		}
+		matched = true
+		if len(r.Values) == 0 {
+			anyValue = true
+		}
+		values = append(values, r.Values...)
+	}
+	if !matched {
+		return Attribute{}, false
+	}
+	if anyValue {
+		return candidate, true
+	}
+
+	attribute := candidate
+	attribute.Values = nil
+	for _, value := range candidate.Values {
+		if slices.ContainsFunc(values, func(v AttributeValue) bool { return v.Value == value.Value }) {
+			attribute.Values = append(attribute.Values, value)
+		}
+	}
+	return attribute, len(attribute.Values) != 0
+}
+
+// compatibleAttrNameFormats returns true if attributes with the NameFormats a and b can have the same
+// name. A missing NameFormat is unspecified, which is compatible with any other.
+func compatibleAttrNameFormats(a, b string) bool {
+	if a == "" || a == unspecifiedAttrNameFormat || b == "" || b == unspecifiedAttrNameFormat {
+		return true
+	}
+	return a == b
 }
 
 // clientAddress returns the IP address of the user for an assertion, which SAMLCore §2.4.1.2 and
