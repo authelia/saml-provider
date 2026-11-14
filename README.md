@@ -151,6 +151,9 @@ least the subset of SAML known as [interoperable SAML](https://kantarainitiative
   custom `AssertionMaker`.
 - **Client address:** assertions state the IP address of the HTTP request. Behind a proxy that is the proxy's address,
   so the `SessionProvider` should set `Session.ClientAddress` to the address of the user.
+- **`SessionNotOnOrAfter`:** only stated when `IdentityProvider.IncludeSessionNotOnOrAfter` is set, as
+  `Session.ExpireTime`, and omitted if that is zero. An SP that honours it ends its session when the IdP's ends. With
+  it set, `DefaultAssertionMaker` refuses a session that has already expired. `samlsp` does not honour it.
 - **Error status responses:** `IdpAuthnRequest.WriteErrorResponse` sends a SAML `Response` with a non-success status once
   the ACS has been validated, and `Subject`, `NameIDPolicy`, `ForceAuthn`, `IsPassive` and `RequestedAuthnContext`
   refusals use it.
