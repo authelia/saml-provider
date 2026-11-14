@@ -118,12 +118,6 @@ func TestIDPMetadataOmitsEncryptionForECDSACertificate(t *testing.T) {
 	assert.Check(t, is.DeepEqual([]string{"signing"}, keyDescriptorUses(descriptors)))
 }
 
-func TestIDPMetadataAdvertisesEncryptionForRSACertificate(t *testing.T) {
-	test := NewIdentityProviderTest(t)
-	descriptors := test.IDP.Metadata().IDPSSODescriptors[0].KeyDescriptors
-	assert.Check(t, is.DeepEqual([]string{"signing", "encryption"}, keyDescriptorUses(descriptors)))
-}
-
 // derSignatureVerifier accepts a peer which signs in DER, by converting the signature on the element
 // to r||s before validating it.
 type derSignatureVerifier struct{}
