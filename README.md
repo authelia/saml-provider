@@ -82,6 +82,7 @@ least the subset of SAML known as [interoperable SAML](https://kantarainitiative
 | `NameIDPolicy`                                    | ⚠️  | ✅  |
 | `ForceAuthn` / `IsPassive`                        | ✅  | ✅  |
 | `RequestedAuthnContext`                           | ⚠️  | ✅  |
+| `AttributeConsumingService` attribute release     | ⚠️  | ❌  |
 | `Scoping` (proxying)                              | ❌  | ❌  |
 | Error status responses                            | ⚠️  | ✅  |
 | Multiple assertions in a single `Response`        | N/A | ⚠️  |
@@ -149,6 +150,18 @@ least the subset of SAML known as [interoperable SAML](https://kantarainitiative
   a bearer confirmation meeting one of them, so a request that only accepts holder-of-key is refused. Set
   `IdentityProvider.SubjectEnforcer` to accept another identifier for the same principal, or the confirmations of a
   custom `AssertionMaker`.
+- **Attribute release:** `DefaultAssertionMaker` only states the attributes that the SP requests with the
+  `RequestedAttribute` elements of an `AttributeConsumingService` in its metadata, and states none if it requests none,
+  so the assertion only carries the `NameID`. The service is the one named by the `AttributeConsumingServiceIndex` of
+  the request, or else the default by SAMLMeta §2.4.4 as changed by errata E87. An index that names no service releases
+  nothing. A requested attribute matches by `Name`, compared exactly, and a compatible `NameFormat`, where a missing
+  format is `unspecified` (errata E89) and `unspecified` matches any format. `FriendlyName` is ignored. If the
+  `RequestedAttribute` lists values, only those values are released. An SP may also request the email, common name,
+  given name, surname or user name of the user under a name of its own, such as `email` or `first_name`, in the `basic`
+  or `unspecified` format, and these are omitted when the session has no value. Set
+  `IdentityProvider.AttributeReleasePolicy`, or `samlidp.Options.AttributeReleasePolicy`, to decide differently for
+  each SP, for example to release attributes to an SP whose metadata requests none. A custom `AssertionMaker` decides
+  for itself. `isRequired` is not enforced, and `EncryptedAttribute` is not supported.
 - **Client address:** assertions state the IP address of the HTTP request. Behind a proxy that is the proxy's address,
   so the `SessionProvider` should set `Session.ClientAddress` to the address of the user.
 - **Error status responses:** `IdpAuthnRequest.WriteErrorResponse` sends a SAML `Response` with a non-success status once
