@@ -163,6 +163,16 @@ least the subset of SAML known as [interoperable SAML](https://kantarainitiative
 - **SPs with ECDSA certificates:** a service provider whose metadata allows encryption with an ECDSA certificate is
   rejected, including a certificate with no `use`, because assertions cannot be encrypted to it. It must set
   `use="signing"`.
+- **SP encryption certificates:** by default the IdP refuses to encrypt to a certificate that is expired or not yet
+  valid at the time of the request (allowing `MaxClockSkew`), whose RSA key is shorter than 2048 bits, or whose
+  `KeyUsage` extension does not assert `keyEncipherment`. A certificate without a `KeyUsage` extension is accepted. The
+  login then fails with an HTTP error, and the assertion is neither sent in plaintext nor encrypted to another key.
+  This is a local policy: the SAML V2.0 Metadata Interoperability Profile treats the certificate as a container for the
+  key, which may be expired or carry any usage flags. To interoperate with SPs following it, set
+  `IdentityProvider.EncryptionCertificateEnforcer` to a `DefaultEncryptionCertificateEnforcer` with
+  `IgnoreValidityPeriod`, `IgnoreKeyUsage` or a lower `MinimumRSAKeySize`, each of which relaxes only its own check, or
+  to a custom enforcer to decide differently for each SP. With `samlidp`, set it on `Server.IDP`. The certificates
+  used to verify signed requests from SPs are not checked.
 
 ### Service Provider Limitations
 
