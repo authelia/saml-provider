@@ -131,9 +131,10 @@ least the subset of SAML known as [interoperable SAML](https://kantarainitiative
   field, because the signature of a redirect does not survive being re-presented as a POST.
 - **`NameIDPolicy`:** a request that the assertion can't satisfy receives an `InvalidNameIDPolicy` status. The `NameID`
   comes from `Session.NameID`, and `DefaultAssertionMaker` refuses a session without one. Its format comes from
-  `Session.NameIDFormat` and defaults to transient, and the metadata only advertises transient, so a
-  request for any other format is refused unless the session provides it. `EncryptedID` is not supported, so the
-  encrypted format is always refused. `AllowCreate` is not checked by default: set
+  `Session.NameIDFormat` and defaults to transient. The metadata advertises `IdentityProvider.NameIDFormats`, in
+  order, or transient if it is empty, but the policy is checked against the asserted format, so a request for a
+  specific format is satisfied only if the session provides it, whether or not it is advertised. `EncryptedID` is not
+  supported, so the encrypted format is always refused. `AllowCreate` is not checked by default: set
   `IdentityProvider.NameIDPolicyEnforcer` to check it, or to decide differently for each SP.
 - **`ForceAuthn` / `IsPassive`:** a `SessionProvider` must also implement `ForceAuthnSessionProvider` or
   `PassiveSessionProvider` to serve these requests. Otherwise they receive an `AuthnFailed` or `NoPassive` status.
