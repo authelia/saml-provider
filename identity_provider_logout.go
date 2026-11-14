@@ -64,30 +64,30 @@ type IdpLogoutRequest struct {
 func (idp *IdentityProvider) ServeSLO(w http.ResponseWriter, r *http.Request) {
 	req, err := NewIdpLogoutRequest(idp, r)
 	if err != nil {
-		idp.Logger.Printf("failed to parse logout request: %s", err)
+		idp.logger().Printf("failed to parse logout request: %s", err)
 		http.Error(w, http.StatusText(http.StatusBadRequest), http.StatusBadRequest)
 		return
 	}
 
 	if err := req.Validate(); err != nil {
-		idp.Logger.Printf("failed to validate logout request: %s", err)
+		idp.logger().Printf("failed to validate logout request: %s", err)
 		http.Error(w, http.StatusText(http.StatusBadRequest), http.StatusBadRequest)
 		return
 	}
 
 	status := Status{StatusCode: StatusCode{Value: StatusSuccess}}
 	if provider, ok := idp.SessionProvider.(LogoutSessionProvider); !ok {
-		idp.Logger.Printf("cannot terminate session: the session provider does not implement LogoutSessionProvider")
+		idp.logger().Printf("cannot terminate session: the session provider does not implement LogoutSessionProvider")
 		status.StatusCode.Value = StatusResponder
 	} else if err := provider.TerminateSession(w, r, req); errors.Is(err, ErrPartialLogout) {
 		status.StatusCode.StatusCode = &StatusCode{Value: StatusPartialLogout}
 	} else if err != nil {
-		idp.Logger.Printf("cannot terminate session: %s", err)
+		idp.logger().Printf("cannot terminate session: %s", err)
 		status.StatusCode.Value = StatusResponder
 	}
 
 	if err := req.WriteResponse(w, status); err != nil {
-		idp.Logger.Printf("failed to write logout response: %s", err)
+		idp.logger().Printf("failed to write logout response: %s", err)
 		http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
 	}
 }
