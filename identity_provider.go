@@ -252,6 +252,28 @@ type IdentityProvider struct {
 	Logger        logger.Interface
 	Certificate   *x509.Certificate
 	Intermediates []*x509.Certificate
+
+	// RolloverCertificates are further signing certificates which the metadata publishes after
+	// Certificate, each in its own KeyDescriptor, but which are never used to sign. They allow a
+	// signing key to be changed without downtime: publish the next certificate here until every
+	// service provider has refreshed the metadata, then make it Certificate and keep the previous
+	// one here until responses signed with it can no longer be in flight. The Metadata Interoperability
+	// Profile §2.5 describes this:
+	//
+	//	Signing or transport authentication keys intended for future use MAY be included as a means
+	//	of preparing for migration from an older to a newer key (i.e., key rollover). Once an
+	//	allowable period of time has elapsed (with this period dependent on deployment-specific
+	//	policies), the older key can be removed, completing the change. Expired keys (those not in
+	//	use anymore by an entity, for reasons other than compromise) SHOULD be removed once the
+	//	rollover process to a new key (or keys) has been completed.
+	//
+	// A compromised key MUST be removed at once instead. The certificates may have any key type
+	// that can sign, so an RSA key can be replaced with an ECDSA key. They are only published for
+	// signing, never for encryption. A certificate that is nil, equal to Certificate or repeated
+	// is left out. Intermediates are not published for them, as they are only sent with a
+	// signature and the profile permits a single certificate in each KeyDescriptor.
+	RolloverCertificates []*x509.Certificate
+
 	// MaxAuthnRequestAge is the oldest AuthnRequest that will be accepted, which must allow for a
 	// SessionProvider that re-presents the request after a login form. Defaults to MaxIssueDelay.
 	MaxAuthnRequestAge      time.Duration
@@ -296,18 +318,19 @@ func (idp *IdentityProvider) Metadata() *EntityDescriptor {
 		validDuration = DefaultValidDuration
 	}
 
-	keyDescriptors := []KeyDescriptor{
-		{
-			Use: "signing",
-			KeyInfo: KeyInfo{
-				X509Data: X509Data{
-					X509Certificates: []X509Certificate{
-						{Data: certStr},
-					},
-				},
-			},
-		},
+	keyDescriptors := []KeyDescriptor{signingKeyDescriptor(certStr)}
+
+	// The Metadata Interoperability Profile §2.5.1 requires each key to be placed in its own
+	// KeyDescriptor, with a single certificate.
+	published := []*x509.Certificate{idp.Certificate}
+	for _, cert := range idp.RolloverCertificates {
+		if cert == nil || slices.ContainsFunc(published, cert.Equal) {
+			continue
+		}
+		published = append(published, cert)
+		keyDescriptors = append(keyDescriptors, signingKeyDescriptor(base64.StdEncoding.EncodeToString(cert.Raw)))
 	}
+
 	// Encryption requires RSA, so a certificate with any other type of key must not be advertised for it.
 	if _, ok := idp.Certificate.PublicKey.(*rsa.PublicKey); ok {
 		keyDescriptors = append(keyDescriptors, KeyDescriptor{
@@ -374,6 +397,21 @@ func (idp *IdentityProvider) Metadata() *EntityDescriptor {
 	}
 
 	return ed
+}
+
+// signingKeyDescriptor returns a KeyDescriptor which publishes the base64 encoded certificate for
+// signing.
+func signingKeyDescriptor(cert string) KeyDescriptor {
+	return KeyDescriptor{
+		Use: "signing",
+		KeyInfo: KeyInfo{
+			X509Data: X509Data{
+				X509Certificates: []X509Certificate{
+					{Data: cert},
+				},
+			},
+		},
+	}
 }
 
 // Handler returns an http.Handler that serves the metadata and SSO URLs, and the logout URL if it

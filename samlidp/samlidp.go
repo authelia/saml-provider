@@ -25,6 +25,11 @@ type Options struct {
 	Certificate *x509.Certificate
 	Store       Store
 
+	// RolloverCertificates are further signing certificates which the metadata publishes but which
+	// are never used to sign, so that the signing key can be changed without downtime. See
+	// saml.IdentityProvider.RolloverCertificates.
+	RolloverCertificates []*x509.Certificate
+
 	// LoginFormTemplate replaces the login form. It must post to {{.URL}} and include the
 	// SAMLRequest and RelayState hidden fields, which resume the flow once the user has logged in. It
 	// must also include {{.RedirectQuery}} in a SAMLRedirectQuery hidden field when that is not empty,
@@ -90,14 +95,15 @@ func New(opts Options) (*Server, error) {
 		serviceProviders: map[string]*saml.EntityDescriptor{},
 		serviceIDs:       map[string]string{},
 		IDP: saml.IdentityProvider{
-			Key:         opts.Key,
-			Signer:      opts.Signer,
-			Logger:      logr,
-			Certificate: opts.Certificate,
-			MetadataURL: metadataURL,
-			SSOURL:      ssoURL,
-			LoginURL:    loginURL,
-			LogoutURL:   logoutURL,
+			Key:                  opts.Key,
+			Signer:               opts.Signer,
+			Logger:               logr,
+			Certificate:          opts.Certificate,
+			RolloverCertificates: opts.RolloverCertificates,
+			MetadataURL:          metadataURL,
+			SSOURL:               ssoURL,
+			LoginURL:             loginURL,
+			LogoutURL:            logoutURL,
 
 			MaxAuthnRequestAge: maxLoginDuration,
 		},
