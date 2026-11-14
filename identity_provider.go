@@ -266,6 +266,16 @@ type IdentityProvider struct {
 	ValidDuration           *time.Duration
 	ResponseFormTemplate    *template.Template
 
+	// NameIDFormats are the NameID formats that the metadata advertises, as SAMLMeta §2.4.2 allows,
+	// which should be the formats that Session.NameIDFormat can take, including transient if a
+	// session can leave it empty. They are advertised in the order given, which some service
+	// providers follow to choose the format they request, so the preferred format should be first.
+	// The unspecified format of SAMLCore §8.3.1 leaves the content to the implementation, so
+	// advertising it tells a service provider nothing about the NameID it will receive. Only the
+	// metadata uses them: a NameIDPolicy is checked against the format that is asserted, not these.
+	// Defaults to transient.
+	NameIDFormats []NameIDFormat
+
 	// WantAuthnRequestsSigned requires every AuthnRequest to be signed, and is declared in the
 	// metadata. A request is also required to be signed if the metadata of its service provider
 	// sets AuthnRequestsSigned, and any signature that is present is always verified.
@@ -339,7 +349,7 @@ func (idp *IdentityProvider) Metadata() *EntityDescriptor {
 						ProtocolSupportEnumeration: "urn:oasis:names:tc:SAML:2.0:protocol",
 						KeyDescriptors:             keyDescriptors,
 					},
-					NameIDFormats: []NameIDFormat{NameIDFormat("urn:oasis:names:tc:SAML:2.0:nameid-format:transient")},
+					NameIDFormats: idp.nameIDFormats(),
 				},
 				SingleSignOnServices: []Endpoint{
 					{
@@ -374,6 +384,14 @@ func (idp *IdentityProvider) Metadata() *EntityDescriptor {
 	}
 
 	return ed
+}
+
+// nameIDFormats returns a copy of NameIDFormats, or the transient format if that is empty.
+func (idp *IdentityProvider) nameIDFormats() []NameIDFormat {
+	if len(idp.NameIDFormats) == 0 {
+		return []NameIDFormat{TransientNameIDFormat}
+	}
+	return slices.Clone(idp.NameIDFormats)
 }
 
 // Handler returns an http.Handler that serves the metadata and SSO URLs, and the logout URL if it
@@ -979,7 +997,8 @@ type DefaultNameIDPolicyEnforcer struct {
 // EnforceNameIDPolicy implements NameIDPolicyEnforcer. Unless the policy leaves the format open, the
 // NameID must have that format. The encrypted format is always refused, because the assertions made
 // here don't contain an EncryptedID. If the policy has an SPNameQualifier, the NameID must also have
-// that value.
+// that value. The formats that IdentityProvider.NameIDFormats advertises are not consulted, because
+// only the format that is asserted decides whether the policy is satisfied.
 func (DefaultNameIDPolicyEnforcer) EnforceNameIDPolicy(req *IdpAuthnRequest, _ *Session) error {
 	policy := req.Request.NameIDPolicy
 	if req.Assertion == nil || req.Assertion.Subject == nil || req.Assertion.Subject.NameID == nil {
