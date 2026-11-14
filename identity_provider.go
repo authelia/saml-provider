@@ -246,6 +246,9 @@ func (e DefaultAuthnContextEnforcer) compare(a, b string) int {
 // You must provide an implementation of the SessionProvider which
 // handles the actual authentication (i.e. prompting for a username
 // and password).
+//
+// Logger receives the reasons that requests fail, and defaults to
+// logger.DefaultLogger.
 type IdentityProvider struct {
 	Key           crypto.PrivateKey
 	Signer        crypto.Signer
@@ -283,6 +286,15 @@ type IdentityProvider struct {
 	// SubjectEnforcer decides whether an assertion matches the Subject of its request. Defaults to
 	// DefaultSubjectEnforcer.
 	SubjectEnforcer SubjectEnforcer
+}
+
+// logger returns the Logger of the identity provider, or logger.DefaultLogger if it has none, so an
+// identity provider embedded without a Logger doesn't panic when it logs a failure.
+func (idp *IdentityProvider) logger() logger.Interface {
+	if idp.Logger == nil {
+		return logger.DefaultLogger
+	}
+	return idp.Logger
 }
 
 // Metadata returns the metadata structure for this identity provider.
@@ -393,7 +405,7 @@ func (idp *IdentityProvider) ServeMetadata(w http.ResponseWriter, _ *http.Reques
 	buf, _ := xml.MarshalIndent(idp.Metadata(), "", "  ")
 	w.Header().Set("Content-Type", "application/samlmetadata+xml")
 	if _, err := w.Write(buf); err != nil {
-		idp.Logger.Printf("ERROR: %s", err)
+		idp.logger().Printf("ERROR: %s", err)
 		http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
 	}
 }
@@ -418,13 +430,13 @@ func (idp *IdentityProvider) ServeMetadata(w http.ResponseWriter, _ *http.Reques
 func (idp *IdentityProvider) ServeSSO(w http.ResponseWriter, r *http.Request) {
 	req, err := NewIdpAuthnRequest(idp, r)
 	if err != nil {
-		idp.Logger.Printf("failed to parse request: %s", err)
+		idp.logger().Printf("failed to parse request: %s", err)
 		http.Error(w, http.StatusText(http.StatusBadRequest), http.StatusBadRequest)
 		return
 	}
 
 	if err := req.Validate(); err != nil {
-		idp.Logger.Printf("failed to validate request: %s", err)
+		idp.logger().Printf("failed to validate request: %s", err)
 		http.Error(w, http.StatusText(http.StatusBadRequest), http.StatusBadRequest)
 		return
 	}
@@ -442,7 +454,7 @@ func (idp *IdentityProvider) ServeSSO(w http.ResponseWriter, r *http.Request) {
 		assertionMaker = DefaultAssertionMaker{}
 	}
 	if err := assertionMaker.MakeAssertion(req, session); err != nil {
-		idp.Logger.Printf("failed to make assertion: %s", err)
+		idp.logger().Printf("failed to make assertion: %s", err)
 		http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
 		return
 	}
@@ -452,9 +464,9 @@ func (idp *IdentityProvider) ServeSSO(w http.ResponseWriter, r *http.Request) {
 			subjectEnforcer = DefaultSubjectEnforcer{}
 		}
 		if err := subjectEnforcer.EnforceSubject(req, session); err != nil {
-			idp.Logger.Printf("cannot match the request subject: %s", err)
+			idp.logger().Printf("cannot match the request subject: %s", err)
 			if err := req.WriteErrorResponse(w, StatusResponder, StatusAuthnFailed, ""); err != nil {
-				idp.Logger.Printf("failed to write response: %s", err)
+				idp.logger().Printf("failed to write response: %s", err)
 				http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
 			}
 			return
@@ -466,9 +478,9 @@ func (idp *IdentityProvider) ServeSSO(w http.ResponseWriter, r *http.Request) {
 			nameIDPolicyEnforcer = DefaultNameIDPolicyEnforcer{}
 		}
 		if err := nameIDPolicyEnforcer.EnforceNameIDPolicy(req, session); err != nil {
-			idp.Logger.Printf("cannot satisfy name id policy: %s", err)
+			idp.logger().Printf("cannot satisfy name id policy: %s", err)
 			if err := req.WriteErrorResponse(w, StatusRequester, StatusInvalidNameIDPolicy, ""); err != nil {
-				idp.Logger.Printf("failed to write response: %s", err)
+				idp.logger().Printf("failed to write response: %s", err)
 				http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
 			}
 			return
@@ -480,16 +492,16 @@ func (idp *IdentityProvider) ServeSSO(w http.ResponseWriter, r *http.Request) {
 			authnContextEnforcer = DefaultAuthnContextEnforcer{}
 		}
 		if err := authnContextEnforcer.EnforceAuthnContext(req, session); err != nil {
-			idp.Logger.Printf("cannot satisfy requested authn context: %s", err)
+			idp.logger().Printf("cannot satisfy requested authn context: %s", err)
 			if err := req.WriteErrorResponse(w, StatusResponder, StatusNoAuthnContext, ""); err != nil {
-				idp.Logger.Printf("failed to write response: %s", err)
+				idp.logger().Printf("failed to write response: %s", err)
 				http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
 			}
 			return
 		}
 	}
 	if err := req.WriteResponse(w); err != nil {
-		idp.Logger.Printf("failed to write response: %s", err)
+		idp.logger().Printf("failed to write response: %s", err)
 		http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
 		return
 	}
@@ -527,7 +539,7 @@ func (req *IdpAuthnRequest) getSession(w http.ResponseWriter, r *http.Request) *
 // writeErrorStatus completes the HTTP request with a Responder status and the given second-level status.
 func (req *IdpAuthnRequest) writeErrorStatus(w http.ResponseWriter, secondLevelStatus string) {
 	if err := req.WriteErrorResponse(w, StatusResponder, secondLevelStatus, ""); err != nil {
-		req.IDP.Logger.Printf("failed to write response: %s", err)
+		req.IDP.logger().Printf("failed to write response: %s", err)
 		http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
 	}
 }
@@ -553,18 +565,18 @@ func (idp *IdentityProvider) ServeIDPInitiated(w http.ResponseWriter, r *http.Re
 	var err error
 	req.ServiceProviderMetadata, err = idp.ServiceProviderProvider.GetServiceProvider(r, serviceProviderID)
 	if err == os.ErrNotExist {
-		idp.Logger.Printf("cannot find service provider: %s", serviceProviderID)
+		idp.logger().Printf("cannot find service provider: %s", serviceProviderID)
 		http.Error(w, http.StatusText(http.StatusNotFound), http.StatusNotFound)
 		return
 	} else if err != nil {
-		idp.Logger.Printf("cannot find service provider %s: %v", serviceProviderID, err)
+		idp.logger().Printf("cannot find service provider %s: %v", serviceProviderID, err)
 		http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
 		return
 	}
 
 	// find an ACS endpoint that we can use
 	if err := req.useDefaultACSEndpoint(); err != nil {
-		idp.Logger.Printf("saml metadata does not contain an Assertion Customer Service url")
+		idp.logger().Printf("saml metadata does not contain an Assertion Customer Service url")
 		http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
 		return
 	}
@@ -574,13 +586,13 @@ func (idp *IdentityProvider) ServeIDPInitiated(w http.ResponseWriter, r *http.Re
 		assertionMaker = DefaultAssertionMaker{}
 	}
 	if err := assertionMaker.MakeAssertion(req, session); err != nil {
-		idp.Logger.Printf("failed to make assertion: %s", err)
+		idp.logger().Printf("failed to make assertion: %s", err)
 		http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
 		return
 	}
 
 	if err := req.WriteResponse(w); err != nil {
-		idp.Logger.Printf("failed to write response: %s", err)
+		idp.logger().Printf("failed to write response: %s", err)
 		http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
 		return
 	}
