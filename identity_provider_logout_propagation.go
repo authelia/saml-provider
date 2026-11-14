@@ -88,7 +88,7 @@ func (idp *IdentityProvider) makeLogoutRequest(r *http.Request, state *LogoutSta
 		Destination:  endpoint.Location,
 		Issuer: &Issuer{
 			Format: "urn:oasis:names:tc:SAML:2.0:nameid-format:entity",
-			Value:  idp.MetadataURL.String(),
+			Value:  idp.entityID(),
 		},
 		NameID: &nameID,
 	}

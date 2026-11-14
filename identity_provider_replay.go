@@ -109,7 +109,7 @@ func (idp *IdentityProvider) replayStore() ReplayStore {
 // The error is a *statusError. A replay is Requester with RequestDenied and wraps ErrReplayed. A failure of the
 // store is Responder, as the message is refused although nothing is known to be wrong with it.
 func (idp *IdentityProvider) checkReplay(ctx context.Context, kind, issuer, id string, expires time.Time) error {
-	key := replayKey(kind, idp.MetadataURL.String(), issuer, id)
+	key := replayKey(kind, idp.entityID(), issuer, id)
 
 	err := idp.replayStore().Consume(ctx, key, expires.Add(MaxClockSkew))
 

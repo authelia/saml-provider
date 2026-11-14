@@ -225,7 +225,7 @@ func (req *IdpNameIDMappingRequest) MakeResponse(status Status) *NameIDMappingRe
 		Version:      "2.0",
 		IssueInstant: req.Now,
 		// SAMLProfiles §7.4.2: the Issuer MUST be the responding identity provider.
-		Issuer: &Issuer{Format: string(EntityNameIDFormat), Value: req.IDP.MetadataURL.String()},
+		Issuer: &Issuer{Format: string(EntityNameIDFormat), Value: req.IDP.entityID()},
 		Status: status,
 	}
 
@@ -450,7 +450,7 @@ func (req *IdpNameIDMappingRequest) completeMappedNameID(nameID *NameID) (*NameI
 	}
 
 	if mapped.NameQualifier == "" {
-		mapped.NameQualifier = req.IDP.MetadataURL.String()
+		mapped.NameQualifier = req.IDP.entityID()
 	}
 
 	return &mapped, nil

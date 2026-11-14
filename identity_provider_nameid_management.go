@@ -380,7 +380,7 @@ func (req *IdpManageNameIDRequest) MakeResponse(status Status) *ManageNameIDResp
 		Version:      "2.0",
 		IssueInstant: req.Now,
 		// SAMLProfiles §4.5.4.2: the Issuer MUST be the responding entity.
-		Issuer: &Issuer{Format: string(EntityNameIDFormat), Value: req.IDP.MetadataURL.String()},
+		Issuer: &Issuer{Format: string(EntityNameIDFormat), Value: req.IDP.entityID()},
 		Status: status,
 	}
 

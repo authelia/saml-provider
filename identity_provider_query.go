@@ -767,7 +767,7 @@ func (req *IdpQueryRequest) newAssertion(nameID *NameID) *Assertion {
 		Version:      "2.0",
 		Issuer: Issuer{
 			Format: "urn:oasis:names:tc:SAML:2.0:nameid-format:entity",
-			Value:  req.IDP.Metadata().EntityID,
+			Value:  req.IDP.entityID(),
 		},
 		Subject: &Subject{NameID: nameID},
 		Conditions: &Conditions{
@@ -803,7 +803,7 @@ func (req *IdpQueryRequest) writeResponse(w http.ResponseWriter, status Status, 
 		IssueInstant: req.Now,
 		Issuer: &Issuer{
 			Format: "urn:oasis:names:tc:SAML:2.0:nameid-format:entity",
-			Value:  req.IDP.MetadataURL.String(),
+			Value:  req.IDP.entityID(),
 		},
 		Status: status,
 	}

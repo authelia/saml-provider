@@ -385,7 +385,7 @@ func (idp *IdentityProvider) elementDecrypter() (elementDecrypter, error) {
 		return elementDecrypter{}, err
 	}
 
-	decrypter := elementDecrypter{recipient: idp.MetadataURL.String(), policy: policy}
+	decrypter := elementDecrypter{recipient: idp.entityID(), policy: policy}
 
 	// A nil *rsa.PrivateKey in the interface would not be recognised as no key.
 	if key := idp.decryptionKey(); key != nil {

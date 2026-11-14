@@ -238,6 +238,8 @@ func TestHandlerDoesNotPanicOnSharedPaths(t *testing.T) {
 
 		f := newQueryFixture(t)
 		f.test.IDP.MetadataURL, f.test.IDP.SSOURL = url.URL{}, url.URL{}
+		// The entity ID defaults to the MetadataURL, and the metadata is refused without one.
+		f.test.IDP.EntityID = "https://idp.example.com/metadata"
 
 		w := httptest.NewRecorder()
 		f.test.IDP.Handler().ServeHTTP(w, httptest.NewRequest(http.MethodGet, "https://idp.example.com/anything", nil))
