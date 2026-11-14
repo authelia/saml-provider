@@ -163,6 +163,8 @@ func TestIDPInitiatedUsesDefaultACS(t *testing.T) {
 
 func TestIDPAssertionDeclaresQNamePrefixes(t *testing.T) {
 	test := NewIdentityProviderTest(t, applyKey)
+	// An attribute is needed for the xs prefix to be used.
+	test.IDP.AttributeReleasePolicy = releaseEveryAttribute
 	req := &IdpAuthnRequest{Now: TimeNow(), IDP: &test.IDP, RequestBuffer: hardeningRequest(`ID="id-1"`, TimeNow(), hardeningIssuer)}
 	req.HTTPRequest, _ = http.NewRequest("POST", "https://idp.example.com/saml/sso", nil)
 	assert.NilError(t, req.Validate())
@@ -200,8 +202,19 @@ func TestIDPOmitsEmptyAttributeStatement(t *testing.T) {
 	assert.NilError(t, DefaultAssertionMaker{}.MakeAssertion(req, &Session{ID: "f00d", NameID: "alice"}))
 	assert.Check(t, is.Len(req.Assertion.AttributeStatements, 0))
 
+	// The service provider requests no attributes, so none are released.
+	assert.NilError(t, DefaultAssertionMaker{}.MakeAssertion(req, &Session{ID: "f00d", NameID: "alice", UserName: "alice"}))
+	assert.Check(t, is.Len(req.Assertion.AttributeStatements, 0))
+
+	test.IDP.AttributeReleasePolicy = releaseEveryAttribute
 	assert.NilError(t, DefaultAssertionMaker{}.MakeAssertion(req, &Session{ID: "f00d", NameID: "alice", UserName: "alice"}))
 	assert.Check(t, is.Len(req.Assertion.AttributeStatements, 1))
+
+	test.IDP.AttributeReleasePolicy = attributeReleasePolicyFunc(func(*IdpAuthnRequest, *Session, []Attribute) ([]Attribute, error) {
+		return []Attribute{}, nil
+	})
+	assert.NilError(t, DefaultAssertionMaker{}.MakeAssertion(req, &Session{ID: "f00d", NameID: "alice", UserName: "alice"}))
+	assert.Check(t, is.Len(req.Assertion.AttributeStatements, 0))
 }
 
 func TestCacheDurationPreservesLexicalForm(t *testing.T) {
