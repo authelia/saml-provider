@@ -236,7 +236,7 @@ func TestIDPGetSPEncryptionCert(t *testing.T) {
 		{name: "empty then usable certificate with unspecified use", descriptors: []KeyDescriptor{emptyThenCert("")}, found: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			req := &IdpAuthnRequest{SPSSODescriptor: &SPSSODescriptor{SSODescriptor: SSODescriptor{RoleDescriptor: RoleDescriptor{KeyDescriptors: tc.descriptors}}}}
+			req := &IdpAuthnRequest{IDP: &test.IDP, Now: TimeNow(), SPSSODescriptor: &SPSSODescriptor{SSODescriptor: SSODescriptor{RoleDescriptor: RoleDescriptor{KeyDescriptors: tc.descriptors}}}}
 			cert, err := req.getSPEncryptionCert()
 			switch {
 			case tc.found:

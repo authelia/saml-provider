@@ -40,6 +40,8 @@ func TestIDPEncryptionFailsClosed(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			selected := tc.selected
 			req := &IdpAuthnRequest{
+				IDP:                     &test.IDP,
+				Now:                     TimeNow(),
 				SPSSODescriptor:         &selected,
 				ServiceProviderMetadata: &EntityDescriptor{SPSSODescriptors: append([]SPSSODescriptor{selected}, tc.others...)},
 			}
