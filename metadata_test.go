@@ -173,3 +173,74 @@ func TestMetadataValidatesUrlSchemeForProtocolBinding(t *testing.T) {
 	err := xml.Unmarshal(buf, &metadata)
 	assert.Error(t, err, "invalid url scheme \"javascript\" for binding \"urn:oasis:names:tc:SAML:2.0:bindings:HTTP-POST\"")
 }
+
+func TestEncryptionMethodKeepsItsParameters(t *testing.T) {
+	const metadata = `<md:EntityDescriptor xmlns:md="urn:oasis:names:tc:SAML:2.0:metadata"
+	xmlns:ds="http://www.w3.org/2000/09/xmldsig#"
+	xmlns:xenc="http://www.w3.org/2001/04/xmlenc#"
+	xmlns:xenc11="http://www.w3.org/2009/xmlenc11#" entityID="https://sp.example.com/saml2/metadata">
+	<md:SPSSODescriptor protocolSupportEnumeration="urn:oasis:names:tc:SAML:2.0:protocol">
+		<md:KeyDescriptor use="encryption">
+			<ds:KeyInfo><ds:X509Data><ds:X509Certificate>AAAA</ds:X509Certificate></ds:X509Data></ds:KeyInfo>
+			<md:EncryptionMethod Algorithm="http://www.w3.org/2009/xmlenc11#aes256-gcm"><xenc:KeySize>256</xenc:KeySize></md:EncryptionMethod>
+			<md:EncryptionMethod Algorithm="http://www.w3.org/2009/xmlenc11#rsa-oaep">
+				<xenc:OAEPparams>9lWu3Q==</xenc:OAEPparams>
+				<ds:DigestMethod Algorithm="http://www.w3.org/2001/04/xmlenc#sha256"/>
+				<xenc11:MGF Algorithm="http://www.w3.org/2009/xmlenc11#mgf1sha256"/>
+			</md:EncryptionMethod>
+			<md:EncryptionMethod Algorithm="http://www.w3.org/2001/04/xmlenc#rsa-oaep-mgf1p">
+				<ds:DigestMethod Algorithm="http://www.w3.org/2000/09/xmldsig#sha1"/>
+			</md:EncryptionMethod>
+			<md:EncryptionMethod Algorithm="http://www.w3.org/2001/04/xmlenc#aes128-cbc"/>
+		</md:KeyDescriptor>
+		<md:AssertionConsumerService Binding="urn:oasis:names:tc:SAML:2.0:bindings:HTTP-POST" Location="https://sp.example.com/saml2/acs" index="1"/>
+	</md:SPSSODescriptor>
+</md:EntityDescriptor>`
+
+	want := []EncryptionMethod{
+		{Algorithm: "http://www.w3.org/2009/xmlenc11#aes256-gcm", KeySize: 256},
+		{
+			Algorithm:    "http://www.w3.org/2009/xmlenc11#rsa-oaep",
+			OAEPParams:   "9lWu3Q==",
+			DigestMethod: &DigestMethod{Algorithm: "http://www.w3.org/2001/04/xmlenc#sha256"},
+			MGF:          &MGF{Algorithm: "http://www.w3.org/2009/xmlenc11#mgf1sha256"},
+		},
+		{
+			Algorithm:    "http://www.w3.org/2001/04/xmlenc#rsa-oaep-mgf1p",
+			DigestMethod: &DigestMethod{Algorithm: "http://www.w3.org/2000/09/xmldsig#sha1"},
+		},
+		{Algorithm: "http://www.w3.org/2001/04/xmlenc#aes128-cbc"},
+	}
+
+	var parsed EntityDescriptor
+	assert.NilError(t, xml.Unmarshal([]byte(metadata), &parsed))
+	assert.Check(t, is.DeepEqual(want, parsed.SPSSODescriptors[0].KeyDescriptors[0].EncryptionMethods))
+
+	// The parameters are marshalled in the namespaces they were parsed from, so that they survive a round trip.
+	buf, err := xml.Marshal(parsed)
+	assert.NilError(t, err)
+	var again EntityDescriptor
+	assert.NilError(t, xml.Unmarshal(buf, &again))
+	assert.Check(t, is.DeepEqual(want, again.SPSSODescriptors[0].KeyDescriptors[0].EncryptionMethods))
+	for _, fragment := range []string{
+		`<KeySize xmlns="http://www.w3.org/2001/04/xmlenc#">256</KeySize>`,
+		`<OAEPparams xmlns="http://www.w3.org/2001/04/xmlenc#">9lWu3Q==</OAEPparams>`,
+		`<DigestMethod xmlns="http://www.w3.org/2000/09/xmldsig#" Algorithm="http://www.w3.org/2001/04/xmlenc#sha256"></DigestMethod>`,
+		`<MGF xmlns="http://www.w3.org/2009/xmlenc11#" Algorithm="http://www.w3.org/2009/xmlenc11#mgf1sha256"></MGF>`,
+		`<EncryptionMethod Algorithm="http://www.w3.org/2001/04/xmlenc#aes128-cbc"></EncryptionMethod>`,
+	} {
+		assert.Check(t, is.Contains(string(buf), fragment))
+	}
+}
+
+func TestEncryptionMethodIgnoresParametersInOtherNamespaces(t *testing.T) {
+	const keyDescriptor = `<KeyDescriptor xmlns="urn:oasis:names:tc:SAML:2.0:metadata" use="encryption">
+		<EncryptionMethod Algorithm="http://www.w3.org/2001/04/xmlenc#rsa-oaep-mgf1p">
+			<DigestMethod xmlns="urn:example:other" Algorithm="http://www.w3.org/2001/04/xmlenc#sha256"/>
+		</EncryptionMethod>
+	</KeyDescriptor>`
+
+	var parsed KeyDescriptor
+	assert.NilError(t, xml.Unmarshal([]byte(keyDescriptor), &parsed))
+	assert.Check(t, is.DeepEqual([]EncryptionMethod{{Algorithm: "http://www.w3.org/2001/04/xmlenc#rsa-oaep-mgf1p"}}, parsed.EncryptionMethods))
+}

@@ -1,0 +1,7 @@
+<?xml version="1.0"?>
+<doc><xenc:EncryptedData xmlns:xenc="http://www.w3.org/2001/04/xmlenc#" xmlns:ds="http://www.w3.org/2000/09/xmldsig#" Type="http://www.w3.org/2001/04/xmlenc#Element"><xenc:EncryptionMethod Algorithm="http://www.w3.org/2001/04/xmlenc#aes128-cbc"/><ds:KeyInfo><xenc:EncryptedKey><xenc:EncryptionMethod Algorithm="http://www.w3.org/2009/xmlenc11#rsa-oaep"/><ds:KeyInfo><ds:KeyName>k</ds:KeyName></ds:KeyInfo><xenc:CipherData><xenc:CipherValue>cExWAV+v0BDlwMxq/BcPCkayLnvfpx2lR55I3ISdHoXN4rHT6dO2sBhB09171bjl
+iEFzwg5hOZp0oer6zfs7IAKcpXs/qK3cpfKW6IDSCj2twVJ/P1GRVWdH0uCcM0wu
+Bd3WnvZPWddmgRnleCvGGAlNIz+A3oHIcvpZBtuqXjS/uMwizLTiVpPWUSG73FBj
+1i1qBi4Kt52NQZpGDnqKcaOHlRR+uZpeC1YUhnIG4M/r8vtW/MN7h8tndBGMdppb
+yyMg8maOXq3Qks60Y/PlihXnKGFqAW5pOP/1VJnrpofG0hxv/E4XLf85jrnQPvi4
+A4+7Qd5XD+Q14LPhQf7AsQ==</xenc:CipherValue></xenc:CipherData></xenc:EncryptedKey></ds:KeyInfo><xenc:CipherData><xenc:CipherValue>WR/mK2NDFzNh8I5sTycd7Gxk4N1ulN6LJ5hIoRqxydk+wbOcZnQm36MpQ2OCDXQQ</xenc:CipherValue></xenc:CipherData></xenc:EncryptedData></doc>

@@ -156,8 +156,16 @@ least the subset of SAML known as [interoperable SAML](https://kantarainitiative
   refusals use it.
   Other failures produce an HTTP error.
 - **Replay detection:** `AuthnRequest` IDs are not checked for reuse.
-- **Encrypt `Assertion`:** key transport always uses RSA-OAEP-MGF1P (SHA-1). Content encryption uses the first of
-  AES-128-GCM and AES-128/192/256-CBC the SP lists in `EncryptionMethod`, or AES-128-CBC if it lists none of them.
+- **Encrypt `Assertion`:** the algorithms are negotiated from the `EncryptionMethod` elements of the SP's encryption
+  key, as the Metadata Profile for Algorithm Support §2.5 requires. For content encryption and for key transport
+  separately, the first algorithm the SP lists that the IdP allows is used, and if the SP lists algorithms of that
+  type but none the IdP allows, the assertion is not sent. Content encryption may use AES-128/192/256-CBC and
+  AES-128/192/256-GCM, and key transport RSA-OAEP-MGF1P or XML Encryption 1.1 RSA-OAEP, with the SHA-1, SHA-256 or
+  SHA-512 digest and MGF1 hash the SP names in `ds:DigestMethod` and `xenc11:MGF`. An SP that lists nothing of a type
+  receives the first the IdP allows, which is AES-128-CBC and RSA-OAEP-MGF1P with SHA-1 by default. Set
+  `IdentityProvider.ContentEncryptionMethods`, `KeyTransportMethods` and `KeyTransportDigestMethods` to restrict or
+  reorder them. 3DES, RSA PKCS#1 v1.5, key agreement and an OAEP label (`OAEPparams`) are never used, and
+  algorithms the IdP doesn't recognise as either type are ignored.
 - **Signature defaults:** `SignatureMethod` defaults to RSA-SHA256 for RSA keys, and SHA-1 is only used if set explicitly.
   For ECDSA keys it defaults to the hash matching the curve: SHA-256 for P-256, SHA-384 for P-384 and SHA-512 for P-521.
 - **SPs with ECDSA certificates:** a service provider whose metadata allows encryption with an ECDSA certificate is
@@ -179,8 +187,10 @@ least the subset of SAML known as [interoperable SAML](https://kantarainitiative
   so an unsolicited response accepted with `AllowIDPInitiated` can be replayed until it expires.
 - **ECDSA signatures:** only the `r||s` form XML Signature requires is accepted, so an IdP which signs in DER fails
   verification unless `SignatureVerifier` is set.
-- **Decrypt `EncryptedAssertion`:** supported algorithms are AES-128/192/256-CBC, AES-128-GCM and 3DES for content
-  and RSA-OAEP-MGF1P for key transport. AES-192/256-GCM and XML Encryption 1.1 RSA-OAEP are not supported by default.
+- **Decrypt `EncryptedAssertion`:** supported algorithms are AES-128/192/256-CBC, AES-128/192/256-GCM and 3DES for
+  content, and RSA-OAEP-MGF1P and XML Encryption 1.1 RSA-OAEP for key transport, with any MGF1 hash from SHA-1 to
+  SHA-512. An OAEP label (`OAEPparams`) is not supported. The SP's metadata advertises AES-128-GCM, AES-128/192/256-CBC
+  and RSA-OAEP-MGF1P.
   RSA PKCS#1 v1.5 key transport is disabled by default and can be enabled with
   `xmlenc.RegisterDecrypter(xmlenc.PKCS1v15())`.
 - **Consume `EntitiesDescriptor`:** `samlsp.ParseMetadata` uses the first entity that has an `IDPSSODescriptor`; there
