@@ -297,11 +297,12 @@ func TestLoginFormCanBeSubmittedAfterRequestDelay(t *testing.T) {
 	for _, tc := range []struct {
 		name  string
 		delay time.Duration
-		code  int
+		// denied is whether the request has expired, which is answered at the ACS with RequestDenied.
+		denied bool
 	}{
-		{name: "past the issue delay", delay: saml.MaxIssueDelay + time.Second, code: http.StatusOK},
-		{name: "at the limit", delay: maxLoginDuration, code: http.StatusOK},
-		{name: "past the limit", delay: maxLoginDuration + time.Second, code: http.StatusBadRequest},
+		{name: "past the issue delay", delay: saml.MaxIssueDelay + time.Second},
+		{name: "at the limit", delay: maxLoginDuration},
+		{name: "past the limit", delay: maxLoginDuration + time.Second, denied: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			test := NewServerTest(t)
@@ -313,10 +314,14 @@ func TestLoginFormCanBeSubmittedAfterRequestDelay(t *testing.T) {
 			saml.TimeNow = func() time.Time { return issued.Add(tc.delay) }
 
 			w := hardeningSubmitLogin(t, test, form, "hunter2")
-			assert.Check(t, is.Equal(tc.code, w.Code))
-			if tc.code == http.StatusOK {
+			if !tc.denied {
 				hardeningAssertSAMLResponse(t, w, "frob")
+				return
 			}
+
+			response := samlResponseXML(t, w)
+			assert.Check(t, is.Contains(response, saml.StatusRequestDenied))
+			assert.Check(t, !strings.Contains(response, "EncryptedAssertion"), response)
 		})
 	}
 }

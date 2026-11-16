@@ -22,21 +22,26 @@ func CurrentMetadata(metadata *EntityDescriptor, now time.Time) *EntityDescripto
 		return nil
 	}
 
-	expired := func(validUntil time.Time) bool { return !validUntil.IsZero() && !now.Before(validUntil) }
-	if expired(metadata.ValidUntil) {
+	if expiredAt(metadata.ValidUntil, now) {
 		return nil
 	}
 
 	current := *metadata
 
 	current.SPSSODescriptors = slices.DeleteFunc(slices.Clone(metadata.SPSSODescriptors), func(descriptor SPSSODescriptor) bool {
-		return descriptor.ValidUntil != nil && expired(*descriptor.ValidUntil)
+		return descriptor.ValidUntil != nil && expiredAt(*descriptor.ValidUntil, now)
 	})
 	if len(current.SPSSODescriptors) == 0 {
 		return nil
 	}
 
 	return &current
+}
+
+// expiredAt reports whether a validUntil is not after now (SAMLMeta §2.3.2). The zero time counts as no
+// validUntil.
+func expiredAt(validUntil, now time.Time) bool {
+	return !validUntil.IsZero() && !now.Before(validUntil)
 }
 
 // serviceProvider returns the current metadata of the service provider from the ServiceProviderProvider,

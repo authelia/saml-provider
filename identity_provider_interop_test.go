@@ -83,6 +83,26 @@ func TestIDPACSSelection(t *testing.T) {
 			location: "https://sp/acs",
 		},
 		{
+			name:     "index with url is rejected",
+			attrs:    `AssertionConsumerServiceIndex="1" AssertionConsumerServiceURL="https://sp/b"`,
+			metadata: interopSP(interopDescriptor(interopACS(1, post, "https://sp/b", nil))),
+		},
+		{
+			name:     "index with protocol binding is rejected",
+			attrs:    `AssertionConsumerServiceIndex="1" ProtocolBinding="` + post + `"`,
+			metadata: interopSP(interopDescriptor(interopACS(1, post, "https://sp/b", nil))),
+		},
+		{
+			name:     "unsupported protocol binding with an unlisted url is rejected",
+			attrs:    `AssertionConsumerServiceURL="https://attacker/acs" ProtocolBinding="` + artifact + `"`,
+			metadata: interopSP(interopDescriptor(interopACS(0, post, "https://sp/b", nil))),
+		},
+		{
+			name:     "unsupported protocol binding with no post endpoint is rejected",
+			attrs:    `ProtocolBinding="` + artifact + `"`,
+			metadata: interopSP(interopDescriptor(interopACS(0, artifact, "https://sp/a", nil))),
+		},
+		{
 			name:     "url with only artifact is rejected",
 			attrs:    `AssertionConsumerServiceURL="https://sp/acs"`,
 			metadata: interopSP(interopDescriptor(interopACS(0, artifact, "https://sp/acs", nil))),
@@ -140,6 +160,9 @@ func TestIDPACSSelection(t *testing.T) {
 			req, err := interopValidate(interopIDP(t, tc.metadata), tc.attrs)
 			if tc.location == "" {
 				assert.Check(t, is.ErrorContains(err, "cannot find assertion consumer service"))
+				_, _, isStatus := requestStatus(err)
+				assert.Check(t, !isStatus, "a request with no usable endpoint can't be answered with a status")
+
 				return
 			}
 

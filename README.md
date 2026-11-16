@@ -81,12 +81,12 @@ least the subset of SAML known as [interoperable SAML](https://kantarainitiative
 |:--------------------------------------------------|:---:|:---:|
 | `AssertionConsumerServiceURL` / `Index` selection | ✅  | N/A |
 | `RelayState`                                      | ✅  | ✅  |
-| `NameIDPolicy`                                    | ⚠️  | ✅  |
+| `NameIDPolicy`                                    | ✅  | ✅  |
 | `ForceAuthn` / `IsPassive`                        | ✅  | ✅  |
 | `RequestedAuthnContext`                           | ⚠️  | ✅  |
 | `AttributeConsumingService` attribute release     | ⚠️  | ❌  |
 | `Scoping` (proxying)                              | ❌  | ❌  |
-| Error status responses                            | ⚠️  | ✅  |
+| Error status responses                            | ✅  | ✅  |
 | Multiple assertions in a single `Response`        | N/A | ⚠️  |
 | Replay detection                                  | ❌  | ⚠️  |
 
@@ -166,10 +166,13 @@ least the subset of SAML known as [interoperable SAML](https://kantarainitiative
   - `StartLogout` and an SP-started logout need a `SessionProvider` that implements all of `LogoutSessionProvider`,
     `SessionParticipantProvider` and `LogoutStateProvider`. Without them a request from an SP is only answered for the
     session at the IdP.
-  - `samlidp` ends the session of the browser if the request matches it with `IdpLogoutRequest.MatchesSession`: the
-    whole NameID (value, Format and qualifiers, none of them omitted) and any session indexes must match, unless
-    `IdentityProvider.LogoutNameIDValueOnly` is set to compare only the value. Its `SameSite=Lax` cookie isn't sent
-    with a cross-site POST, so SPs must use HTTP Redirect to end it. `POST /logout/start` calls
+  - `samlidp` ends the session of the browser if the request matches it with `IdpLogoutRequest.MatchesSession(r,
+    session)`: the whole NameID (value, Format and qualifiers, none of them omitted) and any session indexes must
+    match. `Session.NameID` is only compared when `Session.NameIDFormat` is set. It also matches the NameID that was
+    recorded for the requesting SP in a `SessionParticipant`, which is how a transient NameID or one with an
+    affiliation is found. Set `IdentityProvider.LogoutNameIDValueOnly` to compare only the value, with
+    `Session.NameID` and with the NameID of a `SessionParticipant` of the requesting SP. Its `SameSite=Lax` cookie
+    isn't sent with a cross-site POST, so SPs must use HTTP Redirect to end it. `POST /logout/start` calls
     `StartLogout` for the session of the cookie, and refuses with 403 a request that isn't from the same origin, so
     that another site can't log the user out.
 - **Insecure endpoints:** assertions are bearer tokens, so responses are only sent to an SP endpoint that is `https`, or
@@ -186,12 +189,52 @@ least the subset of SAML known as [interoperable SAML](https://kantarainitiative
   required if the SP metadata sets `AuthnRequestsSigned` or `IdentityProvider.WantAuthnRequestsSigned` is set. SHA-1
   signatures are accepted. A custom login form must send `IdpAuthnRequest.RedirectQuery` in the `SAMLRedirectQuery`
   field, because the signature of a redirect does not survive being re-presented as a POST.
-- **`NameIDPolicy`:** a request that the assertion can't satisfy receives an `InvalidNameIDPolicy` status. The `NameID`
-  comes from `Session.NameID`, and `DefaultAssertionMaker` refuses a session without one. Its format comes from
-  `Session.NameIDFormat` and defaults to transient, and the metadata only advertises transient, so a
-  request for any other format is refused unless the session provides it. `EncryptedID` is not supported, so the
-  encrypted format is always refused. `AllowCreate` is not checked by default: set
-  `IdentityProvider.NameIDPolicyEnforcer` to check it, or to decide differently for each SP.
+- **`NameIDPolicy`:** a request that the assertion can't satisfy receives an `InvalidNameIDPolicy` status. The
+  `NameIDProvider` of `IdentityProvider` issues the `NameID`, and `DefaultNameIDProvider` is used if there is none. The
+  metadata advertises `NameIDProvider.NameIDFormats`, which is transient by default.
+  - A format that the request names is the only one tried. If it leaves the format open (omitted or unspecified), the
+    format of the NameID in the request's `Subject` is tried first, if it has one, then the formats of the SP metadata
+    that the provider supports in order, then `Session.NameIDFormat`, then transient.
+  - `DefaultNameIDProvider` issues `Session.NameID` for the format in `Session.NameIDFormat`, and a random transient
+    value, which it doesn't store, for the transient format, even when the session is transient, as the session's NameID
+    would be the same for every SP (SAMLCore §8.3.8). It refuses any other format, and never issues the persistent
+    format, even for a persistent session: a persistent NameID must be an opaque pseudonym for one SP or affiliation
+    (SAMLCore §8.3.7), so an application that issues them needs its own `NameIDProvider`, which must keep them. A
+    request that leaves the format open then falls back to transient. A session only needs a `NameID` if its own is
+    asserted, and one with a `NameIDFormat` but no `NameID` is refused; no NameID is asserted without a value.
+  - Unless the session sets a `NameIDFormat` other than transient or persistent, the default configuration asserts a
+    random transient NameID rather than `Session.NameID`, as earlier versions did. If the `SessionProvider` is a
+    `SessionParticipantProvider`, the transient NameID last asserted to an SP in the session (with the same
+    `SPNameQualifier`) is asserted to it again, so it is usually random once for each SP in each session, and that SP
+    receives one `LogoutRequest`. It is only recorded when the response is sent, so concurrent first requests to an SP
+    may each receive their own, and that SP is then sent a `LogoutRequest` for each. Without a
+    `SessionParticipantProvider` it is random for each assertion. Single logout by such a NameID needs a
+    `SessionParticipantProvider`, because `MatchesSession` can only find it in a `SessionParticipant`.
+  - `SPNameQualifier` may name an affiliation, which `ServiceProviderProvider` must return with an
+    `AffiliationDescriptor` that is unexpired and lists the SP as a member. Otherwise the request is refused. If the
+    lookup fails for another reason than that the entity doesn't exist, the status is `Responder`.
+  - `AllowCreate` is passed to the provider and isn't checked by default: a provider that issues persistent
+    identifiers must check it, and `IdentityProvider.NameIDPolicyEnforcer` can check it, or decide differently for
+    each SP. `EncryptedID` is not supported, so the encrypted format is always refused.
+  - A NameID of the entity format is asserted without `NameQualifier`, `SPNameQualifier` or `SPProvidedID`, which
+    SAMLCore §8.3.6 requires to be omitted, even if the provider sets them. Logout matches it without them.
+- **Error statuses:** `AuthnRequest` and `LogoutRequest` validation has two stages. The first establishes the request is
+  from a known SP, and a failure is an HTTP 400 and never an error status, because the response has nowhere trusted to
+  go: size, XML, issuer and ID, the SP lookup, the signature (including a signed request with no `Destination`), the ACS
+  or SLO endpoint, an `AssertionConsumerServiceIndex` with an `AssertionConsumerServiceURL` or `ProtocolBinding`
+  (SAMLCore §3.4.1 makes them mutually exclusive), and for a `LogoutRequest` a missing `NameID`. The second is answered
+  to the SP at its endpoint from metadata. A `Version` other than 2.0 is `VersionMismatch`, with `RequestVersionTooHigh`
+  or `RequestVersionTooLow` if it is a version number whose major version is above or below 2, and none otherwise (such
+  as 2.1 or a version that isn't a number). A request that is expired, issued in the future, past its `NotOnOrAfter` (a
+  `LogoutRequest`) or has the wrong `Destination` is `Requester` with `RequestDenied`. The `Destination` of an
+  `AuthnRequest` is only checked when `IdentityProvider.WantAuthnRequestsSigned` is set or the request has one. A
+  `ProtocolBinding` other than HTTP POST, the only binding responses are sent with, is `Responder` with
+  `UnsupportedBinding`, sent to the default HTTP POST endpoint of the metadata, provided any
+  `AssertionConsumerServiceURL` of the request is listed there. A failure of `AssertionMaker` is `Responder`, or
+  `Requester` with `InvalidNameIDPolicy` if it wraps `ErrInvalidNameIDPolicy`. A failure to sign or encrypt the response
+  or to render the template is `Responder`. An application with its own handler gets the same mapping from
+  `RequestStatus`, and `WriteResponse` wraps `ErrResponseNotBuilt` when nothing has been written. IdP-initiated SSO has
+  no request to answer, so its failures are HTTP errors.
 - **`ForceAuthn` / `IsPassive`:** a `SessionProvider` must also implement `ForceAuthnSessionProvider` or
   `PassiveSessionProvider` to serve these requests. Otherwise they receive an `AuthnFailed` or `NoPassive` status.
   `samlidp` implements both, resuming its login form with `IdpAuthnRequest.ResumeFormValues`, and returns `NoPassive`

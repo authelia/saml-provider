@@ -324,6 +324,10 @@ type IdentityProvider struct {
 	// Defaults to DefaultNameIDPolicyEnforcer.
 	NameIDPolicyEnforcer NameIDPolicyEnforcer
 
+	// NameIDProvider issues the NameID of each assertion that DefaultAssertionMaker makes, and its
+	// formats are advertised in the metadata. Defaults to DefaultNameIDProvider.
+	NameIDProvider NameIDProvider
+
 	// AuthnContextEnforcer decides whether an assertion satisfies the RequestedAuthnContext of its
 	// request. Defaults to a DefaultAuthnContextEnforcer with no Strength, which only accepts a
 	// class that the request lists, and never satisfies the better comparison.
@@ -389,8 +393,9 @@ type IdentityProvider struct {
 
 	// LogoutNameIDValueOnly makes IdpLogoutRequest.MatchesSession compare only the NameID value and the session
 	// indexes of a LogoutRequest, as earlier versions did, for service providers that don't echo the Format and
-	// qualifiers of the NameID they were given. It is off by default, which compares the whole identifier
-	// (SAMLCore §3.7.3.2).
+	// qualifiers of the NameID they were given. The value is compared with Session.NameID when
+	// Session.NameIDFormat is set, and with the NameID recorded in a SessionParticipant of the requesting service
+	// provider. It is off by default, which compares the whole identifier (SAMLCore §3.7.3.2).
 	LogoutNameIDValueOnly bool
 
 	// LogoutStateLifetime is how long the state of a logout that is spread over several requests remains valid. It
@@ -510,6 +515,13 @@ func (idp *IdentityProvider) Metadata() *EntityDescriptor {
 		})
 	}
 
+	formats := idp.nameIDProvider().NameIDFormats()
+
+	nameIDFormats := make([]NameIDFormat, 0, len(formats))
+	for _, format := range formats {
+		nameIDFormats = append(nameIDFormats, NameIDFormat(format))
+	}
+
 	ed := &EntityDescriptor{
 		EntityID:      idp.MetadataURL.String(),
 		ValidUntil:    TimeNow().Add(validDuration),
@@ -521,7 +533,7 @@ func (idp *IdentityProvider) Metadata() *EntityDescriptor {
 						ProtocolSupportEnumeration: "urn:oasis:names:tc:SAML:2.0:protocol",
 						KeyDescriptors:             keyDescriptors,
 					},
-					NameIDFormats: []NameIDFormat{NameIDFormat("urn:oasis:names:tc:SAML:2.0:nameid-format:transient")},
+					NameIDFormats: nameIDFormats,
 				},
 				SingleSignOnServices: []Endpoint{
 					{
@@ -597,10 +609,13 @@ func (idp *IdentityProvider) ServeMetadata(w http.ResponseWriter, _ *http.Reques
 // endpoint.
 //
 // If the SAML request is invalid or cannot be verified a simple StatusBadRequest
-// response is sent.
+// response is sent. Once the ACS endpoint has been resolved from the metadata of the
+// service provider, a request with an unsupported version, that is too old or new, or that
+// has the wrong destination is answered with a SAML error status instead.
 //
-// If the assertion cannot be created or returned, a StatusInternalServerError
-// response is sent.
+// If the assertion cannot be created or encrypted, a Responder error status is sent, or
+// Requester with InvalidNameIDPolicy if the failure is ErrInvalidNameIDPolicy. A failure after
+// the body has started is only logged.
 //
 //nolint:gocyclo // Complexity is inherent to the specification being implemented.
 func (idp *IdentityProvider) ServeSSO(w http.ResponseWriter, r *http.Request) {
@@ -614,6 +629,13 @@ func (idp *IdentityProvider) ServeSSO(w http.ResponseWriter, r *http.Request) {
 
 	if err := req.Validate(); err != nil {
 		idp.logger().Printf("failed to validate request: %s", err)
+
+		if top, second, ok := requestStatus(err); ok {
+			req.writeErrorStatus(w, top, second)
+
+			return
+		}
+
 		http.Error(w, http.StatusText(http.StatusBadRequest), http.StatusBadRequest)
 
 		return
@@ -636,7 +658,13 @@ func (idp *IdentityProvider) ServeSSO(w http.ResponseWriter, r *http.Request) {
 
 	if err := assertionMaker.MakeAssertion(req, session); err != nil {
 		idp.logger().Printf("failed to make assertion: %s", err)
-		http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
+
+		top, second, ok := requestStatus(err)
+		if !ok {
+			top, second = StatusResponder, ""
+		}
+
+		req.writeErrorStatus(w, top, second)
 
 		return
 	}
@@ -650,10 +678,7 @@ func (idp *IdentityProvider) ServeSSO(w http.ResponseWriter, r *http.Request) {
 		if err := subjectEnforcer.EnforceSubject(req, session); err != nil {
 			idp.logger().Printf("cannot match the request subject: %s", err)
 
-			if err := req.WriteErrorResponse(w, StatusResponder, StatusAuthnFailed, ""); err != nil {
-				idp.logger().Printf("failed to write response: %s", err)
-				http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
-			}
+			req.writeErrorStatus(w, StatusResponder, StatusAuthnFailed)
 
 			return
 		}
@@ -668,10 +693,7 @@ func (idp *IdentityProvider) ServeSSO(w http.ResponseWriter, r *http.Request) {
 		if err := nameIDPolicyEnforcer.EnforceNameIDPolicy(req, session); err != nil {
 			idp.logger().Printf("cannot satisfy name id policy: %s", err)
 
-			if err := req.WriteErrorResponse(w, StatusRequester, StatusInvalidNameIDPolicy, ""); err != nil {
-				idp.logger().Printf("failed to write response: %s", err)
-				http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
-			}
+			req.writeErrorStatus(w, StatusRequester, StatusInvalidNameIDPolicy)
 
 			return
 		}
@@ -686,10 +708,7 @@ func (idp *IdentityProvider) ServeSSO(w http.ResponseWriter, r *http.Request) {
 		if err := authnContextEnforcer.EnforceAuthnContext(req, session); err != nil {
 			idp.logger().Printf("cannot satisfy requested authn context: %s", err)
 
-			if err := req.WriteErrorResponse(w, StatusResponder, StatusNoAuthnContext, ""); err != nil {
-				idp.logger().Printf("failed to write response: %s", err)
-				http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
-			}
+			req.writeErrorStatus(w, StatusResponder, StatusNoAuthnContext)
 
 			return
 		}
@@ -697,9 +716,13 @@ func (idp *IdentityProvider) ServeSSO(w http.ResponseWriter, r *http.Request) {
 
 	if err := req.WriteResponse(w); err != nil {
 		idp.logger().Printf("failed to write response: %s", err)
-		http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
 
-		return
+		// Once the body has started there is nothing sensible left to send.
+		if !errors.Is(err, ErrResponseNotBuilt) {
+			return
+		}
+
+		req.writeErrorStatus(w, StatusResponder, "")
 	}
 }
 
@@ -716,7 +739,7 @@ func (req *IdpAuthnRequest) getSession(w http.ResponseWriter, r *http.Request) *
 		}
 
 		if session == nil {
-			req.writeErrorStatus(w, StatusNoPassive)
+			req.writeErrorStatus(w, StatusResponder, StatusNoPassive)
 		}
 
 		return session
@@ -725,7 +748,7 @@ func (req *IdpAuthnRequest) getSession(w http.ResponseWriter, r *http.Request) *
 	if req.Request.ForceAuthn != nil && *req.Request.ForceAuthn {
 		provider, ok := idp.SessionProvider.(ForceAuthnSessionProvider)
 		if !ok {
-			req.writeErrorStatus(w, StatusAuthnFailed)
+			req.writeErrorStatus(w, StatusResponder, StatusAuthnFailed)
 			return nil
 		}
 
@@ -735,9 +758,10 @@ func (req *IdpAuthnRequest) getSession(w http.ResponseWriter, r *http.Request) *
 	return idp.SessionProvider.GetSession(w, r, req)
 }
 
-// writeErrorStatus completes the HTTP request with a Responder status and the given second-level status.
-func (req *IdpAuthnRequest) writeErrorStatus(w http.ResponseWriter, secondLevelStatus string) {
-	if err := req.WriteErrorResponse(w, StatusResponder, secondLevelStatus, ""); err != nil {
+// writeErrorStatus completes the HTTP request with an error Response carrying the given top-level and
+// second-level status, or an internal server error if that Response can't be written.
+func (req *IdpAuthnRequest) writeErrorStatus(w http.ResponseWriter, topLevelStatus, secondLevelStatus string) {
+	if err := req.WriteErrorResponse(w, topLevelStatus, secondLevelStatus, ""); err != nil {
 		req.IDP.logger().Printf("failed to write response: %s", err)
 		http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
 	}
@@ -971,7 +995,7 @@ func (req *IdpAuthnRequest) Validate() error {
 		return err
 	}
 
-	if err := req.checkRequest(); err != nil {
+	if err := req.checkTrust(); err != nil {
 		return err
 	}
 
@@ -996,11 +1020,48 @@ func (req *IdpAuthnRequest) Validate() error {
 		return fmt.Errorf("cannot find assertion consumer service: %w", err)
 	}
 
+	return req.checkRequestStage()
+}
+
+// checkTrust makes the checks on the identity of the request that are needed before the service
+// provider can be looked up. Nothing in the request is acted on before these pass, and no response is
+// sent for a request that fails them.
+func (req *IdpAuthnRequest) checkTrust() error {
+	if !isValidAuthnRequestID(req.Request.ID) {
+		// The value is not included because this error is logged without authentication.
+		return fmt.Errorf("invalid request ID")
+	}
+
+	if req.Request.Issuer == nil || req.Request.Issuer.Value == "" {
+		return fmt.Errorf("request has no issuer")
+	}
+
 	return nil
 }
 
-// checkRequest makes the checks that depend only on the content of Request and the identity provider.
-func (req *IdpAuthnRequest) checkRequest() error {
+// checkRequestStage makes the checks on the content of the request that are reported to the service
+// provider as a SAML status. It must only run once the ACS endpoint has been resolved from metadata,
+// and on the content that the signature covers if the request is signed. The error is a *statusError.
+func (req *IdpAuthnRequest) checkRequestStage() error {
+	if statusErr := versionStatus(req.Request.Version); statusErr != nil {
+		return statusErr
+	}
+
+	maxAge := req.IDP.MaxAuthnRequestAge
+	if maxAge == 0 {
+		maxAge = MaxIssueDelay
+	}
+
+	if req.Request.IssueInstant.Add(maxAge).Before(req.Now) {
+		return &statusError{StatusRequester, StatusRequestDenied,
+			fmt.Errorf("request expired at %s", req.Request.IssueInstant.Add(maxAge))}
+	}
+
+	if req.Request.IssueInstant.After(req.Now.Add(MaxClockSkew)) {
+		return &statusError{StatusRequester, StatusRequestDenied,
+			fmt.Errorf("request issued in the future at %s", req.Request.IssueInstant)}
+	}
+
 	// In http://docs.oasis-open.org/security/saml/v2.0/saml-bindings-2.0-os.pdf §3.4.5.2
 	// we get a description of the Destination attribute:
 	//
@@ -1014,37 +1075,38 @@ func (req *IdpAuthnRequest) checkRequest() error {
 	// verifyAuthnRequestSignature requires it on any other request that is signed.
 	if req.IDP.WantAuthnRequestsSigned || req.Request.Destination != "" {
 		if req.Request.Destination != req.IDP.SSOURL.String() {
-			return fmt.Errorf("expected destination to be %q, not %q", req.IDP.SSOURL.String(), req.Request.Destination)
+			return &statusError{StatusRequester, StatusRequestDenied,
+				fmt.Errorf("expected destination to be %q, not %q", req.IDP.SSOURL.String(), req.Request.Destination)}
 		}
 	}
 
-	maxAge := req.IDP.MaxAuthnRequestAge
-	if maxAge == 0 {
-		maxAge = MaxIssueDelay
-	}
-
-	if req.Request.IssueInstant.Add(maxAge).Before(req.Now) {
-		return fmt.Errorf("request expired at %s", req.Request.IssueInstant.Add(maxAge))
-	}
-
-	if req.Request.IssueInstant.After(req.Now.Add(MaxClockSkew)) {
-		return fmt.Errorf("request issued in the future at %s", req.Request.IssueInstant)
-	}
-
-	if req.Request.Version != "2.0" {
-		return fmt.Errorf("expected SAML request version 2.0 got %v", req.Request.Version)
-	}
-
-	if !isValidAuthnRequestID(req.Request.ID) {
-		// The value is not included because this error is logged without authentication.
-		return fmt.Errorf("invalid request ID")
-	}
-
-	if req.Request.Issuer == nil || req.Request.Issuer.Value == "" {
-		return fmt.Errorf("request has no issuer")
+	if !req.supportedProtocolBinding() {
+		return &statusError{StatusResponder, StatusUnsupportedBinding,
+			fmt.Errorf("the response can't be sent with the requested binding %q", req.Request.ProtocolBinding)}
 	}
 
 	return nil
+}
+
+// listsACSLocation reports whether the metadata of the service provider lists an AssertionConsumerService at
+// location, with any binding.
+func (req *IdpAuthnRequest) listsACSLocation(location string) bool {
+	for _, spssoDescriptor := range req.ServiceProviderMetadata.SPSSODescriptors {
+		for _, endpoint := range spssoDescriptor.AssertionConsumerServices {
+			if endpoint.Location == location {
+				return true
+			}
+		}
+	}
+
+	return false
+}
+
+// supportedProtocolBinding reports whether the response can be sent with the ProtocolBinding of the
+// request (SAMLCore §3.4.1): HTTP-POST, the only binding this identity provider sends responses with, or
+// none, which leaves the binding to the endpoint.
+func (req *IdpAuthnRequest) supportedProtocolBinding() bool {
+	return req.Request.ProtocolBinding == "" || req.Request.ProtocolBinding == HTTPPostBinding
 }
 
 // checkAuthnRequestSize returns an error if the decoded request is larger than maxAuthnRequestSize.
@@ -1087,35 +1149,58 @@ func isValidAuthnRequestID(id string) bool {
 // IdentityProvider.AllowInsecureServiceProviderEndpoints, rather than replaced by another endpoint.
 // The response, whether an assertion or an error status, would be sent to that endpoint, so the
 // request can only fail with an HTTP error.
+//
+// AssertionConsumerServiceIndex is mutually exclusive with AssertionConsumerServiceURL and
+// ProtocolBinding (SAMLCore §3.4.1), so a request with both is refused. A request whose ProtocolBinding
+// is another binding than HTTP-POST gets the default endpoint, which only receives the UnsupportedBinding
+// status that checkRequestStage reports, as long as any AssertionConsumerServiceURL it names is listed in
+// the metadata with some binding.
 func (req *IdpAuthnRequest) getACSEndpoint() error {
 	index, location := req.Request.AssertionConsumerServiceIndex, req.Request.AssertionConsumerServiceURL
 
-	if index != "" || location != "" {
-		for _, match := range []func(endpoint IndexedEndpoint) bool{
-			func(endpoint IndexedEndpoint) bool { return index != "" && strconv.Itoa(endpoint.Index) == index },
-			func(endpoint IndexedEndpoint) bool { return location != "" && endpoint.Location == location },
-		} {
-			for _, spssoDescriptor := range req.ServiceProviderMetadata.SPSSODescriptors {
-				for _, endpoint := range spssoDescriptor.AssertionConsumerServices {
-					if endpoint.Binding == HTTPPostBinding && match(endpoint) {
-						if err := req.IDP.CheckServiceProviderEndpoint(endpoint.Location); err != nil {
-							return err
-						}
+	if index != "" && (location != "" || req.Request.ProtocolBinding != "") {
+		return errors.New("the request has an AssertionConsumerServiceIndex with an AssertionConsumerServiceURL or ProtocolBinding, which are mutually exclusive")
+	}
 
-						req.SPSSODescriptor, req.ACSEndpoint = &spssoDescriptor, &endpoint
-
-						return nil
-					}
-				}
-			}
+	if !req.supportedProtocolBinding() {
+		if location != "" && !req.listsACSLocation(location) {
+			return os.ErrNotExist
 		}
 
-		return os.ErrNotExist
+		return req.useDefaultACSEndpoint()
+	}
+
+	if index != "" || location != "" {
+		return req.useRequestedACSEndpoint(index, location)
 	}
 
 	// Some service providers, like the Microsoft Azure AD service provider, issue
 	// assertion requests that don't specify an ACS url at all.
 	return req.useDefaultACSEndpoint()
+}
+
+// useRequestedACSEndpoint selects the HTTP-POST endpoint that the request names by index or location.
+func (req *IdpAuthnRequest) useRequestedACSEndpoint(index, location string) error {
+	for _, match := range []func(endpoint IndexedEndpoint) bool{
+		func(endpoint IndexedEndpoint) bool { return index != "" && strconv.Itoa(endpoint.Index) == index },
+		func(endpoint IndexedEndpoint) bool { return location != "" && endpoint.Location == location },
+	} {
+		for _, spssoDescriptor := range req.ServiceProviderMetadata.SPSSODescriptors {
+			for _, endpoint := range spssoDescriptor.AssertionConsumerServices {
+				if endpoint.Binding == HTTPPostBinding && match(endpoint) {
+					if err := req.IDP.CheckServiceProviderEndpoint(endpoint.Location); err != nil {
+						return err
+					}
+
+					req.SPSSODescriptor, req.ACSEndpoint = &spssoDescriptor, &endpoint
+
+					return nil
+				}
+			}
+		}
+	}
+
+	return os.ErrNotExist
 }
 
 // useDefaultACSEndpoint selects the default HTTP-POST endpoint as defined by SAMLMetadata §2.2.3: the
@@ -1194,12 +1279,8 @@ func (DefaultSubjectEnforcer) EnforceSubject(req *IdpAuthnRequest, _ *Session) e
 		return fmt.Errorf("the assertion is for another principal than the request names")
 	}
 
-	switch requested.Format {
-	case "", string(UnspecifiedNameIDFormat), unspecifiedNameIDFormat:
-	default:
-		if asserted.Format != requested.Format {
-			return fmt.Errorf("the NameID format is %q and the request names %q", asserted.Format, requested.Format)
-		}
+	if !isUnspecifiedNameIDFormat(requested.Format) && asserted.Format != requested.Format {
+		return fmt.Errorf("the NameID format is %q and the request names %q", asserted.Format, requested.Format)
 	}
 
 	for _, qualifier := range []struct{ name, requested, asserted string }{
@@ -1309,14 +1390,12 @@ func (DefaultNameIDPolicyEnforcer) EnforceNameIDPolicy(req *IdpAuthnRequest, _ *
 	nameID := req.Assertion.Subject.NameID
 
 	if policy.Format != nil {
-		switch *policy.Format {
-		case "", string(UnspecifiedNameIDFormat), unspecifiedNameIDFormat:
-		case encryptedNameIDFormat:
+		switch {
+		case isUnspecifiedNameIDFormat(*policy.Format):
+		case *policy.Format == encryptedNameIDFormat:
 			return fmt.Errorf("the request requires an EncryptedID, which is not supported")
-		default:
-			if nameID.Format != *policy.Format {
-				return fmt.Errorf("the NameID format is %q and the request requires %q", nameID.Format, *policy.Format)
-			}
+		case nameID.Format != *policy.Format:
+			return fmt.Errorf("the NameID format is %q and the request requires %q", nameID.Format, *policy.Format)
 		}
 	}
 
@@ -1344,10 +1423,6 @@ type DefaultAssertionMaker struct {
 //
 //nolint:gocyclo // Complexity is inherent to the specification being implemented.
 func (DefaultAssertionMaker) MakeAssertion(req *IdpAuthnRequest, session *Session) error {
-	if session.NameID == "" {
-		return fmt.Errorf("the session has no NameID")
-	}
-
 	attributes := requestedNameAttributes(req.AttributeConsumingService(), session)
 
 	if session.UserName != "" {
@@ -1449,7 +1524,7 @@ func (DefaultAssertionMaker) MakeAssertion(req *IdpAuthnRequest, session *Sessio
 	}
 
 	if len(session.Groups) != 0 {
-		groupMemberAttributeValues := []AttributeValue{}
+		groupMemberAttributeValues := make([]AttributeValue, 0, len(session.Groups))
 		for _, group := range session.Groups {
 			groupMemberAttributeValues = append(groupMemberAttributeValues, AttributeValue{
 				Type:  "xs:string",
@@ -1493,16 +1568,18 @@ func (DefaultAssertionMaker) MakeAssertion(req *IdpAuthnRequest, session *Sessio
 	notBefore := req.Now.Add(-1 * MaxClockSkew)
 	notOnOrAfterAfter := req.Now.Add(MaxIssueDelay)
 
-	nameIDFormat := "urn:oasis:names:tc:SAML:2.0:nameid-format:transient"
+	// The ID is taken first so that a transient NameID doesn't change it.
+	assertionID := fmt.Sprintf("id-%x", randomBytes(20))
 
-	if session.NameIDFormat != "" {
-		nameIDFormat = session.NameIDFormat
+	nameID, err := req.resolveNameID(session)
+	if err != nil {
+		return fmt.Errorf("cannot issue a NameID: %w", err)
 	}
 
 	address := clientAddress(req.HTTPRequest, session)
 
 	req.Assertion = &Assertion{
-		ID:           fmt.Sprintf("id-%x", randomBytes(20)),
+		ID:           assertionID,
 		IssueInstant: TimeNow(),
 		Version:      "2.0",
 		Issuer: Issuer{
@@ -1510,12 +1587,7 @@ func (DefaultAssertionMaker) MakeAssertion(req *IdpAuthnRequest, session *Sessio
 			Value:  req.IDP.Metadata().EntityID,
 		},
 		Subject: &Subject{
-			NameID: &NameID{
-				Format:          nameIDFormat,
-				NameQualifier:   req.IDP.Metadata().EntityID,
-				SPNameQualifier: req.ServiceProviderMetadata.EntityID,
-				Value:           session.NameID,
-			},
+			NameID: nameID,
 			SubjectConfirmations: []SubjectConfirmation{
 				{
 					Method: bearerSubjectConfirmationMethod,
@@ -1951,6 +2023,11 @@ var defaultLogoutRequestFormTemplate = template.Must(template.New("saml-logout-r
 	`<script>document.getElementById('SAMLRequestForm').submit();</script>` +
 	`</html>`))
 
+// ErrResponseNotBuilt is wrapped by an error of IdpAuthnRequest.WriteResponse that happened before
+// anything was written, so the request can still be answered, such as with WriteErrorResponse. Any other
+// error of WriteResponse may have happened after the body started.
+var ErrResponseNotBuilt = errors.New("the response could not be built")
+
 // WriteResponse writes the `Response` to the [http.ResponseWriter]. If
 // `Response` is not already set, it calls MakeResponse to produce it. The response is written by
 // PublishResponse, so if it carries an assertion nothing is written once a logout of the session has
@@ -1958,7 +2035,7 @@ var defaultLogoutRequestFormTemplate = template.Must(template.New("saml-logout-r
 func (req *IdpAuthnRequest) WriteResponse(w http.ResponseWriter) error {
 	form, err := req.PostBinding()
 	if err != nil {
-		return err
+		return fmt.Errorf("%w: %w", ErrResponseNotBuilt, err)
 	}
 
 	tmpl := req.IDP.ResponseFormTemplate
@@ -1968,16 +2045,27 @@ func (req *IdpAuthnRequest) WriteResponse(w http.ResponseWriter) error {
 
 	buf := bytes.NewBuffer(nil)
 	if err := tmpl.Execute(buf, form); err != nil {
-		return err
+		return fmt.Errorf("%w: %w", ErrResponseNotBuilt, err)
 	}
 
-	return req.PublishResponse(func() error {
+	published := false
+
+	err = req.PublishResponse(func() error {
+		published = true
+
 		setNoCacheHeaders(w)
 
 		_, err := io.Copy(w, buf)
 
 		return err
 	})
+
+	// The participant couldn't be recorded, so nothing was written.
+	if err != nil && !published {
+		return fmt.Errorf("%w: %w", ErrResponseNotBuilt, err)
+	}
+
+	return err
 }
 
 // setNoCacheHeaders stops a browser or proxy keeping a page which carries a SAML message, as

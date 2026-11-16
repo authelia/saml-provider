@@ -31,6 +31,13 @@ func serveSSOWithPolicy(t *testing.T, test *IdentityProviderTest, session *Sessi
 		GetSessionFunc: func(http.ResponseWriter, *http.Request, *IdpAuthnRequest) *Session { return session },
 	}
 
+	return postSSOWithPolicy(t, test, policy)
+}
+
+// postSSOWithPolicy is serveSSOWithPolicy with the SessionProvider of test.
+func postSSOWithPolicy(t *testing.T, test *IdentityProviderTest, policy *NameIDPolicy) Response {
+	t.Helper()
+
 	request, err := test.SP.MakeAuthenticationRequest("https://idp.example.com/saml/sso", HTTPPostBinding, HTTPPostBinding)
 	assert.NilError(t, err)
 
@@ -115,6 +122,10 @@ func TestServeSSOUsesConfiguredNameIDPolicyEnforcer(t *testing.T) {
 
 	t.Run("accepts what the default would not", func(t *testing.T) {
 		test := NewIdentityProviderTest(t, applyKey)
+		// The provider issues another format than the one requested, which the default would refuse.
+		test.IDP.NameIDProvider = nameIDProviderFunc{f: func(_ *http.Request, req NameIDRequest, _ *Session) (*NameID, error) {
+			return &NameID{Format: string(PersistentNameIDFormat), SPNameQualifier: req.SPNameQualifier, Value: "alice"}, nil
+		}}
 		test.IDP.NameIDPolicyEnforcer = nameIDPolicyEnforcerFunc(func(*IdpAuthnRequest, *Session) error { return nil })
 		response := serveSSOWithPolicy(t, test, &Session{ID: "s", NameID: "alice"}, &NameIDPolicy{Format: &email})
 		assert.Check(t, is.Equal(response.Status.StatusCode.Value, StatusSuccess))

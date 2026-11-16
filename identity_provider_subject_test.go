@@ -34,6 +34,8 @@ func serveSSOWithSubject(t *testing.T, test *IdentityProviderTest, session *Sess
 	request, err := test.SP.MakeAuthenticationRequest("https://idp.example.com/saml/sso", HTTPPostBinding, HTTPPostBinding)
 	assert.NilError(t, err)
 
+	// The format is left open, so that the emailAddress NameID of a subjectSession is asserted.
+	request.NameIDPolicy = nil
 	request.Subject = subject
 	doc := etree.NewDocument()
 	doc.SetRoot(request.Element())
@@ -48,6 +50,11 @@ func serveSSOWithSubject(t *testing.T, test *IdentityProviderTest, session *Sess
 	test.IDP.ServeSSO(w, r)
 
 	return w
+}
+
+// subjectSession returns a session whose NameID, alice, is asserted when the format is left open.
+func subjectSession() *Session {
+	return &Session{ID: "s", NameID: "alice", NameIDFormat: string(EmailAddressNameIDFormat)}
 }
 
 func subjectResponse(t *testing.T, w *httptest.ResponseRecorder) Response {
@@ -80,10 +87,10 @@ func bearer() []SubjectConfirmation {
 // The assertion must strongly match the subject of the request, SAMLCore §3.4.1 and §3.3.4. A
 // qualifier or format the request leaves out isn't compared.
 func TestServeSSOAcceptsMatchingSubject(t *testing.T) {
-	transient := "urn:oasis:names:tc:SAML:2.0:nameid-format:transient"
+	email := string(EmailAddressNameIDFormat)
 	for name, subject := range map[string]*Subject{
 		"value":                  {NameID: &NameID{Value: "alice"}},
-		"format":                 {NameID: &NameID{Format: transient, Value: "alice"}},
+		"format":                 {NameID: &NameID{Format: email, Value: "alice"}},
 		"unspecified format":     {NameID: &NameID{Format: string(UnspecifiedNameIDFormat), Value: "alice"}},
 		"unspecified format 2.0": {NameID: &NameID{Format: unspecifiedNameIDFormat20, Value: "alice"}},
 		"qualifiers": {NameID: &NameID{
@@ -97,7 +104,7 @@ func TestServeSSOAcceptsMatchingSubject(t *testing.T) {
 	} {
 		t.Run(name, func(t *testing.T) {
 			test := NewIdentityProviderTest(t, applyKey)
-			w := serveSSOWithSubject(t, test, &Session{ID: "s", NameID: "alice"}, subject)
+			w := serveSSOWithSubject(t, test, subjectSession(), subject)
 			assert.Check(t, is.Equal(subjectResponse(t, w).Status.StatusCode.Value, StatusSuccess))
 		})
 	}
@@ -108,7 +115,7 @@ func TestServeSSOAcceptsMatchingSubject(t *testing.T) {
 func TestServeSSORejectsOtherSubject(t *testing.T) {
 	for name, subject := range map[string]*Subject{
 		"other value":          {NameID: &NameID{Value: "bob"}},
-		"other format":         {NameID: &NameID{Format: string(EmailAddressNameIDFormat), Value: "alice"}},
+		"other format":         {NameID: &NameID{Format: string(PersistentNameIDFormat), Value: "alice"}},
 		"other name qualifier": {NameID: &NameID{NameQualifier: "https://other.example.com", Value: "alice"}},
 		"other sp qualifier":   {NameID: &NameID{SPNameQualifier: "https://other.example.com", Value: "alice"}},
 		"sp provided id":       {NameID: &NameID{SPProvidedID: "a1", Value: "alice"}},
@@ -117,7 +124,7 @@ func TestServeSSORejectsOtherSubject(t *testing.T) {
 	} {
 		t.Run(name, func(t *testing.T) {
 			test := NewIdentityProviderTest(t, applyKey)
-			w := serveSSOWithSubject(t, test, &Session{ID: "s", NameID: "alice"}, subject)
+			w := serveSSOWithSubject(t, test, subjectSession(), subject)
 			assertAuthnFailed(t, subjectResponse(t, w))
 		})
 	}
@@ -164,7 +171,7 @@ func TestServeSSOMatchesSubjectConfirmation(t *testing.T) {
 	} {
 		t.Run(name, func(t *testing.T) {
 			test := NewIdentityProviderTest(t, applyKey)
-			w := serveSSOWithSubject(t, test, &Session{ID: "s", NameID: "alice"},
+			w := serveSSOWithSubject(t, test, subjectSession(),
 				&Subject{NameID: &NameID{Value: "alice"}, SubjectConfirmations: tc.confirmations()})
 
 			response := subjectResponse(t, w)
@@ -196,7 +203,7 @@ func TestServeSSOMatchesConfirmationOfCustomAssertion(t *testing.T) {
 				return nil
 			})
 			subject := &Subject{NameID: &NameID{Value: "alice"}, SubjectConfirmations: requested}
-			w := serveSSOWithSubject(t, test, &Session{ID: "s", NameID: "alice"}, subject)
+			w := serveSSOWithSubject(t, test, subjectSession(), subject)
 			assertAuthnFailed(t, subjectResponse(t, w))
 		})
 	}
@@ -235,7 +242,7 @@ func TestServeSSOUsesConfiguredSubjectEnforcer(t *testing.T) {
 	t.Run("accepts what the default would not", func(t *testing.T) {
 		test := NewIdentityProviderTest(t, applyKey)
 		test.IDP.SubjectEnforcer = subjectEnforcerFunc(func(*IdpAuthnRequest, *Session) error { return nil })
-		w := serveSSOWithSubject(t, test, &Session{ID: "s", NameID: "alice"},
+		w := serveSSOWithSubject(t, test, subjectSession(),
 			&Subject{NameID: &NameID{Format: string(EmailAddressNameIDFormat), Value: "alice@example.com"}})
 		assert.Check(t, is.Equal(subjectResponse(t, w).Status.StatusCode.Value, StatusSuccess))
 	})
@@ -249,7 +256,7 @@ func TestServeSSOUsesConfiguredSubjectEnforcer(t *testing.T) {
 			seen = session
 			return errors.New("not the same principal")
 		})
-		session := &Session{ID: "s", NameID: "alice"}
+		session := subjectSession()
 		w := serveSSOWithSubject(t, test, session, &Subject{NameID: &NameID{Value: "alice"}})
 		response := subjectResponse(t, w)
 		assertAuthnFailed(t, response)
@@ -262,7 +269,7 @@ func TestServeSSOUsesConfiguredSubjectEnforcer(t *testing.T) {
 		test.IDP.SubjectEnforcer = subjectEnforcerFunc(func(*IdpAuthnRequest, *Session) error {
 			return errors.New("called")
 		})
-		w := serveSSOWithSubject(t, test, &Session{ID: "s", NameID: "alice"}, nil)
+		w := serveSSOWithSubject(t, test, subjectSession(), nil)
 		assert.Check(t, is.Equal(subjectResponse(t, w).Status.StatusCode.Value, StatusSuccess))
 	})
 }
@@ -271,6 +278,44 @@ func TestServeSSOUsesConfiguredSubjectEnforcer(t *testing.T) {
 func TestServeSSORejectsEmptySubject(t *testing.T) {
 	test := NewIdentityProviderTest(t, applyKey)
 	w := serveSSOWithSubject(t, test, &Session{ID: "s"}, &Subject{NameID: &NameID{}})
-	assert.Check(t, is.Equal(w.Code, http.StatusInternalServerError))
-	assert.Check(t, !strings.Contains(w.Body.String(), "SAMLResponse"))
+	assert.Check(t, is.Equal(w.Code, http.StatusOK))
+
+	response := subjectResponse(t, w)
+	assert.Check(t, is.Equal(response.Status.StatusCode.Value, StatusResponder))
+	assert.Check(t, response.Assertion == nil)
+	assert.Check(t, response.EncryptedAssertion == nil)
+}
+
+// A request that leaves the format open but names a Subject with a format is for a NameID of that format, so it
+// is tried first, rather than refusing a session whose NameID the Subject names (SAMLCore §3.4.1).
+func TestServeSSOSubjectFormatIsFirstCandidate(t *testing.T) {
+	email := string(EmailAddressNameIDFormat)
+	session := &Session{ID: "s", NameID: "alice@example.com", NameIDFormat: email}
+
+	for name, subject := range map[string]*Subject{
+		"email":                   {NameID: &NameID{Format: email, Value: "alice@example.com"}},
+		"email with qualifier":    {NameID: &NameID{Format: email, NameQualifier: "https://idp.example.com/saml/metadata", Value: "alice@example.com"}},
+		"email with confirmation": {NameID: &NameID{Format: email, Value: "alice@example.com"}, SubjectConfirmations: bearer()},
+	} {
+		t.Run(name, func(t *testing.T) {
+			test := NewIdentityProviderTest(t, applyKey)
+			// Without the Subject, transient would come first.
+			withSPNameIDFormats(test, TransientNameIDFormat)
+			captured := captureNameID(test)
+
+			w := serveSSOWithSubject(t, test, session, subject)
+			assert.Check(t, is.Equal(subjectResponse(t, w).Status.StatusCode.Value, StatusSuccess))
+			assert.Assert(t, *captured != nil)
+			assert.Check(t, is.Equal((*captured).Format, email))
+			assert.Check(t, is.Equal((*captured).Value, "alice@example.com"))
+		})
+	}
+
+	// A format the provider can't issue is skipped, and the Subject then doesn't match.
+	t.Run("format the provider can't issue", func(t *testing.T) {
+		test := NewIdentityProviderTest(t, applyKey)
+		withSPNameIDFormats(test, TransientNameIDFormat)
+		w := serveSSOWithSubject(t, test, session, &Subject{NameID: &NameID{Format: "urn:oasis:names:tc:SAML:1.1:nameid-format:X509SubjectName", Value: "alice@example.com"}})
+		assertAuthnFailed(t, subjectResponse(t, w))
+	})
 }

@@ -52,7 +52,7 @@ func TestAssertionAddressIsClientIP(t *testing.T) {
 // A request which names the client IP in its subject confirmation can now be met.
 func TestServeSSOMatchesConfirmationAddress(t *testing.T) {
 	test := NewIdentityProviderTest(t, applyKey)
-	w := serveSSOWithSubject(t, test, &Session{ID: "s", NameID: "alice"}, &Subject{
+	w := serveSSOWithSubject(t, test, subjectSession(), &Subject{
 		NameID: &NameID{Value: "alice"},
 		SubjectConfirmations: []SubjectConfirmation{{
 			Method:                  bearerSubjectConfirmationMethod,

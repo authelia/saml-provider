@@ -8,6 +8,8 @@ import (
 
 	"gotest.tools/assert"
 	is "gotest.tools/assert/cmp"
+
+	"authelia.com/provider/saml"
 )
 
 func putUser(test *ServerTest, name, body string) int {
@@ -43,8 +45,9 @@ func TestNewRejectsDuplicateUserEmails(t *testing.T) {
 	assert.Check(t, is.ErrorContains(err, `users "alice" and "mallory" have the same email`))
 }
 
-// A user without an email has no NameID, so they can log in but receive no assertion.
-func TestUserWithoutEmailReceivesNoAssertion(t *testing.T) {
+// A user without an email has no NameID of their own, so they're asserted a random transient NameID, which
+// no other user shares.
+func TestUserWithoutEmailReceivesTransientNameID(t *testing.T) {
 	test := NewServerTest(t)
 	hardeningAddUser(t, test)
 	user := User{}
@@ -53,8 +56,9 @@ func TestUserWithoutEmailReceivesNoAssertion(t *testing.T) {
 	assert.NilError(t, test.Store.Put("/users/alice", user))
 
 	w := hardeningSubmitLogin(t, test, hardeningStartSSO(t, test), "hunter2")
-	assert.Check(t, !strings.Contains(w.Body.String(), "SAMLResponse"), w.Body.String())
-	assert.Check(t, is.Equal(w.Code, http.StatusInternalServerError))
+	response := samlResponseXML(t, w)
+	assert.Check(t, is.Contains(response, saml.StatusSuccess))
+	assert.Check(t, strings.Contains(response, "Assertion"), response)
 }
 
 // Users without an email have no NameID, so they don't share one.

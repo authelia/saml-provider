@@ -82,8 +82,8 @@ func (req *IdpAuthnRequest) verifyAuthnRequestSignature() error {
 		}
 	}
 
-	// SAMLBind §3.4.5.2 and §3.5.5.2 require this of a signed message. Validate has already checked
-	// any value that is present.
+	// SAMLBind §3.4.5.2 and §3.5.5.2 require this of a signed message. The value is checked against
+	// the SSO URL later, by checkRequestStage.
 	if req.Request.Destination == "" {
 		return errors.New("signed request has no destination")
 	}
@@ -92,7 +92,7 @@ func (req *IdpAuthnRequest) verifyAuthnRequestSignature() error {
 }
 
 // useVerifiedRequest replaces Request with the content that the signature covers, and repeats the
-// checks that were made on the original.
+// trust checks that were made on the original.
 //
 // The original can't be trusted even with a valid signature. Exclusive canonicalization drops unused
 // namespace declarations, so xmlns:IssueInstant="..." doesn't change the digest, while encoding/xml
@@ -105,7 +105,7 @@ func (req *IdpAuthnRequest) useVerifiedRequest(verified *etree.Element) error {
 		return err
 	}
 
-	if err := req.checkRequest(); err != nil {
+	if err := req.checkTrust(); err != nil {
 		return err
 	}
 
