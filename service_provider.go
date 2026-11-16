@@ -28,22 +28,22 @@ import (
 
 	"authelia.com/provider/saml/internal/dsig"
 	"authelia.com/provider/saml/internal/dsig/etreeutils"
-
 	"authelia.com/provider/saml/logger"
 	"authelia.com/provider/saml/xmlenc"
 )
 
-// NameIDFormat is the format of the id
+// NameIDFormat is the format of the id.
 type NameIDFormat string
 
 // Element returns an XML element representation of n.
 func (n NameIDFormat) Element() *etree.Element {
 	el := etree.NewElement("")
 	el.SetText(string(n))
+
 	return el
 }
 
-// Name ID formats
+// Name ID formats.
 const (
 	UnspecifiedNameIDFormat  NameIDFormat = "urn:oasis:names:tc:SAML:1.1:nameid-format:unspecified"
 	TransientNameIDFormat    NameIDFormat = "urn:oasis:names:tc:SAML:2.0:nameid-format:transient"
@@ -73,7 +73,7 @@ type SignatureVerifier interface {
 // See the example directory for an example of a web application using
 // the service provider interface.
 type ServiceProvider struct {
-	// Entity ID is optional - if not specified then MetadataURL will be used
+	// Entity ID is optional - if not specified then MetadataURL will be used.
 	EntityID string
 
 	// Key is private key we use to sign requests. Its public key must be either
@@ -118,11 +118,11 @@ type ServiceProvider struct {
 	IDPCertificate *string
 
 	// AuthnNameIDFormat is the format used in the NameIDPolicy for
-	// authentication requests
+	// authentication requests.
 	AuthnNameIDFormat NameIDFormat
 
 	// MetadataValidDuration is a duration used to calculate validUntil
-	// attribute in the metadata endpoint
+	// attribute in the metadata endpoint.
 	MetadataValidDuration time.Duration
 
 	// ForceAuthn allows you to force re-authentication of users even if the user
@@ -130,13 +130,13 @@ type ServiceProvider struct {
 	ForceAuthn *bool
 
 	// RequestedAuthnContext allow you to specify the requested authentication
-	// context in authentication requests
+	// context in authentication requests.
 	RequestedAuthnContext *RequestedAuthnContext
 
-	// AllowIdpInitiated
+	// AllowIdpInitiated.
 	AllowIDPInitiated bool
 
-	// DefaultRedirectURI where untracked requests (as of IDPInitiated) are redirected to
+	// DefaultRedirectURI where untracked requests (as of IDPInitiated) are redirected to.
 	DefaultRedirectURI string
 
 	// SignatureVerifier, if non-nil, allows you to implement an alternative way
@@ -185,7 +185,7 @@ const DefaultValidDuration = time.Hour * 24 * 2
 // DefaultCacheDuration is how long we ask the IDP to cache the SP metadata.
 const DefaultCacheDuration = time.Hour * 24 * 1
 
-// Metadata returns the service provider metadata
+// Metadata returns the service provider metadata.
 func (sp *ServiceProvider) Metadata() *EntityDescriptor {
 	validDuration := DefaultValidDuration
 	if sp.MetadataValidDuration > 0 {
@@ -197,6 +197,7 @@ func (sp *ServiceProvider) Metadata() *EntityDescriptor {
 	validUntil := TimeNow().Add(validDuration)
 
 	var keyDescriptors []KeyDescriptor
+
 	if sp.Certificate != nil {
 		certBytes := sp.Certificate.Raw
 		for _, intermediate := range sp.Intermediates {
@@ -222,6 +223,7 @@ func (sp *ServiceProvider) Metadata() *EntityDescriptor {
 				},
 			})
 		}
+
 		if len(sp.SignatureMethod) > 0 {
 			keyDescriptors = append(keyDescriptors, KeyDescriptor{
 				Use: "signing",
@@ -288,10 +290,11 @@ func (sp *ServiceProvider) MakeRedirectAuthenticationRequest(relayState string) 
 	if err != nil {
 		return nil, err
 	}
+
 	return req.Redirect(relayState, sp)
 }
 
-// Redirect returns a URL suitable for using the redirect binding with the request
+// Redirect returns a URL suitable for using the redirect binding with the request.
 func (r *AuthnRequest) Redirect(relayState string, sp *ServiceProvider) (*url.URL, error) {
 	return redirectURL(r.Destination, "SAMLRequest", r.Element(), relayState, sp)
 }
@@ -300,12 +303,14 @@ func (r *AuthnRequest) Redirect(relayState string, sp *ServiceProvider) (*url.UR
 // query if the service provider has a signature method, as SAMLBind §3.4.4.1 describes.
 func redirectURL(destination, parameter string, message *etree.Element, relayState string, sp *ServiceProvider) (*url.URL, error) {
 	var signingContext *dsig.SigningContext
+
 	if sp != nil && len(sp.SignatureMethod) > 0 {
 		var err error
 		if signingContext, err = GetSigningContext(sp); err != nil {
 			return nil, err
 		}
 	}
+
 	return redirectURLWithContext(destination, parameter, message, relayState, signingContext)
 }
 
@@ -313,16 +318,20 @@ func redirectURL(destination, parameter string, message *etree.Element, relaySta
 // the query with signingContext unless it is nil.
 func redirectURLWithContext(destination, parameter string, message *etree.Element, relayState string, signingContext *dsig.SigningContext) (*url.URL, error) {
 	var encoded strings.Builder
+
 	base64Writer := base64.NewEncoder(base64.StdEncoding, &encoded)
 	compressedWriter, _ := flate.NewWriter(base64Writer, 9)
 	doc := etree.NewDocument()
 	doc.SetRoot(message)
+
 	if _, err := doc.WriteTo(compressedWriter); err != nil {
 		return nil, err
 	}
+
 	if err := compressedWriter.Close(); err != nil {
 		return nil, err
 	}
+
 	if err := base64Writer.Close(); err != nil {
 		return nil, err
 	}
@@ -338,25 +347,29 @@ func redirectURLWithContext(destination, parameter string, message *etree.Elemen
 	if relayState != "" {
 		query += "&RelayState=" + url.QueryEscape(relayState)
 	}
+
 	if signingContext != nil {
 		query += "&SigAlg=" + url.QueryEscape(signingContext.GetSignatureMethodIdentifier())
+
 		sig, err := signingContext.SignString(query)
 		if err != nil {
 			return nil, err
 		}
+
 		query += "&Signature=" + url.QueryEscape(base64.StdEncoding.EncodeToString(sig))
 	}
 
 	if rv.RawQuery != "" {
 		query = rv.RawQuery + "&" + query
 	}
+
 	rv.RawQuery = query
 
 	return rv, nil
 }
 
 // GetSSOBindingLocation returns URL for the IDP's Single Sign On Service binding
-// of the specified type (HTTPRedirectBinding or HTTPPostBinding)
+// of the specified type (HTTPRedirectBinding or HTTPPostBinding).
 func (sp *ServiceProvider) GetSSOBindingLocation(binding string) string {
 	for _, idpSSODescriptor := range sp.IDPMetadata.IDPSSODescriptors {
 		for _, singleSignOnService := range idpSSODescriptor.SingleSignOnServices {
@@ -365,11 +378,12 @@ func (sp *ServiceProvider) GetSSOBindingLocation(binding string) string {
 			}
 		}
 	}
+
 	return ""
 }
 
 // GetArtifactBindingLocation returns URL for the IDP's Artifact binding of the
-// specified type
+// specified type.
 func (sp *ServiceProvider) GetArtifactBindingLocation(binding string) string {
 	for _, idpSSODescriptor := range sp.IDPMetadata.IDPSSODescriptors {
 		for _, artifactResolutionService := range idpSSODescriptor.ArtifactResolutionServices {
@@ -378,11 +392,12 @@ func (sp *ServiceProvider) GetArtifactBindingLocation(binding string) string {
 			}
 		}
 	}
+
 	return ""
 }
 
 // GetSLOBindingLocation returns URL for the IDP's Single Log Out Service binding
-// of the specified type (HTTPRedirectBinding or HTTPPostBinding)
+// of the specified type (HTTPRedirectBinding or HTTPPostBinding).
 func (sp *ServiceProvider) GetSLOBindingLocation(binding string) string {
 	for _, idpSSODescriptor := range sp.IDPMetadata.IDPSSODescriptors {
 		for _, singleLogoutService := range idpSSODescriptor.SingleLogoutServices {
@@ -391,6 +406,7 @@ func (sp *ServiceProvider) GetSLOBindingLocation(binding string) string {
 			}
 		}
 	}
+
 	return ""
 }
 
@@ -400,7 +416,7 @@ func (sp *ServiceProvider) getIDPSigningCerts() ([]*x509.Certificate, error) {
 	var certStrs []string
 
 	// We need to include non-empty certs where the "use" attribute is
-	// either set to "signing" or is missing
+	// either set to "signing" or is missing.
 	for _, idpSSODescriptor := range sp.IDPMetadata.IDPSSODescriptors {
 		for _, keyDescriptor := range idpSSODescriptor.KeyDescriptors {
 			if len(keyDescriptor.KeyInfo.X509Data.X509Certificates) != 0 {
@@ -420,10 +436,11 @@ func (sp *ServiceProvider) getIDPSigningCerts() ([]*x509.Certificate, error) {
 
 	certs := make([]*x509.Certificate, len(certStrs))
 
-	// cleanup whitespace
+	// cleanup whitespace.
 	regex := regexp.MustCompile(`\s+`)
 	for i, certStr := range certStrs {
 		certStr = regex.ReplaceAllString(certStr, "")
+
 		certBytes, err := base64.StdEncoding.DecodeString(certStr)
 		if err != nil {
 			return nil, fmt.Errorf("cannot parse certificate: %s", err)
@@ -433,6 +450,7 @@ func (sp *ServiceProvider) getIDPSigningCerts() ([]*x509.Certificate, error) {
 		if err != nil {
 			return nil, err
 		}
+
 		certs[i] = parsedCert
 	}
 
@@ -444,6 +462,7 @@ func (sp *ServiceProvider) getCertBasedOnFingerprint(el *etree.Element) ([]*x509
 	if x509CertEl == nil {
 		return nil, fmt.Errorf("cannot validate signature on %s: no certificate present", el.Tag)
 	}
+
 	if len(x509CertEl.Child) != 1 {
 		return nil, fmt.Errorf("cannot validate signature on %s: x509 cert el child len != 1: %d", el.Tag, len(x509CertEl.Child))
 	}
@@ -468,13 +487,13 @@ func (sp *ServiceProvider) getCertBasedOnFingerprint(el *etree.Element) ([]*x509
 	}
 
 	return []*x509.Certificate{cert}, nil
-
 }
 
 func parseCert(x509Data string) (*x509.Certificate, error) {
-	// cleanup whitespace
+	// cleanup whitespace.
 	regex := regexp.MustCompile(`\s+`)
 	certStr := regex.ReplaceAllString(x509Data, "")
+
 	certBytes, err := base64.StdEncoding.DecodeString(certStr)
 	if err != nil {
 		return nil, fmt.Errorf("parse cert, cannot base64 decode cert string: %w", err)
@@ -503,6 +522,7 @@ func fingerprint(cert *x509.Certificate, fingerprintAlgorithm string) (string, e
 
 func fingerprintFormat(fp []byte) (string, error) {
 	var buf bytes.Buffer
+
 	for i, f := range fp {
 		if i > 0 {
 			_, err := fmt.Fprintf(&buf, ":")
@@ -510,15 +530,17 @@ func fingerprintFormat(fp []byte) (string, error) {
 				return "", fmt.Errorf("fingerprint format, print ':': %w", err)
 			}
 		}
+
 		_, err := fmt.Fprintf(&buf, "%02X", f)
 		if err != nil {
 			return "", fmt.Errorf("fingerprint format, print bytes: %w", err)
 		}
 	}
+
 	return buf.String(), nil
 }
 
-// MakeArtifactResolveRequest produces a new ArtifactResolve object to send to the idp's Artifact resolver
+// MakeArtifactResolveRequest produces a new ArtifactResolve object to send to the idp's Artifact resolver.
 func (sp *ServiceProvider) MakeArtifactResolveRequest(artifactID string) (*ArtifactResolve, error) {
 	req := ArtifactResolve{
 		ID:           fmt.Sprintf("id-%x", randomBytes(20)),
@@ -541,15 +563,14 @@ func (sp *ServiceProvider) MakeArtifactResolveRequest(artifactID string) (*Artif
 }
 
 // MakeAuthenticationRequest produces a new AuthnRequest object to send to the idpURL
-// that uses the specified binding (HTTPRedirectBinding or HTTPPostBinding)
+// that uses the specified binding (HTTPRedirectBinding or HTTPPostBinding).
 func (sp *ServiceProvider) MakeAuthenticationRequest(idpURL string, binding string, resultBinding string) (*AuthnRequest, error) {
-
 	allowCreate := true
 	nameIDFormat := sp.nameIDFormat()
 	req := AuthnRequest{
 		AssertionConsumerServiceURL: sp.AcsURL.String(),
 		Destination:                 idpURL,
-		ProtocolBinding:             resultBinding, // default binding for the response
+		ProtocolBinding:             resultBinding, // default binding for the response.
 		ID:                          fmt.Sprintf("id-%x", randomBytes(20)),
 		IssueInstant:                TimeNow(),
 		Version:                     "2.0",
@@ -567,18 +588,19 @@ func (sp *ServiceProvider) MakeAuthenticationRequest(idpURL string, binding stri
 		ForceAuthn:            sp.ForceAuthn,
 		RequestedAuthnContext: sp.RequestedAuthnContext,
 	}
-	// We don't need to sign the XML document if the IDP uses HTTP-Redirect binding
+	// We don't need to sign the XML document if the IDP uses HTTP-Redirect binding.
 	if len(sp.SignatureMethod) > 0 && binding == HTTPPostBinding {
 		if err := sp.SignAuthnRequest(&req); err != nil {
 			return nil, err
 		}
 	}
+
 	return &req, nil
 }
 
-// GetSigningContext returns a dsig.SigningContext initialized based on the Service Provider's configuration
+// GetSigningContext returns a dsig.SigningContext initialized based on the Service Provider's configuration.
 func GetSigningContext(sp *ServiceProvider) (*dsig.SigningContext, error) {
-	// TODO: add intermediates for SP
+	// TODO: add intermediates for SP.
 	chain := [][]byte{sp.Certificate.Raw}
 
 	var public crypto.PublicKey
@@ -610,6 +632,7 @@ func GetSigningContext(sp *ServiceProvider) (*dsig.SigningContext, error) {
 	if err != nil {
 		return nil, err
 	}
+
 	signingContext.Canonicalizer = dsig.MakeC14N10ExclusiveCanonicalizerWithPrefixList(canonicalizerPrefixList)
 	if err := signingContext.SetSignatureMethod(sp.SignatureMethod); err != nil {
 		return nil, err
@@ -624,6 +647,7 @@ func (sp *ServiceProvider) SignArtifactResolve(req *ArtifactResolve) error {
 	if err != nil {
 		return err
 	}
+
 	assertionEl := req.Element()
 
 	signedRequestEl, err := signingContext.SignEnveloped(assertionEl)
@@ -633,16 +657,17 @@ func (sp *ServiceProvider) SignArtifactResolve(req *ArtifactResolve) error {
 
 	sigEl := signedRequestEl.Child[len(signedRequestEl.Child)-1]
 	req.Signature = sigEl.(*etree.Element)
+
 	return nil
 }
 
 // SignAuthnRequest adds the `Signature` element to the `AuthnRequest`.
 func (sp *ServiceProvider) SignAuthnRequest(req *AuthnRequest) error {
-
 	signingContext, err := GetSigningContext(sp)
 	if err != nil {
 		return err
 	}
+
 	assertionEl := req.Element()
 
 	signedRequestEl, err := signingContext.SignEnveloped(assertionEl)
@@ -652,6 +677,7 @@ func (sp *ServiceProvider) SignAuthnRequest(req *AuthnRequest) error {
 
 	sigEl := signedRequestEl.Child[len(signedRequestEl.Child)-1]
 	req.Signature = sigEl.(*etree.Element)
+
 	return nil
 }
 
@@ -663,17 +689,20 @@ func (sp *ServiceProvider) MakePostAuthenticationRequest(relayState string) ([]b
 	if err != nil {
 		return nil, err
 	}
+
 	return req.Post(relayState), nil
 }
 
-// Post returns an HTML form suitable for using the HTTP-POST binding with the request
+// Post returns an HTML form suitable for using the HTTP-POST binding with the request.
 func (r *AuthnRequest) Post(relayState string) []byte {
 	doc := etree.NewDocument()
 	doc.SetRoot(r.Element())
+
 	reqBuf, err := doc.WriteToBytes()
 	if err != nil {
 		panic(err)
 	}
+
 	encodedReqBuf := base64.StdEncoding.EncodeToString(reqBuf)
 
 	tmpl := template.Must(template.New("saml-post-form").Parse(`` +
@@ -702,7 +731,7 @@ func (r *AuthnRequest) Post(relayState string) []byte {
 	return rv.Bytes()
 }
 
-// AssertionAttributes is a list of AssertionAttribute
+// AssertionAttributes is a list of AssertionAttribute.
 type AssertionAttributes []AssertionAttribute
 
 // Get returns the assertion attribute whose Name or FriendlyName
@@ -712,10 +741,12 @@ func (aa AssertionAttributes) Get(name string) *AssertionAttribute {
 		if attr.Name == name {
 			return &attr
 		}
+
 		if attr.FriendlyName == name {
 			return &attr
 		}
 	}
+
 	return nil
 }
 
@@ -737,6 +768,8 @@ type InvalidResponseError struct {
 	Now        time.Time
 }
 
+// Error implements the error interface. The private error is deliberately not
+// disclosed.
 func (ivr *InvalidResponseError) Error() string {
 	return "Authentication failed"
 }
@@ -747,6 +780,7 @@ type ErrBadStatus struct {
 	Status string
 }
 
+// Error implements the error interface.
 func (e ErrBadStatus) Error() string {
 	return e.Status
 }
@@ -757,6 +791,7 @@ func (sp *ServiceProvider) ParseResponse(req *http.Request, possibleRequestIDs [
 	if artifactID := req.Form.Get("SAMLart"); artifactID != "" {
 		return sp.handleArtifactRequest(req.Context(), artifactID, possibleRequestIDs)
 	}
+
 	return sp.parseResponseHTTP(req, possibleRequestIDs)
 }
 
@@ -764,7 +799,7 @@ func (sp *ServiceProvider) ParseResponse(req *http.Request, possibleRequestIDs [
 var (
 	// maxArtifactResponseSize limits the size of a response to an ArtifactResolve.
 	maxArtifactResponseSize int64 = 10 * 1024 * 1024
-	// defaultArtifactResolutionTimeout is used if neither HTTPClient nor http.DefaultClient has a timeout.
+	// defaultArtifactResolutionTimeout is used if neither HTTPClient nor [http.DefaultClient] has a timeout.
 	defaultArtifactResolutionTimeout = 30 * time.Second
 )
 
@@ -789,12 +824,14 @@ func (sp *ServiceProvider) handleArtifactRequest(ctx context.Context, artifactID
 		retErr.PrivateErr = err
 		return nil, retErr
 	}
+
 	req.Header.Set("Content-Type", "text/xml")
 
 	httpClient := *http.DefaultClient
 	if httpClient.Timeout == 0 {
 		httpClient.Timeout = defaultArtifactResolutionTimeout
 	}
+
 	if sp.HTTPClient != nil {
 		httpClient = *sp.HTTPClient
 	}
@@ -802,33 +839,40 @@ func (sp *ServiceProvider) handleArtifactRequest(ctx context.Context, artifactID
 	httpClient.CheckRedirect = func(*http.Request, []*http.Request) error {
 		return http.ErrUseLastResponse
 	}
+
 	response, err := httpClient.Do(req) //nolint:gosec // G704: the URL is from the IdP metadata, redirects are not followed, and the artifact is only in the body.
 	if err != nil {
 		retErr.PrivateErr = fmt.Errorf("cannot resolve artifact: %s", err)
 		return nil, retErr
 	}
+
 	defer func() {
 		if err := response.Body.Close(); err != nil {
 			logger.DefaultLogger.Printf("Error while closing response body during artifact resolution: %v", err)
 		}
 	}()
+
 	if response.StatusCode != 200 {
 		retErr.PrivateErr = fmt.Errorf("Error during artifact resolution: HTTP status %d (%s)", response.StatusCode, response.Status)
 		return nil, retErr
 	}
+
 	responseBody, err := io.ReadAll(io.LimitReader(response.Body, maxArtifactResponseSize+1))
 	if err != nil {
 		retErr.PrivateErr = fmt.Errorf("Error during artifact resolution: %s", err)
 		return nil, retErr
 	}
+
 	if int64(len(responseBody)) > maxArtifactResponseSize {
 		retErr.PrivateErr = fmt.Errorf("Error during artifact resolution: response too large, the limit is %d bytes", maxArtifactResponseSize)
 		return nil, retErr
 	}
+
 	assertion, err := sp.ParseXMLArtifactResponse(responseBody, possibleRequestIDs, artifactResolveRequest.ID, *req.URL)
 	if err != nil {
 		return nil, err
 	}
+
 	return assertion, nil
 }
 
@@ -847,6 +891,7 @@ func (sp *ServiceProvider) parseResponseHTTP(req *http.Request, possibleRequestI
 	if err != nil {
 		return nil, err
 	}
+
 	return assertion, nil
 }
 
@@ -867,7 +912,7 @@ func (sp *ServiceProvider) ParseXMLArtifactResponse(soapResponseXML []byte, poss
 		Now:      now,
 	}
 
-	// ensure that the response XML is well-formed before we parse it
+	// ensure that the response XML is well-formed before we parse it.
 	if err := xrv.Validate(bytes.NewReader(soapResponseXML)); err != nil {
 		retErr.PrivateErr = fmt.Errorf("invalid xml: %s", err)
 		return nil, retErr
@@ -878,10 +923,12 @@ func (sp *ServiceProvider) ParseXMLArtifactResponse(soapResponseXML []byte, poss
 		retErr.PrivateErr = fmt.Errorf("cannot unmarshal response: %s", err)
 		return nil, retErr
 	}
+
 	if doc.Root() == nil {
 		retErr.PrivateErr = errors.New("invalid xml: no root")
 		return nil, retErr
 	}
+
 	if doc.Root().NamespaceURI() != "http://schemas.xmlsoap.org/soap/envelope/" ||
 		doc.Root().Tag != "Envelope" {
 		retErr.PrivateErr = fmt.Errorf("expected a SOAP Envelope")
@@ -921,18 +968,22 @@ func (sp *ServiceProvider) parseArtifactResponse(artifactResponseEl *etree.Eleme
 			retErr.PrivateErr = err
 			return nil, retErr
 		}
+
 		if artifactResponse.InResponseTo != artifactRequestID {
 			retErr.PrivateErr = fmt.Errorf("`InResponseTo` does not match the artifact request ID (expected %s)", artifactRequestID)
 			return nil, retErr
 		}
+
 		if artifactResponse.IssueInstant.Add(MaxIssueDelay).Before(now) {
 			retErr.PrivateErr = fmt.Errorf("response IssueInstant expired at %s", artifactResponse.IssueInstant.Add(MaxIssueDelay))
 			return nil, retErr
 		}
+
 		if artifactResponse.Issuer != nil && artifactResponse.Issuer.Value != sp.IDPMetadata.EntityID {
 			retErr.PrivateErr = fmt.Errorf("response Issuer does not match the IDP metadata (expected %q)", sp.IDPMetadata.EntityID)
 			return nil, retErr
 		}
+
 		if artifactResponse.Status.StatusCode.Value != StatusSuccess {
 			retErr.PrivateErr = ErrBadStatus{Status: artifactResponse.Status.StatusCode.Value}
 			return nil, retErr
@@ -940,6 +991,7 @@ func (sp *ServiceProvider) parseArtifactResponse(artifactResponseEl *etree.Eleme
 	}
 
 	var signatureRequirement signatureRequirement
+
 	switch sigErr {
 	case nil:
 		signatureRequirement = signatureNotRequired
@@ -978,13 +1030,15 @@ func (sp *ServiceProvider) parseArtifactResponse(artifactResponseEl *etree.Eleme
 // information, the Error() method returns a static string.
 func (sp *ServiceProvider) ParseXMLResponse(decodedResponseXML []byte, possibleRequestIDs []string, currentURL url.URL) (*Assertion, error) {
 	now := TimeNow()
+
 	var err error
+
 	retErr := &InvalidResponseError{
 		Now:      now,
 		Response: string(decodedResponseXML),
 	}
 
-	// ensure that the response XML is well-formed before we parse it
+	// ensure that the response XML is well-formed before we parse it.
 	if err := xrv.Validate(bytes.NewReader(decodedResponseXML)); err != nil {
 		retErr.PrivateErr = fmt.Errorf("invalid xml: %s", err)
 		return nil, retErr
@@ -995,6 +1049,7 @@ func (sp *ServiceProvider) ParseXMLResponse(decodedResponseXML []byte, possibleR
 		retErr.PrivateErr = err
 		return nil, retErr
 	}
+
 	if doc.Root() == nil {
 		retErr.PrivateErr = errors.New("invalid xml: no root")
 		return nil, retErr
@@ -1022,15 +1077,22 @@ const (
 // This function handles decrypting the message, verifying the digital
 // signature on the assertion, and verifying that the specified conditions
 // and properties are met.
+//
+//nolint:gocyclo // Complexity is inherent to the specification being implemented.
 func (sp *ServiceProvider) parseResponse(responseEl *etree.Element, possibleRequestIDs []string, now time.Time, signatureRequirement signatureRequirement, currentURL url.URL) (*Assertion, error) {
-	var responseSignatureErr error
-	var responseHasSignature bool
+	var (
+		responseSignatureErr error
+		responseHasSignature bool
+	)
+
 	if signatureRequirement == signatureRequired {
 		var verifiedEl *etree.Element
+
 		verifiedEl, responseSignatureErr = sp.verifySignature(responseEl)
 		if responseSignatureErr != errSignatureElementNotPresent {
 			responseHasSignature = true
 		}
+
 		if responseSignatureErr == nil {
 			responseEl = verifiedEl
 		}
@@ -1040,7 +1102,7 @@ func (sp *ServiceProvider) parseResponse(responseEl *etree.Element, possibleRequ
 		// TODO(ross): adjust the test cases so that we can abort here if the Response signature is invalid.
 	}
 
-	// validate request attributes
+	// validate request attributes.
 	{
 		var response Response
 		if err := unmarshalElement(responseEl, &response); err != nil {
@@ -1064,9 +1126,11 @@ func (sp *ServiceProvider) parseResponse(responseEl *etree.Element, possibleRequ
 		if response.IssueInstant.Add(MaxIssueDelay).Before(now) {
 			return nil, fmt.Errorf("response IssueInstant expired at %s", response.IssueInstant.Add(MaxIssueDelay))
 		}
+
 		if response.Issuer != nil && response.Issuer.Value != sp.IDPMetadata.EntityID {
 			return nil, fmt.Errorf("response Issuer does not match the IDP metadata (expected %q)", sp.IDPMetadata.EntityID)
 		}
+
 		if response.Status.StatusCode.Value != StatusSuccess {
 			return nil, ErrBadStatus{Status: response.Status.StatusCode.Value}
 		}
@@ -1075,47 +1139,53 @@ func (sp *ServiceProvider) parseResponse(responseEl *etree.Element, possibleRequ
 	if signatureRequirement == signatureRequired {
 		switch responseSignatureErr {
 		case nil:
-			// since the request has a signature, none of the Assertions need one
+			// since the request has a signature, none of the Assertions need one.
 			signatureRequirement = signatureNotRequired
 		case errSignatureElementNotPresent:
-			// the request has no signature, so assertions must be signed
-			signatureRequirement = signatureRequired // nop
+			// the request has no signature, so assertions must be signed.
+			signatureRequirement = signatureRequired // nop.
 		default:
 			return nil, responseSignatureErr
 		}
 	}
 
-	var errs []error
-	var assertions []Assertion
+	var (
+		errs       []error
+		assertions []Assertion
+	)
 
-	// look for encrypted assertions
+	// look for encrypted assertions.
 	{
 		encryptedAssertionEls, err := findChildren(responseEl, "urn:oasis:names:tc:SAML:2.0:assertion", "EncryptedAssertion")
 		if err != nil {
 			return nil, err
 		}
+
 		for _, encryptedAssertionEl := range encryptedAssertionEls {
 			assertion, err := sp.parseEncryptedAssertion(encryptedAssertionEl, possibleRequestIDs, now, signatureRequirement)
 			if err != nil {
 				errs = append(errs, err)
 				continue
 			}
+
 			assertions = append(assertions, *assertion)
 		}
 	}
 
-	// look for plaintext assertions
+	// look for plaintext assertions.
 	{
 		assertionEls, err := findChildren(responseEl, "urn:oasis:names:tc:SAML:2.0:assertion", "Assertion")
 		if err != nil {
 			return nil, err
 		}
+
 		for _, assertionEl := range assertionEls {
 			assertion, err := sp.parseAssertion(assertionEl, possibleRequestIDs, now, signatureRequirement)
 			if err != nil {
 				errs = append(errs, err)
 				continue
 			}
+
 			assertions = append(assertions, *assertion)
 		}
 	}
@@ -1124,6 +1194,7 @@ func (sp *ServiceProvider) parseResponse(responseEl *etree.Element, possibleRequ
 		if len(errs) > 0 {
 			return nil, errs[0]
 		}
+
 		return nil, fmt.Errorf("expected at least one valid Assertion, none found")
 	}
 
@@ -1149,9 +1220,11 @@ func (sp *ServiceProvider) validateRequestID(response Response, possibleRequestI
 			}
 		}
 	}
+
 	if !requestIDvalid {
 		return fmt.Errorf("`InResponseTo` does not match any of the possible request IDs (expected %v)", possibleRequestIDs)
 	}
+
 	return nil
 }
 
@@ -1160,6 +1233,7 @@ func (sp *ServiceProvider) parseEncryptedAssertion(encryptedAssertionEl *etree.E
 	if err != nil {
 		return nil, fmt.Errorf("failed to decrypt EncryptedAssertion: %v", err)
 	}
+
 	return sp.parseAssertion(assertionEl, possibleRequestIDs, now, signatureRequirement)
 }
 
@@ -1170,9 +1244,11 @@ func (sp *ServiceProvider) decryptElement(encryptedEl *etree.Element) (*etree.El
 	}
 
 	var key interface{} = sp.Key
+
 	keyEl := encryptedEl.FindElement("./EncryptedKey")
 	if keyEl != nil {
 		var err error
+
 		key, err = xmlenc.Decrypt(sp.Key, keyEl)
 		if err != nil {
 			return nil, fmt.Errorf("failed to decrypt key from response: %s", err)
@@ -1192,6 +1268,7 @@ func (sp *ServiceProvider) decryptElement(encryptedEl *etree.Element) (*etree.El
 	if err := doc.ReadFromBytes(plaintextEl); err != nil {
 		return nil, fmt.Errorf("cannot parse plaintext response %v", err)
 	}
+
 	return doc.Root(), nil
 }
 
@@ -1201,10 +1278,11 @@ func (sp *ServiceProvider) parseAssertion(assertionEl *etree.Element, possibleRe
 		if sigErr != nil {
 			return nil, sigErr
 		}
+
 		assertionEl = verifiedEl
 	}
 
-	// parse the assertion we just validated
+	// parse the assertion we just validated.
 	var assertion Assertion
 	if err := unmarshalElement(assertionEl, &assertion); err != nil {
 		return nil, err
@@ -1225,16 +1303,20 @@ func (sp *ServiceProvider) validateAssertion(assertion *Assertion, possibleReque
 	if assertion.IssueInstant.Add(MaxIssueDelay).Before(now) {
 		return fmt.Errorf("expired on %s", assertion.IssueInstant.Add(MaxIssueDelay))
 	}
+
 	if assertion.Issuer.Value != sp.IDPMetadata.EntityID {
 		return fmt.Errorf("issuer is not %q", sp.IDPMetadata.EntityID)
 	}
+
 	if err := sp.validateSubjectConfirmations(assertion, possibleRequestIDs, now); err != nil {
 		return err
 	}
+
 	if assertion.Conditions != nil {
 		if assertion.Conditions.NotBefore.Add(-MaxClockSkew).After(now) {
 			return fmt.Errorf("assertion Conditions is not yet valid")
 		}
+
 		if assertion.Conditions.NotOnOrAfter.Add(MaxClockSkew).Before(now) {
 			return fmt.Errorf("assertion Conditions is expired")
 		}
@@ -1243,6 +1325,7 @@ func (sp *ServiceProvider) validateAssertion(assertion *Assertion, possibleReque
 	if err := sp.validateAudienceRestriction(assertion); err != nil {
 		return err
 	}
+
 	return nil
 }
 
@@ -1252,21 +1335,26 @@ func (sp *ServiceProvider) validateSubjectConfirmations(assertion *Assertion, po
 	}
 
 	var failures []string
+
 	for _, subjectConfirmation := range assertion.Subject.SubjectConfirmations {
 		if subjectConfirmation.Method != "urn:oasis:names:tc:SAML:2.0:cm:bearer" {
 			continue
 		}
+
 		err := sp.validateBearerSubjectConfirmation(subjectConfirmation, possibleRequestIDs, now)
 		if err == nil {
 			return nil
 		}
+
 		if !slices.Contains(failures, err.Error()) {
 			failures = append(failures, err.Error())
 		}
 	}
+
 	if len(failures) == 0 {
 		return fmt.Errorf("assertion Subject does not contain a bearer SubjectConfirmation")
 	}
+
 	return errors.New(strings.Join(failures, "; "))
 }
 
@@ -1275,17 +1363,21 @@ func (sp *ServiceProvider) validateBearerSubjectConfirmation(subjectConfirmation
 	if data == nil {
 		return fmt.Errorf("assertion SubjectConfirmation does not contain SubjectConfirmationData")
 	}
+
 	if !sp.AllowIDPInitiated || data.InResponseTo != "" {
 		if !slices.Contains(possibleRequestIDs, data.InResponseTo) {
 			return fmt.Errorf("assertion SubjectConfirmation one of the possible request IDs (%v)", possibleRequestIDs)
 		}
 	}
+
 	if data.Recipient != sp.AcsURL.String() {
 		return fmt.Errorf("assertion SubjectConfirmation Recipient is not %s", sp.AcsURL.String())
 	}
+
 	if data.NotOnOrAfter.Add(MaxClockSkew).Before(now) {
 		return fmt.Errorf("assertion SubjectConfirmationData is expired")
 	}
+
 	return nil
 }
 
@@ -1294,6 +1386,7 @@ func (sp *ServiceProvider) validateAudienceRestriction(assertion *Assertion) err
 		if err := sp.ValidateAudienceRestriction(assertion); err != nil {
 			return fmt.Errorf("audience restriction validation failed: %w", err)
 		}
+
 		return nil
 	}
 
@@ -1302,17 +1395,19 @@ func (sp *ServiceProvider) validateAudienceRestriction(assertion *Assertion) err
 	}
 
 	audience := firstSet(sp.EntityID, sp.MetadataURL.String())
+
 	for _, audienceRestriction := range assertion.Conditions.AudienceRestrictions {
 		if !slices.ContainsFunc(audienceRestriction.Audiences, func(a Audience) bool { return a.Value == audience }) {
 			return fmt.Errorf("assertion Conditions AudienceRestriction does not contain %q", audience)
 		}
 	}
+
 	return nil
 }
 
 var errSignatureElementNotPresent = errors.New("signature element not present")
 
-// validateSignature returns nil iff the Signature embedded in the element is valid
+// validateSignature returns nil iff the Signature embedded in the element is valid.
 func (sp *ServiceProvider) validateSignature(el *etree.Element) error {
 	_, err := sp.verifySignature(el)
 	return err
@@ -1324,11 +1419,14 @@ func (sp *ServiceProvider) validateSignature(el *etree.Element) error {
 // canonicalization omits unused namespace declarations, while encoding/xml matches attributes against
 // xmlns:name. A SignatureVerifier doesn't return this content, so el is returned after it succeeds and
 // unmarshalElement is left to remove those declarations.
+//
+//nolint:gocyclo // Complexity is inherent to the specification being implemented.
 func (sp *ServiceProvider) verifySignature(el *etree.Element) (*etree.Element, error) {
 	sigEl, err := findChild(el, "http://www.w3.org/2000/09/xmldsig#", "Signature")
 	if err != nil {
 		return nil, err
 	}
+
 	if sigEl == nil {
 		return nil, errSignatureElementNotPresent
 	}
@@ -1340,19 +1438,23 @@ func (sp *ServiceProvider) verifySignature(el *etree.Element) (*etree.Element, e
 			return nil, fmt.Errorf("cannot validate signature on %s: %v", el.Tag, err)
 		}
 	}
+
 	if sp.IDPMetadata != nil && sp.IDPCertificateFingerprint != nil && sp.IDPCertificateFingerprintAlgorithm != nil && sp.IDPCertificate == nil {
 		certs, err = sp.getCertBasedOnFingerprint(el)
 		if err != nil {
 			return nil, fmt.Errorf("cannot validate signature on %s: %v", el.Tag, err)
 		}
 	}
+
 	if sp.IDPMetadata != nil && sp.IDPCertificateFingerprint == nil && sp.IDPCertificateFingerprintAlgorithm == nil && sp.IDPCertificate != nil {
 		cert, err := parseCert(*sp.IDPCertificate)
 		if err != nil {
 			return nil, fmt.Errorf("cannot validate signature on %s: %w", el.Tag, err)
 		}
+
 		certs = append(certs, cert)
 	}
+
 	if len(certs) == 0 {
 		return nil, fmt.Errorf("cannot validate signature on %s: saml config not set up properly, specify either idp metadata url, fingerprints or actual certificate", el.Tag)
 	}
@@ -1366,6 +1468,7 @@ func (sp *ServiceProvider) verifySignature(el *etree.Element) (*etree.Element, e
 		if err := sp.SignatureVerifier.VerifySignature(validationContext, detached); err != nil {
 			return nil, err
 		}
+
 		return el, nil
 	}
 
@@ -1385,6 +1488,7 @@ func signatureValidationContext(el *etree.Element, certs []*x509.Certificate) (*
 	}
 
 	validationContext := dsig.NewDefaultValidationContext(&certificateStore)
+
 	validationContext.IdAttribute = "ID"
 	if Clock != nil {
 		validationContext.Clock = Clock
@@ -1411,10 +1515,12 @@ func signatureValidationContext(el *etree.Element, certs []*x509.Certificate) (*
 	if err != nil {
 		return nil, nil, fmt.Errorf("cannot validate signature on %s: %v", el.Tag, err)
 	}
+
 	ctx, err = ctx.SubContext(el)
 	if err != nil {
 		return nil, nil, fmt.Errorf("cannot validate signature on %s: %v", el.Tag, err)
 	}
+
 	detached, err := etreeutils.NSDetatch(ctx, el)
 	if err != nil {
 		return nil, nil, fmt.Errorf("cannot validate signature on %s: %v", el.Tag, err)
@@ -1431,6 +1537,7 @@ func (sp *ServiceProvider) SignLogoutRequest(req *LogoutRequest) error {
 	}
 
 	assertionEl := req.Element()
+
 	signedRequestEl, err := signingContext.SignEnveloped(assertionEl)
 	if err != nil {
 		return err
@@ -1438,12 +1545,12 @@ func (sp *ServiceProvider) SignLogoutRequest(req *LogoutRequest) error {
 
 	sigEl := signedRequestEl.Child[len(signedRequestEl.Child)-1]
 	req.Signature = sigEl.(*etree.Element)
+
 	return nil
 }
 
 // MakeLogoutRequest produces a new LogoutRequest object for idpURL.
 func (sp *ServiceProvider) MakeLogoutRequest(idpURL, nameID string) (*LogoutRequest, error) {
-
 	req := LogoutRequest{
 		ID:           fmt.Sprintf("id-%x", randomBytes(20)),
 		IssueInstant: TimeNow(),
@@ -1465,6 +1572,7 @@ func (sp *ServiceProvider) MakeLogoutRequest(idpURL, nameID string) (*LogoutRequ
 			return nil, err
 		}
 	}
+
 	return &req, nil
 }
 
@@ -1476,6 +1584,7 @@ func (sp *ServiceProvider) MakeRedirectLogoutRequest(nameID, relayState string) 
 	if err != nil {
 		return nil, err
 	}
+
 	return req.Redirect(relayState, sp)
 }
 
@@ -1485,6 +1594,7 @@ func (r *LogoutRequest) Redirect(relayState string, sp *ServiceProvider) (*url.U
 	// SAMLBind §3.4.4.1 requires any signature on the message to be removed, as it is signed in the query.
 	unsigned := *r
 	unsigned.Signature = nil
+
 	return redirectURL(r.Destination, "SAMLRequest", unsigned.Element(), relayState, sp)
 }
 
@@ -1496,17 +1606,20 @@ func (sp *ServiceProvider) MakePostLogoutRequest(nameID, relayState string) ([]b
 	if err != nil {
 		return nil, err
 	}
+
 	return req.Post(relayState), nil
 }
 
-// Post returns an HTML form suitable for using the HTTP-POST binding with the request
+// Post returns an HTML form suitable for using the HTTP-POST binding with the request.
 func (r *LogoutRequest) Post(relayState string) []byte {
 	doc := etree.NewDocument()
 	doc.SetRoot(r.Element())
+
 	reqBuf, err := doc.WriteToBytes()
 	if err != nil {
 		panic(err)
 	}
+
 	encodedReqBuf := base64.StdEncoding.EncodeToString(reqBuf)
 
 	tmpl := template.Must(template.New("saml-post-form").Parse(`` +
@@ -1559,6 +1672,7 @@ func (sp *ServiceProvider) MakeLogoutResponse(idpURL, logoutRequestID string) (*
 			return nil, err
 		}
 	}
+
 	return &response, nil
 }
 
@@ -1570,6 +1684,7 @@ func (sp *ServiceProvider) MakeRedirectLogoutResponse(logoutRequestID, relayStat
 	if err != nil {
 		return nil, err
 	}
+
 	return resp.Redirect(relayState, sp)
 }
 
@@ -1579,6 +1694,7 @@ func (r *LogoutResponse) Redirect(relayState string, sp *ServiceProvider) (*url.
 	// SAMLBind §3.4.4.1 requires any signature on the message to be removed, as it is signed in the query.
 	unsigned := *r
 	unsigned.Signature = nil
+
 	return redirectURL(r.Destination, "SAMLResponse", unsigned.Element(), relayState, sp)
 }
 
@@ -1590,6 +1706,7 @@ func (sp *ServiceProvider) MakePostLogoutResponse(logoutRequestID, relayState st
 	if err != nil {
 		return nil, err
 	}
+
 	return resp.Post(relayState), nil
 }
 
@@ -1597,10 +1714,12 @@ func (sp *ServiceProvider) MakePostLogoutResponse(logoutRequestID, relayState st
 func (r *LogoutResponse) Post(relayState string) []byte {
 	doc := etree.NewDocument()
 	doc.SetRoot(r.Element())
+
 	reqBuf, err := doc.WriteToBytes()
 	if err != nil {
 		panic(err)
 	}
+
 	encodedReqBuf := base64.StdEncoding.EncodeToString(reqBuf)
 
 	tmpl := template.Must(template.New("saml-post-form").Parse(`` +
@@ -1637,6 +1756,7 @@ func (sp *ServiceProvider) SignLogoutResponse(resp *LogoutResponse) error {
 	}
 
 	assertionEl := resp.Element()
+
 	signedRequestEl, err := signingContext.SignEnveloped(assertionEl)
 	if err != nil {
 		return err
@@ -1644,11 +1764,13 @@ func (sp *ServiceProvider) SignLogoutResponse(resp *LogoutResponse) error {
 
 	sigEl := signedRequestEl.Child[len(signedRequestEl.Child)-1]
 	resp.Signature = sigEl.(*etree.Element)
+
 	return nil
 }
 
 func (sp *ServiceProvider) nameIDFormat() string {
 	var nameIDFormat string
+
 	switch sp.AuthnNameIDFormat {
 	case "":
 		// To maintain library back-compat, use "transient" if unset.
@@ -1658,6 +1780,7 @@ func (sp *ServiceProvider) nameIDFormat() string {
 	default:
 		nameIDFormat = string(sp.AuthnNameIDFormat)
 	}
+
 	return nameIDFormat
 }
 
@@ -1668,6 +1791,7 @@ func (sp *ServiceProvider) ValidateLogoutResponseRequest(req *http.Request, poss
 	if err != nil {
 		return &InvalidResponseError{Now: TimeNow(), PrivateErr: err}
 	}
+
 	if parameters["SAMLResponse"] != "" {
 		return sp.ValidateLogoutResponseRedirect(req.URL, possibleRequestIDs)
 	}
@@ -1695,9 +1819,10 @@ func (sp *ServiceProvider) ValidateLogoutResponseForm(postFormData string, possi
 		retErr.PrivateErr = fmt.Errorf("unable to parse base64: %s", err)
 		return retErr
 	}
+
 	retErr.Response = string(rawResponseBuf)
 
-	// TODO(ross): add test case for this (SLO does not have tests right now)
+	// TODO(ross): add test case for this (SLO does not have tests right now).
 	if err := xrv.Validate(bytes.NewReader(rawResponseBuf)); err != nil {
 		return fmt.Errorf("response contains invalid XML: %s", err)
 	}
@@ -1719,6 +1844,7 @@ func (sp *ServiceProvider) ValidateLogoutResponseForm(postFormData string, possi
 		retErr.PrivateErr = err
 		return retErr
 	}
+
 	return sp.validateLogoutResponse(&resp, possibleRequestIDs)
 }
 
@@ -1730,7 +1856,7 @@ func (sp *ServiceProvider) ValidateLogoutResponseForm(postFormData string, possi
 // embedded in the message, which that section does not allow but some identity providers send.
 //
 // URL Binding appears to be gzip / flate encoded
-// See https://www.oasis-open.org/committees/download.php/20645/sstc-saml-tech-overview-2%200-draft-10.pdf  6.6
+// See https://www.oasis-open.org/committees/download.php/20645/sstc-saml-tech-overview-2%200-draft-10.pdf  6.6.
 func (sp *ServiceProvider) ValidateLogoutResponseRedirect(u *url.URL, possibleRequestIDs []string) error {
 	retErr := &InvalidResponseError{
 		Now: TimeNow(),
@@ -1744,6 +1870,7 @@ func (sp *ServiceProvider) ValidateLogoutResponseRedirect(u *url.URL, possibleRe
 
 	_, hasSignature := parameters["Signature"]
 	_, hasAlgorithm := parameters["SigAlg"]
+
 	signedInQuery := hasSignature || hasAlgorithm
 	if signedInQuery {
 		certificates, err := sp.redirectSigningCertificates()
@@ -1751,6 +1878,7 @@ func (sp *ServiceProvider) ValidateLogoutResponseRedirect(u *url.URL, possibleRe
 			retErr.PrivateErr = err
 			return retErr
 		}
+
 		if err := verifyRedirectSignature(u.RawQuery, "SAMLResponse", certificates); err != nil {
 			retErr.PrivateErr = err
 			return retErr
@@ -1768,6 +1896,7 @@ func (sp *ServiceProvider) ValidateLogoutResponseRedirect(u *url.URL, possibleRe
 		retErr.PrivateErr = fmt.Errorf("unable to parse base64: %s", err)
 		return retErr
 	}
+
 	retErr.Response = string(rawResponseBuf)
 
 	gr, err := io.ReadAll(newSaferFlateReader(bytes.NewBuffer(rawResponseBuf)))
@@ -1801,11 +1930,14 @@ func (sp *ServiceProvider) ValidateLogoutResponseRedirect(u *url.URL, possibleRe
 		retErr.PrivateErr = err
 		return retErr
 	}
+
 	return sp.validateLogoutResponse(&resp, possibleRequestIDs)
 }
 
 // redirectSigningCertificates returns the certificates which can verify a signature in the query. A
 // fingerprint selects from the certificates in the metadata, because a query has no certificate.
+//
+//nolint:gocyclo // Complexity is inherent to the specification being implemented.
 func (sp *ServiceProvider) redirectSigningCertificates() ([]*x509.Certificate, error) {
 	hasFingerprint := sp.IDPCertificateFingerprint != nil && sp.IDPCertificateFingerprintAlgorithm != nil
 	switch {
@@ -1816,6 +1948,7 @@ func (sp *ServiceProvider) redirectSigningCertificates() ([]*x509.Certificate, e
 		if err != nil {
 			return nil, fmt.Errorf("cannot validate signature: %w", err)
 		}
+
 		return []*x509.Certificate{certificate}, nil
 	case sp.IDPCertificate == nil && sp.IDPCertificateFingerprint == nil && sp.IDPCertificateFingerprintAlgorithm == nil:
 		return sp.getIDPSigningCerts()
@@ -1824,19 +1957,23 @@ func (sp *ServiceProvider) redirectSigningCertificates() ([]*x509.Certificate, e
 		if err != nil {
 			return nil, err
 		}
+
 		matching := make([]*x509.Certificate, 0, len(certificates))
 		for _, certificate := range certificates {
 			value, err := fingerprint(certificate, *sp.IDPCertificateFingerprintAlgorithm)
 			if err != nil {
 				return nil, fmt.Errorf("cannot validate signature: %w", err)
 			}
+
 			if value == *sp.IDPCertificateFingerprint {
 				matching = append(matching, certificate)
 			}
 		}
+
 		if len(matching) == 0 {
 			return nil, errors.New("cannot validate signature: fingerprint mismatch")
 		}
+
 		return matching, nil
 	default:
 		return nil, errors.New("cannot validate signature: saml config not set up properly, specify either idp metadata url, fingerprints or actual certificate")
@@ -1853,6 +1990,7 @@ func (sp *ServiceProvider) validateLogoutResponse(resp *LogoutResponse, possible
 	if resp.IssueInstant.Add(MaxIssueDelay).Before(now) {
 		return fmt.Errorf("issueInstant expired at %s", resp.IssueInstant.Add(MaxIssueDelay))
 	}
+
 	if resp.Issuer == nil || resp.Issuer.Value != sp.IDPMetadata.EntityID {
 		return fmt.Errorf("issuer does not match the IDP metadata (expected %q)", sp.IDPMetadata.EntityID)
 	}
@@ -1860,6 +1998,7 @@ func (sp *ServiceProvider) validateLogoutResponse(resp *LogoutResponse, possible
 	if resp.InResponseTo == "" || !slices.Contains(possibleRequestIDs, resp.InResponseTo) {
 		return fmt.Errorf("`InResponseTo` does not match any of the possible request IDs (expected %v)", possibleRequestIDs)
 	}
+
 	if resp.Status.StatusCode.Value != StatusSuccess {
 		return fmt.Errorf("status code was not %s", StatusSuccess)
 	}
@@ -1871,13 +2010,14 @@ func firstSet(a, b string) string {
 	if a == "" {
 		return b
 	}
+
 	return a
 }
 
 // findChildren returns all the elements matching childNS/childTag that are direct children of parentEl.
 func findChildren(parentEl *etree.Element, childNS string, childTag string) ([]*etree.Element, error) {
-	//nolint:prealloc // We don't know how many child elements we'll actually put into this array.
 	var rv []*etree.Element
+
 	for _, childEl := range parentEl.ChildElements() {
 		if childEl.Tag != childTag {
 			continue
@@ -1887,6 +2027,7 @@ func findChildren(parentEl *etree.Element, childNS string, childTag string) ([]*
 		if err != nil {
 			return nil, err
 		}
+
 		ctx, err = ctx.SubContext(childEl)
 		if err != nil {
 			return nil, err
@@ -1896,6 +2037,7 @@ func findChildren(parentEl *etree.Element, childNS string, childTag string) ([]*
 		if err != nil {
 			return nil, fmt.Errorf("[%s]:%s cannot find prefix %s: %v", childNS, childTag, childEl.Space, err)
 		}
+
 		if ns != childNS {
 			continue
 		}
@@ -1912,6 +2054,7 @@ func findOneChild(parentEl *etree.Element, childNS string, childTag string) (*et
 	if err != nil {
 		return nil, err
 	}
+
 	switch len(children) {
 	case 0:
 		return nil, fmt.Errorf("cannot find %s:%s element", childNS, childTag)
@@ -1928,6 +2071,7 @@ func findChild(parentEl *etree.Element, childNS string, childTag string) (*etree
 	if err != nil {
 		return nil, err
 	}
+
 	switch len(children) {
 	case 0:
 		return nil, nil
@@ -1943,6 +2087,7 @@ func elementToBytes(el *etree.Element) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
+
 	if ctx, err = ctx.SubContext(el); err != nil {
 		return nil, err
 	}
@@ -1959,10 +2104,12 @@ func elementToBytes(el *etree.Element) ([]byte, error) {
 		}
 
 		uri, err := ctx.LookupPrefix(childEl.Space)
+
 		var undeclared etreeutils.ErrUndeclaredNSPrefix
 		if errors.As(err, &undeclared) {
 			continue
 		}
+
 		if err != nil {
 			return nil, err
 		}
@@ -1973,8 +2120,10 @@ func elementToBytes(el *etree.Element) ([]byte, error) {
 			if uri == etreeutils.XMLNamespace {
 				continue
 			}
+
 			key = "xmlns"
 		}
+
 		if doc.Root().SelectAttr(key) == nil {
 			doc.Root().CreateAttr(key, uri)
 		}
@@ -1983,7 +2132,7 @@ func elementToBytes(el *etree.Element) ([]byte, error) {
 	return doc.WriteToBytes()
 }
 
-// unmarshalElement serializes el into v by serializing el and then parsing it with xml.Unmarshal.
+// unmarshalElement serializes el into v by serializing el and then parsing it with [xml.Unmarshal].
 func unmarshalElement(el *etree.Element, v interface{}) error {
 	buf, err := elementToBytes(el)
 	if err != nil {
@@ -1995,10 +2144,13 @@ func unmarshalElement(el *etree.Element, v interface{}) error {
 	if err := doc.ReadFromBytes(buf); err != nil {
 		return err
 	}
+
 	doc.SetRoot(removeUnusedNamespaceDeclarations(doc.Root()))
+
 	if buf, err = doc.WriteToBytes(); err != nil {
 		return err
 	}
+
 	return xml.Unmarshal(buf, v)
 }
 
@@ -2010,6 +2162,7 @@ func unmarshalElement(el *etree.Element, v interface{}) error {
 func removeUnusedNamespaceDeclarations(el *etree.Element) *etree.Element {
 	stripped := el.Copy()
 	stripUnusedNamespaceDeclarations(stripped)
+
 	return stripped
 }
 
@@ -2019,37 +2172,44 @@ func stripUnusedNamespaceDeclarations(el *etree.Element) map[string]struct{} {
 	if el.Space != "" {
 		used[el.Space] = struct{}{}
 	}
+
 	for _, attr := range el.Attr {
 		if attr.Space != "" && attr.Space != "xmlns" {
 			used[attr.Space] = struct{}{}
 		}
 	}
+
 	for _, child := range el.ChildElements() {
 		// An enveloped signature doesn't cover itself, so using a prefix in there doesn't bring a
 		// declaration of it under the signature. This has to be checked first, while child can still
 		// resolve its namespace.
 		signature := child.Tag == "Signature" && child.NamespaceURI() == dsig.Namespace
 		childUsed := stripUnusedNamespaceDeclarations(child)
+
 		if signature {
 			continue
 		}
+
 		for prefix := range childUsed {
 			used[prefix] = struct{}{}
 		}
 	}
 
 	declared := make([]etree.Attr, 0, len(el.Attr))
+
 	declared = append(declared, el.Attr...)
 	for _, attr := range declared {
 		if attr.Space != "xmlns" {
 			continue
 		}
+
 		if _, ok := used[attr.Key]; ok {
 			delete(used, attr.Key)
 		} else {
 			el.RemoveAttr(attr.FullKey())
 		}
 	}
+
 	return used
 }
 
@@ -2058,5 +2218,6 @@ func elementToString(el *etree.Element) string {
 	if err != nil {
 		return ""
 	}
+
 	return string(buf)
 }

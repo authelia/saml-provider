@@ -44,7 +44,7 @@ func (t CookieRequestTracker) TrackRequest(w http.ResponseWriter, r *http.Reques
 		return "", err
 	}
 
-	http.SetCookie(w, &http.Cookie{
+	http.SetCookie(w, &http.Cookie{ //nolint:gosec // Secure follows the ACS URL scheme and SameSite is configurable.
 		Name:     t.NamePrefix + trackedRequest.Index,
 		Value:    signedTrackedRequest,
 		MaxAge:   int(t.MaxAge.Seconds()),
@@ -58,23 +58,26 @@ func (t CookieRequestTracker) TrackRequest(w http.ResponseWriter, r *http.Reques
 }
 
 // StopTrackingRequest stops tracking the SAML request given by index, which is a string
-// previously returned from TrackRequest
+// previously returned from TrackRequest.
 func (t CookieRequestTracker) StopTrackingRequest(w http.ResponseWriter, r *http.Request, index string) error {
 	cookie, err := r.Cookie(t.NamePrefix + index)
 	if err != nil {
 		return err
 	}
+
 	cookie.Value = ""
 	cookie.Domain = t.ServiceProvider.AcsURL.Hostname()
-	cookie.Expires = time.Unix(1, 0) // past time as close to epoch as possible, but not zero time.Time{}
+	cookie.Expires = time.Unix(1, 0) // past time as close to epoch as possible, but not zero time.Time{}.
 	cookie.Path = t.ServiceProvider.AcsURL.Path
 	http.SetCookie(w, cookie)
+
 	return nil
 }
 
-// GetTrackedRequests returns all the pending tracked requests
+// GetTrackedRequests returns all the pending tracked requests.
 func (t CookieRequestTracker) GetTrackedRequests(r *http.Request) []TrackedRequest {
 	rv := []TrackedRequest{}
+
 	for _, cookie := range r.Cookies() {
 		if !strings.HasPrefix(cookie.Name, t.NamePrefix) {
 			continue
@@ -84,6 +87,7 @@ func (t CookieRequestTracker) GetTrackedRequests(r *http.Request) []TrackedReque
 		if err != nil {
 			continue
 		}
+
 		index := strings.TrimPrefix(cookie.Name, t.NamePrefix)
 		if index != trackedRequest.Index {
 			continue
@@ -91,6 +95,7 @@ func (t CookieRequestTracker) GetTrackedRequests(r *http.Request) []TrackedReque
 
 		rv = append(rv, *trackedRequest)
 	}
+
 	return rv
 }
 
@@ -105,8 +110,10 @@ func (t CookieRequestTracker) GetTrackedRequest(r *http.Request, index string) (
 	if err != nil {
 		return nil, err
 	}
+
 	if trackedRequest.Index != index {
 		return nil, fmt.Errorf("expected index %q, got %q", index, trackedRequest.Index)
 	}
+
 	return trackedRequest, nil
 }

@@ -22,6 +22,7 @@ func privateError(err error) error {
 	if invalid, ok := err.(*InvalidResponseError); ok {
 		return invalid.PrivateErr
 	}
+
 	return err
 }
 
@@ -45,11 +46,13 @@ func TestSPChecksInResponseToOfRedirectLogoutResponse(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			f := newLogoutResponseFixture(t)
 			f.setMessageInResponseTo(t, f.sp.SloURL.String(), tc.inResponseTo)
+
 			err := f.sp.ValidateLogoutResponseRedirect(&url.URL{RawQuery: f.signed(t, "")}, tc.possible)
 			if tc.valid {
 				assert.Check(t, err)
 				return
 			}
+
 			assert.Assert(t, err != nil)
 			assert.Check(t, is.ErrorContains(privateError(err), inResponseToError))
 		})
@@ -60,6 +63,7 @@ func TestSPChecksInResponseToOfRedirectLogoutResponse(t *testing.T) {
 // signature, encoded for the HTTP-POST binding.
 func signedLogoutResponseForm(t *testing.T, f *logoutResponseFixture, inResponseTo string) string {
 	t.Helper()
+
 	idp := ServiceProvider{
 		EntityID:        f.sp.IDPMetadata.EntityID,
 		Key:             f.key,
@@ -69,10 +73,12 @@ func signedLogoutResponseForm(t *testing.T, f *logoutResponseFixture, inResponse
 	}
 	response, err := idp.MakeLogoutResponse(f.sp.SloURL.String(), inResponseTo)
 	assert.NilError(t, err)
+
 	doc := etree.NewDocument()
 	doc.SetRoot(response.Element())
 	body, err := doc.WriteToBytes()
 	assert.NilError(t, err)
+
 	return base64.StdEncoding.EncodeToString(body)
 }
 
@@ -102,6 +108,7 @@ func TestValidateLogoutResponseRequestPassesPossibleRequestIDs(t *testing.T) {
 		post, err := http.NewRequest(http.MethodPost, "https://sp.example.com/saml2/slo", strings.NewReader(form))
 		assert.NilError(t, err)
 		post.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+
 		return post
 	}
 	assert.Check(t, f.sp.ValidateLogoutResponseRequest(newPost(), []string{"id-request"}))

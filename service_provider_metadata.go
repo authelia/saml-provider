@@ -26,28 +26,33 @@ func CurrentMetadata(metadata *EntityDescriptor, now time.Time) *EntityDescripto
 	if expired(metadata.ValidUntil) {
 		return nil
 	}
+
 	current := *metadata
+
 	current.SPSSODescriptors = slices.DeleteFunc(slices.Clone(metadata.SPSSODescriptors), func(descriptor SPSSODescriptor) bool {
 		return descriptor.ValidUntil != nil && expired(*descriptor.ValidUntil)
 	})
 	if len(current.SPSSODescriptors) == 0 {
 		return nil
 	}
+
 	return &current
 }
 
 // serviceProvider returns the current metadata of the service provider from the ServiceProviderProvider,
-// or os.ErrNotExist if it has expired, whatever the provider does about expiry.
+// or [os.ErrNotExist] if it has expired, whatever the provider does about expiry.
 func (idp *IdentityProvider) serviceProvider(r *http.Request, serviceProviderID string) (*EntityDescriptor, error) {
 	metadata, err := idp.ServiceProviderProvider.GetServiceProvider(r, serviceProviderID)
 	if err != nil {
 		return nil, err
 	}
+
 	current := CurrentMetadata(metadata, TimeNow())
 	if current == nil {
 		idp.logger().Printf("ERROR: the metadata of service provider %q has expired", serviceProviderID)
 		return nil, os.ErrNotExist
 	}
+
 	return current, nil
 }
 
@@ -76,6 +81,7 @@ func ParseServiceProviderMetadata(data []byte) (*EntityDescriptor, error) {
 				if entities.ValidUntil != nil && !entities.ValidUntil.IsZero() && (e.ValidUntil.IsZero() || entities.ValidUntil.Before(e.ValidUntil)) {
 					e.ValidUntil = *entities.ValidUntil
 				}
+
 				return &e, nil
 			}
 		}
@@ -113,17 +119,21 @@ func (idp *IdentityProvider) CheckServiceProviderMetadata(metadata *EntityDescri
 	}
 
 	var refused error
+
 	for _, descriptor := range current.SPSSODescriptors {
 		for _, endpoint := range descriptor.AssertionConsumerServices {
 			if endpoint.Binding != HTTPPostBinding {
 				continue
 			}
+
 			if err := idp.CheckServiceProviderEndpoint(endpoint.Location); err != nil {
 				refused = err
 				continue
 			}
+
 			return nil
 		}
 	}
+
 	return refused
 }

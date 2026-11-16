@@ -5,11 +5,10 @@ import (
 	"encoding/pem"
 	"testing"
 
+	"github.com/beevik/etree"
 	"gotest.tools/assert"
 	is "gotest.tools/assert/cmp"
 	"gotest.tools/golden"
-
-	"github.com/beevik/etree"
 )
 
 func TestCanDecrypt(t *testing.T) {

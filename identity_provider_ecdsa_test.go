@@ -22,6 +22,7 @@ import (
 func TestSPVerifiesIDPSignatureInRawECDSAEncoding(t *testing.T) {
 	key, err := ecdsa.GenerateKey(elliptic.P384(), rand.Reader)
 	assert.NilError(t, err)
+
 	template := &x509.Certificate{
 		SerialNumber: big.NewInt(1),
 		Subject:      pkix.Name{CommonName: "idp"},
@@ -48,6 +49,7 @@ func TestSPVerifiesIDPSignatureInRawECDSAEncoding(t *testing.T) {
 	doc.SetRoot(req.ResponseEl)
 	serialized, err := doc.WriteToBytes()
 	assert.NilError(t, err)
+
 	parsed := etree.NewDocument()
 	assert.NilError(t, parsed.ReadFromBytes(serialized))
 
@@ -56,6 +58,7 @@ func TestSPVerifiesIDPSignatureInRawECDSAEncoding(t *testing.T) {
 	assert.Check(t, is.Len(value, 96))
 
 	previous := Clock
+
 	Clock = dsig.NewFakeClockAt(time.Now())
 	defer func() { Clock = previous }()
 
@@ -133,24 +136,29 @@ func (derSignatureVerifier) VerifySignature(validationContext *ValidationContext
 	if err != nil {
 		return err
 	}
+
 	public := certificates[0].PublicKey.(*ecdsa.PublicKey)
 	size := (public.Params().N.BitLen() + 7) / 8
 
 	value := el.FindElement("./Signature/SignatureValue")
+
 	der, err := base64.StdEncoding.DecodeString(value.Text())
 	if err != nil {
 		return err
 	}
+
 	var signature struct{ R, S *big.Int }
 	if _, err = asn1.Unmarshal(der, &signature); err != nil {
 		return err
 	}
+
 	raw := make([]byte, 2*size)
 	signature.R.FillBytes(raw[:size])
 	signature.S.FillBytes(raw[size:])
 	value.SetText(base64.StdEncoding.EncodeToString(raw))
 
 	_, err = validationContext.Validate(el)
+
 	return err
 }
 
@@ -170,6 +178,7 @@ func TestSPAcceptsDERSignatureOnlyWithSignatureVerifier(t *testing.T) {
 	doc.SetRoot(req.ResponseEl)
 	serialized, err := doc.WriteToBytes()
 	assert.NilError(t, err)
+
 	parsed := etree.NewDocument()
 	assert.NilError(t, parsed.ReadFromBytes(serialized))
 
@@ -181,6 +190,7 @@ func TestSPAcceptsDERSignatureOnlyWithSignatureVerifier(t *testing.T) {
 	value.SetText(base64.StdEncoding.EncodeToString(der))
 
 	previous := Clock
+
 	Clock = dsig.NewFakeClockAt(time.Now())
 	defer func() { Clock = previous }()
 

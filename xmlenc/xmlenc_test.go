@@ -96,5 +96,5 @@ func TestAES256CBC(t *testing.T) {
 	doc.IndentTabs()
 	s, _ := doc.WriteToString()
 	fmt.Println(s)
-}
+}.
 */

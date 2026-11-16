@@ -17,8 +17,10 @@ func TestCanParseMetadata(t *testing.T) {
 	err := xml.Unmarshal(buf, &metadata)
 	assert.Check(t, err)
 
-	var False = false
-	var True = true
+	var (
+		False = false
+		True  = true
+	)
 
 	expected := EntityDescriptor{
 		EntityID:      "https://dev.aa.kndr.org/users/auth/saml/metadata",
@@ -84,7 +86,6 @@ func TestCanParseMetadata(t *testing.T) {
 		},
 	}
 	assert.Check(t, is.DeepEqual(expected, metadata))
-
 }
 
 func TestCanProduceSPMetadata(t *testing.T) {
@@ -219,9 +220,11 @@ func TestEncryptionMethodKeepsItsParameters(t *testing.T) {
 	// The parameters are marshalled in the namespaces they were parsed from, so that they survive a round trip.
 	buf, err := xml.Marshal(parsed)
 	assert.NilError(t, err)
+
 	var again EntityDescriptor
 	assert.NilError(t, xml.Unmarshal(buf, &again))
 	assert.Check(t, is.DeepEqual(want, again.SPSSODescriptors[0].KeyDescriptors[0].EncryptionMethods))
+
 	for _, fragment := range []string{
 		`<KeySize xmlns="http://www.w3.org/2001/04/xmlenc#">256</KeySize>`,
 		`<OAEPparams xmlns="http://www.w3.org/2001/04/xmlenc#">9lWu3Q==</OAEPparams>`,

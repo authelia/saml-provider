@@ -9,7 +9,7 @@ import (
 )
 
 // TimeNow is a function that returns the current time. The default
-// value is time.Now, but it can be replaced for testing.
+// value is [time.Now], but it can be replaced for testing.
 var TimeNow = func() time.Time { return time.Now().UTC() }
 
 // Clock is assigned to dsig validation and signing contexts if it is
@@ -24,7 +24,7 @@ func NewFakeClockAt(t time.Time) *DSigClock {
 	return dsig.NewFakeClockAt(t)
 }
 
-// RandReader is the io.Reader that produces cryptographically random
+// RandReader is the [io.Reader] that produces cryptographically random
 // bytes when they are need by the library. The default value is
 // rand.Reader, but it can be replaced for testing.
 var RandReader = rand.Reader
@@ -36,5 +36,6 @@ func randomBytes(n int) []byte {
 	if _, err := io.ReadFull(RandReader, rv); err != nil {
 		panic(err)
 	}
+
 	return rv
 }

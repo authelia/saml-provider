@@ -40,18 +40,22 @@ func logoutRedirectSP(t *testing.T) (ServiceProvider, *ServiceProviderTest) {
 		IDPMetadata: &EntityDescriptor{},
 	}
 	assert.NilError(t, xml.Unmarshal(test.IDPMetadata, s.IDPMetadata))
+
 	return s, test
 }
 
 // assertRedirectParameterOrder checks the query has exactly the given parameters in order.
 func assertRedirectParameterOrder(t *testing.T, rawQuery string, keys ...string) {
 	t.Helper()
+
 	pairs := strings.Split(rawQuery, "&")
+
 	got := make([]string, 0, len(pairs))
 	for _, pair := range pairs {
 		key, _, _ := strings.Cut(pair, "=")
 		got = append(got, key)
 	}
+
 	assert.Check(t, is.DeepEqual(keys, got))
 }
 
@@ -69,6 +73,7 @@ func TestSPSignsRedirectLogoutMessagesInTheQuery(t *testing.T) {
 	}
 	decode := func(t *testing.T, parameter string, u *url.URL) []byte {
 		t.Helper()
+
 		var (
 			decoded []byte
 			err     error
@@ -78,7 +83,9 @@ func TestSPSignsRedirectLogoutMessagesInTheQuery(t *testing.T) {
 		} else {
 			decoded, err = testsaml.ParseRedirectResponse(u)
 		}
+
 		assert.NilError(t, err)
+
 		return decoded
 	}
 
@@ -111,8 +118,10 @@ func TestSPSignsRedirectLogoutMessagesInTheQuery(t *testing.T) {
 				signed, signature := signedRedirectQuery(t, u.RawQuery)
 				size := (curve.curve.Params().N.BitLen() + 7) / 8
 				assert.Assert(t, is.Len(signature, 2*size))
+
 				hash := curve.newHash.New()
 				hash.Write([]byte(signed))
+
 				r := new(big.Int).SetBytes(signature[:size])
 				sValue := new(big.Int).SetBytes(signature[size:])
 				assert.Check(t, ecdsa.Verify(&key.PublicKey, hash.Sum(nil), r, sValue))
@@ -141,6 +150,7 @@ func TestLogoutRedirectRemovesEmbeddedSignatureWithoutChangingTheMessage(t *test
 	assertRedirectParameterOrder(t, u.RawQuery, "tenant", "SAMLRequest", "SigAlg", "Signature")
 	signed, _ := signedRedirectQuery(t, u.RawQuery)
 	assert.Check(t, strings.HasPrefix(strings.TrimPrefix(signed, "tenant=a&"), "SAMLRequest="))
+
 	decoded, err := testsaml.ParseRedirectRequest(u)
 	assert.NilError(t, err)
 	assert.Check(t, !strings.Contains(string(decoded), "Signature>"))
@@ -151,6 +161,7 @@ func TestLogoutRedirectRemovesEmbeddedSignatureWithoutChangingTheMessage(t *test
 	u, err = response.Redirect("", &s)
 	assert.NilError(t, err)
 	assert.Check(t, response.Signature != nil)
+
 	decoded, err = testsaml.ParseRedirectResponse(u)
 	assert.NilError(t, err)
 	assert.Check(t, !strings.Contains(string(decoded), "Signature>"))
@@ -169,7 +180,9 @@ func newLogoutResponseFixture(t *testing.T) *logoutResponseFixture {
 	test := NewIdentityProviderTest(t, applyKey)
 	TimeNow = time.Now
 	previous := Clock
+
 	t.Cleanup(func() { Clock = previous })
+
 	Clock = dsig.NewFakeClockAt(test.Certificate.NotBefore)
 
 	sp := test.SP
@@ -177,6 +190,7 @@ func newLogoutResponseFixture(t *testing.T) *logoutResponseFixture {
 	sp.SloURL = mustParseURL("https://sp.example.com/saml2/slo")
 	f := &logoutResponseFixture{sp: sp, key: test.IDP.Key.(crypto.Signer), cert: test.Certificate}
 	f.setMessage(t, sp.SloURL.String())
+
 	return f
 }
 
@@ -197,37 +211,47 @@ func (f *logoutResponseFixture) setMessageWithoutIssuer(t *testing.T) {
 
 func (f *logoutResponseFixture) setMessageBody(t *testing.T, destination, inResponseTo, issuer string) {
 	t.Helper()
+
 	body := fmt.Sprintf(`<samlp:LogoutResponse xmlns:samlp="urn:oasis:names:tc:SAML:2.0:protocol" xmlns:saml="urn:oasis:names:tc:SAML:2.0:assertion" ID="id-response"%s Version="2.0" IssueInstant="%s" Destination="%s">%s<samlp:Status><samlp:StatusCode Value="%s"/></samlp:Status></samlp:LogoutResponse>`,
 		inResponseTo, time.Now().UTC().Format(time.RFC3339), destination, issuer, StatusSuccess)
+
 	var compressed bytes.Buffer
+
 	w, err := flate.NewWriter(&compressed, flate.BestCompression)
 	assert.NilError(t, err)
 	_, err = w.Write([]byte(body))
 	assert.NilError(t, err)
 	assert.NilError(t, w.Close())
+
 	f.message = base64.StdEncoding.EncodeToString(compressed.Bytes())
 }
 
 // signQuery signs the query with the standard library, independently of the code being tested.
 func signQuery(t *testing.T, key crypto.Signer, method, message, relayState string) string {
 	t.Helper()
+
 	query := "SAMLResponse=" + url.QueryEscape(message)
 	if relayState != "" {
 		query += "&RelayState=" + url.QueryEscape(relayState)
 	}
+
 	query += "&SigAlg=" + url.QueryEscape(method)
 	digest := sha256.Sum256([]byte(query))
 	signature, err := key.Sign(rand.Reader, digest[:], crypto.SHA256)
 	assert.NilError(t, err)
+
 	if public, ok := key.Public().(*ecdsa.PublicKey); ok {
 		var parsed struct{ R, S *big.Int }
+
 		_, err = asn1.Unmarshal(signature, &parsed)
 		assert.NilError(t, err)
+
 		size := (public.Params().N.BitLen() + 7) / 8
 		signature = make([]byte, 2*size)
 		parsed.R.FillBytes(signature[:size])
 		parsed.S.FillBytes(signature[size:])
 	}
+
 	return query + "&Signature=" + url.QueryEscape(base64.StdEncoding.EncodeToString(signature))
 }
 
@@ -270,6 +294,7 @@ func TestSPValidatesRedirectLogoutResponseSignedInTheQuery(t *testing.T) {
 		certificate := base64.StdEncoding.EncodeToString(cert.Raw)
 		f.sp.IDPCertificate = &certificate
 		Clock = dsig.NewFakeClockAt(time.Now())
+
 		assert.Check(t, f.validate(signQuery(t, key, dsig.ECDSASHA256SignatureMethod, f.message, "")))
 	})
 
@@ -305,7 +330,9 @@ func TestSPRejectsInvalidRedirectLogoutResponseSignature(t *testing.T) {
 		{"changed message", func(t *testing.T, f *logoutResponseFixture) string {
 			query := f.signed(t, "")
 			f.setMessage(t, "https://forged.example.com/slo")
+
 			_, rest, _ := strings.Cut(query, "&")
+
 			return "SAMLResponse=" + url.QueryEscape(f.message) + "&" + rest
 		}, "verifies the signature"},
 		{"signed by another key", func(t *testing.T, f *logoutResponseFixture) string {
@@ -343,11 +370,13 @@ func TestSPRejectsInvalidRedirectLogoutResponseSignature(t *testing.T) {
 			f := newLogoutResponseFixture(t)
 			err := f.validate(tc.query(t, f))
 			assert.Assert(t, err != nil)
+
 			if tc.reason != "" {
 				private := err
 				if invalid, ok := err.(*InvalidResponseError); ok {
 					private = invalid.PrivateErr
 				}
+
 				assert.Check(t, is.ErrorContains(private, tc.reason))
 			}
 		})
@@ -404,11 +433,14 @@ func TestSPStillAcceptsEmbeddedSignatureOnRedirectLogoutResponse(t *testing.T) {
 
 	response, err := idp.MakeLogoutResponse(f.sp.SloURL.String(), "id-request")
 	assert.NilError(t, err)
+
 	doc := etree.NewDocument()
 	doc.SetRoot(response.Element())
 	body, err := doc.WriteToBytes()
 	assert.NilError(t, err)
+
 	var compressed bytes.Buffer
+
 	w, err := flate.NewWriter(&compressed, flate.BestCompression)
 	assert.NilError(t, err)
 	_, err = w.Write(body)
@@ -420,10 +452,12 @@ func TestSPStillAcceptsEmbeddedSignatureOnRedirectLogoutResponse(t *testing.T) {
 
 func dsigFingerprintForTest(cert *x509.Certificate) string {
 	sum := sha256.Sum256(cert.Raw)
+
 	pairs := make([]string, len(sum))
 	for i, b := range sum {
 		pairs[i] = fmt.Sprintf("%02X", b)
 	}
+
 	return strings.Join(pairs, ":")
 }
 

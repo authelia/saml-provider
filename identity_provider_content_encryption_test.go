@@ -26,6 +26,7 @@ const (
 // encryptedAssertionFor returns the encrypted assertion an IdP makes for the given service provider key descriptors.
 func encryptedAssertionFor(t *testing.T, test *IdentityProviderTest, descriptors []KeyDescriptor) *etree.Element {
 	t.Helper()
+
 	req, err := hardeningValidate(test, hardeningRequest(`ID="id-1"`, TimeNow(), hardeningIssuer))
 	assert.NilError(t, err)
 	assert.NilError(t, DefaultAssertionMaker{}.MakeAssertion(req, &Session{ID: "f00d", NameID: sessionFor}))
@@ -36,8 +37,10 @@ func encryptedAssertionFor(t *testing.T, test *IdentityProviderTest, descriptors
 	doc.SetRoot(req.AssertionEl)
 	serialized, err := doc.WriteToBytes()
 	assert.NilError(t, err)
+
 	parsed := etree.NewDocument()
 	assert.NilError(t, parsed.ReadFromBytes(serialized))
+
 	return parsed.Root()
 }
 
@@ -61,6 +64,7 @@ func TestIDPChoosesContentEncryptionFromMetadata(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			test := NewIdentityProviderTest(t, applyKey)
 			descriptor := KeyDescriptor{Use: "encryption"}
+
 			descriptor.KeyInfo.X509Data.X509Certificates = []X509Certificate{{Data: base64Certificate(test)}}
 			for _, method := range tc.methods {
 				descriptor.EncryptionMethods = append(descriptor.EncryptionMethods, EncryptionMethod{Algorithm: method})

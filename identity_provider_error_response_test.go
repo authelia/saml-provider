@@ -21,14 +21,18 @@ func errorResponseRequest(t *testing.T) (*IdentityProviderTest, *IdpAuthnRequest
 	test := NewIdentityProviderTest(t, applyKey)
 	req, err := hardeningValidate(test, hardeningRequest(`ID="id-request"`, TimeNow(), hardeningIssuer))
 	assert.NilError(t, err)
+
 	req.RelayState = "relay-<state>"
+
 	return test, req
 }
 
 // postedResponse extracts and parses the SAMLResponse from the HTML form that was written.
 func postedResponse(t *testing.T, body string) (*etree.Document, Response) {
 	t.Helper()
+
 	const marker = `name="SAMLResponse" value="`
+
 	start := strings.Index(body, marker)
 	assert.Assert(t, start >= 0, "no SAMLResponse in %q", body)
 	encoded, _, _ := strings.Cut(body[start+len(marker):], `"`)
@@ -40,6 +44,7 @@ func postedResponse(t *testing.T, body string) (*etree.Document, Response) {
 
 	var response Response
 	assert.NilError(t, xml.Unmarshal(buf, &response))
+
 	return doc, response
 }
 
@@ -65,7 +70,9 @@ func TestWriteErrorResponseWritesSignedStatus(t *testing.T) {
 	test.SP.IDPMetadata = test.IDP.Metadata()
 	// The certificate of the test identity provider has expired by the time that the tests use.
 	previousClock := Clock
+
 	t.Cleanup(func() { Clock = previousClock })
+
 	Clock = dsig.NewFakeClockAt(test.Certificate.NotBefore)
 	assert.Check(t, test.SP.validateSignature(doc.Root()))
 

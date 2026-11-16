@@ -19,10 +19,10 @@ type RequestTracker interface {
 	TrackRequest(w http.ResponseWriter, r *http.Request, samlRequestID string) (index string, err error)
 
 	// StopTrackingRequest stops tracking the SAML request given by index, which is a string
-	// previously returned from TrackRequest
+	// previously returned from TrackRequest.
 	StopTrackingRequest(w http.ResponseWriter, r *http.Request, index string) error
 
-	// GetTrackedRequests returns all the pending tracked requests
+	// GetTrackedRequests returns all the pending tracked requests.
 	GetTrackedRequests(r *http.Request) []TrackedRequest
 
 	// GetTrackedRequest returns a pending tracked request.

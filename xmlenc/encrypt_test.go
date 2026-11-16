@@ -13,7 +13,6 @@ import (
 
 func TestCanEncryptOAEP(t *testing.T) {
 	t.Run("CBC", func(t *testing.T) {
-
 		RandReader = rand.New(rand.NewSource(0)) //nolint:gosec // deterministic random numbers for tests
 
 		pemBlock, _ := pem.Decode(golden.Get(t, "cert.pem"))

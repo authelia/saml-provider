@@ -73,12 +73,14 @@ func TestDurationUnmarshal(t *testing.T) {
 	for i, testCase := range durationUnmarshalTests {
 		t.Run(strconv.Itoa(i), func(t *testing.T) {
 			var actual Duration
+
 			err := actual.UnmarshalText(testCase.in)
 			if testCase.err == nil {
 				assert.Check(t, err)
 			} else {
 				assert.Check(t, is.Error(err, testCase.err.Error()))
 			}
+
 			assert.Check(t, is.Equal(Duration(testCase.expected), actual))
 		})
 	}

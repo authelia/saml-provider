@@ -42,8 +42,10 @@ func TestIDPNilLoggerDoesNotPanic(t *testing.T) {
 
 	t.Run("unknown AttributeConsumingServiceIndex", func(t *testing.T) {
 		var logged bytes.Buffer
+
 		defaultLogger := logger.DefaultLogger
 		logger.DefaultLogger = log.New(&logged, "", 0)
+
 		t.Cleanup(func() { logger.DefaultLogger = defaultLogger })
 
 		test := NewIdentityProviderTest(t, applyKey)

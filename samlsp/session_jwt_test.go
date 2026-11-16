@@ -3,9 +3,10 @@ package samlsp
 import (
 	"testing"
 
-	"authelia.com/provider/jose"
 	"gotest.tools/assert"
 	is "gotest.tools/assert/cmp"
+
+	"authelia.com/provider/jose"
 
 	"authelia.com/provider/saml"
 )
@@ -61,6 +62,7 @@ func TestJWTSessionCodecDecodeRejects(t *testing.T) {
 			encode: func(t *testing.T, codec JWTSessionCodec) string {
 				token, err := JWTTrackedRequestCodec(codec).Encode(TrackedRequest{Index: "alice", SAMLRequestID: "id-1", URI: "/"})
 				assert.NilError(t, err)
+
 				return token
 			},
 			err: "expected saml-session",
@@ -79,6 +81,7 @@ func TestJWTSessionCodecDecodeRejects(t *testing.T) {
 
 func newTestSessionCodec(t *testing.T) JWTSessionCodec {
 	test := NewMiddlewareTest(t)
+
 	return DefaultSessionCodec(Options{
 		URL: mustParseURL("https://15661444.ngrok.io/"),
 		Key: test.JWTKey,
@@ -90,5 +93,6 @@ func encodeTestSession(t *testing.T, codec JWTSessionCodec) string {
 	assert.NilError(t, err)
 	token, err := codec.Encode(session)
 	assert.NilError(t, err)
+
 	return token
 }

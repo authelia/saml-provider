@@ -14,6 +14,7 @@ func cbcElement(cipher BlockCipher, ciphertext []byte) *etree.Element {
 	el := etree.NewElement("EncryptedData")
 	el.CreateElement("EncryptionMethod").CreateAttr("Algorithm", cipher.Algorithm())
 	el.CreateElement("CipherData").CreateElement("CipherValue").SetText(base64.StdEncoding.EncodeToString(ciphertext))
+
 	return el
 }
 
@@ -65,6 +66,7 @@ func TestTripleDESRoundTrip(t *testing.T) {
 	for i := range key {
 		key[i] = byte(i * 7)
 	}
+
 	el, err := TripleDES.Encrypt(key, []byte("hello world"), nil)
 	assert.NilError(t, err)
 	plaintext, err := TripleDES.Decrypt(key, el)

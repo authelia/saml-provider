@@ -20,14 +20,12 @@ import (
 	"testing"
 	"time"
 
+	"github.com/beevik/etree"
 	"gotest.tools/assert"
 	is "gotest.tools/assert/cmp"
 	"gotest.tools/golden"
 
-	"github.com/beevik/etree"
-
 	"authelia.com/provider/saml/internal/dsig"
-
 	"authelia.com/provider/saml/logger"
 	"authelia.com/provider/saml/testsaml"
 	"authelia.com/provider/saml/xmlenc"
@@ -50,6 +48,7 @@ func mustParseURL(s string) url.URL {
 	if err != nil {
 		panic(err)
 	}
+
 	return *rv
 }
 
@@ -58,10 +57,12 @@ func mustParsePrivateKey(pemStr []byte) crypto.Signer {
 	if b == nil {
 		panic("cannot parse PEM")
 	}
+
 	k, err := x509.ParsePKCS1PrivateKey(b.Bytes)
 	if err != nil {
 		panic(err)
 	}
+
 	return k
 }
 
@@ -70,10 +71,12 @@ func mustParseCertificate(pemStr []byte) *x509.Certificate {
 	if b == nil {
 		panic("cannot parse PEM")
 	}
+
 	cert, err := x509.ParseCertificate(b.Bytes)
 	if err != nil {
 		panic(err)
 	}
+
 	return cert
 }
 
@@ -108,7 +111,7 @@ func NewIdentityProviderTest(t *testing.T, opts ...idpTestOpts) *IdentityProvide
 		rv, _ := time.Parse("Mon Jan 2 15:04:05 MST 2006", "Mon Dec 1 01:57:09 UTC 2015")
 		return rv
 	}
-	RandReader = &testRandomReader{}                // TODO(ross): remove this and use the below generator
+	RandReader = &testRandomReader{}                // TODO(ross): remove this and use the below generator.
 	xmlenc.RandReader = rand.New(rand.NewSource(0)) //nolint:gosec  // deterministic random numbers for tests
 
 	test.SPKey = mustParsePrivateKey(golden.Get(t, "sp_key.pem")).(*rsa.PrivateKey)
@@ -133,6 +136,7 @@ func NewIdentityProviderTest(t *testing.T, opts ...idpTestOpts) *IdentityProvide
 				if serviceProviderID == test.SP.MetadataURL.String() {
 					return test.SP.Metadata(), nil
 				}
+
 				return nil, os.ErrNotExist
 			},
 		},
@@ -146,13 +150,14 @@ func NewIdentityProviderTest(t *testing.T, opts ...idpTestOpts) *IdentityProvide
 		EncryptionCertificateEnforcer: legacyFixtureEncryptionCertificateEnforcer,
 	}
 
-	// apply the test options
+	// apply the test options.
 	for _, opt := range opts {
 		opt.apply(t, &test)
 	}
 
-	// bind the service provider and the IDP
+	// bind the service provider and the IDP.
 	test.SP.IDPMetadata = test.IDP.Metadata()
+
 	return &test
 }
 
@@ -251,6 +256,7 @@ func TestIDPCanHandleRequestWithNewSession(t *testing.T) {
 			_, err := fmt.Fprintf(w, "RelayState: %s\nSAMLRequest: %s",
 				req.RelayState, req.RequestBuffer)
 			assert.NilError(t, err)
+
 			return nil
 		},
 	}
@@ -315,6 +321,7 @@ func TestIDPCanHandlePostRequestWithExistingSession(t *testing.T) {
 	assert.Check(t, err)
 	authRequestBuf, err := xml.Marshal(authRequest)
 	assert.Check(t, err)
+
 	q := url.Values{}
 	q.Set("SAMLRequest", base64.StdEncoding.EncodeToString(authRequestBuf))
 	q.Set("RelayState", "ThisIsTheRelayState")
@@ -674,6 +681,7 @@ func TestIDPMakeAssertion(t *testing.T) {
 			},
 		},
 	}
+
 	assert.Assert(t, is.Len(req.Assertion.AttributeStatements, 1))
 	assert.Check(t, is.DeepEqual(expectedAttributes, req.Assertion.AttributeStatements[0].Attributes))
 }
@@ -710,7 +718,7 @@ func TestIDPMarshalAssertion(t *testing.T) {
 	err = req.MakeAssertionEl()
 	assert.Check(t, err)
 
-	// Compare the plaintext first
+	// Compare the plaintext first.
 	expectedPlaintext := "<saml:Assertion xmlns:saml=\"urn:oasis:names:tc:SAML:2.0:assertion\" ID=\"id-00020406080a0c0e10121416181a1c1e20222426\" IssueInstant=\"2015-12-01T01:57:09Z\" Version=\"2.0\" xmlns:xs=\"http://www.w3.org/2001/XMLSchema\"><saml:Issuer Format=\"urn:oasis:names:tc:SAML:2.0:nameid-format:entity\">https://idp.example.com/saml/metadata</saml:Issuer><ds:Signature xmlns:ds=\"http://www.w3.org/2000/09/xmldsig#\"><ds:SignedInfo><ds:CanonicalizationMethod Algorithm=\"http://www.w3.org/2001/10/xml-exc-c14n#\"/><ds:SignatureMethod Algorithm=\"http://www.w3.org/2001/04/xmldsig-more#rsa-sha256\"/><ds:Reference URI=\"#id-00020406080a0c0e10121416181a1c1e20222426\"><ds:Transforms><ds:Transform Algorithm=\"http://www.w3.org/2000/09/xmldsig#enveloped-signature\"/><ds:Transform Algorithm=\"http://www.w3.org/2001/10/xml-exc-c14n#\"/></ds:Transforms><ds:DigestMethod Algorithm=\"http://www.w3.org/2001/04/xmlenc#sha256\"/><ds:DigestValue>XbkI5VdK1hPugg87p7Z6V/XMKdLulp/eyGN/+pCu7kU=</ds:DigestValue></ds:Reference></ds:SignedInfo><ds:SignatureValue>MNOM63iFCfGHw83TBzvkG3xPmP6SMO/Z2lKWQFMLwZaIbmPShH+g8E8hAtswXehzvRMldh5A9DSzp7Lo5AkFsjO5GOBl1KBk7EvjbeVkJhjwSYHsO+B1J8NX3Ce+9M38tQ98YSZwntNqwtgfaNIQn+wBdQciraIfN0lRO+y9z6Q=</ds:SignatureValue><ds:KeyInfo><ds:X509Data><ds:X509Certificate>MIIB7zCCAVgCCQDFzbKIp7b3MTANBgkqhkiG9w0BAQUFADA8MQswCQYDVQQGEwJVUzELMAkGA1UECAwCR0ExDDAKBgNVBAoMA2ZvbzESMBAGA1UEAwwJbG9jYWxob3N0MB4XDTEzMTAwMjAwMDg1MVoXDTE0MTAwMjAwMDg1MVowPDELMAkGA1UEBhMCVVMxCzAJBgNVBAgMAkdBMQwwCgYDVQQKDANmb28xEjAQBgNVBAMMCWxvY2FsaG9zdDCBnzANBgkqhkiG9w0BAQEFAAOBjQAwgYkCgYEA1PMHYmhZj308kWLhZVT4vOulqx/9ibm5B86fPWwUKKQ2i12MYtz07tzukPymisTDhQaqyJ8Kqb/6JjhmeMnEOdTvSPmHO8m1ZVveJU6NoKRn/mP/BD7FW52WhbrUXLSeHVSKfWkNk6S4hk9MV9TswTvyRIKvRsw0X/gfnqkroJcCAwEAATANBgkqhkiG9w0BAQUFAAOBgQCMMlIO+GNcGekevKgkakpMdAqJfs24maGb90DvTLbRZRD7Xvn1MnVBBS9hzlXiFLYOInXACMW5gcoRFfeTQLSouMM8o57h0uKjfTmuoWHLQLi6hnF+cvCsEFiJZ4AbF+DgmO6TarJ8O05t8zvnOwJlNCASPZRH/JmF8tX0hoHuAQ==</ds:X509Certificate></ds:X509Data></ds:KeyInfo></ds:Signature><saml:Subject><saml:NameID Format=\"urn:oasis:names:tc:SAML:2.0:nameid-format:transient\" NameQualifier=\"https://idp.example.com/saml/metadata\" SPNameQualifier=\"https://sp.example.com/saml2/metadata\">alice</saml:NameID><saml:SubjectConfirmation Method=\"urn:oasis:names:tc:SAML:2.0:cm:bearer\"><saml:SubjectConfirmationData InResponseTo=\"id-00020406080a0c0e10121416181a1c1e\" NotOnOrAfter=\"2015-12-01T01:58:39Z\" Recipient=\"https://sp.example.com/saml2/acs\"/></saml:SubjectConfirmation></saml:Subject><saml:Conditions NotBefore=\"2015-12-01T01:54:09Z\" NotOnOrAfter=\"2015-12-01T01:58:39Z\"><saml:AudienceRestriction><saml:Audience>https://sp.example.com/saml2/metadata</saml:Audience></saml:AudienceRestriction></saml:Conditions><saml:AuthnStatement AuthnInstant=\"0001-01-01T00:00:00Z\"><saml:SubjectLocality/><saml:AuthnContext><saml:AuthnContextClassRef>urn:oasis:names:tc:SAML:2.0:ac:classes:PasswordProtectedTransport</saml:AuthnContextClassRef></saml:AuthnContext></saml:AuthnStatement><saml:AttributeStatement><saml:Attribute FriendlyName=\"uid\" Name=\"urn:oid:0.9.2342.19200300.100.1.1\" NameFormat=\"urn:oasis:names:tc:SAML:2.0:attrname-format:uri\"><saml:AttributeValue xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\" xsi:type=\"xs:string\">alice</saml:AttributeValue></saml:Attribute></saml:AttributeStatement></saml:Assertion>"
 	actualPlaintext := ""
 	{
@@ -719,8 +727,10 @@ func TestIDPMarshalAssertion(t *testing.T) {
 		el := doc.FindElement("//EncryptedAssertion/EncryptedData")
 		actualPlaintextBuf, err := xmlenc.Decrypt(test.SPKey, el)
 		assert.Check(t, err)
+
 		actualPlaintext = string(actualPlaintextBuf)
 	}
+
 	assert.Check(t, is.Equal(expectedPlaintext, actualPlaintext))
 
 	doc := etree.NewDocument()
@@ -812,6 +822,7 @@ func TestIDPIDPInitiatedNewSession(t *testing.T) {
 		GetSessionFunc: func(w http.ResponseWriter, _ *http.Request, req *IdpAuthnRequest) *Session {
 			_, err := fmt.Fprintf(w, "RelayState: %s", req.RelayState)
 			assert.NilError(t, err)
+
 			return nil
 		},
 	}
@@ -873,11 +884,13 @@ func TestIDPCanHandleUnencryptedResponse(t *testing.T) {
 		golden.Get(t, "TestIDPCanHandleUnencryptedResponse_idp_metadata.xml"),
 		&metadata)
 	assert.Check(t, err)
+
 	test.IDP.ServiceProviderProvider = &mockServiceProviderProvider{
 		GetServiceProviderFunc: func(_ *http.Request, serviceProviderID string) (*EntityDescriptor, error) {
 			if serviceProviderID == "https://gitlab.example.com/users/saml/metadata" {
 				return &metadata, nil
 			}
+
 			return nil, os.ErrNotExist
 		},
 	}
@@ -923,6 +936,7 @@ func TestIDPRequestedAttributes(t *testing.T) {
 	req.ServiceProviderMetadata = &metadata
 	req.ACSEndpoint = &metadata.SPSSODescriptors[0].AssertionConsumerServices[0]
 	req.SPSSODescriptor = &metadata.SPSSODescriptors[0]
+
 	assert.Check(t, err)
 	err = DefaultAssertionMaker{}.MakeAssertion(req, &Session{
 		ID:             "f00df00df00d",
@@ -998,11 +1012,13 @@ func TestIDPNoDestination(t *testing.T) {
 	metadata := EntityDescriptor{}
 	err := xml.Unmarshal(golden.Get(t, "TestIDPNoDestination_idp_metadata.xml"), &metadata)
 	assert.Check(t, err)
+
 	test.IDP.ServiceProviderProvider = &mockServiceProviderProvider{
 		GetServiceProviderFunc: func(_ *http.Request, serviceProviderID string) (*EntityDescriptor, error) {
 			if serviceProviderID == "https://gitlab.example.com/users/saml/metadata" {
 				return &metadata, nil
 			}
+
 			return nil, os.ErrNotExist
 		},
 	}
@@ -1035,17 +1051,21 @@ func TestIDPRejectDecompressionBomb(t *testing.T) {
 			_, err := fmt.Fprintf(w, "RelayState: %s\nSAMLRequest: %s",
 				req.RelayState, req.RequestBuffer)
 			assert.NilError(t, err)
+
 			return nil
 		},
 	}
 
 	data := bytes.Repeat([]byte("a"), 768*1024*1024)
+
 	var compressed bytes.Buffer
+
 	w, _ := flate.NewWriter(&compressed, flate.BestCompression)
 	_, err := w.Write(data)
 	assert.Check(t, err)
 	err = w.Close()
 	assert.Check(t, err)
+
 	encoded := base64.StdEncoding.EncodeToString(compressed.Bytes())
 
 	r, _ := http.NewRequest("GET", "/dontcare?"+url.Values{
@@ -1066,14 +1086,14 @@ func TestIDPHTTPCanHandleSSORequest(t *testing.T) {
 	test.IDP.Handler().ServeHTTP(w, r)
 	assert.Check(t, is.Equal(http.StatusOK, w.Code))
 
-	// rejects requests that are invalid
+	// rejects requests that are invalid.
 	w = httptest.NewRecorder()
 	r, _ = http.NewRequest("GET", "https://idp.example.com/saml/sso?RelayState=ThisIsTheRelayState&"+
 		"SAMLRequest=PEF1dGhuUmVxdWVzdA%3D%3D", nil)
 	test.IDP.Handler().ServeHTTP(w, r)
 	assert.Check(t, is.Equal(http.StatusBadRequest, w.Code))
 
-	// rejects requests that contain malformed XML
+	// rejects requests that contain malformed XML.
 	{
 		a, _ := url.QueryUnescape(validRequest)
 		b, _ := base64.StdEncoding.DecodeString(a)
@@ -1085,6 +1105,7 @@ func TestIDPHTTPCanHandleSSORequest(t *testing.T) {
 		assert.Check(t, err)
 		err = e.Close()
 		assert.Check(t, err)
+
 		g := base64.StdEncoding.EncodeToString(f.Bytes())
 		invalidRequest := url.QueryEscape(g)
 

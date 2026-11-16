@@ -50,10 +50,12 @@ func (p fullProvider) GetSession(w http.ResponseWriter, r *http.Request, req *Id
 
 func serveConstrainedSSO(t *testing.T, test *IdentityProviderTest, provider SessionProvider, force, passive *bool) *httptest.ResponseRecorder {
 	t.Helper()
+
 	test.IDP.SessionProvider = provider
 
 	request, err := test.SP.MakeAuthenticationRequest("https://idp.example.com/saml/sso", HTTPPostBinding, HTTPPostBinding)
 	assert.NilError(t, err)
+
 	request.ForceAuthn = force
 	request.IsPassive = passive
 	doc := etree.NewDocument()
@@ -64,8 +66,10 @@ func serveConstrainedSSO(t *testing.T, test *IdentityProviderTest, provider Sess
 	form := url.Values{"SAMLRequest": {base64.StdEncoding.EncodeToString(body)}}
 	r := httptest.NewRequest(http.MethodPost, "https://idp.example.com/saml/sso", strings.NewReader(form.Encode()))
 	r.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+
 	w := httptest.NewRecorder()
 	test.IDP.ServeSSO(w, r)
+
 	return w
 }
 

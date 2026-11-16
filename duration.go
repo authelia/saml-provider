@@ -10,17 +10,18 @@ import (
 	"time"
 )
 
-// Duration is a time.Duration that uses the xsd:duration format for text
+// Duration is a [time.Duration] that uses the xsd:duration format for text
 // marshalling and unmarshalling.
 type Duration time.Duration
 
-// MarshalText implements the encoding.TextMarshaler interface.
+// MarshalText implements the [encoding.TextMarshaler] interface.
 func (d Duration) MarshalText() ([]byte, error) {
 	if d == 0 {
 		return nil, nil
 	}
 
 	out := "PT"
+
 	if d < 0 {
 		d *= -1
 		out = "-" + out
@@ -30,17 +31,21 @@ func (d Duration) MarshalText() ([]byte, error) {
 	m := time.Duration(d) % time.Hour / time.Minute
 	s := time.Duration(d) % time.Minute / time.Second
 	ns := time.Duration(d) % time.Second
+
 	if h > 0 {
 		out += fmt.Sprintf("%dH", h)
 	}
+
 	if m > 0 {
 		out += fmt.Sprintf("%dM", m)
 	}
+
 	if s > 0 || ns > 0 {
 		out += fmt.Sprintf("%d", s)
 		if ns > 0 {
 			out += strings.TrimRight(fmt.Sprintf(".%09d", ns), "0")
 		}
+
 		out += "S"
 	}
 
@@ -58,7 +63,9 @@ var (
 	durationTimeRegexp = regexp.MustCompile(`^(?:(\d+)H)?(?:(\d+)M)?(?:(\d+(?:\.\d+)?)S)?$`)
 )
 
-// UnmarshalText implements the encoding.TextUnmarshaler interface.
+// UnmarshalText implements the [encoding.TextUnmarshaler] interface.
+//
+//nolint:gocyclo // Complexity is inherent to the specification being implemented.
 func (d *Duration) UnmarshalText(text []byte) error {
 	if text == nil {
 		*d = 0
@@ -69,63 +76,79 @@ func (d *Duration) UnmarshalText(text []byte) error {
 		out  time.Duration
 		sign time.Duration = 1
 	)
+
 	match := durationRegexp.FindStringSubmatch(string(text))
 	if match == nil || strings.Join(match[2:6], "") == "" {
 		return fmt.Errorf("invalid duration (%s)", text)
 	}
+
 	if match[1] == "-" {
 		sign = -1
 	}
+
 	if match[2] != "" {
 		y, err := strconv.Atoi(match[2])
 		if err != nil {
 			return fmt.Errorf("invalid duration years (%s): %s", text, err)
 		}
+
 		out += time.Duration(y) * year
 	}
+
 	if match[3] != "" {
 		m, err := strconv.Atoi(match[3])
 		if err != nil {
 			return fmt.Errorf("invalid duration months (%s): %s", text, err)
 		}
+
 		out += time.Duration(m) * month
 	}
+
 	if match[4] != "" {
 		d, err := strconv.Atoi(match[4])
 		if err != nil {
 			return fmt.Errorf("invalid duration days (%s): %s", text, err)
 		}
+
 		out += time.Duration(d) * day
 	}
+
 	if match[5] != "" {
 		match := durationTimeRegexp.FindStringSubmatch(match[5])
 		if match == nil {
 			return fmt.Errorf("invalid duration (%s)", text)
 		}
+
 		if match[1] != "" {
 			h, err := strconv.Atoi(match[1])
 			if err != nil {
 				return fmt.Errorf("invalid duration hours (%s): %s", text, err)
 			}
+
 			out += time.Duration(h) * time.Hour
 		}
+
 		if match[2] != "" {
 			m, err := strconv.Atoi(match[2])
 			if err != nil {
 				return fmt.Errorf("invalid duration minutes (%s): %s", text, err)
 			}
+
 			out += time.Duration(m) * time.Minute
 		}
+
 		if match[3] != "" {
 			s, err := strconv.ParseFloat(match[3], 64)
 			if err != nil {
 				return fmt.Errorf("invalid duration seconds (%s): %s", text, err)
 			}
+
 			out += time.Duration(s * float64(time.Second))
 		}
 	}
 
 	*d = Duration(sign * out)
+
 	return nil
 }
 
@@ -133,25 +156,28 @@ func (d *Duration) UnmarshalText(text []byte) error {
 // months survive parsing and emission. The empty value means the duration is absent.
 type XSDDuration string
 
-// MarshalXMLAttr implements the xml.MarshalerAttr interface. The attribute is omitted if the value is empty.
+// MarshalXMLAttr implements the [xml.MarshalerAttr] interface. The attribute is omitted if the value is empty.
 func (d XSDDuration) MarshalXMLAttr(name xml.Name) (xml.Attr, error) {
 	if d == "" {
 		return xml.Attr{}, nil
 	}
+
 	return xml.Attr{Name: name, Value: string(d)}, nil
 }
 
-// UnmarshalText implements the encoding.TextUnmarshaler interface.
+// UnmarshalText implements the [encoding.TextUnmarshaler] interface.
 func (d *XSDDuration) UnmarshalText(text []byte) error {
 	if err := new(Duration).UnmarshalText([]byte(string(text))); err != nil {
 		return err
 	}
+
 	*d = XSDDuration(text)
+
 	return nil
 }
 
-// UnmarshalJSON implements the json.Unmarshaler interface. It also accepts the number of nanoseconds written
-// when this field was a time.Duration, where zero means the duration is absent.
+// UnmarshalJSON implements the [json.Unmarshaler] interface. It also accepts the number of nanoseconds written
+// when this field was a [time.Duration], where zero means the duration is absent.
 func (d *XSDDuration) UnmarshalJSON(data []byte) error {
 	var text string
 	if err := json.Unmarshal(data, &text); err == nil {
@@ -159,6 +185,7 @@ func (d *XSDDuration) UnmarshalJSON(data []byte) error {
 			*d = ""
 			return nil
 		}
+
 		return d.UnmarshalText([]byte(text))
 	}
 
@@ -166,10 +193,13 @@ func (d *XSDDuration) UnmarshalJSON(data []byte) error {
 	if err := json.Unmarshal(data, &nanoseconds); err != nil {
 		return err
 	}
+
 	out, err := Duration(nanoseconds).MarshalText()
 	if err != nil {
 		return err
 	}
+
 	*d = XSDDuration(out)
+
 	return nil
 }

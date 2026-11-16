@@ -6,7 +6,7 @@ import (
 	"io"
 )
 
-const flateUncompressLimit = 10 * 1024 * 1024 // 10MB
+const flateUncompressLimit = 10 * 1024 * 1024 // 10MB.
 
 func newSaferFlateReader(r io.Reader) io.ReadCloser {
 	return &saferFlateReader{r: flate.NewReader(r)}
@@ -21,8 +21,10 @@ func (r *saferFlateReader) Read(p []byte) (n int, err error) {
 	if r.count+len(p) > flateUncompressLimit {
 		return 0, fmt.Errorf("flate: uncompress limit exceeded (%d bytes)", flateUncompressLimit)
 	}
+
 	n, err = r.r.Read(p)
 	r.count += n
+
 	return n, err
 }
 

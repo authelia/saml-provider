@@ -18,11 +18,11 @@ type SessionWithAttributes interface {
 	GetAttributes() Attributes
 }
 
-// ErrNoSession is the error returned when the remote user does not have a session
+// ErrNoSession is the error returned when the remote user does not have a session.
 var ErrNoSession = errors.New("saml: session not present")
 
 // SessionProvider is an interface implemented by types that can track
-// the active session of a user. The default implementation is CookieSessionProvider
+// the active session of a user. The default implementation is CookieSessionProvider.
 type SessionProvider interface {
 	// CreateSession is called when we have received a valid SAML assertion and
 	// should create a new session and modify the http response accordingly, e.g. by
@@ -60,16 +60,17 @@ type indexType int
 const sessionIndex indexType = iota
 
 // SessionFromContext returns the session associated with ctx, or nil
-// if no session are associated
+// if no session are associated.
 func SessionFromContext(ctx context.Context) Session {
 	v := ctx.Value(sessionIndex)
 	if v == nil {
 		return nil
 	}
+
 	return v.(Session)
 }
 
-// ContextWithSession returns a new context with session associated
+// ContextWithSession returns a new context with session associated.
 func ContextWithSession(ctx context.Context, session Session) context.Context {
 	return context.WithValue(ctx, sessionIndex, session)
 }
@@ -81,9 +82,11 @@ func AttributeFromContext(ctx context.Context, name string) string {
 	if s == nil {
 		return ""
 	}
+
 	sa, ok := s.(SessionWithAttributes)
 	if !ok {
 		return ""
 	}
+
 	return sa.GetAttributes().Get(name)
 }

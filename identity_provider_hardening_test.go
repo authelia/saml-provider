@@ -32,6 +32,7 @@ func hardeningRequest(idAttr string, issueInstant time.Time, body string) []byte
 func hardeningValidate(test *IdentityProviderTest, buf []byte) (*IdpAuthnRequest, error) {
 	req := &IdpAuthnRequest{Now: TimeNow(), IDP: &test.IDP, RequestBuffer: buf}
 	req.HTTPRequest, _ = http.NewRequest("POST", "https://idp.example.com/saml/sso", nil)
+
 	return req, req.Validate()
 }
 
@@ -45,17 +46,21 @@ func hardeningIDPWithSessionCheck(t *testing.T) *IdentityProviderTest {
 			return nil
 		},
 	}
+
 	return test
 }
 
 func hardeningDeflate(t *testing.T, data []byte) string {
 	t.Helper()
+
 	var compressed bytes.Buffer
+
 	w, err := flate.NewWriter(&compressed, flate.BestCompression)
 	assert.NilError(t, err)
 	_, err = w.Write(data)
 	assert.NilError(t, err)
 	assert.NilError(t, w.Close())
+
 	return base64.StdEncoding.EncodeToString(compressed.Bytes())
 }
 
@@ -94,6 +99,7 @@ func TestIDPServeSSORejectsOversizedRequestsBeforeParsing(t *testing.T) {
 			"SAMLRequest": {base64.StdEncoding.EncodeToString(oversized)},
 		}.Encode()))
 		r.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+
 		w := httptest.NewRecorder()
 		test.IDP.ServeSSO(w, r)
 		assert.Check(t, is.Equal(http.StatusBadRequest, w.Code))
@@ -137,6 +143,7 @@ func TestIDPValidateIssueInstantBounds(t *testing.T) {
 				assert.Check(t, err)
 				return
 			}
+
 			assert.Check(t, is.ErrorContains(err, tc.errMsg))
 		})
 	}
@@ -191,6 +198,7 @@ func TestIDPValidateRequestID(t *testing.T) {
 				assert.Check(t, err)
 				return
 			}
+
 			assert.Check(t, is.ErrorContains(err, "request ID"))
 		})
 	}
@@ -238,6 +246,7 @@ func TestIDPGetSPEncryptionCert(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			req := &IdpAuthnRequest{IDP: &test.IDP, Now: TimeNow(), SPSSODescriptor: &SPSSODescriptor{SSODescriptor: SSODescriptor{RoleDescriptor: RoleDescriptor{KeyDescriptors: tc.descriptors}}}}
 			cert, err := req.getSPEncryptionCert()
+
 			switch {
 			case tc.found:
 				assert.Check(t, err)
@@ -261,6 +270,7 @@ type countingReader struct {
 func (c *countingReader) Read(p []byte) (int, error) {
 	n, err := c.r.Read(p)
 	c.n += n
+
 	return n, err
 }
 
@@ -271,6 +281,7 @@ func TestNewIdpAuthnRequestLimitsPostBody(t *testing.T) {
 	post := func(body io.Reader) *http.Request {
 		r := httptest.NewRequest("POST", "https://idp.example.com/saml/sso", body)
 		r.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+
 		return r
 	}
 	form := func(size int) string {

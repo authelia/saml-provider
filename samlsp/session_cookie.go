@@ -29,7 +29,7 @@ type CookieSessionProvider struct {
 // should create a new session and modify the http response accordingly, e.g. by
 // setting a cookie.
 func (c CookieSessionProvider) CreateSession(w http.ResponseWriter, r *http.Request, assertion *saml.Assertion) error {
-	// Cookies should not have the port attached to them so strip it off
+	// Cookies should not have the port attached to them so strip it off.
 	if domain, _, err := net.SplitHostPort(c.Domain); err == nil {
 		c.Domain = domain
 	}
@@ -49,7 +49,7 @@ func (c CookieSessionProvider) CreateSession(w http.ResponseWriter, r *http.Requ
 		path = "/"
 	}
 
-	http.SetCookie(w, &http.Cookie{
+	http.SetCookie(w, &http.Cookie{ //nolint:gosec // The cookie attributes are configurable by the caller.
 		Name:     c.Name,
 		Domain:   c.Domain,
 		Value:    value,
@@ -59,13 +59,14 @@ func (c CookieSessionProvider) CreateSession(w http.ResponseWriter, r *http.Requ
 		SameSite: c.SameSite,
 		Path:     path,
 	})
+
 	return nil
 }
 
 // DeleteSession is called to modify the response such that it removed the current
 // session, e.g. by deleting a cookie.
 func (c CookieSessionProvider) DeleteSession(w http.ResponseWriter, r *http.Request) error {
-	// Cookies should not have the port attached to them so strip it off
+	// Cookies should not have the port attached to them so strip it off.
 	if domain, _, err := net.SplitHostPort(c.Domain); err == nil {
 		c.Domain = domain
 	}
@@ -75,15 +76,17 @@ func (c CookieSessionProvider) DeleteSession(w http.ResponseWriter, r *http.Requ
 	if err == http.ErrNoCookie {
 		return nil
 	}
+
 	if err != nil {
 		return err
 	}
 
 	cookie.Value = ""
-	cookie.Expires = time.Unix(1, 0) // past time as close to epoch as possible, but not zero time.Time{}
+	cookie.Expires = time.Unix(1, 0) // past time as close to epoch as possible, but not zero time.Time{}.
 	cookie.Path = "/"
 	cookie.Domain = c.Domain
 	http.SetCookie(w, cookie)
+
 	return nil
 }
 
@@ -101,5 +104,6 @@ func (c CookieSessionProvider) GetSession(r *http.Request) (Session, error) {
 	if err != nil {
 		return nil, ErrNoSession
 	}
+
 	return session, nil
 }

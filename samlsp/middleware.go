@@ -14,7 +14,7 @@ import (
 // Middleware implements middleware than allows a web application
 // to support SAML.
 //
-// It implements http.Handler so that it can provide the metadata and ACS endpoints,
+// It implements [http.Handler] so that it can provide the metadata and ACS endpoints,
 // typically /saml/metadata and /saml/acs, respectively.
 //
 // It also provides middleware RequireAccount which redirects users to
@@ -35,7 +35,7 @@ import (
 // authenticated attributes from the SAML assertion.
 //
 // When the middleware receives a request with a valid session JWT it extracts
-// the SAML attributes and modifies the http.Request object adding a Context
+// the SAML attributes and modifies the [http.Request] object adding a Context
 // object to the request context that contains attributes from the initial
 // SAML assertion.
 //
@@ -45,14 +45,14 @@ import (
 type Middleware struct {
 	ServiceProvider  saml.ServiceProvider
 	OnError          func(w http.ResponseWriter, r *http.Request, err error)
-	Binding          string // either saml.HTTPPostBinding or saml.HTTPRedirectBinding
-	ResponseBinding  string // either saml.HTTPPostBinding or saml.HTTPArtifactBinding
+	Binding          string // either saml.HTTPPostBinding or saml.HTTPRedirectBinding.
+	ResponseBinding  string // either saml.HTTPPostBinding or saml.HTTPArtifactBinding.
 	RequestTracker   RequestTracker
 	Session          SessionProvider
 	AssertionHandler AssertionHandler
 }
 
-// ServeHTTP implements http.Handler and serves the SAML-specific HTTP endpoints
+// ServeHTTP implements [http.Handler] and serves the SAML-specific HTTP endpoints
 // on the URIs specified by m.ServiceProvider.MetadataURL and
 // m.ServiceProvider.AcsURL.
 func (m *Middleware) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -72,8 +72,10 @@ func (m *Middleware) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 // ServeMetadata handles requests for the SAML metadata endpoint.
 func (m *Middleware) ServeMetadata(w http.ResponseWriter, _ *http.Request) {
 	buf, _ := xml.MarshalIndent(m.ServiceProvider.Metadata(), "", "  ")
+
 	w.Header().Set("Content-Type", "application/samlmetadata+xml")
-	if _, err := w.Write(buf); err != nil {
+
+	if _, err := w.Write(buf); err != nil { //nolint:gosec // The metadata is generated from configuration, not the request.
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
@@ -121,8 +123,10 @@ func (m *Middleware) RequireAccount(handler http.Handler) http.Handler {
 		if session != nil {
 			r = r.WithContext(ContextWithSession(r.Context(), session))
 			handler.ServeHTTP(w, r)
+
 			return
 		}
+
 		if err == ErrNoSession {
 			m.HandleStartAuthFlow(w, r)
 			return
@@ -148,6 +152,7 @@ func (m *Middleware) HandleStartAuthFlow(w http.ResponseWriter, r *http.Request)
 		bindingLocation = m.ServiceProvider.GetSSOBindingLocation(binding)
 	} else {
 		binding = saml.HTTPRedirectBinding
+
 		bindingLocation = m.ServiceProvider.GetSSOBindingLocation(binding)
 		if bindingLocation == "" {
 			binding = saml.HTTPPostBinding
@@ -177,26 +182,33 @@ func (m *Middleware) HandleStartAuthFlow(w http.ResponseWriter, r *http.Request)
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
+
 		w.Header().Add("Location", redirectURL.String())
 		w.WriteHeader(http.StatusFound)
+
 		return
 	}
+
 	if binding == saml.HTTPPostBinding {
 		w.Header().Add("Content-Security-Policy", ""+
 			"default-src; "+
 			"script-src 'sha256-AjPdJSbZmeWHnEc5ykvJFay8FTWeTeRbs9dutfZ0HqE='; "+
 			"reflected-xss block; referrer no-referrer;")
 		w.Header().Add("Content-type", "text/html")
+
 		var buf bytes.Buffer
 		buf.WriteString(`<!DOCTYPE html><html><body>`)
 		buf.Write(authReq.Post(relayState))
 		buf.WriteString(`</body></html>`)
+
 		if _, err := w.Write(buf.Bytes()); err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
+
 		return
 	}
+
 	panic("not reached")
 }
 
@@ -234,7 +246,7 @@ func (m *Middleware) CreateSessionFromAssertion(w http.ResponseWriter, r *http.R
 		return
 	}
 
-	http.Redirect(w, r, redirectURI, http.StatusFound)
+	http.Redirect(w, r, redirectURI, http.StatusFound) //nolint:gosec // Client supplied targets are restricted by isLocalRedirect.
 }
 
 // relayState returns the RelayState sent alongside the SAML message, so a
@@ -243,6 +255,7 @@ func relayState(r *http.Request) string {
 	if r.PostForm.Has("SAMLResponse") || r.PostForm.Has("SAMLart") {
 		return r.PostForm.Get("RelayState")
 	}
+
 	return r.URL.Query().Get("RelayState")
 }
 
@@ -252,13 +265,16 @@ func (m *Middleware) isLocalRedirect(uri string) bool {
 	if strings.ContainsFunc(uri, unicode.IsControl) {
 		return false
 	}
+
 	if strings.HasPrefix(uri, "/") {
 		return !strings.HasPrefix(uri, "//") && !strings.HasPrefix(uri, "/\\")
 	}
+
 	u, err := url.Parse(uri)
 	if err != nil {
 		return false
 	}
+
 	return u.User == nil &&
 		strings.EqualFold(u.Scheme, m.ServiceProvider.AcsURL.Scheme) &&
 		strings.EqualFold(u.Host, m.ServiceProvider.AcsURL.Host)
@@ -274,6 +290,7 @@ func RequireAttribute(name, value string) func(http.Handler) http.Handler {
 			if session := SessionFromContext(r.Context()); session != nil {
 				// this will panic if we have the wrong type of Session, and that is OK.
 				sessionWithAttributes := session.(SessionWithAttributes)
+
 				attributes := sessionWithAttributes.GetAttributes()
 				if values, ok := attributes[name]; ok {
 					for _, v := range values {
@@ -284,6 +301,7 @@ func RequireAttribute(name, value string) func(http.Handler) http.Handler {
 					}
 				}
 			}
+
 			http.Error(w, http.StatusText(http.StatusForbidden), http.StatusForbidden)
 		})
 	}

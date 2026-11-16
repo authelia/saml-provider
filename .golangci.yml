@@ -1,65 +1,97 @@
+---
 version: "2"
 linters:
   enable:
-    - bodyclose
+    - asciicheck
+    - forbidigo
     - gocritic
     - gocyclo
+    - godoclint
+    - godot
     - gosec
     - misspell
-    - nakedret
+    - nolintlint
     - prealloc
     - revive
-    - staticcheck
     - unconvert
     - unparam
-  disable:
-    # TODO(ross): fix errors reported by these checkers and enable them
-    - depguard
-    - dupl
-    - gochecknoglobals
-    - gochecknoinits
-    - goconst
-    - lll
+    - whitespace
+    - wsl_v5
   settings:
-    govet:
+    forbidigo:
+      forbid:
+        - pattern: ^print.*$
+          msg: Do not commit print statements.
+        - pattern: ^fmt\.Print.*$
+          pkg: ^fmt$
+          msg: Do not commit print statements.
+      analyze-types: true
+    goconst:
+      min-len: 2
+      min-occurrences: 2
+      ignore-tests: true
+    gocyclo:
+      min-complexity: 15
+    godoclint:
       enable:
-        - asmdecl
-        - assign
-        - atomic
-        - bools
-        - buildtag
-        - cgocall
-        - composites
-        - copylocks
-        - errorsas
-        - httpresponse
-        - loopclosure
-        - lostcancel
-        - nilfunc
-        - printf
-        - shift
-        - stdmethods
-        - structtag
-        - tests
-        - unmarshal
-        - unreachable
-        - unsafeptr
-        - unusedresult
-      disable:
-        - shadow
+        - no-unused-link
+        - require-doc
+        - require-pkg-doc
+        - require-stdlib-doclink
+    godot:
+      scope: all
+      exclude:
+        - '^\s*SPDX-'
+    revive:
+      confidence: 0.8
   exclusions:
     generated: lax
     rules:
+      - linters:
+          - godoclint
+        path: _test\.go$
+      - linters:
+          - forbidigo
+        path: example/
       - path: (.+)\.go$
-        text: G104 # 'Errors unhandled. (gosec)
+        text: Error return value of .((os\.)?std(out|err)\..*|.*Close|.*Flush|os\.Remove(All)?|.*printf?|os\.(Un)?Setenv). is not checked  # yamllint disable-line rule:line-length
+      - path: (.+)\.go$
+        text: func name will be used as test\.Test.* by other packages, and that stutters; consider calling this
+      - path: (.+)\.go$
+        text: (possible misuse of unsafe.Pointer|should have signature)
+      - path: (.+)\.go$
+        text: ineffective break statement. Did you mean to break out of the outer loop
+      - path: (.+)\.go$
+        text: Use of unsafe calls should be audited
+      - path: (.+)\.go$
+        text: Subprocess launch(ed with variable|ing should be audited)
+      - path: (.+)\.go$
+        text: (G104|G307)
+      - path: (.+)\.go$
+        text: (Expect directory permissions to be 0750 or less|Expect file permissions to be 0600 or less)
+      - path: (.+)\.go$
+        text: Potential file inclusion via variable
     paths:
+      - third_party$
+      - builtin$
+      - examples$
       - example/(service\.go|trivial/.*\.go|idp/idp\.go)$
       - internal/dsig/.*\.go$
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0
 formatters:
   enable:
+    - gci
     - gofmt
     - goimports
   settings:
+    gci:
+      sections:
+        - standard
+        - default
+        - prefix(authelia.com,github.com/authelia)
+        - localmodule
     goimports:
       local-prefixes:
         - authelia.com/provider/saml
@@ -69,3 +101,4 @@ formatters:
       - third_party$
       - builtin$
       - examples$
+...

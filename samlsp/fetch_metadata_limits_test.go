@@ -17,6 +17,7 @@ import (
 func TestFetchMetadataLimitsSize(t *testing.T) {
 	previous := maxMetadataSize
 	maxMetadataSize = 1024
+
 	t.Cleanup(func() { maxMetadataSize = previous })
 
 	for _, tc := range []struct {
@@ -33,11 +34,13 @@ func TestFetchMetadataLimitsSize(t *testing.T) {
 				_, _ = w.Write(bytes.Repeat([]byte(" "), tc.size))
 			}))
 			defer server.Close()
+
 			u, err := url.Parse(server.URL)
 			assert.NilError(t, err)
 
 			_, err = FetchMetadata(context.Background(), server.Client(), *u)
 			assert.Assert(t, err != nil)
+
 			if tc.tooMuch {
 				assert.Check(t, is.ErrorContains(err, "too large"))
 			} else {
@@ -50,12 +53,14 @@ func TestFetchMetadataLimitsSize(t *testing.T) {
 func TestFetchMetadataWithoutClientHasTimeout(t *testing.T) {
 	previous := defaultFetchMetadataTimeout
 	defaultFetchMetadataTimeout = 50 * time.Millisecond
+
 	t.Cleanup(func() { defaultFetchMetadataTimeout = previous })
 
 	release := make(chan struct{})
 	server := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { <-release }))
 	t.Cleanup(server.Close)
 	t.Cleanup(func() { close(release) })
+
 	u, err := url.Parse(server.URL)
 	assert.NilError(t, err)
 

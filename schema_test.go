@@ -29,6 +29,7 @@ func TestAttributeXMLRoundTrip(t *testing.T) {
 		string(x)))
 
 	var actual Attribute
+
 	err = xml.Unmarshal(x, &actual)
 	assert.Check(t, err)
 	assert.Check(t, is.DeepEqual(expected, actual))
@@ -55,6 +56,7 @@ func TestAudienceRestrictionXMLRoundTrip(t *testing.T) {
 
 func TestNameIDFormat(t *testing.T) {
 	var emptyString string
+
 	el := NameIDPolicy{
 		Format: &emptyString,
 	}
@@ -83,6 +85,7 @@ func TestAuthnStatementXMLRoundTrip(t *testing.T) {
 		string(x)))
 
 	var actual AuthnStatement
+
 	err = xml.Unmarshal(x, &actual)
 	assert.Check(t, err)
 	assert.Check(t, is.DeepEqual(expected, actual))
@@ -109,6 +112,7 @@ func TestAuthnStatementMarshalWithoutSessionNotOnOrAfter(t *testing.T) {
 		string(x)))
 
 	var actual AuthnStatement
+
 	err = xml.Unmarshal(x, &actual)
 	assert.Check(t, err)
 	assert.Check(t, is.DeepEqual(expected, actual))
@@ -133,7 +137,7 @@ func TestArtifactResolveElement(t *testing.T) {
 		ID:           "index",
 		Version:      "version",
 		IssueInstant: issueInstant,
-		// Signature    *etree.Element
+		// Signature    *etree.Element.
 	}
 
 	doc := etree.NewDocument()
@@ -144,6 +148,7 @@ func TestArtifactResolveElement(t *testing.T) {
 		string(x)))
 
 	var actual ArtifactResolve
+
 	err = xml.Unmarshal(x, &actual)
 	assert.Check(t, err)
 	assert.Check(t, is.DeepEqual(expected, actual))
@@ -160,7 +165,7 @@ func TestArtifactResolveSoapRequest(t *testing.T) {
 		ID:           "index",
 		Version:      "version",
 		IssueInstant: issueInstant,
-		// Signature    *etree.Element
+		// Signature    *etree.Element.
 	}
 
 	doc := etree.NewDocument()
@@ -201,7 +206,7 @@ func TestArtifactResponseElement(t *testing.T) {
 			Status:       status,
 			IssueInstant: issueInstant,
 		},
-		// Signature *etree.Element
+		// Signature *etree.Element.
 	}
 
 	doc := etree.NewDocument()
@@ -212,6 +217,7 @@ func TestArtifactResponseElement(t *testing.T) {
 		string(x)))
 
 	var actual ArtifactResponse
+
 	err = xml.Unmarshal(x, &actual)
 	assert.Check(t, err)
 	assert.Check(t, is.DeepEqual(expected, actual))
@@ -253,6 +259,7 @@ func TestLogoutRequestXMLRoundTrip(t *testing.T) {
 		string(x)))
 
 	var actual LogoutRequest
+
 	err = xml.Unmarshal(x, &actual)
 	assert.Check(t, err)
 	assert.Check(t, is.DeepEqual(expected, actual))
@@ -292,6 +299,7 @@ func TestLogoutRequestMarshalWithoutNotOnOrAfter(t *testing.T) {
 		string(x)))
 
 	var actual LogoutRequest
+
 	err = xml.Unmarshal(x, &actual)
 	assert.Check(t, err)
 	assert.Check(t, is.DeepEqual(expected, actual))

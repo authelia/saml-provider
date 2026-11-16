@@ -27,11 +27,14 @@ type recordingTransport struct {
 
 func (r *recordingTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 	r.url = req.URL.String()
+
 	body, err := io.ReadAll(req.Body)
 	if err != nil {
 		return nil, err
 	}
+
 	r.body = string(body)
+
 	return nil, errors.New("request recorded")
 }
 
@@ -94,8 +97,10 @@ func TestArtifactResolutionDoesNotFollowRedirects(t *testing.T) {
 	} {
 		t.Run(http.StatusText(status), func(t *testing.T) {
 			var hits atomic.Int32
+
 			internal := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { hits.Add(1) }))
 			defer internal.Close()
+
 			idp := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				http.Redirect(w, r, internal.URL, status)
 			}))
@@ -145,6 +150,7 @@ func TestArtifactResolutionDoesNotFollowRedirects(t *testing.T) {
 		}
 		assert.NilError(t, xml.Unmarshal(test.IDPMetadata, sp.IDPMetadata))
 		_, _ = sp.handleArtifactRequest(context.Background(), "artifact", nil)
+
 		assert.Check(t, client.CheckRedirect == nil)
 		assert.Check(t, http.DefaultClient.CheckRedirect == nil)
 	})
@@ -169,12 +175,14 @@ func artifactRequestTo(t *testing.T, location string) (*ServiceProvider, *http.R
 	assert.NilError(t, err)
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	assert.NilError(t, req.ParseForm())
+
 	return sp, req
 }
 
 func TestArtifactResolutionLimitsResponseSize(t *testing.T) {
 	previous := maxArtifactResponseSize
 	maxArtifactResponseSize = 1024
+
 	t.Cleanup(func() { maxArtifactResponseSize = previous })
 
 	for _, tc := range []struct {
@@ -195,6 +203,7 @@ func TestArtifactResolutionLimitsResponseSize(t *testing.T) {
 			sp, req := artifactRequestTo(t, idp.URL)
 			_, err := sp.ParseResponse(req, nil)
 			assert.Assert(t, err != nil)
+
 			reason := err.(*InvalidResponseError).PrivateErr
 			if tc.tooMuch {
 				assert.Check(t, is.ErrorContains(reason, "too large"))
@@ -208,6 +217,7 @@ func TestArtifactResolutionLimitsResponseSize(t *testing.T) {
 func TestArtifactResolutionTimeout(t *testing.T) {
 	previous := defaultArtifactResolutionTimeout
 	defaultArtifactResolutionTimeout = 50 * time.Millisecond
+
 	t.Cleanup(func() { defaultArtifactResolutionTimeout = previous })
 
 	release := make(chan struct{})
@@ -227,8 +237,10 @@ func TestArtifactResolutionTimeout(t *testing.T) {
 	t.Run("the client of the caller decides", func(t *testing.T) {
 		sp, req := artifactRequestTo(t, idp.URL)
 		sp.HTTPClient = &http.Client{}
+
 		ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
 		defer cancel()
+
 		start := time.Now()
 		_, err := sp.ParseResponse(req.WithContext(ctx), nil)
 		assert.Assert(t, err != nil)

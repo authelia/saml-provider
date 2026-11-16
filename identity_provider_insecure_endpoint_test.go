@@ -89,9 +89,11 @@ func insecureEndpointTestIDP(t *testing.T, acs ...IndexedEndpoint) *IdentityProv
 			if serviceProviderID == test.SP.MetadataURL.String() {
 				return metadata, nil
 			}
+
 			return nil, errors.New("unknown service provider")
 		},
 	}
+
 	return test
 }
 
@@ -193,7 +195,9 @@ func TestIDPMixedACSEndpoints(t *testing.T) {
 
 	t.Run("enabled default", func(t *testing.T) {
 		test.IDP.AllowInsecureServiceProviderEndpoints = true
+
 		t.Cleanup(func() { test.IDP.AllowInsecureServiceProviderEndpoints = false })
+
 		req, err := hardeningValidate(test, insecureEndpointRequest(``))
 		assert.NilError(t, err)
 		assert.Check(t, is.Equal(req.ACSEndpoint.Location, insecureACS.Location))
@@ -222,6 +226,7 @@ func TestIDPServeSSORefusesInsecureACS(t *testing.T) {
 	body := url.Values{"SAMLRequest": {base64.StdEncoding.EncodeToString(request)}}.Encode()
 	r := httptest.NewRequest(http.MethodPost, "https://idp.example.com/saml/sso", strings.NewReader(body))
 	r.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+
 	w := httptest.NewRecorder()
 	test.IDP.ServeSSO(w, r)
 
@@ -296,6 +301,7 @@ func insecureLogoutTestIDP(t *testing.T, slo ...Endpoint) (*IdentityProviderTest
 	test.IDP.ServiceProviderProvider = &mockServiceProviderProvider{
 		GetServiceProviderFunc: func(*http.Request, string) (*EntityDescriptor, error) { return metadata, nil },
 	}
+
 	return test, provider
 }
 

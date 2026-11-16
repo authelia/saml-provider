@@ -21,12 +21,15 @@ import (
 // addAttributes adds attributes to the end of the first tag that starts with prefix.
 func addAttributes(t *testing.T, body, prefix, attributes string) string {
 	t.Helper()
+
 	start := strings.Index(body, prefix)
 	assert.Assert(t, start >= 0, "no %s in %s", prefix, body)
+
 	end := start + strings.Index(body[start:], ">")
 	if body[end-1] == '/' {
 		end--
 	}
+
 	return body[:end] + " " + attributes + body[end:]
 }
 
@@ -38,7 +41,9 @@ func signedResponseForSP(t *testing.T) (*IdentityProviderTest, string) {
 	test.SP.IDPMetadata = test.IDP.Metadata()
 
 	previousClock := Clock
+
 	t.Cleanup(func() { Clock = previousClock })
+
 	Clock = dsig.NewFakeClockAt(test.Certificate.NotBefore)
 
 	metadata := test.SP.Metadata()
@@ -64,6 +69,7 @@ func signedResponseForSP(t *testing.T) (*IdentityProviderTest, string) {
 
 	_, err = test.SP.ParseXMLResponse([]byte(body), []string{"id-request"}, test.SP.AcsURL)
 	assert.NilError(t, err)
+
 	return test, body
 }
 
@@ -119,7 +125,9 @@ func TestValidateLogoutResponseRejectsDestinationInUnusedDeclaration(t *testing.
 	test := NewIdentityProviderTest(t, applyKey)
 	TimeNow = time.Now
 	previousClock := Clock
+
 	t.Cleanup(func() { Clock = previousClock })
+
 	Clock = dsig.NewFakeClockAt(test.Certificate.NotBefore)
 
 	test.SP.IDPMetadata = test.IDP.Metadata()
@@ -130,10 +138,12 @@ func TestValidateLogoutResponseRejectsDestinationInUnusedDeclaration(t *testing.
 	sign := func(destination string) string {
 		response, err := test.SP.MakeLogoutResponse(destination, "id-request")
 		assert.NilError(t, err)
+
 		doc := etree.NewDocument()
 		doc.SetRoot(response.Element())
 		body, err := doc.WriteToString()
 		assert.NilError(t, err)
+
 		return body
 	}
 	encode := func(body string) string { return base64.StdEncoding.EncodeToString([]byte(body)) }
@@ -186,11 +196,14 @@ func TestParseResponseChecksAssertionOnlySignature(t *testing.T) {
 	assert.NilError(t, doc.ReadFromString(body))
 	root := doc.Root()
 	root.RemoveChild(root.SelectElement("Signature"))
+
 	issued := TimeNow()
 	later := issued.Add(10 * time.Hour)
 	now := later.UTC().Format(time.RFC3339)
 	far := later.Add(100 * time.Hour).UTC().Format(time.RFC3339)
+
 	root.CreateAttr("IssueInstant", now)
+
 	unsigned, err := doc.WriteToString()
 	assert.NilError(t, err)
 
@@ -212,6 +225,7 @@ func TestParseResponseKeepsAttributeValueTypes(t *testing.T) {
 	var value struct {
 		Value AttributeValue
 	}
+
 	doc := etree.NewDocument()
 	assert.NilError(t, doc.ReadFromString(`<root xmlns:xs="http://www.w3.org/2001/XMLSchema"><Value xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:type="xs:string">alice</Value></root>`))
 	assert.NilError(t, unmarshalElement(doc.Root(), &value))
@@ -223,7 +237,9 @@ func TestValidateLogoutResponseRedirectRejectsDestinationInUnusedDeclaration(t *
 	test := NewIdentityProviderTest(t, applyKey)
 	TimeNow = time.Now
 	previousClock := Clock
+
 	t.Cleanup(func() { Clock = previousClock })
+
 	Clock = dsig.NewFakeClockAt(test.Certificate.NotBefore)
 
 	test.SP.IDPMetadata = test.IDP.Metadata()
@@ -233,6 +249,7 @@ func TestValidateLogoutResponseRedirectRejectsDestinationInUnusedDeclaration(t *
 
 	response, err := test.SP.MakeLogoutResponse("https://other.example.com/slo", "id-request")
 	assert.NilError(t, err)
+
 	doc := etree.NewDocument()
 	doc.SetRoot(response.Element())
 	body, err := doc.WriteToString()
@@ -240,6 +257,7 @@ func TestValidateLogoutResponseRedirectRejectsDestinationInUnusedDeclaration(t *
 	body = addAttributes(t, body, "<samlp:LogoutResponse ", `xmlns:Destination="`+test.SP.SloURL.String()+`"`)
 
 	var compressed bytes.Buffer
+
 	w, err := flate.NewWriter(&compressed, flate.BestCompression)
 	assert.NilError(t, err)
 	_, err = w.Write([]byte(body))
@@ -254,8 +272,10 @@ func TestValidateLogoutResponseRedirectRejectsDestinationInUnusedDeclaration(t *
 // cover itself, so this doesn't make a declaration of that prefix part of what was signed.
 func useInSignature(t *testing.T, body, prefix string) string {
 	t.Helper()
+
 	const end = "</ds:Signature>"
 	assert.Assert(t, strings.Contains(body, end))
+
 	return strings.Replace(body, end, "<"+prefix+":x/>"+end, 1)
 }
 
@@ -268,6 +288,7 @@ func TestParseResponseRejectsDeclarationUsedOnlyInSignature(t *testing.T) {
 	body = addAttributes(t, body, "<samlp:Response ", `xmlns:IssueInstant="`+later.UTC().Format(time.RFC3339)+`"`)
 
 	_, err := test.SP.ParseXMLResponse([]byte(body), []string{"id-request"}, test.SP.AcsURL)
+
 	var invalid *InvalidResponseError
 	assert.Assert(t, errors.As(err, &invalid), "got %v", err)
 	assert.Check(t, is.ErrorContains(invalid.PrivateErr, "response IssueInstant expired"))
@@ -280,7 +301,9 @@ func logoutResponseWithDeclarationUsedInSignature(t *testing.T) (*IdentityProvid
 	test := NewIdentityProviderTest(t, applyKey)
 	TimeNow = time.Now
 	previousClock := Clock
+
 	t.Cleanup(func() { Clock = previousClock })
+
 	Clock = dsig.NewFakeClockAt(test.Certificate.NotBefore)
 
 	test.SP.IDPMetadata = test.IDP.Metadata()
@@ -290,12 +313,14 @@ func logoutResponseWithDeclarationUsedInSignature(t *testing.T) (*IdentityProvid
 
 	response, err := test.SP.MakeLogoutResponse("https://other.example.com/slo", "id-request")
 	assert.NilError(t, err)
+
 	doc := etree.NewDocument()
 	doc.SetRoot(response.Element())
 	body, err := doc.WriteToString()
 	assert.NilError(t, err)
 
 	body = useInSignature(t, body, "Destination")
+
 	return test, addAttributes(t, body, "<samlp:LogoutResponse ", `xmlns:Destination="`+test.SP.SloURL.String()+`"`)
 }
 
@@ -310,6 +335,7 @@ func TestValidateLogoutResponseRedirectRejectsDeclarationUsedOnlyInSignature(t *
 	test, body := logoutResponseWithDeclarationUsedInSignature(t)
 
 	var compressed bytes.Buffer
+
 	w, err := flate.NewWriter(&compressed, flate.BestCompression)
 	assert.NilError(t, err)
 	_, err = w.Write([]byte(body))

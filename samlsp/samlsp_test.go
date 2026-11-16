@@ -26,6 +26,7 @@ func mustParseURL(s string) url.URL {
 	if err != nil {
 		panic(err)
 	}
+
 	return *rv
 }
 
@@ -34,10 +35,12 @@ func mustParsePrivateKey(pemStr []byte) crypto.PrivateKey {
 	if b == nil {
 		panic("cannot parse PEM")
 	}
+
 	k, err := x509.ParsePKCS1PrivateKey(b.Bytes)
 	if err != nil {
 		panic(err)
 	}
+
 	return k
 }
 
@@ -46,10 +49,12 @@ func mustParseCertificate(pemStr []byte) *x509.Certificate {
 	if b == nil {
 		panic("cannot parse PEM")
 	}
+
 	cert, err := x509.ParseCertificate(b.Bytes)
 	if err != nil {
 		panic(err)
 	}
+
 	return cert
 }
 
@@ -57,6 +62,7 @@ func TestCanParseTestshibMetadata(t *testing.T) {
 	httpClient := http.Client{
 		Transport: mockTransport(func(req *http.Request) (*http.Response, error) {
 			responseBody := golden.Get(t, "testshib_metadata.xml")
+
 			return &http.Response{
 				Header:     http.Header{},
 				Request:    req,

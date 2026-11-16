@@ -7,7 +7,6 @@ import (
 )
 
 func TestNewCanAcceptCookieName(t *testing.T) {
-
 	testCases := []struct {
 		testName   string
 		cookieName string
@@ -24,10 +23,9 @@ func TestNewCanAcceptCookieName(t *testing.T) {
 			}
 			sp, err := New(opts)
 			assert.Assert(t, err)
+
 			cookieProvider := sp.Session.(CookieSessionProvider)
 			assert.Equal(t, tc.expected, cookieProvider.Name)
-
 		})
 	}
-
 }

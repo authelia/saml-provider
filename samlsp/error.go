@@ -25,11 +25,13 @@ const maxLoggedValueSize = 4096
 // forge log lines.
 func DefaultOnError(w http.ResponseWriter, _ *http.Request, err error) {
 	if parseErr, ok := err.(*saml.InvalidResponseError); ok {
+		//nolint:gosec // Client controlled values are quoted by logValue.
 		log.Printf("WARNING: received invalid saml response: %s (now: %s) %s",
 			logValue(parseErr.Response), parseErr.Now, logValue(fmt.Sprint(parseErr.PrivateErr)))
 	} else {
 		log.Printf("ERROR: %s", logValue(fmt.Sprint(err)))
 	}
+
 	http.Error(w, http.StatusText(http.StatusForbidden), http.StatusForbidden)
 }
 
@@ -38,5 +40,6 @@ func logValue(value string) string {
 	if len(value) > maxLoggedValueSize {
 		return fmt.Sprintf("%q (truncated from %d bytes)", value[:maxLoggedValueSize], len(value))
 	}
+
 	return strconv.Quote(value)
 }

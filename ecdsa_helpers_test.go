@@ -34,8 +34,10 @@ var ecdsaTestCurves = []struct {
 
 func newECDSATestKey(t *testing.T, curve elliptic.Curve) (*ecdsa.PrivateKey, *x509.Certificate) {
 	t.Helper()
+
 	key, err := ecdsa.GenerateKey(curve, rand.Reader)
 	assert.NilError(t, err)
+
 	template := &x509.Certificate{
 		SerialNumber: big.NewInt(1),
 		Subject:      pkix.Name{CommonName: "test"},
@@ -46,6 +48,7 @@ func newECDSATestKey(t *testing.T, curve elliptic.Curve) (*ecdsa.PrivateKey, *x5
 	assert.NilError(t, err)
 	cert, err := x509.ParseCertificate(der)
 	assert.NilError(t, err)
+
 	return key, cert
 }
 
@@ -54,5 +57,6 @@ func keyDescriptorUses(descriptors []KeyDescriptor) []string {
 	for _, descriptor := range descriptors {
 		uses = append(uses, descriptor.Use)
 	}
+
 	return uses
 }

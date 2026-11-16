@@ -17,8 +17,10 @@ import (
 
 func gcmCipherValue(t *testing.T, el *etree.Element) string {
 	t.Helper()
+
 	value := el.FindElement("./CipherData/CipherValue")
 	assert.Assert(t, value != nil)
+
 	return value.Text()
 }
 
@@ -103,7 +105,9 @@ func TestGCMDecryptRejectsShortCiphertext(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
+
 		el.FindElement("./CipherData/CipherValue").SetText(base64.StdEncoding.EncodeToString(make([]byte, size)))
+
 		if _, err = AES128GCM.Decrypt(key, el); err == nil {
 			t.Errorf("expected an error for a ciphertext of %d bytes", size)
 		}

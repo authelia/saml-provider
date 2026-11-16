@@ -8,9 +8,10 @@ import (
 	"net/url"
 	"testing"
 
-	"authelia.com/provider/jose"
 	"gotest.tools/assert"
 	is "gotest.tools/assert/cmp"
+
+	"authelia.com/provider/jose"
 
 	"authelia.com/provider/saml/internal/dsig"
 )
@@ -32,8 +33,10 @@ var ecdsaTestCurves = []struct {
 
 func ecdsaTestSigners(t *testing.T, curve elliptic.Curve) map[string]crypto.Signer {
 	t.Helper()
+
 	key, err := ecdsa.GenerateKey(curve, rand.Reader)
 	assert.NilError(t, err)
+
 	return map[string]crypto.Signer{"key": key, "opaque signer": opaqueSigner{key}}
 }
 
@@ -43,6 +46,7 @@ func TestDefaultCodecsRoundTripWithECDSA(t *testing.T) {
 			t.Run(tc.name+"/"+name, func(t *testing.T) {
 				u, err := url.Parse("https://sp.example.com/")
 				assert.NilError(t, err)
+
 				opts := Options{URL: *u, Key: signer}
 
 				sessions := DefaultSessionCodec(opts)
@@ -69,6 +73,7 @@ func TestDefaultServiceProviderSigningMethodWithECDSA(t *testing.T) {
 			t.Run(tc.name+"/"+name, func(t *testing.T) {
 				u, err := url.Parse("https://sp.example.com/")
 				assert.NilError(t, err)
+
 				sp := DefaultServiceProvider(Options{URL: *u, Key: signer, SignRequest: true})
 				assert.Check(t, is.Equal(tc.method, sp.SignatureMethod))
 			})

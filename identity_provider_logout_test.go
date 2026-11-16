@@ -39,7 +39,9 @@ type logoutSessionProvider struct {
 
 func (p *logoutSessionProvider) TerminateSession(w http.ResponseWriter, _ *http.Request, req *IdpLogoutRequest) error {
 	p.terminated = append(p.terminated, req)
+
 	http.SetCookie(w, &http.Cookie{Name: "session", MaxAge: -1, Secure: true, HttpOnly: true, SameSite: http.SameSiteLaxMode})
+
 	return p.err
 }
 
@@ -55,6 +57,7 @@ func logoutTestIDP(t *testing.T) (*IdentityProviderTest, *logoutSessionProvider)
 
 	provider := &logoutSessionProvider{}
 	test.IDP.SessionProvider = provider
+
 	return test, provider
 }
 
@@ -62,14 +65,17 @@ func logoutTestIDP(t *testing.T) (*IdentityProviderTest, *logoutSessionProvider)
 func serveSLO(test *IdentityProviderTest, r *http.Request) *httptest.ResponseRecorder {
 	w := httptest.NewRecorder()
 	test.IDP.ServeSLO(w, r)
+
 	return w
 }
 
 // redirectLogoutRequest returns a signed HTTP-Redirect logout request, and its ID.
 func redirectLogoutRequest(t *testing.T, sp *ServiceProvider, mutate func(*LogoutRequest)) (*http.Request, string) {
 	t.Helper()
+
 	request, err := sp.MakeLogoutRequest(logoutTestSLOURL, "alice")
 	assert.NilError(t, err)
+
 	if mutate != nil {
 		mutate(request)
 	}
@@ -78,6 +84,7 @@ func redirectLogoutRequest(t *testing.T, sp *ServiceProvider, mutate func(*Logou
 	unsigned.Signature = nil
 	u, err := redirectURL(logoutTestSLOURL, "SAMLRequest", unsigned.Element(), "relay", sp)
 	assert.NilError(t, err)
+
 	return httptest.NewRequest(http.MethodGet, u.String(), nil), request.ID
 }
 
@@ -85,20 +92,25 @@ func redirectLogoutRequest(t *testing.T, sp *ServiceProvider, mutate func(*Logou
 // has changed the request and before it is signed, and its ID.
 func postLogoutRequest(t *testing.T, sp *ServiceProvider, mutate func(*LogoutRequest)) (*http.Request, string) {
 	t.Helper()
+
 	unsigned := *sp
 	unsigned.SignatureMethod = ""
 	request, err := unsigned.MakeLogoutRequest(logoutTestSLOURL, "alice")
 	assert.NilError(t, err)
+
 	if mutate != nil {
 		mutate(request)
 	}
+
 	if sp.SignatureMethod != "" {
 		assert.NilError(t, sp.SignLogoutRequest(request))
 	}
+
 	doc := etree.NewDocument()
 	doc.SetRoot(request.Element())
 	body, err := doc.WriteToBytes()
 	assert.NilError(t, err)
+
 	return postLogoutBody(body), request.ID
 }
 
@@ -106,6 +118,7 @@ func postLogoutBody(body []byte) *http.Request {
 	form := url.Values{"SAMLRequest": {base64.StdEncoding.EncodeToString(body)}, "RelayState": {"relay"}}
 	r := httptest.NewRequest(http.MethodPost, logoutTestSLOURL, strings.NewReader(form.Encode()))
 	r.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+
 	return r
 }
 
@@ -119,8 +132,10 @@ func redirectedLogoutResponse(t *testing.T, w *httptest.ResponseRecorder) (*url.
 	assert.NilError(t, err)
 	buf, err := io.ReadAll(flate.NewReader(bytes.NewReader(compressed)))
 	assert.NilError(t, err)
+
 	var response LogoutResponse
 	assert.NilError(t, xml.Unmarshal(buf, &response))
+
 	return location, response
 }
 
@@ -134,13 +149,16 @@ func postedLogoutResponse(t *testing.T, w *httptest.ResponseRecorder) (string, s
 		start := strings.Index(body, marker)
 		assert.Assert(t, start >= 0, "no %s in %q", name, body)
 		value, _, _ := strings.Cut(body[start+len(marker):], `"`)
+
 		return html.UnescapeString(value)
 	}
 	encoded := field("SAMLResponse")
 	buf, err := base64.StdEncoding.DecodeString(encoded)
 	assert.NilError(t, err)
+
 	var response LogoutResponse
 	assert.NilError(t, xml.Unmarshal(buf, &response))
+
 	return encoded, field("RelayState"), response
 }
 
@@ -184,6 +202,7 @@ func TestServeSLOPost(t *testing.T) {
 	// SAMLCore requires the signature to follow the Issuer.
 	buf, err := base64.StdEncoding.DecodeString(encoded)
 	assert.NilError(t, err)
+
 	doc := etree.NewDocument()
 	assert.NilError(t, doc.ReadFromBytes(buf))
 	children := doc.Root().ChildElements()
@@ -245,27 +264,32 @@ func TestServeSLORejectsUnauthenticatedRequests(t *testing.T) {
 			unsigned := test.SP
 			unsigned.SignatureMethod = ""
 			r, _ := redirectLogoutRequest(t, &unsigned, nil)
+
 			return r
 		},
 		"unsigned post": func(t *testing.T, test *IdentityProviderTest) *http.Request {
 			unsigned := test.SP
 			unsigned.SignatureMethod = ""
 			r, _ := postLogoutRequest(t, &unsigned, nil)
+
 			return r
 		},
 		"redirect signed by another key": func(t *testing.T, test *IdentityProviderTest) *http.Request {
 			other := serviceProviderWithOtherKey(t, test)
 			r, _ := redirectLogoutRequest(t, &other, nil)
+
 			return r
 		},
 		"post signed by another key": func(t *testing.T, test *IdentityProviderTest) *http.Request {
 			other := serviceProviderWithOtherKey(t, test)
 			r, _ := postLogoutRequest(t, &other, nil)
+
 			return r
 		},
 		"altered relay state": func(t *testing.T, test *IdentityProviderTest) *http.Request {
 			r, _ := redirectLogoutRequest(t, &test.SP, nil)
 			r.URL.RawQuery = strings.Replace(r.URL.RawQuery, "RelayState=relay", "RelayState=other", 1)
+
 			return r
 		},
 		"altered post": func(t *testing.T, test *IdentityProviderTest) *http.Request {
@@ -273,6 +297,7 @@ func TestServeSLORejectsUnauthenticatedRequests(t *testing.T) {
 			assert.NilError(t, r.ParseForm())
 			body, err := base64.StdEncoding.DecodeString(r.PostForm.Get("SAMLRequest"))
 			assert.NilError(t, err)
+
 			return postLogoutBody(bytes.Replace(body, []byte(">alice<"), []byte(">bob<"), 1))
 		},
 	} {
@@ -337,6 +362,7 @@ func TestServeSLOUsesSignedContent(t *testing.T) {
 	assert.NilError(t, r.ParseForm())
 	body, err := base64.StdEncoding.DecodeString(r.PostForm.Get("SAMLRequest"))
 	assert.NilError(t, err)
+
 	now := TimeNow().UTC().Format(timeFormat)
 	// encoding/xml keeps the last of the two, so the declaration goes at the end of the start tag.
 	end := bytes.IndexByte(body, '>')
@@ -397,13 +423,17 @@ func TestServeSLOSignsWithECDSA(t *testing.T) {
 			if binding == "post" {
 				test.SP.LogoutBindings = []string{HTTPPostBinding}
 			}
+
 			r, id := request(t, &test.SP, nil)
+
 			w := serveSLO(test, r)
 			if binding == "post" {
 				encoded, _, _ := postedLogoutResponse(t, w)
 				assert.Check(t, test.SP.ValidateLogoutResponseForm(encoded, []string{id}))
+
 				return
 			}
+
 			location, _ := redirectedLogoutResponse(t, w)
 			assert.Check(t, is.Equal(location.Query().Get("SigAlg"), dsig.ECDSASHA256SignatureMethod))
 			assert.Check(t, test.SP.ValidateLogoutResponseRedirect(location, []string{id}))
@@ -446,6 +476,7 @@ func TestLogoutRequestSessionIndexes(t *testing.T) {
 
 	// SessionIndex is in the protocol namespace, unlike the NameID before it.
 	const assertionNamespace = `<samlp:LogoutRequest xmlns:samlp="urn:oasis:names:tc:SAML:2.0:protocol" xmlns:saml="urn:oasis:names:tc:SAML:2.0:assertion" ID="id" Version="2.0"><saml:SessionIndex>wrong</saml:SessionIndex></samlp:LogoutRequest>`
+
 	parsed = LogoutRequest{}
 	assert.NilError(t, xml.Unmarshal([]byte(assertionNamespace), &parsed))
 	assert.Check(t, is.Len(parsed.SessionIndexes, 0))
@@ -455,8 +486,10 @@ func TestLogoutRequestSessionIndexes(t *testing.T) {
 // signatureTestIDP sets.
 func ecdsaIdentityProviderKey(t *testing.T, test *IdentityProviderTest) (*ecdsa.PrivateKey, *x509.Certificate) {
 	t.Helper()
+
 	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	assert.NilError(t, err)
+
 	template := &x509.Certificate{
 		SerialNumber: big.NewInt(1),
 		Subject:      pkix.Name{CommonName: "idp"},
@@ -467,5 +500,6 @@ func ecdsaIdentityProviderKey(t *testing.T, test *IdentityProviderTest) (*ecdsa.
 	assert.NilError(t, err)
 	certificate, err := x509.ParseCertificate(der)
 	assert.NilError(t, err)
+
 	return key, certificate
 }

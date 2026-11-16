@@ -60,7 +60,7 @@ type RSA struct {
 	keyDecrypter func(e RSA, privKey *rsa.PrivateKey, ciphertext []byte) ([]byte, error)
 }
 
-// Algorithm returns the name of the algorithm
+// Algorithm returns the name of the algorithm.
 func (e RSA) Algorithm() string {
 	return e.algorithm
 }
@@ -70,6 +70,7 @@ func (e RSA) mgfHash() crypto.Hash {
 	if e.algorithm == algorithmRSAOAEP2009 && e.MGFHash != 0 {
 		return e.MGFHash
 	}
+
 	return crypto.SHA1
 }
 
@@ -79,14 +80,17 @@ func (e RSA) oaepOptions() (*rsa.OAEPOptions, error) {
 	if e.DigestMethod != nil {
 		digest = e.DigestMethod
 	}
+
 	hash, ok := digestCryptoHash(digest)
 	if !ok {
 		return nil, ErrAlgorithmNotImplemented(digest.Algorithm())
 	}
+
 	mgf := e.mgfHash()
 	if !mgf.Available() {
 		return nil, fmt.Errorf("MGF1 with %v is not available", mgf)
 	}
+
 	return &rsa.OAEPOptions{Hash: hash, MGFHash: mgf}, nil
 }
 
@@ -100,6 +104,7 @@ func digestCryptoHash(digest DigestMethod) (crypto.Hash, bool) {
 	} else if hash, ok = digestIdentifierHashes[digest.Algorithm()]; !ok {
 		return 0, false
 	}
+
 	return hash, hash.Available() && hash.Size() == digest.Hash().Size()
 }
 
@@ -121,6 +126,7 @@ func encryptOAEP(e RSA, pubKey *rsa.PublicKey, plaintext []byte) ([]byte, error)
 	if err != nil {
 		return nil, err
 	}
+
 	return rsa.EncryptOAEPWithOptions(RandReader, pubKey, plaintext, opts)
 }
 
@@ -129,6 +135,7 @@ func decryptOAEP(e RSA, privKey *rsa.PrivateKey, ciphertext []byte) ([]byte, err
 	if err != nil {
 		return nil, err
 	}
+
 	return privKey.Decrypt(nil, ciphertext, opts)
 }
 
@@ -152,7 +159,7 @@ func (e RSA) Encrypt(certificate interface{}, plaintext []byte, nonce []byte) (*
 		}
 	}
 
-	// generate a key
+	// generate a key.
 	key := make([]byte, e.BlockCipher.KeySize())
 	if _, err := RandReader.Read(key); err != nil {
 		return nil, err
@@ -167,18 +174,22 @@ func (e RSA) Encrypt(certificate interface{}, plaintext []byte, nonce []byte) (*
 		if _, err := RandReader.Read(randBuf); err != nil {
 			return nil, err
 		}
+
 		encryptedKey.CreateAttr("Id", fmt.Sprintf("_%x", randBuf))
 	}
+
 	encryptedKey.CreateAttr("xmlns:xenc", "http://www.w3.org/2001/04/xmlenc#")
 
 	encryptionMethodEl := encryptedKey.CreateElement("xenc:EncryptionMethod")
 	encryptionMethodEl.CreateAttr("Algorithm", e.algorithm)
 	encryptionMethodEl.CreateAttr("xmlns:xenc", "http://www.w3.org/2001/04/xmlenc#")
+
 	if e.DigestMethod != nil {
 		dm := encryptionMethodEl.CreateElement("ds:DigestMethod")
 		dm.CreateAttr("Algorithm", e.DigestMethod.Algorithm())
 		dm.CreateAttr("xmlns:ds", "http://www.w3.org/2000/09/xmldsig#")
 	}
+
 	if mgfAlgorithm != "" {
 		// XML Encryption 1.1 §5.5.2 defaults to MGF1 with SHA-1, which is stated anyway so that no receiver can
 		// mistake it for the digest.
@@ -202,16 +213,18 @@ func (e RSA) Encrypt(certificate interface{}, plaintext []byte, nonce []byte) (*
 	cd := encryptedKey.CreateElement("xenc:CipherData")
 	cd.CreateAttr("xmlns:xenc", "http://www.w3.org/2001/04/xmlenc#")
 	cd.CreateElement("xenc:CipherValue").SetText(base64.StdEncoding.EncodeToString(buf))
+
 	encryptedDataEl, err := e.BlockCipher.Encrypt(key, plaintext, nonce)
 	if err != nil {
 		return nil, err
 	}
+
 	encryptedDataEl.InsertChildAt(encryptedDataEl.FindElement("./CipherData").Index(), keyInfoEl)
 
 	return encryptedDataEl, nil
 }
 
-// Decrypt implements Decryptor. `key` must be an *rsa.PrivateKey.
+// Decrypt implements Decryptor. `key` must be an *[rsa.PrivateKey].
 func (e RSA) Decrypt(key interface{}, ciphertextEl *etree.Element) ([]byte, error) {
 	rsaKey, err := validateRSAKeyIfPresent(key, ciphertextEl)
 	if err != nil {
@@ -229,10 +242,12 @@ func (e RSA) Decrypt(key interface{}, ciphertextEl *etree.Element) ([]byte, erro
 			e.DigestMethod = SHA1
 		} else {
 			hashAlgorithmStr := digestMethodEl.SelectAttrValue("Algorithm", "")
+
 			digestMethod, ok := digestMethods[hashAlgorithmStr]
 			if !ok {
 				return nil, ErrAlgorithmNotImplemented(hashAlgorithmStr)
 			}
+
 			e.DigestMethod = digestMethod
 		}
 	}
@@ -240,12 +255,15 @@ func (e RSA) Decrypt(key interface{}, ciphertextEl *etree.Element) ([]byte, erro
 	if e.algorithm == algorithmRSAOAEP2009 {
 		// XML Encryption 1.1 §5.5.2: MGF1 with SHA-1 unless an MGF element names another.
 		e.MGFHash = crypto.SHA1
+
 		if mgfEl := ciphertextEl.FindElement("./EncryptionMethod/MGF"); mgfEl != nil {
 			mgfAlgorithm := mgfEl.SelectAttrValue("Algorithm", "")
+
 			mgfHash, ok := mgfHashes[mgfAlgorithm]
 			if !ok {
 				return nil, ErrAlgorithmNotImplemented(mgfAlgorithm)
 			}
+
 			e.MGFHash = mgfHash
 		}
 	}
@@ -276,7 +294,7 @@ func OAEP() RSA {
 //
 // An instance is registered as a decrypter by default, which reads the digest and mask
 // generation function from the EncryptedKey it decrypts.
-func OAEP_SHA256() RSA { //nolint:revive
+func OAEP_SHA256() RSA {
 	return RSA{
 		BlockCipher:  AES256CBC,
 		DigestMethod: SHA256,
@@ -291,7 +309,7 @@ func OAEP_SHA256() RSA { //nolint:revive
 // §5.5.2. By default the block cipher used is AES-256 CBC, and the digest method and the hash
 // of the MGF1 mask generation function are SHA-512. You can specify others by assigning to
 // BlockCipher, DigestMethod or MGFHash.
-func OAEP_SHA512() RSA { //nolint:revive
+func OAEP_SHA512() RSA {
 	return RSA{
 		BlockCipher:  AES256CBC,
 		DigestMethod: SHA512,
@@ -317,10 +335,10 @@ func PKCS1v15() RSA {
 		DigestMethod: nil,
 		algorithm:    "http://www.w3.org/2001/04/xmlenc#rsa-1_5",
 		keyEncrypter: func(_ RSA, pubKey *rsa.PublicKey, plaintext []byte) ([]byte, error) {
-			return rsa.EncryptPKCS1v15(RandReader, pubKey, plaintext)
+			return rsa.EncryptPKCS1v15(RandReader, pubKey, plaintext) //nolint:staticcheck // PKCS #1 v1.5 is an explicit legacy opt-in.
 		},
 		keyDecrypter: func(_ RSA, privKey *rsa.PrivateKey, ciphertext []byte) ([]byte, error) {
-			return rsa.DecryptPKCS1v15(RandReader, privKey, ciphertext)
+			return rsa.DecryptPKCS1v15(RandReader, privKey, ciphertext) //nolint:staticcheck // PKCS #1 v1.5 is an explicit legacy opt-in.
 		},
 	}
 }
