@@ -21,12 +21,15 @@ import (
 // signedRedirectQuery splits a signed redirect query into what was signed and the decoded signature.
 func signedRedirectQuery(t *testing.T, rawQuery string) (signed string, signature []byte) {
 	t.Helper()
+
 	signed, encoded, found := strings.Cut(rawQuery, "&Signature=")
 	assert.Assert(t, found)
+
 	unescaped, err := url.QueryUnescape(encoded)
 	assert.NilError(t, err)
 	signature, err = base64.StdEncoding.DecodeString(unescaped)
 	assert.NilError(t, err)
+
 	return signed, signature
 }
 
@@ -54,8 +57,10 @@ func TestSPSignsRedirectRequestWithECDSA(t *testing.T) {
 				signed, signature := signedRedirectQuery(t, redirectURL.RawQuery)
 				size := (tc.curve.Params().N.BitLen() + 7) / 8
 				assert.Assert(t, is.Len(signature, 2*size))
+
 				hash := tc.newHash.New()
 				hash.Write([]byte(signed))
+
 				r := new(big.Int).SetBytes(signature[:size])
 				sValue := new(big.Int).SetBytes(signature[size:])
 				assert.Check(t, ecdsa.Verify(&key.PublicKey, hash.Sum(nil), r, sValue))
@@ -87,6 +92,7 @@ func TestGetSigningContextChecksKeyType(t *testing.T) {
 				assert.Check(t, err)
 				return
 			}
+
 			assert.Check(t, is.ErrorContains(err, tc.err))
 		})
 	}

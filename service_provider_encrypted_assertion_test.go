@@ -46,6 +46,7 @@ func TestSPRejectsForgedShortGCMCiphertextWithoutPanic(t *testing.T) {
 	status := response.CreateElement("samlp:Status").CreateElement("samlp:StatusCode")
 	status.CreateAttr("Value", StatusSuccess)
 	response.CreateElement("saml:EncryptedAssertion").AddChild(encryptedData)
+
 	serialized, err := doc.WriteToBytes()
 	assert.NilError(t, err)
 

@@ -16,7 +16,6 @@ import (
 	is "gotest.tools/assert/cmp"
 
 	"authelia.com/provider/saml/internal/dsig"
-
 	"authelia.com/provider/saml/xmlenc"
 )
 
@@ -42,6 +41,7 @@ func interopIDP(t *testing.T, metadata *EntityDescriptor) *IdentityProviderTest 
 			if metadata == nil {
 				return nil, os.ErrNotExist
 			}
+
 			return metadata, nil
 		},
 	}
@@ -50,12 +50,14 @@ func interopIDP(t *testing.T, metadata *EntityDescriptor) *IdentityProviderTest 
 			return &Session{ID: "f00d", NameID: "alice", UserName: "alice"}
 		},
 	}
+
 	return test
 }
 
 func interopValidate(test *IdentityProviderTest, attrs string) (*IdpAuthnRequest, error) {
 	buf := `<AuthnRequest xmlns="urn:oasis:names:tc:SAML:2.0:protocol" ID="id-1" Version="2.0" ` + attrs +
 		` IssueInstant="` + TimeNow().UTC().Format(time.RFC3339) + `">` + hardeningIssuer + `</AuthnRequest>`
+
 	return hardeningValidate(test, []byte(buf))
 }
 
@@ -65,6 +67,7 @@ func TestIDPACSSelection(t *testing.T) {
 		artifact = HTTPArtifactBinding
 		redirect = HTTPRedirectBinding
 	)
+
 	yes, no := true, false
 
 	for _, tc := range []struct {
@@ -139,6 +142,7 @@ func TestIDPACSSelection(t *testing.T) {
 				assert.Check(t, is.ErrorContains(err, "cannot find assertion consumer service"))
 				return
 			}
+
 			assert.NilError(t, err)
 			assert.Check(t, is.Equal(tc.location, req.ACSEndpoint.Location))
 			assert.Check(t, is.Equal(post, req.ACSEndpoint.Binding))
@@ -207,12 +211,14 @@ func TestIDPOmitsEmptyAttributeStatement(t *testing.T) {
 	assert.Check(t, is.Len(req.Assertion.AttributeStatements, 0))
 
 	test.IDP.AttributeReleasePolicy = releaseEveryAttribute
+
 	assert.NilError(t, DefaultAssertionMaker{}.MakeAssertion(req, &Session{ID: "f00d", NameID: "alice", UserName: "alice"}))
 	assert.Check(t, is.Len(req.Assertion.AttributeStatements, 1))
 
 	test.IDP.AttributeReleasePolicy = attributeReleasePolicyFunc(func(*IdpAuthnRequest, *Session, []Attribute) ([]Attribute, error) {
 		return []Attribute{}, nil
 	})
+
 	assert.NilError(t, DefaultAssertionMaker{}.MakeAssertion(req, &Session{ID: "f00d", NameID: "alice", UserName: "alice"}))
 	assert.Check(t, is.Len(req.Assertion.AttributeStatements, 0))
 }
@@ -284,12 +290,14 @@ func TestCacheDurationJSON(t *testing.T) {
 	month := XSDDuration("P1M")
 	buf, err = json.Marshal(AffiliationDescriptor{CacheDuration: &month})
 	assert.NilError(t, err)
+
 	decoded := AffiliationDescriptor{}
 	assert.NilError(t, json.Unmarshal(buf, &decoded))
 	assert.Check(t, is.Equal(month, *decoded.CacheDuration))
 
 	buf, err = json.Marshal(AffiliationDescriptor{})
 	assert.NilError(t, err)
+
 	decoded = AffiliationDescriptor{}
 	assert.NilError(t, json.Unmarshal(buf, &decoded))
 	assert.Check(t, decoded.CacheDuration == nil)

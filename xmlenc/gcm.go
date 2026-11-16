@@ -11,7 +11,7 @@ import (
 	"github.com/beevik/etree"
 )
 
-// GCM implements Decrypter and Encrypter for block ciphers in struct mode
+// GCM implements Decrypter and Encrypter for block ciphers in struct mode.
 type GCM struct {
 	keySize   int
 	algorithm string
@@ -29,12 +29,13 @@ func (e GCM) Algorithm() string {
 	return e.algorithm
 }
 
-// Encrypt encrypts plaintext with key and nonce
+// Encrypt encrypts plaintext with key and nonce.
 func (e GCM) Encrypt(key interface{}, plaintext []byte, nonce []byte) (*etree.Element, error) {
 	keyBuf, ok := key.([]byte)
 	if !ok {
 		return nil, ErrIncorrectKeyType("[]byte")
 	}
+
 	if len(keyBuf) != e.keySize {
 		return nil, ErrIncorrectKeyLength(e.keySize)
 	}
@@ -51,6 +52,7 @@ func (e GCM) Encrypt(key interface{}, plaintext []byte, nonce []byte) (*etree.El
 		if _, err := RandReader.Read(randBuf); err != nil {
 			return nil, err
 		}
+
 		encryptedDataEl.CreateAttr("Id", fmt.Sprintf("_%x", randBuf))
 	}
 
@@ -64,12 +66,13 @@ func (e GCM) Encrypt(key interface{}, plaintext []byte, nonce []byte) (*etree.El
 	}
 
 	if nonce == nil {
-		// generate random nonce when it's nil
+		// generate random nonce when it's nil.
 		nonce = make([]byte, aesgcm.NonceSize())
 		if _, err := io.ReadFull(RandReader, nonce); err != nil {
 			return nil, err
 		}
 	}
+
 	if len(nonce) != aesgcm.NonceSize() {
 		return nil, fmt.Errorf("nonce must be %d bytes", aesgcm.NonceSize())
 	}
@@ -80,6 +83,7 @@ func (e GCM) Encrypt(key interface{}, plaintext []byte, nonce []byte) (*etree.El
 	cd := encryptedDataEl.CreateElement("xenc:CipherData")
 	cd.CreateAttr("xmlns:xenc", "http://www.w3.org/2001/04/xmlenc#")
 	cd.CreateElement("xenc:CipherValue").SetText(base64.StdEncoding.EncodeToString(text))
+
 	return encryptedDataEl, nil
 }
 
@@ -90,6 +94,7 @@ func (e GCM) Encrypt(key interface{}, plaintext []byte, nonce []byte) (*etree.El
 func (e GCM) Decrypt(key interface{}, ciphertextEl *etree.Element) ([]byte, error) {
 	if encryptedKeyEl := ciphertextEl.FindElement("./KeyInfo/EncryptedKey"); encryptedKeyEl != nil {
 		var err error
+
 		key, err = Decrypt(key, encryptedKeyEl)
 		if err != nil {
 			return nil, err
@@ -101,6 +106,7 @@ func (e GCM) Decrypt(key interface{}, ciphertextEl *etree.Element) ([]byte, erro
 	if !ok {
 		return nil, ErrIncorrectKeyType("[]byte")
 	}
+
 	if len(keyBuf) != e.KeySize() {
 		return nil, ErrIncorrectKeyLength(e.KeySize())
 	}
@@ -131,25 +137,26 @@ func (e GCM) Decrypt(key interface{}, ciphertextEl *etree.Element) ([]byte, erro
 	if err != nil {
 		return nil, err
 	}
+
 	return plainText, nil
 }
 
 var (
-	// AES128GCM implements AES128-GCM mode for encryption and decryption
+	// AES128GCM implements AES128-GCM mode for encryption and decryption.
 	AES128GCM BlockCipher = GCM{
 		keySize:   16,
 		algorithm: "http://www.w3.org/2009/xmlenc11#aes128-gcm",
 		cipher:    aes.NewCipher,
 	}
 
-	// AES192GCM implements AES192-GCM mode for encryption and decryption
+	// AES192GCM implements AES192-GCM mode for encryption and decryption.
 	AES192GCM BlockCipher = GCM{
 		keySize:   24,
 		algorithm: "http://www.w3.org/2009/xmlenc11#aes192-gcm",
 		cipher:    aes.NewCipher,
 	}
 
-	// AES256GCM implements AES256-GCM mode for encryption and decryption
+	// AES256GCM implements AES256-GCM mode for encryption and decryption.
 	AES256GCM BlockCipher = GCM{
 		keySize:   32,
 		algorithm: "http://www.w3.org/2009/xmlenc11#aes256-gcm",

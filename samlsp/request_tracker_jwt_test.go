@@ -3,9 +3,10 @@ package samlsp
 import (
 	"testing"
 
-	"authelia.com/provider/jose"
 	"gotest.tools/assert"
 	is "gotest.tools/assert/cmp"
+
+	"authelia.com/provider/jose"
 )
 
 func TestJWTTrackedRequestCodecRoundTrip(t *testing.T) {
@@ -32,6 +33,7 @@ func TestJWTTrackedRequestCodecDecodeRejects(t *testing.T) {
 				codec.SigningMethod = jose.RS512
 				token, err := codec.Encode(TrackedRequest{Index: "idx", SAMLRequestID: "id-1", URI: "/"})
 				assert.NilError(t, err)
+
 				return token
 			},
 			err: `unexpected signature algorithm "RS512"; expected ["RS256"]`,
@@ -57,6 +59,7 @@ func TestJWTTrackedRequestCodecDecodeRejects(t *testing.T) {
 
 func newTestTrackedRequestCodec(t *testing.T) JWTTrackedRequestCodec {
 	test := NewMiddlewareTest(t)
+
 	return DefaultTrackedRequestCodec(Options{
 		URL: mustParseURL("https://15661444.ngrok.io/"),
 		Key: test.JWTKey,

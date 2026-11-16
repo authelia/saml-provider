@@ -17,6 +17,7 @@ func TestWriteResponseIsNotCached(t *testing.T) {
 			if err := (DefaultAssertionMaker{}).MakeAssertion(req, &Session{ID: "f00d", NameID: "alice"}); err != nil {
 				return err
 			}
+
 			return req.WriteResponse(w)
 		},
 		"error status": func(req *IdpAuthnRequest, w http.ResponseWriter) error {

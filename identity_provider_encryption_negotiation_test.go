@@ -43,20 +43,24 @@ var negotiationKey = sync.OnceValues(func() (*rsa.PrivateKey, *x509.Certificate)
 	if err != nil {
 		panic(err)
 	}
+
 	template := &x509.Certificate{
 		SerialNumber: big.NewInt(1),
 		Subject:      pkix.Name{CommonName: "sp.example.com"},
 		NotBefore:    time.Unix(0, 0),
 		NotAfter:     time.Now().Add(100 * 365 * 24 * time.Hour),
 	}
+
 	der, err := x509.CreateCertificate(rand.Reader, template, template, key.Public(), key)
 	if err != nil {
 		panic(err)
 	}
+
 	cert, err := x509.ParseCertificate(der)
 	if err != nil {
 		panic(err)
 	}
+
 	return key, cert
 })
 
@@ -69,9 +73,11 @@ func oaepMethod(algorithm, digest, mgf string) EncryptionMethod {
 	if digest != "" {
 		m.DigestMethod = &DigestMethod{Algorithm: digest}
 	}
+
 	if mgf != "" {
 		m.MGF = &MGF{Algorithm: mgf}
 	}
+
 	return m
 }
 
@@ -79,16 +85,21 @@ func oaepMethod(algorithm, digest, mgf string) EncryptionMethod {
 // identity provider configured by configure, and returns the EncryptedData of the assertion.
 func negotiatedAssertion(t *testing.T, configure func(*IdentityProvider), methods ...EncryptionMethod) (*etree.Element, error) {
 	t.Helper()
+
 	_, cert := negotiationKey()
+
 	test := NewIdentityProviderTest(t, applyKey)
 	if configure != nil {
 		configure(&test.IDP)
 	}
+
 	req, err := hardeningValidate(test, hardeningRequest(`ID="id-1"`, TimeNow(), hardeningIssuer))
 	assert.NilError(t, err)
 	assert.NilError(t, DefaultAssertionMaker{}.MakeAssertion(req, &Session{ID: "f00d", NameID: sessionFor}))
+
 	descriptor := KeyDescriptor{Use: "encryption", EncryptionMethods: methods}
 	descriptor.KeyInfo.X509Data.X509Certificates = []X509Certificate{{Data: base64.StdEncoding.EncodeToString(cert.Raw)}}
+
 	req.SPSSODescriptor.KeyDescriptors = []KeyDescriptor{descriptor}
 	if err := req.MakeAssertionEl(); err != nil {
 		assert.Check(t, req.AssertionEl == nil, "no assertion may be sent when negotiation fails")
@@ -99,11 +110,13 @@ func negotiatedAssertion(t *testing.T, configure func(*IdentityProvider), method
 	doc.SetRoot(req.AssertionEl)
 	serialized, err := doc.WriteToBytes()
 	assert.NilError(t, err)
+
 	parsed := etree.NewDocument()
 	assert.NilError(t, parsed.ReadFromBytes(serialized))
 	assert.Check(t, is.Equal("EncryptedAssertion", parsed.Root().Tag))
 	encryptedData := parsed.Root().FindElement("./EncryptedData")
 	assert.Assert(t, encryptedData != nil)
+
 	return encryptedData, nil
 }
 
@@ -119,9 +132,11 @@ type negotiated struct {
 // decrypter of this library and with an RSA-OAEP of the parameters the specifications define for what it states.
 func checkNegotiated(t *testing.T, encryptedData *etree.Element, want negotiated) {
 	t.Helper()
+
 	key, _ := negotiationKey()
 	keyMethod := encryptedData.FindElement("./KeyInfo/EncryptedKey/EncryptionMethod")
 	assert.Assert(t, keyMethod != nil)
+
 	got := negotiated{
 		content:      encryptedData.FindElement("./EncryptionMethod").SelectAttrValue("Algorithm", ""),
 		keyTransport: keyMethod.SelectAttrValue("Algorithm", ""),
@@ -129,20 +144,24 @@ func checkNegotiated(t *testing.T, encryptedData *etree.Element, want negotiated
 	if el := keyMethod.FindElement("./DigestMethod"); el != nil {
 		got.digest = el.SelectAttrValue("Algorithm", "")
 	}
+
 	if el := keyMethod.FindElement("./MGF"); el != nil {
 		assert.Check(t, is.Equal("http://www.w3.org/2009/xmlenc11#", el.NamespaceURI()))
 		got.mgf = el.SelectAttrValue("Algorithm", "")
 	}
+
 	assert.Check(t, is.Equal(want, got))
 
 	// RSA-OAEP-MGF1P always uses MGF1 with SHA-1 (XML Encryption §5.4.2), and XML Encryption 1.1 RSA-OAEP the one
 	// its MGF names (§5.5.2), so check the key transport against crypto/rsa directly as well.
 	hashes := map[string]crypto.Hash{digestSHA1: crypto.SHA1, digestSHA256: crypto.SHA256, digestSHA512: crypto.SHA512,
 		mgf1SHA1: crypto.SHA1, mgf1SHA256: crypto.SHA256, mgf1SHA512: crypto.SHA512}
+
 	mgfHash := crypto.SHA1
 	if want.mgf != "" {
 		mgfHash = hashes[want.mgf]
 	}
+
 	value := encryptedData.FindElement("./KeyInfo/EncryptedKey/CipherData/CipherValue")
 	assert.Assert(t, value != nil)
 	ciphertext, err := base64.StdEncoding.DecodeString(strings.TrimSpace(value.Text()))
@@ -160,6 +179,7 @@ func TestIDPNegotiatesEncryptionWithServiceProvider(t *testing.T) {
 	with := func(change func(*negotiated)) negotiated {
 		n := defaults
 		change(&n)
+
 		return n
 	}
 
@@ -335,6 +355,7 @@ func TestIDPEncryptionAlgorithmConfiguration(t *testing.T) {
 				assert.Check(t, is.ErrorContains(err, tc.err))
 				return
 			}
+
 			assert.NilError(t, err)
 			checkNegotiated(t, el, tc.want)
 		})

@@ -21,6 +21,7 @@ const signatureDeclaration = `<ds:Signature xmlns:ds="http://www.w3.org/2000/09/
 // with attributes. The signature's content uses the prefix used, and declares prefix again deep inside.
 func rebindSignaturePrefix(t *testing.T, body, rootPrefix, attributes, used, prefix string) string {
 	t.Helper()
+
 	start := strings.Index(body, rootPrefix)
 	assert.Assert(t, start >= 0)
 	head, rest := body[:start], body[start:]
@@ -36,12 +37,14 @@ func rebindSignaturePrefix(t *testing.T, body, rootPrefix, attributes, used, pre
 	for range 12 {
 		deep = "<n>" + deep + "</n>"
 	}
+
 	rest = rest[:end] + "<" + used + ":x/>" + deep + shut + rest[end+len("</ds:Signature>"):]
 
 	declarations := `xmlns:ds="` + dsig.Namespace + `"`
 	if prefix != "ds" {
 		declarations += ` xmlns:` + prefix + `="` + dsig.Namespace + `"`
 	}
+
 	return addAttributes(t, head+rest, rootPrefix, declarations+" "+attributes)
 }
 
@@ -50,7 +53,9 @@ func signedLogoutResponseForOtherDestination(t *testing.T) (*IdentityProviderTes
 	test := NewIdentityProviderTest(t, applyKey)
 	TimeNow = time.Now
 	previousClock := Clock
+
 	t.Cleanup(func() { Clock = previousClock })
+
 	Clock = dsig.NewFakeClockAt(test.Certificate.NotBefore)
 
 	test.SP.IDPMetadata = test.IDP.Metadata()
@@ -60,10 +65,12 @@ func signedLogoutResponseForOtherDestination(t *testing.T) (*IdentityProviderTes
 
 	response, err := test.SP.MakeLogoutResponse("https://other.example.com/slo", "id-request")
 	assert.NilError(t, err)
+
 	doc := etree.NewDocument()
 	doc.SetRoot(response.Element())
 	body, err := doc.WriteToString()
 	assert.NilError(t, err)
+
 	return test, body
 }
 
@@ -90,6 +97,7 @@ func TestParseResponseUsesSignedAttributesWhenSignaturePrefixIsRebound(t *testin
 				`xmlns:IssueInstant="`+later.UTC().Format(time.RFC3339)+`"`, "IssueInstant", prefix)
 
 			_, err := test.SP.ParseXMLResponse([]byte(altered), []string{"id-request"}, test.SP.AcsURL)
+
 			var invalid *InvalidResponseError
 			assert.Assert(t, errors.As(err, &invalid), "got %v", err)
 			assert.Check(t, is.ErrorContains(invalid.PrivateErr, "response IssueInstant expired"))
@@ -103,6 +111,7 @@ func TestParseAssertionUsesSignedAttributesWhenSignaturePrefixIsRebound(t *testi
 	doc := etree.NewDocument()
 	assert.NilError(t, doc.ReadFromString(body))
 	doc.Root().RemoveChild(doc.Root().SelectElement("Signature"))
+
 	issued := TimeNow()
 	later := issued.Add(MaxIssueDelay + time.Second)
 	now := later.UTC().Format(time.RFC3339)
@@ -114,6 +123,7 @@ func TestParseAssertionUsesSignedAttributesWhenSignaturePrefixIsRebound(t *testi
 
 	TimeNow = func() time.Time { return later }
 	_, err = test.SP.ParseXMLResponse([]byte(altered), []string{"id-request"}, test.SP.AcsURL)
+
 	var invalid *InvalidResponseError
 	assert.Assert(t, errors.As(err, &invalid), "got %v", err)
 	assert.Check(t, is.ErrorContains(invalid.PrivateErr, "expired on"))
@@ -159,6 +169,7 @@ func TestParseArtifactResponseUsesSignedAttributes(t *testing.T) {
 
 	inner := etree.NewDocument()
 	assert.NilError(t, inner.ReadFromString(body))
+
 	artifact := etree.NewElement("samlp:ArtifactResponse")
 	artifact.CreateAttr("xmlns:saml", "urn:oasis:names:tc:SAML:2.0:assertion")
 	artifact.CreateAttr("xmlns:samlp", "urn:oasis:names:tc:SAML:2.0:protocol")
@@ -185,6 +196,7 @@ func TestParseArtifactResponseUsesSignedAttributes(t *testing.T) {
 		parsed := etree.NewDocument()
 		assert.NilError(t, parsed.ReadFromString(xml))
 		_, err := test.SP.parseArtifactResponse(parsed.Root(), []string{"id-request"}, "id-artifact", TimeNow(), test.SP.AcsURL)
+
 		return err
 	}
 	assert.NilError(t, parse(signedBody))
@@ -194,6 +206,7 @@ func TestParseArtifactResponseUsesSignedAttributes(t *testing.T) {
 	altered := addAttributes(t, signedBody, "<samlp:ArtifactResponse ", `xmlns:IssueInstant="`+later.UTC().Format(time.RFC3339)+`"`)
 
 	err = parse(altered)
+
 	var invalid *InvalidResponseError
 	assert.Assert(t, errors.As(err, &invalid), "got %v", err)
 	assert.Check(t, is.ErrorContains(invalid.PrivateErr, "response IssueInstant expired"))

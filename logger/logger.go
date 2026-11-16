@@ -6,7 +6,7 @@ import (
 	"os"
 )
 
-// Interface provides the minimal logging interface
+// Interface provides the minimal logging interface.
 type Interface interface {
 	// Printf prints to the logger using the format.
 	Printf(format string, v ...interface{})
@@ -28,5 +28,5 @@ type Interface interface {
 	Panicln(v ...interface{})
 }
 
-// DefaultLogger logs messages to os.Stdout
+// DefaultLogger logs messages to [os.Stdout].
 var DefaultLogger = log.New(os.Stdout, "", log.LstdFlags)

@@ -14,6 +14,7 @@ func assertedAddresses(t *testing.T, remoteAddr string, session *Session) (strin
 	test := NewIdentityProviderTest(t, applyKey)
 	req, err := hardeningValidate(test, hardeningRequest(`ID="id-1"`, TimeNow(), hardeningIssuer))
 	assert.NilError(t, err)
+
 	req.HTTPRequest.RemoteAddr = remoteAddr
 	assert.NilError(t, DefaultAssertionMaker{}.MakeAssertion(req, session))
 
@@ -22,6 +23,7 @@ func assertedAddresses(t *testing.T, remoteAddr string, session *Session) (strin
 	assert.Assert(t, confirmations[0].SubjectConfirmationData != nil)
 	assert.Assert(t, is.Len(req.Assertion.AuthnStatements, 1))
 	assert.Assert(t, req.Assertion.AuthnStatements[0].SubjectLocality != nil)
+
 	return confirmations[0].SubjectConfirmationData.Address, req.Assertion.AuthnStatements[0].SubjectLocality.Address
 }
 

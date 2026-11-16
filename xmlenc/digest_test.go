@@ -85,6 +85,7 @@ func TestDecryptDigestIdentifiers(t *testing.T) {
 				assert.ErrorContains(t, err, tc.err)
 				return
 			}
+
 			require.NoError(t, err)
 			assert.Equal(t, "plaintext", string(plaintext))
 		})
@@ -93,8 +94,10 @@ func TestDecryptDigestIdentifiers(t *testing.T) {
 
 func newDigestTestKey(t *testing.T) (*rsa.PrivateKey, *x509.Certificate) {
 	t.Helper()
+
 	key, err := rsa.GenerateKey(rand.Reader, 2048)
 	require.NoError(t, err)
+
 	template := &x509.Certificate{
 		SerialNumber: big.NewInt(1),
 		Subject:      pkix.Name{CommonName: "test"},
@@ -105,5 +108,6 @@ func newDigestTestKey(t *testing.T) (*rsa.PrivateKey, *x509.Certificate) {
 	require.NoError(t, err)
 	cert, err := x509.ParseCertificate(der)
 	require.NoError(t, err)
+
 	return key, cert
 }

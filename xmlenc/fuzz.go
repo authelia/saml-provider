@@ -25,20 +25,24 @@ ztiZhuvuVAoKIv5HnDqC0CNqIUAZtzlozDB3f+xT6SFr+/Plfn4Nlod4JMVGhZNo
 ZaeOlBLBAEX+cAcVtOs/AkBicZOAPv84ABmFfyhXhYaAuacaJLq//jg+t+URUOg+
 XZS9naRmawEQxOkZQVoMeKgvu05+V4MniFqdQBINIkr5
 -----END RSA PRIVATE KEY-----`
+
 	b, _ := pem.Decode([]byte(keyStr))
+
 	k, err := x509.ParsePKCS1PrivateKey(b.Bytes)
 	if err != nil {
 		panic(err)
 	}
+
 	return k
 }()
 
-// Fuzz is the go-fuzz fuzzing function
+// Fuzz is the go-fuzz fuzzing function.
 func Fuzz(data []byte) int {
 	doc := etree.NewDocument()
 	if err := doc.ReadFromBytes(data); err != nil {
 		return 0
 	}
+
 	if doc.Root() == nil {
 		return 0
 	}
@@ -46,5 +50,6 @@ func Fuzz(data []byte) int {
 	if _, err := Decrypt(testKey, doc.Root()); err != nil {
 		return 0
 	}
+
 	return 1
 }

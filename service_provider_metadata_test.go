@@ -23,6 +23,7 @@ func TestCurrentMetadata(t *testing.T) {
 	descriptor := func(validUntil *time.Time, acs string) SPSSODescriptor {
 		d := SPSSODescriptor{AssertionConsumerServices: []IndexedEndpoint{{Binding: HTTPPostBinding, Location: acs, Index: 1}}}
 		d.ValidUntil = validUntil
+
 		return d
 	}
 
@@ -55,11 +56,14 @@ func TestCurrentMetadata(t *testing.T) {
 				assert.Check(t, is.Nil(current))
 				return
 			}
+
 			assert.Assert(t, current != nil)
+
 			var locations []string
 			for _, d := range current.SPSSODescriptors {
 				locations = append(locations, d.AssertionConsumerServices[0].Location)
 			}
+
 			assert.Check(t, is.DeepEqual(locations, tc.locations))
 		})
 	}
@@ -151,6 +155,7 @@ func TestParseServiceProviderMetadataGroupValidUntil(t *testing.T) {
 				if v == "" {
 					return ""
 				}
+
 				return fmt.Sprintf(" validUntil=%q", v)
 			}
 			data := fmt.Sprintf("<EntitiesDescriptor xmlns=\"urn:oasis:names:tc:SAML:2.0:metadata\"%s>"+
@@ -164,6 +169,7 @@ func TestParseServiceProviderMetadataGroupValidUntil(t *testing.T) {
 				assert.Check(t, metadata.ValidUntil.IsZero())
 				return
 			}
+
 			expected, err := time.Parse(time.RFC3339, tc.expected)
 			assert.NilError(t, err)
 			assert.Check(t, metadata.ValidUntil.Equal(expected), metadata.ValidUntil)
@@ -178,6 +184,7 @@ func TestCheckServiceProviderMetadata(t *testing.T) {
 	descriptor := func(validUntil *time.Time, acs string) SPSSODescriptor {
 		d := SPSSODescriptor{AssertionConsumerServices: []IndexedEndpoint{{Binding: HTTPPostBinding, Location: acs, Index: 1}}}
 		d.ValidUntil = validUntil
+
 		return d
 	}
 
@@ -212,6 +219,7 @@ func TestCheckServiceProviderMetadata(t *testing.T) {
 				assert.Check(t, errors.Is(err, ErrInsecureEndpoint), err)
 			case tc.err != "":
 				assert.Check(t, err != nil)
+
 				if err != nil {
 					assert.Check(t, is.Contains(err.Error(), tc.err))
 				}

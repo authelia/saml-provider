@@ -55,6 +55,7 @@ func TestSPRejectsForgedCBCCiphertextWithoutPanic(t *testing.T) {
 			response.CreateElement("saml:Issuer").SetText(sp.IDPMetadata.EntityID)
 			response.CreateElement("samlp:Status").CreateElement("samlp:StatusCode").CreateAttr("Value", StatusSuccess)
 			response.CreateElement("saml:EncryptedAssertion").AddChild(encryptedData)
+
 			serialized, err := doc.WriteToBytes()
 			assert.NilError(t, err)
 

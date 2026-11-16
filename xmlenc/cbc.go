@@ -3,7 +3,7 @@ package xmlenc
 import (
 	"crypto/aes"
 	"crypto/cipher"
-	"crypto/des" // nolint: gosec
+	"crypto/des" //nolint: gosec
 	"encoding/base64"
 	"errors"
 	"fmt"
@@ -11,7 +11,7 @@ import (
 	"github.com/beevik/etree"
 )
 
-// CBC implements Decrypter and Encrypter for block ciphers in CBC mode
+// CBC implements Decrypter and Encrypter for block ciphers in CBC mode.
 type CBC struct {
 	keySize   int
 	algorithm string
@@ -36,6 +36,7 @@ func (e CBC) Encrypt(key interface{}, plaintext []byte, _ []byte) (*etree.Elemen
 	if !ok {
 		return nil, ErrIncorrectKeyType("[]byte")
 	}
+
 	if len(keyBuf) != e.keySize {
 		return nil, ErrIncorrectKeyLength(e.keySize)
 	}
@@ -52,6 +53,7 @@ func (e CBC) Encrypt(key interface{}, plaintext []byte, _ []byte) (*etree.Elemen
 		if _, err := RandReader.Read(randBuf); err != nil {
 			return nil, err
 		}
+
 		encryptedDataEl.CreateAttr("Id", fmt.Sprintf("_%x", randBuf))
 	}
 
@@ -61,19 +63,20 @@ func (e CBC) Encrypt(key interface{}, plaintext []byte, _ []byte) (*etree.Elemen
 
 	plaintext = appendPadding(plaintext, block.BlockSize())
 
-	iv := make([]byte, block.BlockSize())
+	ciphertext := make([]byte, block.BlockSize()+len(plaintext))
+	iv := ciphertext[:block.BlockSize()]
+
 	if _, err := RandReader.Read(iv); err != nil {
 		return nil, err
 	}
 
 	mode := cipher.NewCBCEncrypter(block, iv)
-	ciphertext := make([]byte, len(plaintext))
-	mode.CryptBlocks(ciphertext, plaintext)
-	ciphertext = append(iv, ciphertext...)
+	mode.CryptBlocks(ciphertext[block.BlockSize():], plaintext)
 
 	cd := encryptedDataEl.CreateElement("xenc:CipherData")
 	cd.CreateAttr("xmlns:xenc", "http://www.w3.org/2001/04/xmlenc#")
 	cd.CreateElement("xenc:CipherValue").SetText(base64.StdEncoding.EncodeToString(ciphertext))
+
 	return encryptedDataEl, nil
 }
 
@@ -85,6 +88,7 @@ func (e CBC) Decrypt(key interface{}, ciphertextEl *etree.Element) ([]byte, erro
 	// If the key is encrypted, decrypt it.
 	if encryptedKeyEl := ciphertextEl.FindElement("./KeyInfo/EncryptedKey"); encryptedKeyEl != nil {
 		var err error
+
 		key, err = Decrypt(key, encryptedKeyEl)
 		if err != nil {
 			return nil, err
@@ -95,6 +99,7 @@ func (e CBC) Decrypt(key interface{}, ciphertextEl *etree.Element) ([]byte, erro
 	if !ok {
 		return nil, ErrIncorrectKeyType("[]byte")
 	}
+
 	if len(keyBuf) != e.KeySize() {
 		return nil, ErrIncorrectKeyLength(e.KeySize())
 	}
@@ -112,6 +117,7 @@ func (e CBC) Decrypt(key interface{}, ciphertextEl *etree.Element) ([]byte, erro
 	if len(ciphertext) < block.BlockSize() {
 		return nil, errors.New("ciphertext too short")
 	}
+
 	if len(ciphertext)%block.BlockSize() != 0 {
 		return nil, errors.New("ciphertext is not a whole number of blocks")
 	}
@@ -121,7 +127,7 @@ func (e CBC) Decrypt(key interface{}, ciphertextEl *etree.Element) ([]byte, erro
 
 	mode := cipher.NewCBCDecrypter(block, iv)
 	plaintext := make([]byte, len(ciphertext))
-	mode.CryptBlocks(plaintext, ciphertext) // decrypt in place
+	mode.CryptBlocks(plaintext, ciphertext) // decrypt in place.
 
 	plaintext, err = stripPadding(plaintext)
 	if err != nil {
@@ -132,28 +138,28 @@ func (e CBC) Decrypt(key interface{}, ciphertextEl *etree.Element) ([]byte, erro
 }
 
 var (
-	// AES128CBC implements AES128-CBC symetric key mode for encryption and decryption
+	// AES128CBC implements AES128-CBC symetric key mode for encryption and decryption.
 	AES128CBC BlockCipher = CBC{
 		keySize:   16,
 		algorithm: "http://www.w3.org/2001/04/xmlenc#aes128-cbc",
 		cipher:    aes.NewCipher,
 	}
 
-	// AES192CBC implements AES192-CBC symetric key mode for encryption and decryption
+	// AES192CBC implements AES192-CBC symetric key mode for encryption and decryption.
 	AES192CBC BlockCipher = CBC{
 		keySize:   24,
 		algorithm: "http://www.w3.org/2001/04/xmlenc#aes192-cbc",
 		cipher:    aes.NewCipher,
 	}
 
-	// AES256CBC implements AES256-CBC symetric key mode for encryption and decryption
+	// AES256CBC implements AES256-CBC symetric key mode for encryption and decryption.
 	AES256CBC BlockCipher = CBC{
 		keySize:   32,
 		algorithm: "http://www.w3.org/2001/04/xmlenc#aes256-cbc",
 		cipher:    aes.NewCipher,
 	}
 
-	// TripleDES implements 3DES in CBC mode for encryption and decryption
+	// TripleDES implements 3DES in CBC mode for encryption and decryption.
 	TripleDES BlockCipher = CBC{
 		keySize:   24,
 		algorithm: "http://www.w3.org/2001/04/xmlenc#tripledes-cbc",
@@ -171,7 +177,8 @@ func init() {
 func appendPadding(buf []byte, blockSize int) []byte {
 	paddingBytes := blockSize - (len(buf) % blockSize)
 	padding := make([]byte, paddingBytes)
-	padding[len(padding)-1] = byte(paddingBytes)
+	padding[len(padding)-1] = byte(paddingBytes) //nolint:gosec // paddingBytes is at most blockSize which is at most 16.
+
 	return append(buf, padding...)
 }
 
@@ -179,12 +186,15 @@ func stripPadding(buf []byte) ([]byte, error) {
 	if len(buf) < 1 {
 		return nil, errors.New("buffer is too short for padding")
 	}
+
 	paddingBytes := int(buf[len(buf)-1])
 	if paddingBytes > len(buf)-1 {
 		return nil, errors.New("buffer is too short for padding")
 	}
+
 	if paddingBytes < 1 {
 		return nil, errors.New("padding must be at least one byte")
 	}
+
 	return buf[:len(buf)-paddingBytes], nil
 }

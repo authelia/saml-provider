@@ -21,9 +21,8 @@ import (
 	is "gotest.tools/assert/cmp"
 	"gotest.tools/golden"
 
-	"authelia.com/provider/saml/internal/dsig"
-
 	"authelia.com/provider/saml"
+	"authelia.com/provider/saml/internal/dsig"
 	"authelia.com/provider/saml/testsaml"
 )
 
@@ -47,6 +46,7 @@ func (tr *testRandomReader) Read(p []byte) (n int, err error) {
 		p[i] = tr.Next
 		tr.Next += 2
 	}
+
 	return len(p), nil
 }
 
@@ -79,6 +79,7 @@ func NewMiddlewareTest(t *testing.T) *MiddlewareTest {
 	}
 
 	var err error
+
 	test.Middleware, err = New(opts)
 	if err != nil {
 		panic(err)
@@ -109,6 +110,7 @@ func NewMiddlewareTest(t *testing.T) *MiddlewareTest {
 	if err := json.Unmarshal(golden.Get(t, "token.json"), &tc); err != nil {
 		panic(err)
 	}
+
 	test.expectedSessionCookie, err = sessionProvider.Codec.Encode(tc)
 	if err != nil {
 		panic(err)
@@ -119,6 +121,7 @@ func NewMiddlewareTest(t *testing.T) *MiddlewareTest {
 
 func (test *MiddlewareTest) makeTrackedRequest(id string) string {
 	codec := test.Middleware.RequestTracker.(CookieRequestTracker).Codec
+
 	token, err := codec.Encode(TrackedRequest{
 		Index:         "KCosLjAyNDY4Ojw-QEJERkhKTE5QUlRWWFpcXmBiZGZoamxucHJ0dnh6",
 		SAMLRequestID: id,
@@ -127,6 +130,7 @@ func (test *MiddlewareTest) makeTrackedRequest(id string) string {
 	if err != nil {
 		panic(err)
 	}
+
 	return token
 }
 
@@ -222,7 +226,7 @@ func TestMiddlewareRequireAccountNoCredsPostBinding(t *testing.T) {
 
 	golden.Assert(t, resp.Body.String(), "expected_post_binding_response.html")
 
-	// check that the CSP script hash is set correctly
+	// check that the CSP script hash is set correctly.
 	scriptContent := "document.getElementById('SAMLSubmitButton').style.visibility=\"hidden\";document.getElementById('SAMLRequestForm').submit();"
 	scriptSum := sha256.Sum256([]byte(scriptContent))
 	scriptHash := base64.StdEncoding.EncodeToString(scriptSum[:])
@@ -255,6 +259,7 @@ func TestMiddlewareRequireAccountCreds(t *testing.T) {
 	req.Header.Set("Cookie", ""+
 		"ttt="+test.expectedSessionCookie+"; "+
 		"Path=/; Max-Age=7200")
+
 	resp := httptest.NewRecorder()
 	handler.ServeHTTP(resp, req)
 
@@ -272,6 +277,7 @@ func TestMiddlewareRequireAccountBadCreds(t *testing.T) {
 	req.Header.Set("Cookie", ""+
 		"ttt=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.yejJbiI6Ik1lIE15c2VsZiBBbmQgSSIsImVkdVBlcnNvbkFmZmlsaWF0aW9uIjoiU3RhZmYiLCJlZHVQZXJzb25FbnRpdGxlbWVudCI6InVybjptYWNlOmRpcjplbnRpdGxlbWVudDpjb21tb24tbGliLXRlcm1zIiwiZWR1UGVyc29uUHJpbmNpcGFsTmFtZSI6Im15c2VsZkB0ZXN0c2hpYi5vcmciLCJlZHVQZXJzb25TY29wZWRBZmZpbGlhdGlvbiI6IlN0YWZmQHRlc3RzaGliLm9yZyIsImVkdVBlcnNvblRhcmdldGVkSUQiOiIiLCJleHAiOjE0NDg5Mzg2MjksImdpdmVuTmFtZSI6Ik1lIE15c2VsZiIsInNuIjoiQW5kIEkiLCJ0ZWxlcGhvbmVOdW1iZXIiOiI1NTUtNTU1NSIsInVpZCI6Im15c2VsZiJ9.SqeTkbGG35oFj_9H-d9oVdV-Hb7Vqam6LvZLcmia7FY; "+
 		"Path=/; Max-Age=7200; Secure")
+
 	resp := httptest.NewRecorder()
 	handler.ServeHTTP(resp, req)
 
@@ -303,6 +309,7 @@ func TestMiddlewareRequireAccountExpiredCreds(t *testing.T) {
 	req.Header.Set("Cookie", ""+
 		"ttt="+test.expectedSessionCookie+"; "+
 		"Path=/; Max-Age=7200")
+
 	resp := httptest.NewRecorder()
 	handler.ServeHTTP(resp, req)
 
@@ -342,6 +349,7 @@ func TestMiddlewareRequireAttribute(t *testing.T) {
 	req.Header.Set("Cookie", ""+
 		"ttt="+test.expectedSessionCookie+"; "+
 		"Path=/; Max-Age=7200")
+
 	resp := httptest.NewRecorder()
 	handler.ServeHTTP(resp, req)
 
@@ -360,6 +368,7 @@ func TestMiddlewareRequireAttributeWrongValue(t *testing.T) {
 	req.Header.Set("Cookie", ""+
 		"ttt="+test.expectedSessionCookie+"; "+
 		"Path=/; Max-Age=7200")
+
 	resp := httptest.NewRecorder()
 	handler.ServeHTTP(resp, req)
 
@@ -378,6 +387,7 @@ func TestMiddlewareRequireAttributeNotPresent(t *testing.T) {
 	req.Header.Set("Cookie", ""+
 		"ttt="+test.expectedSessionCookie+"; "+
 		"Path=/; Max-Age=7200")
+
 	resp := httptest.NewRecorder()
 	handler.ServeHTTP(resp, req)
 
@@ -395,6 +405,7 @@ func TestMiddlewareRequireAttributeMissingAccount(t *testing.T) {
 	req.Header.Set("Cookie", ""+
 		"ttt="+test.expectedSessionCookie+"; "+
 		"Path=/; Max-Age=7200")
+
 	resp := httptest.NewRecorder()
 	handler.ServeHTTP(resp, req)
 
@@ -466,13 +477,16 @@ func TestMiddlewareRedirectAfterLogin(t *testing.T) {
 
 			v := &url.Values{}
 			v.Set("SAMLResponse", base64.StdEncoding.EncodeToString(test.SamlResponse))
+
 			if tc.bodyRelayState != "" {
 				v.Set("RelayState", tc.bodyRelayState)
 			}
+
 			target := "/saml2/acs"
 			if tc.queryRelayState != "" {
 				target += "?RelayState=" + url.QueryEscape(tc.queryRelayState)
 			}
+
 			req := httptest.NewRequest(http.MethodPost, target, strings.NewReader(v.Encode()))
 			req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 			req.Header.Set("Cookie", "saml_"+index+"="+token)
@@ -504,7 +518,7 @@ func TestMiddlewareDefaultCookieDomainIPv4(t *testing.T) {
 }
 
 func TestMiddlewareDefaultCookieDomainIPv6(t *testing.T) {
-	t.Skip("fails") // TODO(ross): fix this test
+	t.Skip("fails") // TODO(ross): fix this test.
 
 	test := NewMiddlewareTest(t)
 

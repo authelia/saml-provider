@@ -12,12 +12,11 @@ import (
 
 	"authelia.com/provider/jose"
 
-	"authelia.com/provider/saml/internal/dsig"
-
 	"authelia.com/provider/saml"
+	"authelia.com/provider/saml/internal/dsig"
 )
 
-// Options represents the parameters for creating a new middleware
+// Options represents the parameters for creating a new middleware.
 type Options struct {
 	EntityID              string
 	URL                   url.URL
@@ -30,7 +29,7 @@ type Options struct {
 	IDPMetadata           *saml.EntityDescriptor
 	SignRequest           bool
 	UseArtifactResponse   bool
-	ForceAuthn            bool // TODO(ross): this should be *bool
+	ForceAuthn            bool // TODO(ross): this should be *bool.
 	RequestedAuthnContext *saml.RequestedAuthnContext
 	CookieSameSite        http.SameSite
 	CookieName            string
@@ -51,6 +50,7 @@ func getDefaultSigningMethod(signer crypto.Signer) jose.SignatureAlgorithm {
 			}
 		}
 	}
+
 	return jose.RS256
 }
 
@@ -73,6 +73,7 @@ func DefaultSessionProvider(opts Options) CookieSessionProvider {
 	if cookieName == "" {
 		cookieName = defaultSessionCookieName
 	}
+
 	return CookieSessionProvider{
 		Name:     cookieName,
 		Domain:   opts.URL.Host,
@@ -157,6 +158,7 @@ func defaultSigningMethodForKey(key crypto.Signer) string {
 	if key == nil {
 		return ""
 	}
+
 	switch public := key.Public().(type) {
 	case *rsa.PublicKey:
 		return dsig.RSASHA256SignatureMethod
@@ -188,6 +190,7 @@ func New(opts Options) (*Middleware, error) {
 		Session:          DefaultSessionProvider(opts),
 		AssertionHandler: DefaultAssertionHandler(opts),
 	}
+
 	m.RequestTracker = DefaultRequestTracker(opts, &m.ServiceProvider)
 	if opts.UseArtifactResponse {
 		m.ResponseBinding = saml.HTTPArtifactBinding

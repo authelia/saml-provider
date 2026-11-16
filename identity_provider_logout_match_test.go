@@ -30,6 +30,7 @@ func TestIdpLogoutRequestMatchesSession(t *testing.T) {
 		for _, v := range values {
 			out = append(out, SessionIndex{Value: v})
 		}
+
 		return out
 	}
 
@@ -105,6 +106,8 @@ func TestIdpLogoutRequestMatchesSessionNilPreconditions(t *testing.T) {
 	// The complete identifier can't be compared without it either, so only the value-only match succeeds.
 	req.Request.NameID.SPNameQualifier = ""
 	assert.Assert(t, req.MatchesSession(session) != nil)
+
 	idp.LogoutNameIDValueOnly = true
+
 	assert.NilError(t, req.MatchesSession(session))
 }

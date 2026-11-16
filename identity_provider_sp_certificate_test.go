@@ -39,10 +39,12 @@ func spCertTestKeys(t *testing.T) (rsa2048, rsa1024 *rsa.PrivateKey) {
 		if spCertTestRSA2048, err = rsa.GenerateKey(rand.Reader, 2048); err != nil {
 			panic(err)
 		}
+
 		if spCertTestRSA1024, err = rsa.GenerateKey(rand.Reader, 1024); err != nil { //nolint:gosec // a weak key is what is tested
 			panic(err)
 		}
 	})
+
 	return spCertTestRSA2048, spCertTestRSA1024
 }
 
@@ -56,6 +58,7 @@ type spCertTemplate struct {
 // makeSPCert returns a self-signed certificate made from the template.
 func makeSPCert(t *testing.T, tmpl spCertTemplate) *x509.Certificate {
 	t.Helper()
+
 	template := &x509.Certificate{
 		SerialNumber: big.NewInt(1),
 		Subject:      pkix.Name{CommonName: "sp.example.com"},
@@ -67,6 +70,7 @@ func makeSPCert(t *testing.T, tmpl spCertTemplate) *x509.Certificate {
 	assert.NilError(t, err)
 	cert, err := x509.ParseCertificate(der)
 	assert.NilError(t, err)
+
 	return cert
 }
 
@@ -75,6 +79,7 @@ func spCertRequest(idp *IdentityProvider, cert *x509.Certificate, keys ...KeyDes
 	certData := base64.StdEncoding.EncodeToString(cert.Raw)
 	keys = append([]KeyDescriptor{{Use: "encryption", KeyInfo: KeyInfo{X509Data: X509Data{X509Certificates: []X509Certificate{{Data: certData}}}}}}, keys...)
 	descriptor := SPSSODescriptor{SSODescriptor: SSODescriptor{RoleDescriptor: RoleDescriptor{KeyDescriptors: keys}}}
+
 	return &IdpAuthnRequest{
 		IDP:                     idp,
 		Now:                     TimeNow(),
@@ -91,6 +96,7 @@ func TestIDPEncryptionCertificatePolicy(t *testing.T) {
 	with := func(change func(*spCertTemplate)) spCertTemplate {
 		tmpl := valid
 		change(&tmpl)
+
 		return tmpl
 	}
 	expired := with(func(c *spCertTemplate) { c.notBefore, c.notAfter = now.Add(-48*time.Hour), now.Add(-24*time.Hour) })
@@ -141,12 +147,15 @@ func TestIDPEncryptionCertificatePolicy(t *testing.T) {
 			idp := test.IDP
 			idp.EncryptionCertificateEnforcer = tc.enforcer
 			req := spCertRequest(&idp, makeSPCert(t, tc.cert))
+
 			cert, err := req.getSPEncryptionCert()
 			if tc.err == "" {
 				assert.Check(t, err)
 				assert.Check(t, cert != nil)
+
 				return
 			}
+
 			assert.Check(t, is.ErrorContains(err, tc.err))
 			assert.Check(t, !errors.Is(err, os.ErrNotExist), "a rejected certificate must not fall back to plaintext")
 			assert.Check(t, cert == nil)
@@ -198,6 +207,7 @@ func (e *entityEnforcer) EnforceEncryptionCertificate(req *IdpAuthnRequest, cert
 	if req.ServiceProviderMetadata.EntityID == e.legacy {
 		return DefaultEncryptionCertificateEnforcer{IgnoreValidityPeriod: true, MinimumRSAKeySize: 1024}.EnforceEncryptionCertificate(req, cert)
 	}
+
 	return DefaultEncryptionCertificateEnforcer{}.EnforceEncryptionCertificate(req, cert)
 }
 
@@ -222,7 +232,9 @@ func TestIDPEncryptionCertificateEnforcerPerServiceProvider(t *testing.T) {
 func TestIDPServeSSORefusesRejectedEncryptionCertificate(t *testing.T) {
 	test := NewIdentityProviderTest(t, applyKey)
 	test.IDP.EncryptionCertificateEnforcer = nil
+
 	var logs bytes.Buffer
+
 	test.IDP.Logger = log.New(&logs, "", 0)
 	test.IDP.SessionProvider = &mockSessionProvider{
 		GetSessionFunc: func(_ http.ResponseWriter, _ *http.Request, _ *IdpAuthnRequest) *Session {
@@ -237,6 +249,7 @@ func TestIDPServeSSORefusesRejectedEncryptionCertificate(t *testing.T) {
 
 	requestURL, err := test.SP.MakeRedirectAuthenticationRequest("ThisIsTheRelayState")
 	assert.NilError(t, err)
+
 	r, _ := http.NewRequest("GET", requestURL.String(), nil)
 	w := httptest.NewRecorder()
 	test.IDP.ServeSSO(w, r)

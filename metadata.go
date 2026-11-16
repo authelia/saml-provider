@@ -9,24 +9,24 @@ import (
 	"github.com/beevik/etree"
 )
 
-// HTTPPostBinding is the official URN for the HTTP-POST binding (transport)
+// HTTPPostBinding is the official URN for the HTTP-POST binding (transport).
 const HTTPPostBinding = "urn:oasis:names:tc:SAML:2.0:bindings:HTTP-POST"
 
-// HTTPRedirectBinding is the official URN for the HTTP-Redirect binding (transport)
+// HTTPRedirectBinding is the official URN for the HTTP-Redirect binding (transport).
 const HTTPRedirectBinding = "urn:oasis:names:tc:SAML:2.0:bindings:HTTP-Redirect"
 
-// HTTPArtifactBinding is the official URN for the HTTP-Artifact binding (transport)
+// HTTPArtifactBinding is the official URN for the HTTP-Artifact binding (transport).
 const HTTPArtifactBinding = "urn:oasis:names:tc:SAML:2.0:bindings:HTTP-Artifact"
 
-// SOAPBinding is the official URN for the SOAP binding (transport)
+// SOAPBinding is the official URN for the SOAP binding (transport).
 const SOAPBinding = "urn:oasis:names:tc:SAML:2.0:bindings:SOAP"
 
-// SOAPBindingV1 is the URN for the SOAP binding in SAML 1.0
+// SOAPBindingV1 is the URN for the SOAP binding in SAML 1.0.
 const SOAPBindingV1 = "urn:oasis:names:tc:SAML:1.0:bindings:SOAP-binding"
 
 // EntitiesDescriptor represents the SAML object of the same name.
 //
-// See http://docs.oasis-open.org/security/saml/v2.0/saml-metadata-2.0-os.pdf §2.3.1
+// See http://docs.oasis-open.org/security/saml/v2.0/saml-metadata-2.0-os.pdf §2.3.1.
 type EntitiesDescriptor struct {
 	XMLName             xml.Name       `xml:"urn:oasis:names:tc:SAML:2.0:metadata EntitiesDescriptor"`
 	ID                  *string        `xml:",attr,omitempty"`
@@ -38,19 +38,25 @@ type EntitiesDescriptor struct {
 	EntityDescriptors   []EntityDescriptor   `xml:"urn:oasis:names:tc:SAML:2.0:metadata EntityDescriptor"`
 }
 
-// MarshalXML implements xml.Marshaler
+// MarshalXML implements [xml.Marshaler].
 func (m EntitiesDescriptor) MarshalXML(e *xml.Encoder, _ xml.StartElement) error {
-	var validUntil *RelaxedTime
-	var cacheDuration *Duration
+	var (
+		validUntil    *RelaxedTime
+		cacheDuration *Duration
+	)
+
 	if m.ValidUntil != nil {
 		vu := RelaxedTime(*m.ValidUntil)
 		validUntil = &vu
 	}
+
 	if m.CacheDuration != nil {
 		cd := Duration(*m.CacheDuration)
 		cacheDuration = &cd
 	}
+
 	type Alias EntitiesDescriptor
+
 	aux := &struct {
 		ValidUntil    *RelaxedTime `xml:"validUntil,attr,omitempty"`
 		CacheDuration *Duration    `xml:"cacheDuration,attr,omitempty"`
@@ -60,12 +66,14 @@ func (m EntitiesDescriptor) MarshalXML(e *xml.Encoder, _ xml.StartElement) error
 		CacheDuration: cacheDuration,
 		Alias:         (*Alias)(&m),
 	}
+
 	return e.Encode(aux)
 }
 
-// UnmarshalXML implements xml.Unmarshaler
+// UnmarshalXML implements [xml.Unmarshaler].
 func (m *EntitiesDescriptor) UnmarshalXML(d *xml.Decoder, start xml.StartElement) error {
 	type Alias EntitiesDescriptor
+
 	aux := &struct {
 		ValidUntil    *RelaxedTime `xml:"validUntil,attr,omitempty"`
 		CacheDuration *Duration    `xml:"cacheDuration,attr,omitempty"`
@@ -76,14 +84,17 @@ func (m *EntitiesDescriptor) UnmarshalXML(d *xml.Decoder, start xml.StartElement
 	if err := d.DecodeElement(aux, &start); err != nil {
 		return err
 	}
+
 	if aux.ValidUntil != nil {
 		t := time.Time(*aux.ValidUntil)
 		m.ValidUntil = &t
 	}
+
 	if aux.CacheDuration != nil {
 		d := time.Duration(*aux.CacheDuration)
 		m.CacheDuration = &d
 	}
+
 	return nil
 }
 
@@ -98,7 +109,7 @@ var Metadata = struct{}{}
 
 // EntityDescriptor represents the SAML EntityDescriptor object.
 //
-// See http://docs.oasis-open.org/security/saml/v2.0/saml-metadata-2.0-os.pdf §2.3.2
+// See http://docs.oasis-open.org/security/saml/v2.0/saml-metadata-2.0-os.pdf §2.3.2.
 type EntityDescriptor struct {
 	XMLName                       xml.Name      `xml:"urn:oasis:names:tc:SAML:2.0:metadata EntityDescriptor"`
 	EntityID                      string        `xml:"entityID,attr"`
@@ -118,9 +129,10 @@ type EntityDescriptor struct {
 	AdditionalMetadataLocations   []string `xml:"AdditionalMetadataLocation"`
 }
 
-// MarshalXML implements xml.Marshaler
+// MarshalXML implements [xml.Marshaler].
 func (m EntityDescriptor) MarshalXML(e *xml.Encoder, _ xml.StartElement) error {
 	type Alias EntityDescriptor
+
 	aux := &struct {
 		ValidUntil    RelaxedTime `xml:"validUntil,attr,omitempty"`
 		CacheDuration Duration    `xml:"cacheDuration,attr,omitempty"`
@@ -130,12 +142,14 @@ func (m EntityDescriptor) MarshalXML(e *xml.Encoder, _ xml.StartElement) error {
 		CacheDuration: Duration(m.CacheDuration),
 		Alias:         (*Alias)(&m),
 	}
+
 	return e.Encode(aux)
 }
 
-// UnmarshalXML implements xml.Unmarshaler
+// UnmarshalXML implements [xml.Unmarshaler].
 func (m *EntityDescriptor) UnmarshalXML(d *xml.Decoder, start xml.StartElement) error {
 	type Alias EntityDescriptor
+
 	aux := &struct {
 		ValidUntil    RelaxedTime `xml:"validUntil,attr,omitempty"`
 		CacheDuration Duration    `xml:"cacheDuration,attr,omitempty"`
@@ -146,14 +160,16 @@ func (m *EntityDescriptor) UnmarshalXML(d *xml.Decoder, start xml.StartElement) 
 	if err := d.DecodeElement(aux, &start); err != nil {
 		return err
 	}
+
 	m.ValidUntil = time.Time(aux.ValidUntil)
 	m.CacheDuration = time.Duration(aux.CacheDuration)
+
 	return nil
 }
 
 // Organization represents the SAML Organization object.
 //
-// See http://docs.oasis-open.org/security/saml/v2.0/saml-metadata-2.0-os.pdf §2.3.2.1
+// See http://docs.oasis-open.org/security/saml/v2.0/saml-metadata-2.0-os.pdf §2.3.2.1.
 type Organization struct {
 	OrganizationNames        []LocalizedName `xml:"OrganizationName"`
 	OrganizationDisplayNames []LocalizedName `xml:"OrganizationDisplayName"`
@@ -162,7 +178,7 @@ type Organization struct {
 
 // LocalizedName represents the SAML type localizedNameType.
 //
-// See http://docs.oasis-open.org/security/saml/v2.0/saml-metadata-2.0-os.pdf §2.2.4
+// See http://docs.oasis-open.org/security/saml/v2.0/saml-metadata-2.0-os.pdf §2.2.4.
 type LocalizedName struct {
 	Lang  string `xml:"http://www.w3.org/XML/1998/namespace lang,attr"`
 	Value string `xml:",chardata"`
@@ -170,7 +186,7 @@ type LocalizedName struct {
 
 // LocalizedURI represents the SAML type localizedURIType.
 //
-// See http://docs.oasis-open.org/security/saml/v2.0/saml-metadata-2.0-os.pdf §2.2.5
+// See http://docs.oasis-open.org/security/saml/v2.0/saml-metadata-2.0-os.pdf §2.2.5.
 type LocalizedURI struct {
 	Lang  string `xml:"http://www.w3.org/XML/1998/namespace lang,attr"`
 	Value string `xml:",chardata"`
@@ -178,7 +194,7 @@ type LocalizedURI struct {
 
 // ContactPerson represents the SAML element ContactPerson.
 //
-// See http://docs.oasis-open.org/security/saml/v2.0/saml-metadata-2.0-os.pdf §2.3.2.2
+// See http://docs.oasis-open.org/security/saml/v2.0/saml-metadata-2.0-os.pdf §2.3.2.2.
 type ContactPerson struct {
 	ContactType      string `xml:"contactType,attr"`
 	Company          string
@@ -190,7 +206,7 @@ type ContactPerson struct {
 
 // RoleDescriptor represents the SAML element RoleDescriptor.
 //
-// See http://docs.oasis-open.org/security/saml/v2.0/saml-metadata-2.0-os.pdf §2.4.1
+// See http://docs.oasis-open.org/security/saml/v2.0/saml-metadata-2.0-os.pdf §2.4.1.
 type RoleDescriptor struct {
 	ID                         string      `xml:",attr,omitempty"`
 	ValidUntil                 *time.Time  `xml:"validUntil,attr,omitempty"`
@@ -203,7 +219,7 @@ type RoleDescriptor struct {
 	ContactPeople              []ContactPerson `xml:"ContactPerson,omitempty"`
 }
 
-// KeyDescriptor represents the XMLSEC object of the same name
+// KeyDescriptor represents the XMLSEC object of the same name.
 type KeyDescriptor struct {
 	Use               string             `xml:"use,attr"`
 	KeyInfo           KeyInfo            `xml:"http://www.w3.org/2000/09/xmldsig# KeyInfo"`
@@ -243,19 +259,19 @@ type MGF struct {
 	Algorithm string `xml:"Algorithm,attr"`
 }
 
-// KeyInfo represents the XMLSEC object of the same name
+// KeyInfo represents the XMLSEC object of the same name.
 type KeyInfo struct {
 	XMLName  xml.Name `xml:"http://www.w3.org/2000/09/xmldsig# KeyInfo"`
 	X509Data X509Data `xml:"X509Data"`
 }
 
-// X509Data represents the XMLSEC object of the same name
+// X509Data represents the XMLSEC object of the same name.
 type X509Data struct {
 	XMLName          xml.Name          `xml:"http://www.w3.org/2000/09/xmldsig# X509Data"`
 	X509Certificates []X509Certificate `xml:"X509Certificate"`
 }
 
-// X509Certificate represents the XMLSEC object of the same name
+// X509Certificate represents the XMLSEC object of the same name.
 type X509Certificate struct {
 	XMLName xml.Name `xml:"http://www.w3.org/2000/09/xmldsig# X509Certificate"`
 	Data    string   `xml:",chardata"`
@@ -263,7 +279,7 @@ type X509Certificate struct {
 
 // Endpoint represents the SAML EndpointType object.
 //
-// See http://docs.oasis-open.org/security/saml/v2.0/saml-metadata-2.0-os.pdf §2.2.2
+// See http://docs.oasis-open.org/security/saml/v2.0/saml-metadata-2.0-os.pdf §2.2.2.
 type Endpoint struct {
 	Binding          string `xml:"Binding,attr"`
 	Location         string `xml:"Location,attr"`
@@ -290,9 +306,10 @@ func checkEndpointLocation(binding string, location string) (string, error) {
 		if err != nil {
 			return "", fmt.Errorf("invalid url %q: %w", location, err)
 		}
+
 		switch locationURL.Scheme {
 		case "http", "https":
-		// ok
+		// ok.
 		default:
 			return "", fmt.Errorf("invalid url scheme %q for binding %q",
 				locationURL.Scheme, binding)
@@ -313,9 +330,10 @@ func checkEndpointLocation(binding string, location string) (string, error) {
 	return location, nil
 }
 
-// UnmarshalXML implements xml.Unmarshaler
+// UnmarshalXML implements [xml.Unmarshaler].
 func (m *Endpoint) UnmarshalXML(d *xml.Decoder, start xml.StartElement) error {
 	type Alias Endpoint
+
 	aux := &struct {
 		*Alias
 	}{
@@ -326,10 +344,12 @@ func (m *Endpoint) UnmarshalXML(d *xml.Decoder, start xml.StartElement) error {
 	}
 
 	var err error
+
 	m.Location, err = checkEndpointLocation(m.Binding, m.Location)
 	if err != nil {
 		return err
 	}
+
 	if m.ResponseLocation != "" {
 		m.ResponseLocation, err = checkEndpointLocation(m.Binding, m.ResponseLocation)
 		if err != nil {
@@ -342,7 +362,7 @@ func (m *Endpoint) UnmarshalXML(d *xml.Decoder, start xml.StartElement) error {
 
 // IndexedEndpoint represents the SAML IndexedEndpointType object.
 //
-// See http://docs.oasis-open.org/security/saml/v2.0/saml-metadata-2.0-os.pdf §2.2.3
+// See http://docs.oasis-open.org/security/saml/v2.0/saml-metadata-2.0-os.pdf §2.2.3.
 type IndexedEndpoint struct {
 	Binding          string  `xml:"Binding,attr"`
 	Location         string  `xml:"Location,attr"`
@@ -351,9 +371,10 @@ type IndexedEndpoint struct {
 	IsDefault        *bool   `xml:"isDefault,attr"`
 }
 
-// UnmarshalXML implements xml.Unmarshaler
+// UnmarshalXML implements [xml.Unmarshaler].
 func (m *IndexedEndpoint) UnmarshalXML(d *xml.Decoder, start xml.StartElement) error {
 	type Alias IndexedEndpoint
+
 	aux := &struct {
 		*Alias
 	}{
@@ -364,15 +385,18 @@ func (m *IndexedEndpoint) UnmarshalXML(d *xml.Decoder, start xml.StartElement) e
 	}
 
 	var err error
+
 	m.Location, err = checkEndpointLocation(m.Binding, m.Location)
 	if err != nil {
 		return err
 	}
+
 	if m.ResponseLocation != nil {
 		responseLocation, err := checkEndpointLocation(m.Binding, *m.ResponseLocation)
 		if err != nil {
 			return err
 		}
+
 		if responseLocation != "" {
 			m.ResponseLocation = &responseLocation
 		} else {
@@ -385,7 +409,7 @@ func (m *IndexedEndpoint) UnmarshalXML(d *xml.Decoder, start xml.StartElement) e
 
 // SSODescriptor represents the SAML complex type SSODescriptor
 //
-// See http://docs.oasis-open.org/security/saml/v2.0/saml-metadata-2.0-os.pdf §2.4.2
+// See http://docs.oasis-open.org/security/saml/v2.0/saml-metadata-2.0-os.pdf §2.4.2.
 type SSODescriptor struct {
 	RoleDescriptor
 	ArtifactResolutionServices []IndexedEndpoint `xml:"ArtifactResolutionService"`
@@ -396,7 +420,7 @@ type SSODescriptor struct {
 
 // IDPSSODescriptor represents the SAML IDPSSODescriptorType object.
 //
-// See http://docs.oasis-open.org/security/saml/v2.0/saml-metadata-2.0-os.pdf §2.4.3
+// See http://docs.oasis-open.org/security/saml/v2.0/saml-metadata-2.0-os.pdf §2.4.3.
 type IDPSSODescriptor struct {
 	XMLName xml.Name `xml:"urn:oasis:names:tc:SAML:2.0:metadata IDPSSODescriptor"`
 	SSODescriptor
@@ -412,7 +436,7 @@ type IDPSSODescriptor struct {
 
 // SPSSODescriptor represents the SAML SPSSODescriptorType object.
 //
-// See http://docs.oasis-open.org/security/saml/v2.0/saml-metadata-2.0-os.pdf §2.4.2
+// See http://docs.oasis-open.org/security/saml/v2.0/saml-metadata-2.0-os.pdf §2.4.2.
 type SPSSODescriptor struct {
 	XMLName xml.Name `xml:"urn:oasis:names:tc:SAML:2.0:metadata SPSSODescriptor"`
 	SSODescriptor
@@ -424,7 +448,7 @@ type SPSSODescriptor struct {
 
 // AttributeConsumingService represents the SAML AttributeConsumingService object.
 //
-// See http://docs.oasis-open.org/security/saml/v2.0/saml-metadata-2.0-os.pdf §2.4.4.1
+// See http://docs.oasis-open.org/security/saml/v2.0/saml-metadata-2.0-os.pdf §2.4.4.1.
 type AttributeConsumingService struct {
 	Index               int                  `xml:"index,attr"`
 	IsDefault           *bool                `xml:"isDefault,attr"`
@@ -435,7 +459,7 @@ type AttributeConsumingService struct {
 
 // RequestedAttribute represents the SAML RequestedAttribute object.
 //
-// See http://docs.oasis-open.org/security/saml/v2.0/saml-metadata-2.0-os.pdf §2.4.4.2
+// See http://docs.oasis-open.org/security/saml/v2.0/saml-metadata-2.0-os.pdf §2.4.4.2.
 type RequestedAttribute struct {
 	Attribute
 	IsRequired *bool `xml:"isRequired,attr"`
@@ -443,7 +467,7 @@ type RequestedAttribute struct {
 
 // AuthnAuthorityDescriptor represents the SAML AuthnAuthorityDescriptor object.
 //
-// See http://docs.oasis-open.org/security/saml/v2.0/saml-metadata-2.0-os.pdf §2.4.5
+// See http://docs.oasis-open.org/security/saml/v2.0/saml-metadata-2.0-os.pdf §2.4.5.
 type AuthnAuthorityDescriptor struct {
 	RoleDescriptor
 	AuthnQueryServices         []Endpoint     `xml:"AuthnQueryService"`
@@ -453,7 +477,7 @@ type AuthnAuthorityDescriptor struct {
 
 // PDPDescriptor represents the SAML PDPDescriptor object.
 //
-// See http://docs.oasis-open.org/security/saml/v2.0/saml-metadata-2.0-os.pdf §2.4.6
+// See http://docs.oasis-open.org/security/saml/v2.0/saml-metadata-2.0-os.pdf §2.4.6.
 type PDPDescriptor struct {
 	RoleDescriptor
 	AuthzServices              []Endpoint     `xml:"AuthzService"`
@@ -463,7 +487,7 @@ type PDPDescriptor struct {
 
 // AttributeAuthorityDescriptor represents the SAML AttributeAuthorityDescriptor object.
 //
-// See http://docs.oasis-open.org/security/saml/v2.0/saml-metadata-2.0-os.pdf §2.4.7
+// See http://docs.oasis-open.org/security/saml/v2.0/saml-metadata-2.0-os.pdf §2.4.7.
 type AttributeAuthorityDescriptor struct {
 	RoleDescriptor
 	AttributeServices          []Endpoint     `xml:"AttributeService"`
@@ -475,7 +499,7 @@ type AttributeAuthorityDescriptor struct {
 
 // AffiliationDescriptor represents the SAML AffiliationDescriptor object.
 //
-// See http://docs.oasis-open.org/security/saml/v2.0/saml-metadata-2.0-os.pdf §2.5
+// See http://docs.oasis-open.org/security/saml/v2.0/saml-metadata-2.0-os.pdf §2.5.
 type AffiliationDescriptor struct {
 	AffiliationOwnerID string       `xml:"affiliationOwnerID,attr"`
 	ID                 string       `xml:",attr"`

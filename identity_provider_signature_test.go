@@ -11,12 +11,14 @@ import (
 
 func interopSignatureMethod(t *testing.T, test *IdentityProviderTest) (signature, digest string) {
 	t.Helper()
+
 	req, err := hardeningValidate(test, hardeningRequest(`ID="id-1"`, TimeNow(), hardeningIssuer))
 	assert.NilError(t, err)
 	assert.NilError(t, DefaultAssertionMaker{}.MakeAssertion(req, &Session{ID: "f00d", NameID: "alice"}))
 	assert.NilError(t, req.MakeResponse())
 	signature = req.ResponseEl.FindElement(".//SignatureMethod").SelectAttrValue("Algorithm", "")
 	digest = req.ResponseEl.FindElement(".//DigestMethod").SelectAttrValue("Algorithm", "")
+
 	return signature, digest
 }
 

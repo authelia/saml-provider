@@ -3,7 +3,6 @@ package samlsp
 import (
 	"bytes"
 	"context"
-	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -18,11 +17,11 @@ func TestFetchMetadata(t *testing.T) {
 
 	testServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		assert.Check(t, is.Equal("/metadata", r.URL.String()))
+
 		_, err := w.Write(test.IDPMetadata)
 		assert.Check(t, err)
 	}))
 
-	fmt.Println(testServer.URL + "/metadata")
 	u, _ := url.Parse(testServer.URL + "/metadata")
 	md, err := FetchMetadata(context.Background(), testServer.Client(), *u)
 	assert.Check(t, err)
@@ -36,11 +35,11 @@ func TestFetchMetadataRejectsInvalid(t *testing.T) {
 
 	testServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		assert.Check(t, is.Equal("/metadata", r.URL.String()))
+
 		_, err := w.Write(test.IDPMetadata)
 		assert.Check(t, err)
 	}))
 
-	fmt.Println(testServer.URL + "/metadata")
 	u, _ := url.Parse(testServer.URL + "/metadata")
 	md, err := FetchMetadata(context.Background(), testServer.Client(), *u)
 	assert.Check(t, err != nil)

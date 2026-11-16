@@ -26,12 +26,14 @@ func (f subjectEnforcerFunc) EnforceSubject(req *IdpAuthnRequest, session *Sessi
 // serveSSOWithSubject posts a request naming subject, and returns the HTTP response.
 func serveSSOWithSubject(t *testing.T, test *IdentityProviderTest, session *Session, subject *Subject) *httptest.ResponseRecorder {
 	t.Helper()
+
 	test.IDP.SessionProvider = &mockSessionProvider{
 		GetSessionFunc: func(http.ResponseWriter, *http.Request, *IdpAuthnRequest) *Session { return session },
 	}
 
 	request, err := test.SP.MakeAuthenticationRequest("https://idp.example.com/saml/sso", HTTPPostBinding, HTTPPostBinding)
 	assert.NilError(t, err)
+
 	request.Subject = subject
 	doc := etree.NewDocument()
 	doc.SetRoot(request.Element())
@@ -41,8 +43,10 @@ func serveSSOWithSubject(t *testing.T, test *IdentityProviderTest, session *Sess
 	form := url.Values{"SAMLRequest": {base64.StdEncoding.EncodeToString(body)}}
 	r := httptest.NewRequest(http.MethodPost, "https://idp.example.com/saml/sso", strings.NewReader(form.Encode()))
 	r.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+
 	w := httptest.NewRecorder()
 	test.IDP.ServeSSO(w, r)
+
 	return w
 }
 
@@ -50,6 +54,7 @@ func subjectResponse(t *testing.T, w *httptest.ResponseRecorder) Response {
 	t.Helper()
 	assert.Assert(t, is.Equal(w.Code, http.StatusOK), "body: %s", w.Body.String())
 	_, response := postedResponse(t, w.Body.String())
+
 	return response
 }
 
@@ -131,10 +136,12 @@ func TestServeSSOMatchesSubjectConfirmation(t *testing.T) {
 		return func() []SubjectConfirmation {
 			var d SubjectConfirmationData
 			set(&d, TimeNow().Add(offset))
+
 			return data(d)()
 		}
 	}
 	notOnOrAfter := func(d *SubjectConfirmationData, t time.Time) { d.NotOnOrAfter = t }
+
 	notBefore := func(d *SubjectConfirmationData, t time.Time) { d.NotBefore = t }
 	for name, tc := range map[string]struct {
 		confirmations func() []SubjectConfirmation
@@ -159,6 +166,7 @@ func TestServeSSOMatchesSubjectConfirmation(t *testing.T) {
 			test := NewIdentityProviderTest(t, applyKey)
 			w := serveSSOWithSubject(t, test, &Session{ID: "s", NameID: "alice"},
 				&Subject{NameID: &NameID{Value: "alice"}, SubjectConfirmations: tc.confirmations()})
+
 			response := subjectResponse(t, w)
 			if tc.success {
 				assert.Check(t, is.Equal(response.Status.StatusCode.Value, StatusSuccess))
@@ -182,7 +190,9 @@ func TestServeSSOMatchesConfirmationOfCustomAssertion(t *testing.T) {
 				if err := (DefaultAssertionMaker{}).MakeAssertion(req, session); err != nil {
 					return err
 				}
+
 				req.Assertion.Subject.SubjectConfirmations = []SubjectConfirmation{{Method: holderOfKeyMethod}}
+
 				return nil
 			})
 			subject := &Subject{NameID: &NameID{Value: "alice"}, SubjectConfirmations: requested}
@@ -232,7 +242,9 @@ func TestServeSSOUsesConfiguredSubjectEnforcer(t *testing.T) {
 
 	t.Run("refuses", func(t *testing.T) {
 		test := NewIdentityProviderTest(t, applyKey)
+
 		var seen *Session
+
 		test.IDP.SubjectEnforcer = subjectEnforcerFunc(func(_ *IdpAuthnRequest, session *Session) error {
 			seen = session
 			return errors.New("not the same principal")

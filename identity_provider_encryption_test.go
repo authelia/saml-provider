@@ -46,6 +46,7 @@ func TestIDPEncryptionFailsClosed(t *testing.T) {
 				ServiceProviderMetadata: &EntityDescriptor{SPSSODescriptors: append([]SPSSODescriptor{selected}, tc.others...)},
 			}
 			cert, err := req.getSPEncryptionCert()
+
 			switch tc.want {
 			case "encrypted":
 				assert.Check(t, err)

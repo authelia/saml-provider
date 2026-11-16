@@ -108,32 +108,38 @@ func (idp *IdentityProvider) encryptionPolicy() (*encryptionPolicy, error) {
 
 	if len(idp.ContentEncryptionMethods) != 0 {
 		policy.content = nil
+
 		for _, algorithm := range idp.ContentEncryptionMethods {
 			i := slices.IndexFunc(contentEncryptionCiphers, func(c xmlenc.BlockCipher) bool { return c.Algorithm() == algorithm })
 			if i < 0 {
 				return nil, fmt.Errorf("IdentityProvider.ContentEncryptionMethods: unsupported algorithm %q", algorithm)
 			}
+
 			policy.content = append(policy.content, contentEncryptionCiphers[i])
 		}
 	}
 
 	if len(idp.KeyTransportMethods) != 0 {
 		policy.keyTransports = nil
+
 		for _, algorithm := range idp.KeyTransportMethods {
 			if !slices.Contains(keyTransportAlgorithms, algorithm) {
 				return nil, fmt.Errorf("IdentityProvider.KeyTransportMethods: unsupported algorithm %q", algorithm)
 			}
+
 			policy.keyTransports = append(policy.keyTransports, algorithm)
 		}
 	}
 
 	if len(idp.KeyTransportDigestMethods) != 0 {
 		policy.digests = nil
+
 		for _, algorithm := range idp.KeyTransportDigestMethods {
 			digest, ok := lookupKeyTransportDigest(keyTransportDigests, algorithm)
 			if !ok {
 				return nil, fmt.Errorf("IdentityProvider.KeyTransportDigestMethods: unsupported algorithm %q", algorithm)
 			}
+
 			policy.digests = append(policy.digests, digest)
 		}
 	}
@@ -146,11 +152,13 @@ func lookupKeyTransportDigest(digests []keyTransportDigest, algorithm string) (k
 	if standard, ok := legacyDigestIdentifiers[algorithm]; ok {
 		algorithm = standard
 	}
+
 	for _, digest := range digests {
 		if digest.method.Algorithm() == algorithm {
 			return digest, true
 		}
 	}
+
 	return keyTransportDigest{}, false
 }
 
@@ -177,11 +185,14 @@ func (req *IdpAuthnRequest) assertionEncrypter() (xmlenc.RSA, error) {
 	if err != nil {
 		return xmlenc.RSA{}, fmt.Errorf("%s: %w", req.ServiceProviderMetadata.EntityID, err)
 	}
+
 	encrypter, err := policy.keyTransport(methods)
 	if err != nil {
 		return xmlenc.RSA{}, fmt.Errorf("%s: %w", req.ServiceProviderMetadata.EntityID, err)
 	}
+
 	encrypter.BlockCipher = content
+
 	return encrypter, nil
 }
 
@@ -189,11 +200,14 @@ func (req *IdpAuthnRequest) assertionEncrypter() (xmlenc.RSA, error) {
 // allows if methods lists none.
 func (policy *encryptionPolicy) contentEncryption(methods []EncryptionMethod) (xmlenc.BlockCipher, error) {
 	listed := false
+
 	for _, method := range methods {
 		if !slices.Contains(contentEncryptionIdentifiers, method.Algorithm) {
 			continue
 		}
+
 		listed = true
+
 		for _, cipher := range policy.content {
 			// The key size of these ciphers is fixed by the algorithm, so one that lists another can't be met.
 			if cipher.Algorithm() == method.Algorithm && (method.KeySize == 0 || method.KeySize == cipher.KeySize()*8) {
@@ -201,9 +215,11 @@ func (policy *encryptionPolicy) contentEncryption(methods []EncryptionMethod) (x
 			}
 		}
 	}
+
 	if listed {
 		return nil, fmt.Errorf("the encryption key lists no content encryption algorithm the identity provider allows")
 	}
+
 	return policy.content[0], nil
 }
 
@@ -211,18 +227,23 @@ func (policy *encryptionPolicy) contentEncryption(methods []EncryptionMethod) (x
 // with its parameters, or for the first the policy allows if methods lists none.
 func (policy *encryptionPolicy) keyTransport(methods []EncryptionMethod) (xmlenc.RSA, error) {
 	listed := false
+
 	for _, method := range methods {
 		if !slices.Contains(keyTransportIdentifiers, method.Algorithm) {
 			continue
 		}
+
 		listed = true
+
 		if encrypter, ok := policy.keyTransportFor(method); ok {
 			return encrypter, nil
 		}
 	}
+
 	if listed {
 		return xmlenc.RSA{}, fmt.Errorf("the encryption key lists no key transport algorithm the identity provider allows with the parameters it gives")
 	}
+
 	return policy.defaultKeyTransport(), nil
 }
 
@@ -236,7 +257,9 @@ func (policy *encryptionPolicy) defaultKeyTransport() xmlenc.RSA {
 	} else {
 		encrypter = xmlenc.OAEP()
 	}
+
 	encrypter.DigestMethod = policy.digests[0].method
+
 	return encrypter
 }
 
@@ -254,33 +277,40 @@ func (policy *encryptionPolicy) keyTransportFor(method EncryptionMethod) (xmlenc
 	if method.DigestMethod != nil {
 		digestAlgorithm = method.DigestMethod.Algorithm
 	}
+
 	digest, ok := lookupKeyTransportDigest(policy.digests, digestAlgorithm)
 	if !ok {
 		return xmlenc.RSA{}, false
 	}
 
 	var encrypter xmlenc.RSA
+
 	switch method.Algorithm {
 	case algorithmRSAOAEPMGF1P:
 		// XML Encryption §5.4.2 fixes the mask generation function to MGF1 with SHA-1.
 		if method.MGF != nil && method.MGF.Algorithm != keyTransportDigests[0].mgf {
 			return xmlenc.RSA{}, false
 		}
+
 		encrypter = xmlenc.OAEP()
 	case algorithmRSAOAEP2009:
 		mgfAlgorithm := keyTransportDigests[0].mgf
 		if method.MGF != nil {
 			mgfAlgorithm = method.MGF.Algorithm
 		}
+
 		i := slices.IndexFunc(policy.digests, func(d keyTransportDigest) bool { return d.mgf == mgfAlgorithm })
 		if i < 0 {
 			return xmlenc.RSA{}, false
 		}
+
 		encrypter = xmlenc.OAEP_SHA256()
 		encrypter.MGFHash = policy.digests[i].hash
 	default:
 		return xmlenc.RSA{}, false
 	}
+
 	encrypter.DigestMethod = digest.method
+
 	return encrypter, true
 }

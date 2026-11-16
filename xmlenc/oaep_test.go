@@ -20,10 +20,12 @@ import (
 // encryptedKeyCiphertext returns the RSA ciphertext of the EncryptedKey of an EncryptedData element.
 func encryptedKeyCiphertext(t *testing.T, el *etree.Element) []byte {
 	t.Helper()
+
 	value := el.FindElement("./KeyInfo/EncryptedKey/CipherData/CipherValue")
 	assert.Assert(t, value != nil)
 	ciphertext, err := base64.StdEncoding.DecodeString(strings.TrimSpace(value.Text()))
 	assert.NilError(t, err)
+
 	return ciphertext
 }
 
@@ -70,7 +72,7 @@ func TestOAEPMGF1PAlwaysMasksWithSHA1(t *testing.T) {
 			encrypter := OAEP()
 			encrypter.BlockCipher = AES128CBC
 			encrypter.DigestMethod = tc.digest
-			encrypter.MGFHash = crypto.SHA512 // ignored, as RSA-OAEP-MGF1P fixes MGF1 with SHA-1
+			encrypter.MGFHash = crypto.SHA512 // ignored, as RSA-OAEP-MGF1P fixes MGF1 with SHA-1.
 			el, err := encrypter.Encrypt(cert, []byte("plaintext"), nil)
 			assert.NilError(t, err)
 			assert.Check(t, el.FindElement("./KeyInfo/EncryptedKey/EncryptionMethod/MGF") == nil)
@@ -89,6 +91,7 @@ func TestOAEPMGF1PAlwaysMasksWithSHA1(t *testing.T) {
 
 func TestOAEP11RoundTrip(t *testing.T) {
 	key, cert := newDigestTestKey(t)
+
 	for _, digest := range []struct {
 		method DigestMethod
 		hash   crypto.Hash
@@ -133,6 +136,7 @@ func TestOAEP11RoundTrip(t *testing.T) {
 				doc.SetRoot(el)
 				buf, err := doc.WriteToBytes()
 				assert.NilError(t, err)
+
 				parsed := etree.NewDocument()
 				assert.NilError(t, parsed.ReadFromBytes(buf))
 
@@ -155,6 +159,7 @@ func TestOAEP11DecryptRejectsAnUnknownMaskGenerationFunction(t *testing.T) {
 	encrypter.BlockCipher = AES128CBC
 	el, err := encrypter.Encrypt(cert, []byte("plaintext"), nil)
 	assert.NilError(t, err)
+
 	el.FindElement("./KeyInfo/EncryptedKey/EncryptionMethod/MGF").SelectAttr("Algorithm").Value = "http://www.w3.org/2009/xmlenc11#mgf1md5"
 
 	_, err = Decrypt(key, el)

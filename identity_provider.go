@@ -30,7 +30,6 @@ import (
 	xrv "github.com/mattermost/xml-roundtrip-validator"
 
 	"authelia.com/provider/saml/internal/dsig"
-
 	"authelia.com/provider/saml/logger"
 )
 
@@ -230,6 +229,7 @@ func (e DefaultAuthnContextEnforcer) EnforceAuthnContext(req *IdpAuthnRequest, _
 	}
 
 	var satisfies func(asserted, class string) bool
+
 	switch requested.Comparison {
 	case "", AuthnContextComparisonExact:
 		satisfies = func(asserted, class string) bool { return asserted == class }
@@ -246,15 +246,18 @@ func (e DefaultAuthnContextEnforcer) EnforceAuthnContext(req *IdpAuthnRequest, _
 	if req.Assertion == nil || len(req.Assertion.AuthnStatements) == 0 {
 		return fmt.Errorf("assertion has no AuthnStatement")
 	}
+
 	for _, statement := range req.Assertion.AuthnStatements {
 		if statement.AuthnContext.AuthnContextClassRef == nil {
 			return fmt.Errorf("an AuthnStatement has no AuthnContextClassRef")
 		}
+
 		asserted := statement.AuthnContext.AuthnContextClassRef.Value
 		if !slices.ContainsFunc(requested.AuthnContextClassRefs, func(class string) bool { return satisfies(asserted, class) }) {
 			return fmt.Errorf("the asserted class %q doesn't satisfy the %q comparison", asserted, requested.Comparison)
 		}
 	}
+
 	return nil
 }
 
@@ -262,10 +265,12 @@ func (e DefaultAuthnContextEnforcer) EnforceAuthnContext(req *IdpAuthnRequest, _
 // zero if they are equal or either is not ranked.
 func (e DefaultAuthnContextEnforcer) compare(a, b string) int {
 	strengthA, okA := e.Strength[a]
+
 	strengthB, okB := e.Strength[b]
 	if !okA || !okB {
 		return 0
 	}
+
 	return cmp.Compare(strengthA, strengthB)
 }
 
@@ -397,9 +402,11 @@ func (idp *IdentityProvider) CheckServiceProviderEndpoint(location string) error
 	if isSecureEndpointLocation(location) {
 		return nil
 	}
+
 	if idp.AllowInsecureServiceProviderEndpoints && endpointScheme(location) == "http" {
 		return nil
 	}
+
 	return fmt.Errorf("cannot send a response to %q: %w", location, ErrInsecureEndpoint)
 }
 
@@ -410,6 +417,7 @@ func endpointScheme(location string) string {
 	if err != nil || u.Opaque != "" || u.Hostname() == "" {
 		return ""
 	}
+
 	return strings.ToLower(u.Scheme)
 }
 
@@ -435,7 +443,9 @@ func isLoopbackHost(host string) bool {
 	if host == "localhost" || strings.HasSuffix(host, ".localhost") {
 		return true
 	}
+
 	addr, err := netip.ParseAddr(host)
+
 	return err == nil && addr.Unmap().IsLoopback()
 }
 
@@ -445,6 +455,7 @@ func (idp *IdentityProvider) logger() logger.Interface {
 	if idp.Logger == nil {
 		return logger.DefaultLogger
 	}
+
 	return idp.Logger
 }
 
@@ -539,22 +550,26 @@ func (idp *IdentityProvider) Metadata() *EntityDescriptor {
 	return ed
 }
 
-// Handler returns an http.Handler that serves the metadata and SSO URLs, and the logout URL if it
+// Handler returns an [http.Handler] that serves the metadata and SSO URLs, and the logout URL if it
 // is set.
 func (idp *IdentityProvider) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc(idp.MetadataURL.Path, idp.ServeMetadata)
 	mux.HandleFunc(idp.SSOURL.Path, idp.ServeSSO)
+
 	if idp.LogoutURL.String() != "" {
 		mux.HandleFunc(idp.LogoutURL.Path, idp.ServeSLO)
 	}
+
 	return mux
 }
 
-// ServeMetadata is an http.HandlerFunc that serves the IDP metadata
+// ServeMetadata is an [http.HandlerFunc] that serves the IDP metadata.
 func (idp *IdentityProvider) ServeMetadata(w http.ResponseWriter, _ *http.Request) {
 	buf, _ := xml.MarshalIndent(idp.Metadata(), "", "  ")
+
 	w.Header().Set("Content-Type", "application/samlmetadata+xml")
+
 	if _, err := w.Write(buf); err != nil {
 		idp.logger().Printf("ERROR: %s", err)
 		http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
@@ -578,17 +593,21 @@ func (idp *IdentityProvider) ServeMetadata(w http.ResponseWriter, _ *http.Reques
 //
 // If the assertion cannot be created or returned, a StatusInternalServerError
 // response is sent.
+//
+//nolint:gocyclo // Complexity is inherent to the specification being implemented.
 func (idp *IdentityProvider) ServeSSO(w http.ResponseWriter, r *http.Request) {
 	req, err := NewIdpAuthnRequest(idp, r)
 	if err != nil {
 		idp.logger().Printf("failed to parse request: %s", err)
 		http.Error(w, http.StatusText(http.StatusBadRequest), http.StatusBadRequest)
+
 		return
 	}
 
 	if err := req.Validate(); err != nil {
 		idp.logger().Printf("failed to validate request: %s", err)
 		http.Error(w, http.StatusText(http.StatusBadRequest), http.StatusBadRequest)
+
 		return
 	}
 
@@ -604,56 +623,72 @@ func (idp *IdentityProvider) ServeSSO(w http.ResponseWriter, r *http.Request) {
 	if assertionMaker == nil {
 		assertionMaker = DefaultAssertionMaker{}
 	}
+
 	if err := assertionMaker.MakeAssertion(req, session); err != nil {
 		idp.logger().Printf("failed to make assertion: %s", err)
 		http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
+
 		return
 	}
+
 	if req.Request.Subject != nil {
 		subjectEnforcer := idp.SubjectEnforcer
 		if subjectEnforcer == nil {
 			subjectEnforcer = DefaultSubjectEnforcer{}
 		}
+
 		if err := subjectEnforcer.EnforceSubject(req, session); err != nil {
 			idp.logger().Printf("cannot match the request subject: %s", err)
+
 			if err := req.WriteErrorResponse(w, StatusResponder, StatusAuthnFailed, ""); err != nil {
 				idp.logger().Printf("failed to write response: %s", err)
 				http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
 			}
+
 			return
 		}
 	}
+
 	if req.Request.NameIDPolicy != nil {
 		nameIDPolicyEnforcer := idp.NameIDPolicyEnforcer
 		if nameIDPolicyEnforcer == nil {
 			nameIDPolicyEnforcer = DefaultNameIDPolicyEnforcer{}
 		}
+
 		if err := nameIDPolicyEnforcer.EnforceNameIDPolicy(req, session); err != nil {
 			idp.logger().Printf("cannot satisfy name id policy: %s", err)
+
 			if err := req.WriteErrorResponse(w, StatusRequester, StatusInvalidNameIDPolicy, ""); err != nil {
 				idp.logger().Printf("failed to write response: %s", err)
 				http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
 			}
+
 			return
 		}
 	}
+
 	if req.Request.RequestedAuthnContext != nil {
 		authnContextEnforcer := idp.AuthnContextEnforcer
 		if authnContextEnforcer == nil {
 			authnContextEnforcer = DefaultAuthnContextEnforcer{}
 		}
+
 		if err := authnContextEnforcer.EnforceAuthnContext(req, session); err != nil {
 			idp.logger().Printf("cannot satisfy requested authn context: %s", err)
+
 			if err := req.WriteErrorResponse(w, StatusResponder, StatusNoAuthnContext, ""); err != nil {
 				idp.logger().Printf("failed to write response: %s", err)
 				http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
 			}
+
 			return
 		}
 	}
+
 	if err := req.WriteResponse(w); err != nil {
 		idp.logger().Printf("failed to write response: %s", err)
 		http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
+
 		return
 	}
 }
@@ -669,9 +704,11 @@ func (req *IdpAuthnRequest) getSession(w http.ResponseWriter, r *http.Request) *
 		if provider, ok := idp.SessionProvider.(PassiveSessionProvider); ok {
 			session = provider.GetPassiveSession(r, req)
 		}
+
 		if session == nil {
 			req.writeErrorStatus(w, StatusNoPassive)
 		}
+
 		return session
 	}
 
@@ -681,6 +718,7 @@ func (req *IdpAuthnRequest) getSession(w http.ResponseWriter, r *http.Request) *
 			req.writeErrorStatus(w, StatusAuthnFailed)
 			return nil
 		}
+
 		return provider.GetForcedSession(w, r, req)
 	}
 
@@ -709,19 +747,22 @@ func (idp *IdentityProvider) ServeIDPInitiated(w http.ResponseWriter, r *http.Re
 	session := idp.SessionProvider.GetSession(w, r, req)
 	if session == nil {
 		// If GetSession returns nil, it must have written an HTTP response, per the interface
-		// (this is probably because it drew a login form or something)
+		// (this is probably because it drew a login form or something).
 		return
 	}
 
 	var err error
+
 	req.ServiceProviderMetadata, err = idp.serviceProvider(r, serviceProviderID)
 	if err == os.ErrNotExist {
 		idp.logger().Printf("cannot find service provider: %s", serviceProviderID)
 		http.Error(w, http.StatusText(http.StatusNotFound), http.StatusNotFound)
+
 		return
 	} else if err != nil {
 		idp.logger().Printf("cannot find service provider %s: %v", serviceProviderID, err)
 		http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
+
 		return
 	}
 
@@ -730,6 +771,7 @@ func (idp *IdentityProvider) ServeIDPInitiated(w http.ResponseWriter, r *http.Re
 	if err := req.useDefaultACSEndpoint(); err != nil {
 		idp.logger().Printf("cannot find assertion consumer service for %s: %v", serviceProviderID, err)
 		http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
+
 		return
 	}
 
@@ -737,15 +779,18 @@ func (idp *IdentityProvider) ServeIDPInitiated(w http.ResponseWriter, r *http.Re
 	if assertionMaker == nil {
 		assertionMaker = DefaultAssertionMaker{}
 	}
+
 	if err := assertionMaker.MakeAssertion(req, session); err != nil {
 		idp.logger().Printf("failed to make assertion: %s", err)
 		http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
+
 		return
 	}
 
 	if err := req.WriteResponse(w); err != nil {
 		idp.logger().Printf("failed to write response: %s", err)
 		http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
+
 		return
 	}
 }
@@ -810,6 +855,7 @@ func NewIdpAuthnRequest(idp *IdentityProvider, r *http.Request) (*IdpAuthnReques
 		if r.Body != nil {
 			r.Body = http.MaxBytesReader(nil, r.Body, maxAuthnRequestBodySize)
 		}
+
 		if err := r.ParseForm(); err != nil {
 			return nil, err
 		}
@@ -819,13 +865,17 @@ func NewIdpAuthnRequest(idp *IdentityProvider, r *http.Request) (*IdpAuthnReques
 			if err := req.readRedirectQuery(rawQuery); err != nil {
 				return nil, err
 			}
+
 			return req, nil
 		}
+
 		var err error
+
 		req.RequestBuffer, err = base64.StdEncoding.DecodeString(r.PostForm.Get("SAMLRequest"))
 		if err != nil {
 			return nil, err
 		}
+
 		req.RelayState = r.PostForm.Get("RelayState")
 	default:
 		return nil, fmt.Errorf("method not allowed")
@@ -840,7 +890,9 @@ func (req *IdpAuthnRequest) readRedirectQuery(rawQuery string) error {
 	if err != nil {
 		return err
 	}
+
 	req.RequestBuffer, req.RelayState, req.RedirectQuery = buf, relayState, signedQuery
+
 	return nil
 }
 
@@ -861,13 +913,16 @@ func readRedirectRequest(rawQuery string) (buf []byte, relayState, signedQuery s
 	if err != nil {
 		return nil, "", "", fmt.Errorf("cannot decompress request: %s", err)
 	}
+
 	if err := checkAuthnRequestSize(buf); err != nil {
 		return nil, "", "", err
 	}
+
 	relayState = values.Get("RelayState")
 	if values.Has("Signature") || values.Has("SigAlg") {
 		signedQuery = rawQuery
 	}
+
 	return buf, relayState, signedQuery, nil
 }
 
@@ -885,6 +940,7 @@ func (req *IdpAuthnRequest) Validate() error {
 		return err
 	}
 
+	//nolint:gosec // The request is size limited and passed XML round trip validation above.
 	if err := xml.Unmarshal(req.RequestBuffer, &req.Request); err != nil {
 		return err
 	}
@@ -893,14 +949,16 @@ func (req *IdpAuthnRequest) Validate() error {
 		return err
 	}
 
-	// find the service provider
+	// find the service provider.
 	serviceProviderID := req.Request.Issuer.Value
+
 	serviceProvider, err := req.IDP.serviceProvider(req.HTTPRequest, serviceProviderID)
 	if err == os.ErrNotExist {
 		return fmt.Errorf("cannot handle request from unknown service provider %s", serviceProviderID)
 	} else if err != nil {
 		return fmt.Errorf("cannot find service provider %s: %v", serviceProviderID, err)
 	}
+
 	req.ServiceProviderMetadata = serviceProvider
 
 	if err := req.verifyAuthnRequestSignature(); err != nil {
@@ -938,22 +996,28 @@ func (req *IdpAuthnRequest) checkRequest() error {
 	if maxAge == 0 {
 		maxAge = MaxIssueDelay
 	}
+
 	if req.Request.IssueInstant.Add(maxAge).Before(req.Now) {
 		return fmt.Errorf("request expired at %s", req.Request.IssueInstant.Add(maxAge))
 	}
+
 	if req.Request.IssueInstant.After(req.Now.Add(MaxClockSkew)) {
 		return fmt.Errorf("request issued in the future at %s", req.Request.IssueInstant)
 	}
+
 	if req.Request.Version != "2.0" {
 		return fmt.Errorf("expected SAML request version 2.0 got %v", req.Request.Version)
 	}
+
 	if !isValidAuthnRequestID(req.Request.ID) {
 		// The value is not included because this error is logged without authentication.
 		return fmt.Errorf("invalid request ID")
 	}
+
 	if req.Request.Issuer == nil || req.Request.Issuer.Value == "" {
 		return fmt.Errorf("request has no issuer")
 	}
+
 	return nil
 }
 
@@ -962,6 +1026,7 @@ func checkAuthnRequestSize(buf []byte) error {
 	if len(buf) > maxAuthnRequestSize {
 		return fmt.Errorf("request exceeds the limit of %d bytes", maxAuthnRequestSize)
 	}
+
 	return nil
 }
 
@@ -976,6 +1041,7 @@ func isValidAuthnRequestID(id string) bool {
 	if id == "" || len(id) > maxAuthnRequestIDLength {
 		return false
 	}
+
 	for i := 0; i < len(id); i++ {
 		c := id[i]
 		switch {
@@ -984,6 +1050,7 @@ func isValidAuthnRequestID(id string) bool {
 			return false
 		}
 	}
+
 	return true
 }
 
@@ -1008,12 +1075,15 @@ func (req *IdpAuthnRequest) getACSEndpoint() error {
 						if err := req.IDP.CheckServiceProviderEndpoint(endpoint.Location); err != nil {
 							return err
 						}
+
 						req.SPSSODescriptor, req.ACSEndpoint = &spssoDescriptor, &endpoint
+
 						return nil
 					}
 				}
 			}
 		}
+
 		return os.ErrNotExist
 	}
 
@@ -1044,26 +1114,33 @@ func (req *IdpAuthnRequest) useDefaultACSEndpoint() error {
 	}
 
 	best := 0
+
 	var insecure error
+
 	for _, spssoDescriptor := range req.ServiceProviderMetadata.SPSSODescriptors {
 		for _, endpoint := range spssoDescriptor.AssertionConsumerServices {
 			if endpoint.Binding != HTTPPostBinding || preference(endpoint) <= best {
 				continue
 			}
+
 			if err := req.IDP.CheckServiceProviderEndpoint(endpoint.Location); err != nil {
 				insecure = err
 				continue
 			}
+
 			best = preference(endpoint)
 			req.SPSSODescriptor, req.ACSEndpoint = &spssoDescriptor, &endpoint
 		}
 	}
+
 	if best == 0 {
 		if insecure != nil {
 			return insecure
 		}
+
 		return os.ErrNotExist
 	}
+
 	return nil
 }
 
@@ -1080,14 +1157,17 @@ func (DefaultSubjectEnforcer) EnforceSubject(req *IdpAuthnRequest, _ *Session) e
 	if requested == nil || requested.Value == "" {
 		return fmt.Errorf("the request Subject has no NameID")
 	}
+
 	if req.Assertion == nil || req.Assertion.Subject == nil || req.Assertion.Subject.NameID == nil {
 		return fmt.Errorf("assertion has no NameID")
 	}
+
 	asserted := req.Assertion.Subject.NameID
 
 	if asserted.Value != requested.Value {
 		return fmt.Errorf("the assertion is for another principal than the request names")
 	}
+
 	switch requested.Format {
 	case "", string(UnspecifiedNameIDFormat), unspecifiedNameIDFormat:
 	default:
@@ -1095,6 +1175,7 @@ func (DefaultSubjectEnforcer) EnforceSubject(req *IdpAuthnRequest, _ *Session) e
 			return fmt.Errorf("the NameID format is %q and the request names %q", asserted.Format, requested.Format)
 		}
 	}
+
 	for _, qualifier := range []struct{ name, requested, asserted string }{
 		{"NameQualifier", requested.NameQualifier, asserted.NameQualifier},
 		{"SPNameQualifier", requested.SPNameQualifier, asserted.SPNameQualifier},
@@ -1104,9 +1185,11 @@ func (DefaultSubjectEnforcer) EnforceSubject(req *IdpAuthnRequest, _ *Session) e
 			return fmt.Errorf("the NameID %s is %q and the request names %q", qualifier.name, qualifier.asserted, qualifier.requested)
 		}
 	}
+
 	if !confirmsSubject(req.Request.Subject.SubjectConfirmations, req.Assertion.Subject.SubjectConfirmations) {
 		return fmt.Errorf("the assertion can't be confirmed in a manner the request accepts")
 	}
+
 	return nil
 }
 
@@ -1118,6 +1201,7 @@ func confirmsSubject(requested []SubjectConfirmation, asserted []SubjectConfirma
 	if len(requested) == 0 {
 		return true
 	}
+
 	return slices.ContainsFunc(requested, func(want SubjectConfirmation) bool {
 		return want.Method == bearerSubjectConfirmationMethod && slices.ContainsFunc(asserted, func(have SubjectConfirmation) bool {
 			return have.Method == want.Method && sameNameID(want.NameID, have.NameID) && satisfiesConfirmationData(want.SubjectConfirmationData, have.SubjectConfirmationData)
@@ -1137,9 +1221,11 @@ func satisfiesConfirmationData(requested, asserted *SubjectConfirmationData) boo
 	if requested == nil {
 		return true
 	}
+
 	if asserted == nil {
 		return false
 	}
+
 	for _, value := range [][2]string{
 		{requested.Recipient, asserted.Recipient},
 		{requested.InResponseTo, asserted.InResponseTo},
@@ -1148,15 +1234,19 @@ func satisfiesConfirmationData(requested, asserted *SubjectConfirmationData) boo
 			return false
 		}
 	}
+
 	if requested.Address != "" && !sameAddress(requested.Address, asserted.Address) {
 		return false
 	}
+
 	if !requested.NotBefore.IsZero() && asserted.NotBefore.Before(requested.NotBefore) {
 		return false
 	}
+
 	if !requested.NotOnOrAfter.IsZero() && (asserted.NotOnOrAfter.IsZero() || asserted.NotOnOrAfter.After(requested.NotOnOrAfter)) {
 		return false
 	}
+
 	return true
 }
 
@@ -1167,7 +1257,9 @@ func sameAddress(a, b string) bool {
 	if err != nil {
 		return false
 	}
+
 	y, err := netip.ParseAddr(b)
+
 	return err == nil && x == y
 }
 
@@ -1187,6 +1279,7 @@ func (DefaultNameIDPolicyEnforcer) EnforceNameIDPolicy(req *IdpAuthnRequest, _ *
 	if req.Assertion == nil || req.Assertion.Subject == nil || req.Assertion.Subject.NameID == nil {
 		return fmt.Errorf("assertion has no NameID")
 	}
+
 	nameID := req.Assertion.Subject.NameID
 
 	if policy.Format != nil {
@@ -1200,9 +1293,11 @@ func (DefaultNameIDPolicyEnforcer) EnforceNameIDPolicy(req *IdpAuthnRequest, _ *
 			}
 		}
 	}
+
 	if policy.SPNameQualifier != nil && nameID.SPNameQualifier != *policy.SPNameQualifier {
 		return fmt.Errorf("the NameID SPNameQualifier is %q and the request requires %q", nameID.SPNameQualifier, *policy.SPNameQualifier)
 	}
+
 	return nil
 }
 
@@ -1220,6 +1315,8 @@ type DefaultAssertionMaker struct {
 
 // MakeAssertion implements AssertionMaker. It produces a SAML assertion from the
 // given request and assigns it to req.Assertion.
+//
+//nolint:gocyclo // Complexity is inherent to the specification being implemented.
 func (DefaultAssertionMaker) MakeAssertion(req *IdpAuthnRequest, session *Session) error {
 	if session.NameID == "" {
 		return fmt.Errorf("the session has no NameID")
@@ -1250,6 +1347,7 @@ func (DefaultAssertionMaker) MakeAssertion(req *IdpAuthnRequest, session *Sessio
 			}},
 		})
 	}
+
 	if session.EduPersonPrincipalName != "" || session.UserEmail != "" {
 		value := session.EduPersonPrincipalName
 		if value == "" {
@@ -1270,6 +1368,7 @@ func (DefaultAssertionMaker) MakeAssertion(req *IdpAuthnRequest, session *Sessio
 			}},
 		})
 	}
+
 	if session.UserSurname != "" {
 		attributes = append(attributes, Attribute{
 			FriendlyName: "sn",
@@ -1281,6 +1380,7 @@ func (DefaultAssertionMaker) MakeAssertion(req *IdpAuthnRequest, session *Sessio
 			}},
 		})
 	}
+
 	if session.UserGivenName != "" {
 		attributes = append(attributes, Attribute{
 			FriendlyName: "givenName",
@@ -1330,6 +1430,7 @@ func (DefaultAssertionMaker) MakeAssertion(req *IdpAuthnRequest, session *Sessio
 				Value: group,
 			})
 		}
+
 		attributes = append(attributes, Attribute{
 			FriendlyName: "eduPersonAffiliation",
 			Name:         "urn:oid:1.3.6.1.4.1.5923.1.1.1.1",
@@ -1355,6 +1456,7 @@ func (DefaultAssertionMaker) MakeAssertion(req *IdpAuthnRequest, session *Sessio
 	if policy == nil {
 		policy = DefaultAttributeReleasePolicy{}
 	}
+
 	attributes, err := policy.ReleaseAttributes(req, session, attributes)
 	if err != nil {
 		return fmt.Errorf("cannot release attributes: %w", err)
@@ -1454,6 +1556,7 @@ func requestedNameAttributes(service *AttributeConsumingService, session *Sessio
 		}
 
 		var value string
+
 		switch strings.ToLower(nonAlphanumeric.ReplaceAllString(requested.Name, "")) {
 		case "email", "emailaddress":
 			value = session.UserEmail
@@ -1466,6 +1569,7 @@ func requestedNameAttributes(service *AttributeConsumingService, session *Sessio
 		case "uid", "user", "userid":
 			value = session.UserName
 		}
+
 		if value == "" {
 			continue
 		}
@@ -1475,6 +1579,7 @@ func requestedNameAttributes(service *AttributeConsumingService, session *Sessio
 		}) {
 			continue
 		}
+
 		attributes = append(attributes, Attribute{
 			FriendlyName: requested.FriendlyName,
 			Name:         requested.Name,
@@ -1482,6 +1587,7 @@ func requestedNameAttributes(service *AttributeConsumingService, session *Sessio
 			Values:       []AttributeValue{{Type: "xs:string", Value: value}},
 		})
 	}
+
 	return attributes
 }
 
@@ -1511,6 +1617,7 @@ func (req *IdpAuthnRequest) AttributeConsumingService() *AttributeConsumingServi
 	if req.SPSSODescriptor == nil {
 		return nil
 	}
+
 	services := req.SPSSODescriptor.AttributeConsumingServices
 
 	if index := req.Request.AttributeConsumingServiceIndex; index != "" {
@@ -1519,11 +1626,13 @@ func (req *IdpAuthnRequest) AttributeConsumingService() *AttributeConsumingServi
 		if err != nil {
 			return nil
 		}
+
 		for _, service := range services {
 			if service.Index == int(n) {
 				return &service
 			}
 		}
+
 		return nil
 	}
 
@@ -1537,12 +1646,14 @@ func (req *IdpAuthnRequest) AttributeConsumingService() *AttributeConsumingServi
 			return 1
 		}
 	}
+
 	var selected *AttributeConsumingService
 	for _, service := range services {
 		if selected == nil || preference(service) > preference(*selected) {
 			selected = &service
 		}
 	}
+
 	return selected
 }
 
@@ -1573,15 +1684,18 @@ func (DefaultAttributeReleasePolicy) ReleaseAttributes(req *IdpAuthnRequest, _ *
 		if req.Request.AttributeConsumingServiceIndex != "" && req.IDP != nil {
 			req.IDP.logger().Printf("releasing no attributes: the AttributeConsumingServiceIndex of the request names no service")
 		}
+
 		return nil, nil
 	}
 
 	var released []Attribute
+
 	for _, candidate := range candidates {
 		if attribute, ok := releaseRequestedAttribute(service.RequestedAttributes, candidate); ok {
 			released = append(released, attribute)
 		}
 	}
+
 	return released, nil
 }
 
@@ -1589,31 +1703,40 @@ func (DefaultAttributeReleasePolicy) ReleaseAttributes(req *IdpAuthnRequest, _ *
 // asks for none of it.
 func releaseRequestedAttribute(requested []RequestedAttribute, candidate Attribute) (Attribute, bool) {
 	matched, anyValue := false, false
+
 	var values []AttributeValue
+
 	for _, r := range requested {
 		if r.Name != candidate.Name || !compatibleAttrNameFormats(r.NameFormat, candidate.NameFormat) {
 			continue
 		}
+
 		matched = true
+
 		if len(r.Values) == 0 {
 			anyValue = true
 		}
+
 		values = append(values, r.Values...)
 	}
+
 	if !matched {
 		return Attribute{}, false
 	}
+
 	if anyValue {
 		return candidate, true
 	}
 
 	attribute := candidate
+
 	attribute.Values = nil
 	for _, value := range candidate.Values {
 		if slices.ContainsFunc(values, value.equal) {
 			attribute.Values = append(attribute.Values, value)
 		}
 	}
+
 	return attribute, len(attribute.Values) != 0
 }
 
@@ -1623,6 +1746,7 @@ func (a AttributeValue) equal(b AttributeValue) bool {
 	if a.NameID != nil || b.NameID != nil {
 		return a.NameID != nil && b.NameID != nil && *a.NameID == *b.NameID
 	}
+
 	return a.Value == b.Value
 }
 
@@ -1635,6 +1759,7 @@ func (a Attribute) clone() Attribute {
 			a.Values[i].NameID = &nameID
 		}
 	}
+
 	return a
 }
 
@@ -1644,6 +1769,7 @@ func compatibleAttrNameFormats(a, b string) bool {
 	if a == "" || a == unspecifiedAttrNameFormat || b == "" || b == unspecifiedAttrNameFormat {
 		return true
 	}
+
 	return a == b
 }
 
@@ -1658,10 +1784,12 @@ func clientAddress(r *http.Request, session *Session) string {
 			address = host
 		}
 	}
+
 	ip, err := netip.ParseAddr(address)
 	if err != nil {
 		return ""
 	}
+
 	return ip.WithZone("").String()
 }
 
@@ -1699,6 +1827,7 @@ func (req *IdpAuthnRequest) MakeAssertionEl() error {
 	{
 		doc := etree.NewDocument()
 		doc.SetRoot(signedAssertionEl)
+
 		signedAssertionBuf, err = doc.WriteToBytes()
 		if err != nil {
 			return err
@@ -1709,10 +1838,12 @@ func (req *IdpAuthnRequest) MakeAssertionEl() error {
 	if err != nil {
 		return err
 	}
+
 	encryptedDataEl, err := encryptor.Encrypt(certBuf, signedAssertionBuf, nil)
 	if err != nil {
 		return err
 	}
+
 	encryptedDataEl.CreateAttr("Type", "http://www.w3.org/2001/04/xmlenc#Element")
 
 	encryptedAssertionEl := etree.NewElement("saml:EncryptedAssertion")
@@ -1755,6 +1886,7 @@ func (req *IdpAuthnRequest) PostBinding() (IdpAuthnRequestForm, error) {
 
 	doc := etree.NewDocument()
 	doc.SetRoot(req.ResponseEl)
+
 	responseBuf, err := doc.WriteToBytes()
 	if err != nil {
 		return form, err
@@ -1783,7 +1915,7 @@ var defaultResponseFormTemplate = template.Must(template.New("saml-post-form").P
 	`<script>document.getElementById('SAMLResponseForm').submit();</script>` +
 	`</html>`))
 
-// WriteResponse writes the `Response` to the http.ResponseWriter. If
+// WriteResponse writes the `Response` to the [http.ResponseWriter]. If
 // `Response` is not already set, it calls MakeResponse to produce it.
 func (req *IdpAuthnRequest) WriteResponse(w http.ResponseWriter) error {
 	form, err := req.PostBinding()
@@ -1800,10 +1932,13 @@ func (req *IdpAuthnRequest) WriteResponse(w http.ResponseWriter) error {
 	if err := tmpl.Execute(buf, form); err != nil {
 		return err
 	}
+
 	setNoCacheHeaders(w)
+
 	if _, err := io.Copy(w, buf); err != nil {
 		return err
 	}
+
 	return nil
 }
 
@@ -1826,6 +1961,7 @@ func (req *IdpAuthnRequest) spEncryptionKeyDescriptor() *KeyDescriptor {
 			}
 		}
 	}
+
 	return nil
 }
 
@@ -1843,15 +1979,18 @@ func (req *IdpAuthnRequest) getSPEncryptionCert() (*x509.Certificate, error) {
 		if req.serviceProviderAcceptsEncryption() {
 			return nil, fmt.Errorf("service provider metadata allows encryption but has no usable certificate in the selected descriptor")
 		}
+
 		return nil, os.ErrNotExist
 	}
 
-	// cleanup whitespace and re-encode a PEM
+	// cleanup whitespace and re-encode a PEM.
 	certStr = regexp.MustCompile(`\s+`).ReplaceAllString(certStr, "")
+
 	certBytes, err := base64.StdEncoding.DecodeString(certStr)
 	if err != nil {
 		return nil, fmt.Errorf("cannot decode certificate base64: %v", err)
 	}
+
 	cert, err := x509.ParseCertificate(certBytes)
 	if err != nil {
 		return nil, fmt.Errorf("cannot parse certificate: %v", err)
@@ -1861,13 +2000,16 @@ func (req *IdpAuthnRequest) getSPEncryptionCert() (*x509.Certificate, error) {
 	if req.IDP != nil && req.IDP.EncryptionCertificateEnforcer != nil {
 		enforcer = req.IDP.EncryptionCertificateEnforcer
 	}
+
 	if err := enforcer.EnforceEncryptionCertificate(req, cert); err != nil {
 		entityID := ""
 		if req.ServiceProviderMetadata != nil {
 			entityID = req.ServiceProviderMetadata.EntityID
 		}
+
 		return nil, fmt.Errorf("refusing the encryption certificate of service provider %q: %w", entityID, err)
 	}
+
 	return cert, nil
 }
 
@@ -1920,6 +2062,7 @@ func (e DefaultEncryptionCertificateEnforcer) EnforceEncryptionCertificate(req *
 		if cert.NotBefore.After(req.Now.Add(MaxClockSkew)) {
 			return fmt.Errorf("the certificate is not yet valid: it is valid from %s", cert.NotBefore.UTC().Format(time.RFC3339))
 		}
+
 		if cert.NotAfter.Before(req.Now.Add(-MaxClockSkew)) {
 			return fmt.Errorf("the certificate expired at %s", cert.NotAfter.UTC().Format(time.RFC3339))
 		}
@@ -1930,6 +2073,7 @@ func (e DefaultEncryptionCertificateEnforcer) EnforceEncryptionCertificate(req *
 		if minimum <= 0 {
 			minimum = DefaultMinimumRSAKeySize
 		}
+
 		if size := key.N.BitLen(); size < minimum {
 			return fmt.Errorf("the RSA key is %d-bit, shorter than the minimum of %d bits", size, minimum)
 		}
@@ -1940,6 +2084,7 @@ func (e DefaultEncryptionCertificateEnforcer) EnforceEncryptionCertificate(req *
 	if !e.IgnoreKeyUsage && hasKeyUsageExtension(cert) && cert.KeyUsage&x509.KeyUsageKeyEncipherment == 0 {
 		return fmt.Errorf("the certificate has a KeyUsage extension which does not assert keyEncipherment")
 	}
+
 	return nil
 }
 
@@ -1951,6 +2096,7 @@ func (req *IdpAuthnRequest) serviceProviderAcceptsEncryption() bool {
 	if req.ServiceProviderMetadata != nil {
 		descriptors = append(descriptors, req.ServiceProviderMetadata.SPSSODescriptors...)
 	}
+
 	for _, descriptor := range descriptors {
 		for _, keyDescriptor := range descriptor.KeyDescriptors {
 			if keyDescriptor.Use != "signing" {
@@ -1958,6 +2104,7 @@ func (req *IdpAuthnRequest) serviceProviderAcceptsEncryption() bool {
 			}
 		}
 	}
+
 	return false
 }
 
@@ -1969,19 +2116,22 @@ func firstCertificateData(keyDescriptor KeyDescriptor) string {
 			return certificate.Data
 		}
 	}
+
 	return ""
 }
 
 // unmarshalEtreeHack parses `el` and sets values in the structure `v`.
 //
-// This is a hack -- it first serializes the element, then uses xml.Unmarshal.
+// This is a hack -- it first serializes the element, then uses [xml.Unmarshal].
 func unmarshalEtreeHack(el *etree.Element, v interface{}) error {
 	doc := etree.NewDocument()
 	doc.SetRoot(el)
+
 	buf, err := doc.WriteToBytes()
 	if err != nil {
 		return err
 	}
+
 	return xml.Unmarshal(buf, v)
 }
 
@@ -2001,6 +2151,7 @@ func (req *IdpAuthnRequest) MakeResponse() error {
 	}
 
 	req.ResponseEl = responseEl
+
 	return nil
 }
 
@@ -2018,6 +2169,7 @@ func (req *IdpAuthnRequest) MakeErrorResponse(topLevelStatus, secondLevelStatus,
 	if req.ACSEndpoint == nil {
 		return fmt.Errorf("cannot make an error response without a validated assertion consumer service")
 	}
+
 	if err := req.IDP.CheckServiceProviderEndpoint(req.ACSEndpoint.Location); err != nil {
 		return err
 	}
@@ -2032,6 +2184,7 @@ func (req *IdpAuthnRequest) MakeErrorResponse(topLevelStatus, secondLevelStatus,
 	if secondLevelStatus != "" {
 		status.StatusCode.StatusCode = &StatusCode{Value: secondLevelStatus}
 	}
+
 	if message != "" {
 		status.StatusMessage = &StatusMessage{Value: message}
 	}
@@ -2042,6 +2195,7 @@ func (req *IdpAuthnRequest) MakeErrorResponse(topLevelStatus, secondLevelStatus,
 	}
 
 	req.ResponseEl = responseEl
+
 	return nil
 }
 
@@ -2052,6 +2206,7 @@ func (req *IdpAuthnRequest) WriteErrorResponse(w http.ResponseWriter, topLevelSt
 	if err := req.MakeErrorResponse(topLevelStatus, secondLevelStatus, message); err != nil {
 		return err
 	}
+
 	return req.WriteResponse(w)
 }
 
@@ -2090,6 +2245,7 @@ func (req *IdpAuthnRequest) signResponse(response *Response, assertionEl *etree.
 	}
 
 	response.Signature = signedResponseEl.ChildElements()[len(signedResponseEl.ChildElements())-1]
+
 	responseEl = response.Element()
 	if assertionEl != nil {
 		responseEl.AddChild(assertionEl)
@@ -2107,6 +2263,7 @@ func (req *IdpAuthnRequest) signingContext() (*dsig.SigningContext, error) {
 func (idp *IdentityProvider) signingContext() (*dsig.SigningContext, error) {
 	// Create a cert chain based off of the IDP cert and its intermediates.
 	certificates := make([][]byte, 0, 1+len(idp.Intermediates))
+
 	certificates = append(certificates, idp.Certificate.Raw)
 	for _, cert := range idp.Intermediates {
 		certificates = append(certificates, cert.Raw)

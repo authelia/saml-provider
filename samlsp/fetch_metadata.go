@@ -13,9 +13,8 @@ import (
 
 	xrv "github.com/mattermost/xml-roundtrip-validator"
 
-	"authelia.com/provider/saml/logger"
-
 	"authelia.com/provider/saml"
+	"authelia.com/provider/saml/logger"
 )
 
 // ParseMetadata parses arbitrary SAML IDP metadata.
@@ -32,7 +31,7 @@ func ParseMetadata(data []byte) (*saml.EntityDescriptor, error) {
 
 	err := xml.Unmarshal(data, entity)
 
-	// this comparison is ugly, but it is how the error is generated in encoding/xml
+	// this comparison is ugly, but it is how the error is generated in encoding/xml.
 	if err != nil && err.Error() == "expected element type <EntityDescriptor> but have <EntitiesDescriptor>" {
 		entities := &saml.EntitiesDescriptor{}
 		if err := xml.Unmarshal(data, entities); err != nil {
@@ -44,11 +43,14 @@ func ParseMetadata(data []byte) (*saml.EntityDescriptor, error) {
 				return &entities.EntityDescriptors[i], nil
 			}
 		}
+
 		return nil, errors.New("no entity found with IDPSSODescriptor")
 	}
+
 	if err != nil {
 		return nil, err
 	}
+
 	return entity, nil
 }
 
@@ -65,7 +67,7 @@ var (
 // The metadata decides which keys are trusted, so the URL should be one the operator has chosen and
 // should use TLS. Redirects are followed according to httpClient, including to other hosts, and its
 // CheckRedirect can restrict them. If httpClient is nil then a client with a timeout of 30 seconds is
-// used. Otherwise, httpClient or ctx should have a timeout, which http.DefaultClient does not.
+// used. Otherwise, httpClient or ctx should have a timeout, which [http.DefaultClient] does not.
 func FetchMetadata(ctx context.Context, httpClient *http.Client, metadataURL url.URL) (*saml.EntityDescriptor, error) {
 	if httpClient == nil {
 		httpClient = &http.Client{Timeout: defaultFetchMetadataTimeout}
@@ -75,6 +77,7 @@ func FetchMetadata(ctx context.Context, httpClient *http.Client, metadataURL url
 	if err != nil {
 		return nil, err
 	}
+
 	req = req.WithContext(ctx)
 
 	resp, err := httpClient.Do(req)
@@ -86,6 +89,7 @@ func FetchMetadata(ctx context.Context, httpClient *http.Client, metadataURL url
 			logger.DefaultLogger.Printf("Error while closing response body during fetch metadata: %v", err)
 		}
 	}()
+
 	if resp.StatusCode >= 400 {
 		return nil, fmt.Errorf("failed to fetch metadata: unexpected status code %d", resp.StatusCode)
 	}
@@ -94,6 +98,7 @@ func FetchMetadata(ctx context.Context, httpClient *http.Client, metadataURL url
 	if err != nil {
 		return nil, err
 	}
+
 	if int64(len(data)) > maxMetadataSize {
 		return nil, fmt.Errorf("failed to fetch metadata: too large, the limit is %d bytes", maxMetadataSize)
 	}

@@ -61,6 +61,7 @@ func attributeReleaseSession() *Session {
 // services. index is the AttributeConsumingServiceIndex of the request.
 func attributeReleaseRequest(t *testing.T, test *IdentityProviderTest, index string, services ...AttributeConsumingService) *IdpAuthnRequest {
 	t.Helper()
+
 	metadata := test.SP.Metadata()
 	metadata.SPSSODescriptors[0].AttributeConsumingServices = services
 	req := &IdpAuthnRequest{
@@ -72,6 +73,7 @@ func attributeReleaseRequest(t *testing.T, test *IdentityProviderTest, index str
 		Request:                 AuthnRequest{ID: "id-1", AttributeConsumingServiceIndex: index},
 	}
 	req.HTTPRequest, _ = http.NewRequest(http.MethodPost, "https://idp.example.com/saml/sso", nil)
+
 	return req
 }
 
@@ -80,6 +82,7 @@ func requested(name, nameFormat string, values ...string) RequestedAttribute {
 	for _, value := range values {
 		attribute.Values = append(attribute.Values, AttributeValue{Type: "xs:string", Value: value})
 	}
+
 	return attribute
 }
 
@@ -96,6 +99,7 @@ func service(index int, isDefault *bool, attributes ...RequestedAttribute) Attri
 func releasedAttributes(t *testing.T, req *IdpAuthnRequest, session *Session) []Attribute {
 	t.Helper()
 	assert.NilError(t, DefaultAssertionMaker{}.MakeAssertion(req, session))
+
 	switch len(req.Assertion.AttributeStatements) {
 	case 0:
 		return nil
@@ -113,6 +117,7 @@ func attributeNames(attributes []Attribute) []string {
 	for _, attribute := range attributes {
 		names = append(names, attribute.Name)
 	}
+
 	return names
 }
 
@@ -136,7 +141,7 @@ func TestDefaultAttributeReleasePolicyReleasesOnlyRequested(t *testing.T) {
 	req := attributeReleaseRequest(t, test, "", service(0, nil,
 		requested(affiliationAttributeName, uriAttrNameFormat),
 		requested(mailAttributeName, uriAttrNameFormat),
-		requested("urn:oid:2.16.840.1.113730.3.1.241", uriAttrNameFormat), // displayName, which the session lacks
+		requested("urn:oid:2.16.840.1.113730.3.1.241", uriAttrNameFormat), // displayName, which the session lacks.
 	))
 
 	attributes := releasedAttributes(t, req, attributeReleaseSession())
@@ -172,6 +177,7 @@ func TestDefaultAttributeReleasePolicyMatchesNameFormat(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			test := NewIdentityProviderTest(t, applyKey)
 			req := attributeReleaseRequest(t, test, "", service(0, nil, tc.requested))
+
 			attributes := releasedAttributes(t, req, attributeReleaseSession())
 			if tc.released {
 				assert.Check(t, is.DeepEqual(attributeNames(attributes), []string{tc.requested.Name}))
@@ -237,6 +243,7 @@ func TestDefaultAttributeReleasePolicyReleasesRequestedNameIDValues(t *testing.T
 				NameFormat: uriAttrNameFormat,
 				Values:     []AttributeValue{{NameID: &nameID}},
 			})
+
 			attributes := releasedAttributes(t, req, session)
 			if tc.released {
 				assert.Assert(t, is.Len(attributes, 1))
@@ -261,6 +268,7 @@ func TestDefaultAssertionMakerCopiesCustomAttributes(t *testing.T) {
 				}
 			}
 		}
+
 		return candidates, nil
 	})
 	req := attributeReleaseRequest(t, test, "")
@@ -295,11 +303,13 @@ func TestDefaultAssertionMakerReleasesEmailUnderRequestedName(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			test := NewIdentityProviderTest(t, applyKey)
 			req := attributeReleaseRequest(t, test, "", service(0, nil, tc.requested))
+
 			attributes := releasedAttributes(t, req, attributeReleaseSession())
 			if tc.value == "" {
 				assert.Check(t, is.Len(attributes, 0))
 				return
 			}
+
 			assert.Check(t, is.DeepEqual(attributes, []Attribute{{
 				Name:       tc.requested.Name,
 				NameFormat: tc.requested.NameFormat,
@@ -387,12 +397,15 @@ func TestAttributeConsumingServiceIndex(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			test := NewIdentityProviderTest(t, applyKey)
 			req := attributeReleaseRequest(t, test, tc.index, services...)
+
 			attributes := releasedAttributes(t, req, attributeReleaseSession())
 			if tc.released == nil {
 				assert.Check(t, is.Len(attributes, 0))
 				assert.Check(t, req.AttributeConsumingService() == nil)
+
 				return
 			}
+
 			assert.Check(t, is.DeepEqual(attributeNames(attributes), tc.released))
 		})
 	}
@@ -401,7 +414,9 @@ func TestAttributeConsumingServiceIndex(t *testing.T) {
 func TestDefaultAssertionMakerUsesConfiguredAttributeReleasePolicy(t *testing.T) {
 	t.Run("receives every candidate", func(t *testing.T) {
 		test := NewIdentityProviderTest(t, applyKey)
+
 		var candidates []Attribute
+
 		test.IDP.AttributeReleasePolicy = attributeReleasePolicyFunc(func(_ *IdpAuthnRequest, _ *Session, c []Attribute) ([]Attribute, error) {
 			candidates = c
 			return c, nil
@@ -452,11 +467,13 @@ func TestServeSSOReleasesAttributesOfRequestedService(t *testing.T) {
 			if serviceProviderID != test.SP.MetadataURL.String() {
 				return nil, os.ErrNotExist
 			}
+
 			metadata := test.SP.Metadata()
 			metadata.SPSSODescriptors[0].AttributeConsumingServices = []AttributeConsumingService{
 				service(1, &yes, requested(mailAttributeName, uriAttrNameFormat)),
 				service(2, nil, requested(uidAttributeName, uriAttrNameFormat)),
 			}
+
 			return metadata, nil
 		},
 	}
@@ -464,15 +481,20 @@ func TestServeSSOReleasesAttributesOfRequestedService(t *testing.T) {
 	test.IDP.SessionProvider = &mockSessionProvider{
 		GetSessionFunc: func(http.ResponseWriter, *http.Request, *IdpAuthnRequest) *Session { return session },
 	}
+
 	var released []Attribute
+
 	test.IDP.AttributeReleasePolicy = attributeReleasePolicyFunc(func(req *IdpAuthnRequest, session *Session, candidates []Attribute) ([]Attribute, error) {
 		var err error
+
 		released, err = DefaultAttributeReleasePolicy{}.ReleaseAttributes(req, session, candidates)
+
 		return released, err
 	})
 
 	request, err := test.SP.MakeAuthenticationRequest("https://idp.example.com/saml/sso", HTTPPostBinding, HTTPPostBinding)
 	assert.NilError(t, err)
+
 	request.AttributeConsumingServiceIndex = "2"
 	doc := etree.NewDocument()
 	doc.SetRoot(request.Element())
@@ -482,6 +504,7 @@ func TestServeSSOReleasesAttributesOfRequestedService(t *testing.T) {
 	form := url.Values{"SAMLRequest": {base64.StdEncoding.EncodeToString(body)}}
 	r := httptest.NewRequest(http.MethodPost, "https://idp.example.com/saml/sso", strings.NewReader(form.Encode()))
 	r.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+
 	w := httptest.NewRecorder()
 	test.IDP.ServeSSO(w, r)
 	assert.Assert(t, is.Equal(w.Code, http.StatusOK), "body: %s", w.Body.String())

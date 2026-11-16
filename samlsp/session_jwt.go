@@ -56,13 +56,14 @@ func (c JWTSessionCodec) New(assertion *saml.Assertion) (Session, error) {
 			if claimName == "" {
 				claimName = attr.Name
 			}
+
 			for _, value := range attr.Values {
 				claims.Attributes[claimName] = append(claims.Attributes[claimName], value.Value)
 			}
 		}
 	}
 
-	// add SessionIndex to claims Attributes
+	// add SessionIndex to claims Attributes.
 	for _, authnStatement := range assertion.AuthnStatements {
 		claims.Attributes[claimNameSessionIndex] = append(claims.Attributes[claimNameSessionIndex],
 			authnStatement.SessionIndex)
@@ -76,7 +77,7 @@ func (c JWTSessionCodec) New(assertion *saml.Assertion) (Session, error) {
 // The provided session must be a JWTSessionClaims, otherwise this
 // function will panic.
 func (c JWTSessionCodec) Encode(s Session) (string, error) {
-	claims := s.(JWTSessionClaims) // this will panic if you pass the wrong kind of session
+	claims := s.(JWTSessionClaims) // this will panic if you pass the wrong kind of session.
 
 	return signJWT(c.SigningMethod, c.Key, claims)
 }
@@ -86,17 +87,19 @@ func (c JWTSessionCodec) Encode(s Session) (string, error) {
 func (c JWTSessionCodec) Decode(signed string) (Session, error) {
 	claims := JWTSessionClaims{}
 	err := verifyJWT(signed, c.SigningMethod, c.Key, c.Audience, c.Issuer, &claims, &claims.Claims)
-	// TODO(ross): check for errors due to bad time and return ErrNoSession
+	// TODO(ross): check for errors due to bad time and return ErrNoSession.
 	if err != nil {
 		return nil, err
 	}
+
 	if !claims.SAMLSession {
 		return nil, errors.New("expected saml-session")
 	}
+
 	return claims, nil
 }
 
-// JWTSessionClaims represents the JWT claims in the encoded session
+// JWTSessionClaims represents the JWT claims in the encoded session.
 type JWTSessionClaims struct {
 	jwt.Claims
 	Attributes  Attributes `json:"attr"`
@@ -110,7 +113,7 @@ func (c JWTSessionClaims) GetAttributes() Attributes {
 	return c.Attributes
 }
 
-// Attributes is a map of attributes provided in the SAML assertion
+// Attributes is a map of attributes provided in the SAML assertion.
 type Attributes map[string][]string
 
 // Get returns the first attribute named `key` or an empty string if
@@ -119,10 +122,12 @@ func (a Attributes) Get(key string) string {
 	if a == nil {
 		return ""
 	}
+
 	v := a[key]
 	if len(v) == 0 {
 		return ""
 	}
+
 	return v[0]
 }
 

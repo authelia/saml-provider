@@ -38,6 +38,7 @@ func serveSSOWithAuthnContext(t *testing.T, test *IdentityProviderTest, requeste
 // serveSSOWithSession is serveSSOWithAuthnContext for the given session.
 func serveSSOWithSession(t *testing.T, test *IdentityProviderTest, session *Session, requested *RequestedAuthnContext) Response {
 	t.Helper()
+
 	test.IDP.SessionProvider = &mockSessionProvider{
 		GetSessionFunc: func(http.ResponseWriter, *http.Request, *IdpAuthnRequest) *Session {
 			return session
@@ -46,6 +47,7 @@ func serveSSOWithSession(t *testing.T, test *IdentityProviderTest, session *Sess
 
 	request, err := test.SP.MakeAuthenticationRequest("https://idp.example.com/saml/sso", HTTPPostBinding, HTTPPostBinding)
 	assert.NilError(t, err)
+
 	request.RequestedAuthnContext = requested
 	doc := etree.NewDocument()
 	doc.SetRoot(request.Element())
@@ -55,11 +57,13 @@ func serveSSOWithSession(t *testing.T, test *IdentityProviderTest, session *Sess
 	form := url.Values{"SAMLRequest": {base64.StdEncoding.EncodeToString(body)}}
 	r := httptest.NewRequest(http.MethodPost, "https://idp.example.com/saml/sso", strings.NewReader(form.Encode()))
 	r.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+
 	w := httptest.NewRecorder()
 	test.IDP.ServeSSO(w, r)
 	assert.Check(t, is.Equal(w.Code, http.StatusOK), "body: %s", w.Body.String())
 
 	_, response := postedResponse(t, w.Body.String())
+
 	return response
 }
 
@@ -147,11 +151,16 @@ func TestServeSSOUsesConfiguredAuthnContextEnforcer(t *testing.T) {
 
 	t.Run("refuses with the request and session", func(t *testing.T) {
 		test := NewIdentityProviderTest(t, applyKey)
-		var classes []string
-		var nameID string
+
+		var (
+			classes []string
+			nameID  string
+		)
+
 		test.IDP.AuthnContextEnforcer = authnContextEnforcerFunc(func(req *IdpAuthnRequest, session *Session) error {
 			classes = req.Request.RequestedAuthnContext.AuthnContextClassRefs
 			nameID = session.NameID
+
 			return errors.New("alice has not used a second factor")
 		})
 		response := serveSSOWithAuthnContext(t, test, &RequestedAuthnContext{AuthnContextClassRefs: []string{transportClass, strongClass}})
@@ -193,7 +202,9 @@ func enforceAssertedClasses(enforcer DefaultAuthnContextEnforcer, requested *Req
 			AuthnContext: AuthnContext{AuthnContextClassRef: &AuthnContextClassRef{Value: class}},
 		})
 	}
+
 	req := &IdpAuthnRequest{Request: AuthnRequest{RequestedAuthnContext: requested}, Assertion: assertion}
+
 	return enforcer.EnforceAuthnContext(req, &Session{})
 }
 
@@ -264,6 +275,7 @@ func TestRequestedAuthnContextKeepsEveryReference(t *testing.T) {
 	const input = `<samlp:RequestedAuthnContext xmlns:samlp="urn:oasis:names:tc:SAML:2.0:protocol" xmlns:saml="urn:oasis:names:tc:SAML:2.0:assertion" Comparison="minimum">` +
 		`<saml:AuthnContextClassRef>a</saml:AuthnContextClassRef><saml:AuthnContextClassRef>b</saml:AuthnContextClassRef>` +
 		`</samlp:RequestedAuthnContext>`
+
 	var actual RequestedAuthnContext
 	assert.NilError(t, xml.Unmarshal([]byte(input), &actual))
 	assert.Check(t, is.Equal(actual.Comparison, AuthnContextComparisonMinimum))
@@ -272,6 +284,7 @@ func TestRequestedAuthnContextKeepsEveryReference(t *testing.T) {
 	const declarations = `<samlp:RequestedAuthnContext xmlns:samlp="urn:oasis:names:tc:SAML:2.0:protocol" xmlns:saml="urn:oasis:names:tc:SAML:2.0:assertion">` +
 		`<saml:AuthnContextDeclRef>c</saml:AuthnContextDeclRef><saml:AuthnContextDeclRef>d</saml:AuthnContextDeclRef>` +
 		`</samlp:RequestedAuthnContext>`
+
 	actual = RequestedAuthnContext{}
 	assert.NilError(t, xml.Unmarshal([]byte(declarations), &actual))
 	assert.Check(t, is.DeepEqual(actual.AuthnContextDeclRefs, []string{"c", "d"}))

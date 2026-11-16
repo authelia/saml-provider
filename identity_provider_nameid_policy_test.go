@@ -1,14 +1,13 @@
 package saml
 
 import (
+	"encoding/base64"
 	"errors"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
 	"strings"
 	"testing"
-
-	"encoding/base64"
 
 	"github.com/beevik/etree"
 	"gotest.tools/assert"
@@ -27,12 +26,14 @@ func (f nameIDPolicyEnforcerFunc) EnforceNameIDPolicy(req *IdpAuthnRequest, sess
 // service provider.
 func serveSSOWithPolicy(t *testing.T, test *IdentityProviderTest, session *Session, policy *NameIDPolicy) Response {
 	t.Helper()
+
 	test.IDP.SessionProvider = &mockSessionProvider{
 		GetSessionFunc: func(http.ResponseWriter, *http.Request, *IdpAuthnRequest) *Session { return session },
 	}
 
 	request, err := test.SP.MakeAuthenticationRequest("https://idp.example.com/saml/sso", HTTPPostBinding, HTTPPostBinding)
 	assert.NilError(t, err)
+
 	request.NameIDPolicy = policy
 	doc := etree.NewDocument()
 	doc.SetRoot(request.Element())
@@ -42,11 +43,13 @@ func serveSSOWithPolicy(t *testing.T, test *IdentityProviderTest, session *Sessi
 	form := url.Values{"SAMLRequest": {base64.StdEncoding.EncodeToString(body)}}
 	r := httptest.NewRequest(http.MethodPost, "https://idp.example.com/saml/sso", strings.NewReader(form.Encode()))
 	r.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+
 	w := httptest.NewRecorder()
 	test.IDP.ServeSSO(w, r)
 	assert.Check(t, is.Equal(w.Code, http.StatusOK), "body: %s", w.Body.String())
 
 	_, response := postedResponse(t, w.Body.String())
+
 	return response
 }
 
@@ -119,7 +122,9 @@ func TestServeSSOUsesConfiguredNameIDPolicyEnforcer(t *testing.T) {
 
 	t.Run("refuses per service provider", func(t *testing.T) {
 		test := NewIdentityProviderTest(t, applyKey)
+
 		var seen string
+
 		test.IDP.NameIDPolicyEnforcer = nameIDPolicyEnforcerFunc(func(req *IdpAuthnRequest, _ *Session) error {
 			seen = req.ServiceProviderMetadata.EntityID
 			return errors.New("not established for this service provider")

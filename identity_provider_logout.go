@@ -128,23 +128,28 @@ func (idp *IdentityProvider) ServeSLO(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		idp.logger().Printf("failed to parse logout request: %s", err)
 		http.Error(w, http.StatusText(http.StatusBadRequest), http.StatusBadRequest)
+
 		return
 	}
 
 	if err := req.Validate(); err != nil {
 		idp.logger().Printf("failed to validate logout request: %s", err)
 		http.Error(w, http.StatusText(http.StatusBadRequest), http.StatusBadRequest)
+
 		return
 	}
 
 	status := Status{StatusCode: StatusCode{Value: StatusSuccess}}
+
 	if provider, ok := idp.SessionProvider.(LogoutSessionProvider); !ok {
 		idp.logger().Printf("cannot terminate session: the session provider does not implement LogoutSessionProvider")
+
 		status.StatusCode.Value = StatusResponder
 	} else if err := provider.TerminateSession(w, r, req); errors.Is(err, ErrPartialLogout) {
 		status.StatusCode.StatusCode = &StatusCode{Value: StatusPartialLogout}
 	} else if err != nil {
 		idp.logger().Printf("cannot terminate session: %s", err)
+
 		status.StatusCode.Value = StatusResponder
 	}
 
@@ -164,28 +169,35 @@ func NewIdpLogoutRequest(idp *IdentityProvider, r *http.Request) (*IdpLogoutRequ
 	}
 
 	var err error
+
 	switch r.Method {
 	case http.MethodGet:
 		req.binding = HTTPRedirectBinding
+
 		req.RequestBuffer, req.RelayState, req.RedirectQuery, err = readRedirectRequest(r.URL.RawQuery)
 		if err != nil {
 			return nil, err
 		}
 	case http.MethodPost:
 		req.binding = HTTPPostBinding
+
 		if r.Body != nil {
 			r.Body = http.MaxBytesReader(nil, r.Body, maxAuthnRequestBodySize)
 		}
+
 		if err := r.ParseForm(); err != nil {
 			return nil, err
 		}
+
 		if req.RequestBuffer, err = base64.StdEncoding.DecodeString(r.PostForm.Get("SAMLRequest")); err != nil {
 			return nil, err
 		}
+
 		req.RelayState = r.PostForm.Get("RelayState")
 	default:
 		return nil, fmt.Errorf("method not allowed")
 	}
+
 	return req, nil
 }
 
@@ -197,6 +209,7 @@ func (req *IdpLogoutRequest) Validate() error {
 	if err := checkAuthnRequestSize(req.RequestBuffer); err != nil {
 		return err
 	}
+
 	if err := xrv.Validate(bytes.NewReader(req.RequestBuffer)); err != nil {
 		return err
 	}
@@ -204,17 +217,20 @@ func (req *IdpLogoutRequest) Validate() error {
 	if err := xml.Unmarshal(req.RequestBuffer, &req.Request); err != nil {
 		return err
 	}
+
 	if err := req.checkRequest(); err != nil {
 		return err
 	}
 
 	serviceProviderID := req.Request.Issuer.Value
+
 	serviceProvider, err := req.IDP.serviceProvider(req.HTTPRequest, serviceProviderID)
 	if errors.Is(err, os.ErrNotExist) {
 		return fmt.Errorf("cannot handle request from unknown service provider %s", serviceProviderID)
 	} else if err != nil {
 		return fmt.Errorf("cannot find service provider %s: %v", serviceProviderID, err)
 	}
+
 	req.ServiceProviderMetadata = serviceProvider
 
 	if err := req.verifySignature(); err != nil {
@@ -235,25 +251,32 @@ func (req *IdpLogoutRequest) checkRequest() error {
 	if req.Request.Destination != req.IDP.LogoutURL.String() {
 		return fmt.Errorf("expected destination to be %q, not %q", req.IDP.LogoutURL.String(), req.Request.Destination)
 	}
+
 	if req.Request.IssueInstant.Add(MaxIssueDelay).Before(req.Now) {
 		return fmt.Errorf("request expired at %s", req.Request.IssueInstant.Add(MaxIssueDelay))
 	}
+
 	if req.Request.IssueInstant.After(req.Now.Add(MaxClockSkew)) {
 		return fmt.Errorf("request issued in the future at %s", req.Request.IssueInstant)
 	}
+
 	if req.Request.NotOnOrAfter != nil && !req.Now.Before(*req.Request.NotOnOrAfter) {
 		return fmt.Errorf("request expired at %s", *req.Request.NotOnOrAfter)
 	}
+
 	if req.Request.Version != "2.0" {
 		return fmt.Errorf("expected SAML request version 2.0 got %v", req.Request.Version)
 	}
+
 	if !isValidAuthnRequestID(req.Request.ID) {
 		// The value is not included because this error is logged without authentication.
 		return fmt.Errorf("invalid request ID")
 	}
+
 	if req.Request.Issuer == nil || req.Request.Issuer.Value == "" {
 		return fmt.Errorf("request has no issuer")
 	}
+
 	return nil
 }
 
@@ -265,13 +288,16 @@ func (req *IdpLogoutRequest) verifySignature() error {
 	if err := doc.ReadFromBytes(req.RequestBuffer); err != nil {
 		return err
 	}
+
 	if doc.Root() == nil {
 		return errors.New("request has no root element")
 	}
+
 	signatureEl, err := findChild(doc.Root(), "http://www.w3.org/2000/09/xmldsig#", "Signature")
 	if err != nil {
 		return err
 	}
+
 	if req.RedirectQuery == "" && signatureEl == nil {
 		return errors.New("request is not signed")
 	}
@@ -280,6 +306,7 @@ func (req *IdpLogoutRequest) verifySignature() error {
 	if err != nil {
 		return err
 	}
+
 	if len(certificates) == 0 {
 		return errors.New("request is signed but the service provider has no signing certificate")
 	}
@@ -289,23 +316,29 @@ func (req *IdpLogoutRequest) verifySignature() error {
 			return fmt.Errorf("invalid request signature: %w", err)
 		}
 	}
+
 	if signatureEl != nil {
 		verified, err := verifyEnvelopedSignature(doc.Root(), certificates)
 		if err != nil {
 			return fmt.Errorf("invalid request signature: %w", err)
 		}
+
 		serviceProviderID := req.Request.Issuer.Value
+
 		req.Request = LogoutRequest{}
 		if err := unmarshalElement(verified, &req.Request); err != nil {
 			return err
 		}
+
 		if err := req.checkRequest(); err != nil {
 			return err
 		}
+
 		if req.Request.Issuer.Value != serviceProviderID {
 			return errors.New("signed request has a different issuer")
 		}
 	}
+
 	return nil
 }
 
@@ -318,24 +351,30 @@ func (req *IdpLogoutRequest) verifySignature() error {
 // ended or a response is made.
 func (req *IdpLogoutRequest) getSLOEndpoint() error {
 	var insecure error
+
 	for _, binding := range []string{req.binding, HTTPRedirectBinding, HTTPPostBinding} {
 		for _, descriptor := range req.ServiceProviderMetadata.SPSSODescriptors {
 			for _, endpoint := range descriptor.SingleLogoutServices {
 				if endpoint.Binding != binding {
 					continue
 				}
+
 				if err := req.IDP.CheckServiceProviderEndpoint(endpointResponseLocation(endpoint)); err != nil {
 					insecure = err
 					continue
 				}
+
 				req.SLOEndpoint = &endpoint
+
 				return nil
 			}
 		}
 	}
+
 	if insecure != nil {
 		return fmt.Errorf("service provider %s has no secure SingleLogoutService: %w", req.ServiceProviderMetadata.EntityID, insecure)
 	}
+
 	return fmt.Errorf("service provider %s has no SingleLogoutService with a supported binding", req.ServiceProviderMetadata.EntityID)
 }
 
@@ -349,6 +388,7 @@ func endpointResponseLocation(endpoint Endpoint) string {
 	if endpoint.ResponseLocation != "" {
 		return endpoint.ResponseLocation
 	}
+
 	return endpoint.Location
 }
 
@@ -373,6 +413,7 @@ func (req *IdpLogoutRequest) MakeResponse(status Status) *LogoutResponse {
 // requires, and on the HTTP-POST binding it is enveloped.
 func (req *IdpLogoutRequest) WriteResponse(w http.ResponseWriter, status Status) error {
 	response := req.MakeResponse(status)
+
 	signingContext, err := req.IDP.signingContext()
 	if err != nil {
 		return err
@@ -386,7 +427,9 @@ func (req *IdpLogoutRequest) WriteResponse(w http.ResponseWriter, status Status)
 		if err != nil {
 			return err
 		}
+
 		http.Redirect(w, req.HTTPRequest, u.String(), http.StatusFound) //nolint:gosec // G710: the location is from the service provider metadata, not the request.
+
 		return nil
 	case HTTPPostBinding:
 		signedEl, err := signingContext.SignEnveloped(response.Element())
@@ -397,6 +440,7 @@ func (req *IdpLogoutRequest) WriteResponse(w http.ResponseWriter, status Status)
 		response.Signature = signedEl.ChildElements()[len(signedEl.ChildElements())-1]
 		doc := etree.NewDocument()
 		doc.SetRoot(response.Element())
+
 		buf, err := doc.WriteToBytes()
 		if err != nil {
 			return err
@@ -406,16 +450,20 @@ func (req *IdpLogoutRequest) WriteResponse(w http.ResponseWriter, status Status)
 		if tmpl == nil {
 			tmpl = defaultResponseFormTemplate
 		}
+
 		form := IdpAuthnRequestForm{
 			URL:          response.Destination,
 			SAMLResponse: base64.StdEncoding.EncodeToString(buf),
 			RelayState:   req.RelayState,
 		}
+
 		var body bytes.Buffer
 		if err := tmpl.Execute(&body, form); err != nil {
 			return err
 		}
+
 		_, err = w.Write(body.Bytes())
+
 		return err
 	default:
 		return fmt.Errorf("unsupported binding %s", req.SLOEndpoint.Binding)

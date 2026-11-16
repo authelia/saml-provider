@@ -17,8 +17,11 @@ import (
 
 func captureDefaultOnError(t *testing.T, err error) string {
 	t.Helper()
+
 	var output bytes.Buffer
+
 	previousWriter, previousFlags := log.Writer(), log.Flags()
+
 	log.SetOutput(&output)
 	log.SetFlags(0)
 	t.Cleanup(func() {
@@ -29,6 +32,7 @@ func captureDefaultOnError(t *testing.T, err error) string {
 	recorder := httptest.NewRecorder()
 	DefaultOnError(recorder, httptest.NewRequest("POST", "/saml/acs", nil), err)
 	assert.Check(t, is.Equal(403, recorder.Code))
+
 	return output.String()
 }
 
