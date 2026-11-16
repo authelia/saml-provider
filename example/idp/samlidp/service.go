@@ -5,10 +5,10 @@ import (
 	"encoding/xml"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"os"
 	"slices"
-	"time"
 
 	"authelia.com/provider/saml"
 )
@@ -33,51 +33,7 @@ func (s *Server) GetServiceProvider(_ *http.Request, serviceProviderID string) (
 	if !ok {
 		return nil, os.ErrNotExist
 	}
-	current := currentMetadata(rv, saml.TimeNow())
-	if current == nil {
-		s.logger.Printf("ERROR: the metadata of service provider %q has expired", serviceProviderID)
-		return nil, os.ErrNotExist
-	}
-	return current, nil
-}
-
-// currentMetadata returns metadata without the service provider descriptors whose validUntil is not
-// after now, or nil if the metadata itself has expired or has no descriptor left, SAMLMeta §2.3.2 and
-// §2.4.1. The zero time counts as no validUntil, as earlier versions of this package wrote it for a
-// descriptor that had none.
-func currentMetadata(metadata *saml.EntityDescriptor, now time.Time) *saml.EntityDescriptor {
-	expired := func(validUntil time.Time) bool { return !validUntil.IsZero() && !now.Before(validUntil) }
-	if expired(metadata.ValidUntil) {
-		return nil
-	}
-	current := *metadata
-	current.SPSSODescriptors = slices.DeleteFunc(slices.Clone(metadata.SPSSODescriptors), func(descriptor saml.SPSSODescriptor) bool {
-		return descriptor.ValidUntil != nil && expired(*descriptor.ValidUntil)
-	})
-	if len(current.SPSSODescriptors) == 0 {
-		return nil
-	}
-	return &current
-}
-
-// checkACSEndpoints returns an error if metadata has HTTP-POST assertion consumer services, and the
-// identity provider would refuse to send a response to every one of them, as the service could then
-// never receive an assertion. See saml.IdentityProvider.AllowInsecureServiceProviderEndpoints.
-func (s *Server) checkACSEndpoints(metadata *saml.EntityDescriptor) error {
-	var refused error
-	for _, descriptor := range metadata.SPSSODescriptors {
-		for _, endpoint := range descriptor.AssertionConsumerServices {
-			if endpoint.Binding != saml.HTTPPostBinding {
-				continue
-			}
-			if err := s.IDP.CheckServiceProviderEndpoint(endpoint.Location); err != nil {
-				refused = err
-				continue
-			}
-			return nil
-		}
-	}
-	return refused
+	return rv, nil
 }
 
 // HandleListServices handles the `GET /services/` request and responds with a JSON formatted list
@@ -123,34 +79,21 @@ func (s *Server) HandlePutService(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	service := Service{}
 
-	metadata, err := getSPMetadata(r.Body)
+	data, err := io.ReadAll(r.Body)
 	if err != nil {
 		s.logger.Printf("ERROR: %s", err)
 		writeBodyError(w, err)
 		return
 	}
 
-	for _, spssoDescriptor := range metadata.SPSSODescriptors {
-		for _, keyDescriptor := range spssoDescriptor.KeyDescriptors {
-			switch keyDescriptor.Use {
-			case "", "encryption", "signing":
-			default:
-				s.logger.Printf("ERROR: metadata has a key descriptor with an unrecognized use %q", keyDescriptor.Use)
-				http.Error(w, http.StatusText(http.StatusBadRequest), http.StatusBadRequest)
-				return
-			}
-		}
-	}
-
-	// Only the descriptors that have not expired are served, so only their endpoints are checked.
-	current := currentMetadata(metadata, saml.TimeNow())
-	if current == nil {
-		s.logger.Printf("ERROR: the metadata has expired")
+	metadata, err := saml.ParseServiceProviderMetadata(data)
+	if err != nil {
+		s.logger.Printf("ERROR: %s", err)
 		http.Error(w, http.StatusText(http.StatusBadRequest), http.StatusBadRequest)
 		return
 	}
 
-	if err := s.checkACSEndpoints(current); err != nil {
+	if err := s.IDP.CheckServiceProviderMetadata(metadata, saml.TimeNow()); err != nil {
 		s.logger.Printf("ERROR: %s", err)
 		http.Error(w, http.StatusText(http.StatusBadRequest), http.StatusBadRequest)
 		return

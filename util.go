@@ -16,6 +16,14 @@ var TimeNow = func() time.Time { return time.Now().UTC() }
 // not nil, otherwise the default clock is used.
 var Clock *dsig.Clock
 
+// DSigClock is the clock type assigned to Clock.
+type DSigClock = dsig.Clock
+
+// NewFakeClockAt returns a clock fixed at t. It is intended for tests, which assign it to Clock.
+func NewFakeClockAt(t time.Time) *DSigClock {
+	return dsig.NewFakeClockAt(t)
+}
+
 // RandReader is the io.Reader that produces cryptographically random
 // bytes when they are need by the library. The default value is
 // rand.Reader, but it can be replaced for testing.

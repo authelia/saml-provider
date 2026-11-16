@@ -34,6 +34,10 @@ jobs:
       - name: 'Test'
         run: |
           go test -coverprofile=coverage.txt -v ./...
+      - name: 'Test Example IdP'
+        working-directory: 'example/idp'
+        run: |
+          go test -v ./...
       - name: 'Coverage'
         uses: codecov/codecov-action@303a32d7a59b442fa8d48b6a1cc6825c09c847a5 # v7.1.1
         with:
@@ -66,5 +70,13 @@ jobs:
         run: |
           go build -v ./...
       - name: 'Test'
+        run: |
+          go test -race -v ./...
+      - name: 'Build Example IdP'
+        working-directory: 'example/idp'
+        run: |
+          go build -v ./...
+      - name: 'Test Example IdP'
+        working-directory: 'example/idp'
         run: |
           go test -race -v ./...

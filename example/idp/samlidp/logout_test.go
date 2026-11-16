@@ -13,8 +13,10 @@ import (
 	is "gotest.tools/assert/cmp"
 
 	"authelia.com/provider/saml"
-	"authelia.com/provider/saml/internal/dsig"
 )
+
+// rsaSHA256SignatureMethod is the XML Signature algorithm for RSA with SHA-256.
+const rsaSHA256SignatureMethod = "http://www.w3.org/2001/04/xmldsig-more#rsa-sha256"
 
 // logoutTest returns a server with a user, and a service provider which accepts logout, with a clock
 // at which the certificate of the service provider is valid.
@@ -34,7 +36,7 @@ func logoutTest(t *testing.T) *ServerTest {
 
 	previousClock := saml.Clock
 	t.Cleanup(func() { saml.Clock = previousClock })
-	saml.Clock = dsig.NewFakeClockAt(test.SPCertificate.NotBefore)
+	saml.Clock = saml.NewFakeClockAt(test.SPCertificate.NotBefore)
 	return test
 }
 
@@ -143,6 +145,32 @@ func TestLogoutKeepsOtherSessions(t *testing.T) {
 	}
 }
 
+// A NameID qualified for another service provider isn't the one that the identity provider asserted to
+// this service provider, so the request can't end the session.
+func TestLogoutRefusesNameIDOfAnotherServiceProvider(t *testing.T) {
+	test := logoutTest(t)
+	cookie := loggedInCookie(t, test)
+
+	w, id := logoutRedirect(t, test, "alice@example.com", cookie, func(r *saml.LogoutRequest) {
+		r.NameID.SPNameQualifier = "https://other.example.com/saml2/metadata"
+	})
+	assert.Check(t, is.ErrorContains(errorString(logoutStatus(t, test, w, id)), "status code"))
+	assert.Check(t, sessionStored(t, test, cookie))
+}
+
+// With LogoutNameIDValueOnly only the value of the NameID is compared.
+func TestLogoutValueOnlyOption(t *testing.T) {
+	test := logoutTest(t)
+	test.Server.IDP.LogoutNameIDValueOnly = true
+	cookie := loggedInCookie(t, test)
+
+	w, id := logoutRedirect(t, test, "alice@example.com", cookie, func(r *saml.LogoutRequest) {
+		r.NameID.SPNameQualifier = "https://other.example.com/saml2/metadata"
+	})
+	assert.Check(t, is.Equal(logoutStatus(t, test, w, id), saml.StatusSuccess))
+	assert.Check(t, !sessionStored(t, test, cookie))
+}
+
 // Without a session there is nothing to end in this browser.
 func TestLogoutWithoutSession(t *testing.T) {
 	test := logoutTest(t)
@@ -193,6 +221,6 @@ func (e errorString) Error() string { return string(e) }
 // metadata, as registered, doesn't require signed AuthnRequests, so the login helpers still work.
 func signingServiceProvider(test *ServerTest) saml.ServiceProvider {
 	signer := test.SP
-	signer.SignatureMethod = dsig.RSASHA256SignatureMethod
+	signer.SignatureMethod = rsaSHA256SignatureMethod
 	return signer
 }

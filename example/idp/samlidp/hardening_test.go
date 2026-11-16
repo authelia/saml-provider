@@ -19,7 +19,6 @@ import (
 	is "gotest.tools/assert/cmp"
 
 	"authelia.com/provider/saml"
-	"authelia.com/provider/saml/internal/dsig"
 )
 
 var adminRoutes = []struct{ method, path string }{
@@ -376,12 +375,12 @@ func TestShortcutGetIgnoresMalformedQuery(t *testing.T) {
 func TestSignedRedirectResumesAfterLogin(t *testing.T) {
 	test := NewServerTest(t)
 	hardeningAddUser(t, test)
-	test.SP.SignatureMethod = dsig.RSASHA256SignatureMethod
+	test.SP.SignatureMethod = rsaSHA256SignatureMethod
 	test.Server.serviceProviders["https://sp.example.com/saml2/metadata"] = test.SP.Metadata()
 
 	previousClock := saml.Clock
 	t.Cleanup(func() { saml.Clock = previousClock })
-	saml.Clock = dsig.NewFakeClockAt(test.SPCertificate.NotBefore)
+	saml.Clock = saml.NewFakeClockAt(test.SPCertificate.NotBefore)
 
 	form := hardeningStartSSO(t, test)
 

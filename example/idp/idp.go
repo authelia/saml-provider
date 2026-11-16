@@ -12,8 +12,8 @@ import (
 
 	"golang.org/x/crypto/bcrypt"
 
+	"authelia.com/provider/saml/example/idp/samlidp"
 	"authelia.com/provider/saml/logger"
-	"authelia.com/provider/saml/samlidp"
 )
 
 var key = func() crypto.PrivateKey {

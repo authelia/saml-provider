@@ -9,7 +9,6 @@ import (
 	"html/template"
 	"net/http"
 	"net/url"
-	"slices"
 	"strings"
 	"time"
 
@@ -224,6 +223,7 @@ func (s *Server) sendLoginForm(w http.ResponseWriter, req *saml.IdpAuthnRequest,
 	if tmpl == nil {
 		tmpl = defaultLoginFormTemplate
 	}
+	values := req.ResumeFormValues()
 	data := struct {
 		Toast         string
 		URL           string
@@ -233,9 +233,9 @@ func (s *Server) sendLoginForm(w http.ResponseWriter, req *saml.IdpAuthnRequest,
 	}{
 		Toast:         toast,
 		URL:           loginFormURL(req),
-		SAMLRequest:   base64.StdEncoding.EncodeToString(req.RequestBuffer),
-		RelayState:    req.RelayState,
-		RedirectQuery: req.RedirectQuery,
+		SAMLRequest:   values.Get("SAMLRequest"),
+		RelayState:    values.Get("RelayState"),
+		RedirectQuery: values.Get(saml.RedirectQueryFormField),
 	}
 
 	if err := tmpl.Execute(w, data); err != nil {
@@ -366,13 +366,8 @@ func (s *Server) TerminateSession(w http.ResponseWriter, r *http.Request, req *s
 		return nil
 	}
 
-	if session.NameID != req.Request.NameID.Value {
-		return errors.New("the session belongs to another principal")
-	}
-	if len(req.Request.SessionIndexes) != 0 && !slices.ContainsFunc(req.Request.SessionIndexes, func(index saml.SessionIndex) bool {
-		return index.Value == session.Index
-	}) {
-		return errors.New("the session index of the session is not in the request")
+	if err := req.MatchesSession(session); err != nil {
+		return err
 	}
 
 	if err := s.Store.Delete(fmt.Sprintf("/sessions/%s", session.ID)); err != nil {

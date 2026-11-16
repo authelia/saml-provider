@@ -27,8 +27,10 @@ users log in with someone else's credentials, then you are a **Service Provider*
 both service providers and identity providers.
 
 The core package contains the implementation of SAML. The package samlsp provides helper middleware suitable for use in 
-Service Provider applications. The package samlidp provides a rudimentary IDP service that is useful for testing or as 
-a starting point for other integrations.
+Service Provider applications. The package `example/idp/samlidp`, in a separate module, is a rudimentary IDP service
+that is useful for testing or as a starting point for other integrations. It is a demo outside the library, which
+holds the SAML logic it uses, such as `CheckServiceProviderMetadata`, `CurrentMetadata`, `MatchesSession` and
+`ResumeFormValues`.
 
 ## Support
 
@@ -122,15 +124,18 @@ least the subset of SAML known as [interoperable SAML](https://kantarainitiative
 - **Single Logout:** `IdentityProvider.ServeSLO` handles a `LogoutRequest` from an SP on the HTTP Redirect or HTTP POST
   binding at `IdentityProvider.LogoutURL`, and answers with a signed `LogoutResponse`. The request must be signed. Only
   the session at the IdP ends, by a `SessionProvider` that implements `LogoutSessionProvider`, and other SPs are not
-  told. The IdP can't start a logout. `samlidp` ends the session of the browser if the request names its principal,
-  but its `SameSite=Lax` cookie isn't sent with a cross-site POST, so SPs must use HTTP Redirect to end it.
+  told. The IdP can't start a logout. `samlidp` ends the session of the browser if the request matches it with
+  `IdpLogoutRequest.MatchesSession`: the whole NameID (value, Format and qualifiers, none of them omitted) and any
+  session indexes must match, unless `IdentityProvider.LogoutNameIDValueOnly` is set to compare only the value. Its
+  `SameSite=Lax` cookie isn't sent with a cross-site POST, so SPs must use HTTP Redirect to end it.
 - **Insecure endpoints:** assertions are bearer tokens, so responses are only sent to an SP endpoint that is `https`, or
   `http` on a loopback host (`localhost`, `*.localhost`, `127.0.0.0/8` or `::1`). This covers the
   `AssertionConsumerService` and the `SingleLogoutService` that receives a `LogoutResponse`. A request that names an
   `http` ACS by URL or index is refused with an HTTP error, and when none is named an `http` endpoint is skipped for a
   secure one, even if it is the default. Set `IdentityProvider.AllowInsecureServiceProviderEndpoints`, or
   `samlidp.Options.AllowInsecureServiceProviderEndpoints`, to allow any `http` URL, only for testing. `samlidp` refuses
-  to register an SP whose HTTP-POST ACS endpoints are all refused.
+  to register an SP whose HTTP-POST ACS endpoints are all refused, using `CheckServiceProviderMetadata`, and the
+  identity provider only uses metadata that `CurrentMetadata` finds unexpired.
 - **Artifact Resolution, HTTP Artifact and SOAP:** responses are only ever delivered via HTTP POST, and there is no
   `ArtifactResolutionService`.
 - **Verify signed `AuthnRequest`:** any signature on the HTTP Redirect or HTTP POST bindings is verified, and one is
@@ -145,7 +150,8 @@ least the subset of SAML known as [interoperable SAML](https://kantarainitiative
   `IdentityProvider.NameIDPolicyEnforcer` to check it, or to decide differently for each SP.
 - **`ForceAuthn` / `IsPassive`:** a `SessionProvider` must also implement `ForceAuthnSessionProvider` or
   `PassiveSessionProvider` to serve these requests. Otherwise they receive an `AuthnFailed` or `NoPassive` status.
-  `samlidp` implements both, and returns `NoPassive` if both are set, as it can only authenticate with a login form.
+  `samlidp` implements both, resuming its login form with `IdpAuthnRequest.ResumeFormValues`, and returns `NoPassive`
+  if both are set, as it can only authenticate with a login form.
 - **`RequestedAuthnContext`:** a request that the assertion can't satisfy receives a `NoAuthnContext` status.
   `DefaultAssertionMaker` asserts `Session.AuthnContextClassRef`, or `PasswordProtectedTransport` when the session sets
   none, and a custom `AssertionMaker` can set a different class. `minimum`, `maximum` and `better` need `DefaultAuthnContextEnforcer.Strength` to rank classes. Without it,
