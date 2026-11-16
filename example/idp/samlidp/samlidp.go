@@ -68,6 +68,8 @@ type Server struct {
 	http.Handler
 	idpConfigMu       sync.RWMutex // protects calls into the IDP
 	usersMu           sync.Mutex   // serializes changes to users, so that emails stay unique
+	participantsMu    sync.Mutex   // serializes changes to the participants of a session, and its end.
+	logoutStatesMu    sync.Mutex   // serializes the conditional saves of logout states.
 	logger            logger.Interface
 	serviceProviders  map[string]*saml.EntityDescriptor
 	serviceIDs        map[string]string
@@ -157,6 +159,7 @@ func (s *Server) InitializeHTTP() {
 	mux.HandleFunc("/logout", func(w http.ResponseWriter, r *http.Request) {
 		s.IDP.ServeSLO(w, r)
 	})
+	mux.HandleFunc("POST /logout/start", s.HandleLogout)
 
 	mux.HandleFunc("/login", s.HandleLogin)
 	mux.HandleFunc("/login/{shortcut}", s.HandleIDPInitiated)

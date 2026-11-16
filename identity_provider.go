@@ -311,6 +311,10 @@ type IdentityProvider struct {
 	ValidDuration           *time.Duration
 	ResponseFormTemplate    *template.Template
 
+	// LogoutRequestFormTemplate renders the HTTP-POST form of a LogoutRequest, with an IdpLogoutRequestForm.
+	// Defaults to a form which posts SAMLRequest and RelayState.
+	LogoutRequestFormTemplate *template.Template
+
 	// WantAuthnRequestsSigned requires every AuthnRequest to be signed, and is declared in the
 	// metadata. A request is also required to be signed if the metadata of its service provider
 	// sets AuthnRequestsSigned, and any signature that is present is always verified.
@@ -388,6 +392,10 @@ type IdentityProvider struct {
 	// qualifiers of the NameID they were given. It is off by default, which compares the whole identifier
 	// (SAMLCore §3.7.3.2).
 	LogoutNameIDValueOnly bool
+
+	// LogoutStateLifetime is how long the state of a logout that is spread over several requests remains valid. It
+	// defaults to 5 minutes.
+	LogoutStateLifetime time.Duration
 }
 
 // ErrInsecureEndpoint is returned when the endpoint that a response would be sent to is not secure.
@@ -619,6 +627,8 @@ func (idp *IdentityProvider) ServeSSO(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	req.Session = session
+
 	assertionMaker := idp.AssertionMaker
 	if assertionMaker == nil {
 		assertionMaker = DefaultAssertionMaker{}
@@ -751,6 +761,8 @@ func (idp *IdentityProvider) ServeIDPInitiated(w http.ResponseWriter, r *http.Re
 		return
 	}
 
+	req.Session = session
+
 	var err error
 
 	req.ServiceProviderMetadata, err = idp.serviceProvider(r, serviceProviderID)
@@ -809,6 +821,14 @@ type IdpAuthnRequest struct {
 	AssertionEl             *etree.Element
 	ResponseEl              *etree.Element
 	Now                     time.Time
+
+	// Session is the session the assertion is for. ServeSSO and ServeIDPInitiated set it once the
+	// SessionProvider has returned it.
+	Session *Session
+
+	// responseParticipant is the participant that the assertion in ResponseEl makes of the service
+	// provider, which PublishResponse records each time the response is sent.
+	responseParticipant *SessionParticipant
 
 	// RedirectQuery is the raw query string of a signed HTTP-Redirect request, which is what the
 	// signature covers. A SessionProvider which shows a login form and re-presents the request as a
@@ -899,11 +919,17 @@ func (req *IdpAuthnRequest) readRedirectQuery(rawQuery string) error {
 // readRedirectRequest returns the decoded request and the RelayState from the query string of the
 // HTTP-Redirect binding, and the query string itself if it carries a signature.
 func readRedirectRequest(rawQuery string) (buf []byte, relayState, signedQuery string, err error) {
+	return readRedirectMessage(rawQuery, "SAMLRequest")
+}
+
+// readRedirectMessage returns the decoded message of the parameter and the RelayState from the query string of the
+// HTTP-Redirect binding, and the query string itself if it carries a signature.
+func readRedirectMessage(rawQuery, parameter string) (buf []byte, relayState, signedQuery string, err error) {
 	// As with url.URL.Query, malformed pairs are dropped. Those can't affect a signed request, which
 	// verifyRedirectSignature rejects if the query has a malformed key.
 	values, _ := url.ParseQuery(rawQuery)
 
-	compressedRequest, err := base64.StdEncoding.DecodeString(values.Get("SAMLRequest"))
+	compressedRequest, err := base64.StdEncoding.DecodeString(values.Get(parameter))
 	if err != nil {
 		return nil, "", "", fmt.Errorf("cannot decode request: %s", err)
 	}
@@ -1873,7 +1899,7 @@ func (req *IdpAuthnRequest) PostBinding() (IdpAuthnRequestForm, error) {
 
 	if req.ACSEndpoint != nil {
 		if err := req.IDP.CheckServiceProviderEndpoint(req.ACSEndpoint.Location); err != nil {
-			req.ResponseEl = nil
+			req.ResponseEl, req.responseParticipant = nil, nil
 			return form, err
 		}
 	}
@@ -1915,8 +1941,20 @@ var defaultResponseFormTemplate = template.Must(template.New("saml-post-form").P
 	`<script>document.getElementById('SAMLResponseForm').submit();</script>` +
 	`</html>`))
 
+var defaultLogoutRequestFormTemplate = template.Must(template.New("saml-logout-request-form").Parse(`<html>` +
+	`<form method="post" action="{{.URL}}" id="SAMLRequestForm">` +
+	`<input type="hidden" name="SAMLRequest" value="{{.SAMLRequest}}" />` +
+	`<input type="hidden" name="RelayState" value="{{.RelayState}}" />` +
+	`<input id="SAMLSubmitButton" type="submit" value="Continue" />` +
+	`</form>` +
+	`<script>document.getElementById('SAMLSubmitButton').style.visibility='hidden';</script>` +
+	`<script>document.getElementById('SAMLRequestForm').submit();</script>` +
+	`</html>`))
+
 // WriteResponse writes the `Response` to the [http.ResponseWriter]. If
-// `Response` is not already set, it calls MakeResponse to produce it.
+// `Response` is not already set, it calls MakeResponse to produce it. The response is written by
+// PublishResponse, so if it carries an assertion nothing is written once a logout of the session has
+// begun.
 func (req *IdpAuthnRequest) WriteResponse(w http.ResponseWriter) error {
 	form, err := req.PostBinding()
 	if err != nil {
@@ -1933,13 +1971,13 @@ func (req *IdpAuthnRequest) WriteResponse(w http.ResponseWriter) error {
 		return err
 	}
 
-	setNoCacheHeaders(w)
+	return req.PublishResponse(func() error {
+		setNoCacheHeaders(w)
 
-	if _, err := io.Copy(w, buf); err != nil {
+		_, err := io.Copy(w, buf)
+
 		return err
-	}
-
-	return nil
+	})
 }
 
 // setNoCacheHeaders stops a browser or proxy keeping a page which carries a SAML message, as
@@ -2150,7 +2188,14 @@ func (req *IdpAuthnRequest) MakeResponse() error {
 		return err
 	}
 
-	req.ResponseEl = responseEl
+	// The participant is recorded each time the response is sent, by PublishResponse, so that a response isn't sent
+	// once a logout of the session has begun.
+	participant, err := req.sessionParticipant()
+	if err != nil {
+		return err
+	}
+
+	req.ResponseEl, req.responseParticipant = responseEl, participant
 
 	return nil
 }
@@ -2164,7 +2209,7 @@ func (req *IdpAuthnRequest) MakeResponse() error {
 // that has been checked against the metadata of the service provider. Requests which fail before
 // that point, such as any for which Validate returns an error, can't be answered with a SAML response.
 func (req *IdpAuthnRequest) MakeErrorResponse(topLevelStatus, secondLevelStatus, message string) error {
-	req.ResponseEl = nil
+	req.ResponseEl, req.responseParticipant = nil, nil
 
 	if req.ACSEndpoint == nil {
 		return fmt.Errorf("cannot make an error response without a validated assertion consumer service")
