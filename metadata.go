@@ -210,8 +210,36 @@ type KeyDescriptor struct {
 	EncryptionMethods []EncryptionMethod `xml:"EncryptionMethod"`
 }
 
-// EncryptionMethod represents the XMLSEC object of the same name
+// EncryptionMethod represents the md:EncryptionMethod element, of the xenc:EncryptionMethodType of XML
+// Encryption §3.2.1, which a KeyDescriptor lists for each algorithm its entity supports (SAMLMeta §2.4.1.1).
+// The Metadata Profile for Algorithm Support §2.3 allows the KeySize and any parameters an algorithm defines,
+// such as the DigestMethod and OAEPparams of RSA-OAEP (XML Encryption §5.4.2) and its MGF in XML Encryption
+// 1.1 (§5.5.2), so that the entity can say which of them it accepts.
 type EncryptionMethod struct {
+	Algorithm string `xml:"Algorithm,attr"`
+
+	// KeySize is the size of key in bits that the entity accepts for an algorithm with keys of more than one size,
+	// or zero if it gives none.
+	KeySize int `xml:"http://www.w3.org/2001/04/xmlenc# KeySize,omitempty"`
+
+	// OAEPParams is the base64 encoded OAEP label of RSA-OAEP, or empty if there is none.
+	OAEPParams string `xml:"http://www.w3.org/2001/04/xmlenc# OAEPparams,omitempty"`
+
+	// DigestMethod is the digest of RSA-OAEP, or nil if it gives none.
+	DigestMethod *DigestMethod `xml:"http://www.w3.org/2000/09/xmldsig# DigestMethod,omitempty"`
+
+	// MGF is the mask generation function of XML Encryption 1.1 RSA-OAEP, or nil if it gives none.
+	MGF *MGF `xml:"http://www.w3.org/2009/xmlenc11# MGF,omitempty"`
+}
+
+// DigestMethod represents a ds:DigestMethod element, which identifies a digest algorithm of XML Signature.
+type DigestMethod struct {
+	Algorithm string `xml:"Algorithm,attr"`
+}
+
+// MGF represents the xenc11:MGF element, which identifies the mask generation function of XML Encryption 1.1
+// RSA-OAEP (§5.5.2).
+type MGF struct {
 	Algorithm string `xml:"Algorithm,attr"`
 }
 

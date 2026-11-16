@@ -1,0 +1,7 @@
+version: 2
+secret:
+  ignored_paths:
+    - xmlenc/testdata/xmlsec1-rsa2048.key
+  ignored_matches:
+    - match: e6c014e690cf47d31a6d19458ec1b1a0eefbfd1fd90bc33daca9fd8c39f1b7a4
+      name: RSA Private Key - xmlenc/testdata/xmlsec1-rsa2048.key (test fixture)
