@@ -7,6 +7,8 @@ import (
 	"crypto/ecdsa"
 	"crypto/rsa"
 	"crypto/x509"
+	"crypto/x509/pkix"
+	"encoding/asn1"
 	"encoding/base64"
 	"encoding/xml"
 	"fmt"
@@ -172,6 +174,19 @@ type SubjectEnforcer interface {
 	EnforceSubject(req *IdpAuthnRequest, session *Session) error
 }
 
+// EncryptionCertificateEnforcer is an interface used by IdentityProvider to decide whether the
+// certificate in the metadata of a service provider may be used to encrypt assertions to it, which
+// allows the decision to differ for each service provider. The default implementation is
+// DefaultEncryptionCertificateEnforcer, which is used if no EncryptionCertificateEnforcer is
+// specified.
+type EncryptionCertificateEnforcer interface {
+	// EnforceEncryptionCertificate returns an error if cert, which was taken from the selected
+	// SPSSODescriptor of req.ServiceProviderMetadata, must not be used to encrypt the assertion. The
+	// login then fails without a response: the assertion is never sent in plaintext, and no other key
+	// of the service provider is tried in its place.
+	EnforceEncryptionCertificate(req *IdpAuthnRequest, cert *x509.Certificate) error
+}
+
 // DefaultAuthnContextEnforcer applies the comparison rules of SAMLCore §3.3.2.2.1 to the class
 // reference of every AuthnStatement in the assertion.
 type DefaultAuthnContextEnforcer struct {
@@ -283,6 +298,12 @@ type IdentityProvider struct {
 	// SubjectEnforcer decides whether an assertion matches the Subject of its request. Defaults to
 	// DefaultSubjectEnforcer.
 	SubjectEnforcer SubjectEnforcer
+
+	// EncryptionCertificateEnforcer decides whether the encryption certificate of a service provider
+	// may be used. Defaults to a DefaultEncryptionCertificateEnforcer with no options set, which
+	// refuses a certificate that is expired or not yet valid, has an RSA key shorter than 2048 bits,
+	// or has a KeyUsage extension without keyEncipherment.
+	EncryptionCertificateEnforcer EncryptionCertificateEnforcer
 }
 
 // Metadata returns the metadata structure for this identity provider.
@@ -1532,7 +1553,91 @@ func (req *IdpAuthnRequest) getSPEncryptionCert() (*x509.Certificate, error) {
 	if err != nil {
 		return nil, fmt.Errorf("cannot parse certificate: %v", err)
 	}
+
+	var enforcer EncryptionCertificateEnforcer = DefaultEncryptionCertificateEnforcer{}
+	if req.IDP != nil && req.IDP.EncryptionCertificateEnforcer != nil {
+		enforcer = req.IDP.EncryptionCertificateEnforcer
+	}
+	if err := enforcer.EnforceEncryptionCertificate(req, cert); err != nil {
+		entityID := ""
+		if req.ServiceProviderMetadata != nil {
+			entityID = req.ServiceProviderMetadata.EntityID
+		}
+		return nil, fmt.Errorf("refusing the encryption certificate of service provider %q: %w", entityID, err)
+	}
 	return cert, nil
+}
+
+// oidExtensionKeyUsage is the identifier of the KeyUsage extension, from RFC 5280 §4.2.1.3.
+var oidExtensionKeyUsage = asn1.ObjectIdentifier{2, 5, 29, 15}
+
+// hasKeyUsageExtension returns true if the certificate has a KeyUsage extension, which can't be told
+// from a KeyUsage field with no bits set.
+func hasKeyUsageExtension(cert *x509.Certificate) bool {
+	return slices.ContainsFunc(cert.Extensions, func(ext pkix.Extension) bool { return ext.Id.Equal(oidExtensionKeyUsage) })
+}
+
+// DefaultMinimumRSAKeySize is the shortest RSA key, in bits, that DefaultEncryptionCertificateEnforcer
+// accepts unless its MinimumRSAKeySize is set. It follows NIST SP 800-131A, which disallows RSA keys
+// shorter than 2048 bits for key transport.
+const DefaultMinimumRSAKeySize = 2048
+
+// DefaultEncryptionCertificateEnforcer is the default EncryptionCertificateEnforcer. With no options
+// set it refuses a certificate which is expired or not yet valid at the time of the request, allowing
+// MaxClockSkew either way, whose RSA key is shorter than DefaultMinimumRSAKeySize, or which has a
+// KeyUsage extension that doesn't assert keyEncipherment. A certificate without a KeyUsage extension
+// is not restricted, as RFC 5280 §4.2.1.3 describes. A key that is not RSA is refused when the
+// assertion is encrypted, whatever the enforcer decides, because only RSA key transport is supported.
+//
+// These checks are a local security policy, not a requirement of SAML. The SAML V2.0 Metadata
+// Interoperability Profile (sstc-metadata-iop §2.5.1) treats the certificate in metadata as merely a
+// matter of notational convenience to communicate a key, which may be expired, not yet valid or carry
+// any usage flags, although it recommends that certificates be unexpired, and §2.6.1 forbids a
+// consumer following that profile to apply criteria beyond the key itself. §2.6 does allow a consumer
+// to constrain interoperability by the default policies it applies, and this is one. The options exist
+// to interoperate with service providers which follow that profile: each relaxes one check only, so
+// that allowing an expired certificate does not also allow a weak key.
+type DefaultEncryptionCertificateEnforcer struct {
+	// IgnoreValidityPeriod accepts a certificate which is expired or not yet valid, as the Metadata
+	// Interoperability Profile expects. Such a certificate is common where metadata is managed by
+	// key rather than by certificate.
+	IgnoreValidityPeriod bool
+
+	// IgnoreKeyUsage accepts a certificate whose KeyUsage extension doesn't assert keyEncipherment.
+	IgnoreKeyUsage bool
+
+	// MinimumRSAKeySize is the shortest RSA key accepted, in bits. Defaults to
+	// DefaultMinimumRSAKeySize. It may be set lower to accept legacy keys, or higher to be stricter.
+	MinimumRSAKeySize int
+}
+
+// EnforceEncryptionCertificate implements EncryptionCertificateEnforcer.
+func (e DefaultEncryptionCertificateEnforcer) EnforceEncryptionCertificate(req *IdpAuthnRequest, cert *x509.Certificate) error {
+	if !e.IgnoreValidityPeriod {
+		if cert.NotBefore.After(req.Now.Add(MaxClockSkew)) {
+			return fmt.Errorf("the certificate is not yet valid: it is valid from %s", cert.NotBefore.UTC().Format(time.RFC3339))
+		}
+		if cert.NotAfter.Before(req.Now.Add(-MaxClockSkew)) {
+			return fmt.Errorf("the certificate expired at %s", cert.NotAfter.UTC().Format(time.RFC3339))
+		}
+	}
+
+	if key, ok := cert.PublicKey.(*rsa.PublicKey); ok {
+		minimum := e.MinimumRSAKeySize
+		if minimum <= 0 {
+			minimum = DefaultMinimumRSAKeySize
+		}
+		if size := key.N.BitLen(); size < minimum {
+			return fmt.Errorf("the RSA key is %d-bit, shorter than the minimum of %d bits", size, minimum)
+		}
+	}
+
+	// RFC 5280 §4.2.1.3: when the extension is present, keyEncipherment is asserted when the key is
+	// used to encrypt keys, which is how RSA is used to encrypt an assertion.
+	if !e.IgnoreKeyUsage && hasKeyUsageExtension(cert) && cert.KeyUsage&x509.KeyUsageKeyEncipherment == 0 {
+		return fmt.Errorf("the certificate has a KeyUsage extension which does not assert keyEncipherment")
+	}
+	return nil
 }
 
 // serviceProviderAcceptsEncryption returns true if any of the service provider's key descriptors

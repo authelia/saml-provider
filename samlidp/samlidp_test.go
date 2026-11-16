@@ -110,6 +110,9 @@ func NewServerTest(t *testing.T) *ServerTest {
 	}
 
 	test.Server.AdminAuthorizer = func(*http.Request) bool { return true }
+	// The fixture sp_cert.pem is an RSA-1024 certificate which expired in 2014, before the mocked
+	// time, so the default policy would refuse to encrypt to it.
+	test.Server.IDP.EncryptionCertificateEnforcer = saml.DefaultEncryptionCertificateEnforcer{IgnoreValidityPeriod: true, MinimumRSAKeySize: 1024}
 
 	test.SP.IDPMetadata = test.Server.IDP.Metadata()
 	test.Server.serviceProviders["https://sp.example.com/saml2/metadata"] = test.SP.Metadata()
