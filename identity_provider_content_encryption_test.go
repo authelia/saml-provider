@@ -54,9 +54,9 @@ func TestIDPChoosesContentEncryptionFromMetadata(t *testing.T) {
 		{"cbc preferred over gcm", []string{aes128CBC, aes128GCM}, aes128CBC},
 		{"larger cbc preferred", []string{aes256CBC, aes128CBC}, aes256CBC},
 		{"aes-192 cbc", []string{aes192CBC}, aes192CBC},
-		{"unsupported skipped", []string{aes256GCM, aes128GCM}, aes128GCM},
+		{"aes-256 gcm", []string{aes256GCM, aes128GCM}, aes256GCM},
+		{"unsupported skipped", []string{tripleDES, aes128GCM}, aes128GCM},
 		{"3des is not chosen", []string{tripleDES, aes128CBC}, aes128CBC},
-		{"nothing supported", []string{aes256GCM}, aes128CBC},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			test := NewIdentityProviderTest(t, applyKey)

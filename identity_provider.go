@@ -32,7 +32,6 @@ import (
 	"authelia.com/provider/saml/internal/dsig"
 
 	"authelia.com/provider/saml/logger"
-	"authelia.com/provider/saml/xmlenc"
 )
 
 // maxAuthnRequestSize is the largest decoded AuthnRequest that the identity provider will process.
@@ -348,6 +347,29 @@ type IdentityProvider struct {
 	// always refused. To decide for each service provider, leave this unset and have the
 	// ServiceProviderProvider rewrite or remove the endpoints of the metadata it returns.
 	AllowInsecureServiceProviderEndpoints bool
+
+	// ContentEncryptionMethods lists the identifiers of the block ciphers the identity provider may encrypt an
+	// assertion with. When the service provider lists content encryption algorithms for its key, the first of them
+	// in its order of preference that is also listed here is used, and when it lists none the first one listed
+	// here is used (Metadata Profile for Algorithm Support §2.5). The supported ciphers are AES-128-CBC,
+	// AES-192-CBC, AES-256-CBC, AES-128-GCM, AES-192-GCM and AES-256-GCM, and empty means all of them in that
+	// order, so that a service provider which lists none receives AES-128-CBC.
+	ContentEncryptionMethods []string
+
+	// KeyTransportMethods lists the identifiers of the key transport algorithms the identity provider may encrypt
+	// the key of an assertion with, and is chosen from like ContentEncryptionMethods. The supported algorithms
+	// are RSA-OAEP-MGF1P (XML Encryption §5.4.2) and the RSA-OAEP of XML Encryption 1.1 (§5.5.2), and empty
+	// means both in that order, so that a service provider which lists none receives RSA-OAEP-MGF1P.
+	KeyTransportMethods []string
+
+	// KeyTransportDigestMethods lists the identifiers of the digests the identity provider may use for RSA-OAEP,
+	// and for the MGF1 mask generation function of XML Encryption 1.1 RSA-OAEP. The first one is used when the
+	// service provider lists no key transport algorithm. A key transport algorithm it lists without a digest or
+	// mask generation function means the default of that algorithm, SHA-1 or MGF1 with SHA-1, and can't be used
+	// unless SHA-1 is allowed. The supported digests are SHA-1, SHA-256 and SHA-512, and empty means all of them in
+	// that order, so that a service provider which lists no key transport algorithm receives SHA-1. The legacy
+	// identifiers of SHA-256 and SHA-512 are accepted, and the standard ones are written.
+	KeyTransportDigestMethods []string
 }
 
 // ErrInsecureEndpoint is returned when the endpoint that a response would be sent to is not secure.
@@ -1646,9 +1668,10 @@ func (req *IdpAuthnRequest) MakeAssertionEl() error {
 		}
 	}
 
-	encryptor := xmlenc.OAEP()
-	encryptor.BlockCipher = req.contentEncryption()
-	encryptor.DigestMethod = &xmlenc.SHA1
+	encryptor, err := req.assertionEncrypter()
+	if err != nil {
+		return err
+	}
 	encryptedDataEl, err := encryptor.Encrypt(certBuf, signedAssertionBuf, nil)
 	if err != nil {
 		return err
@@ -1752,30 +1775,6 @@ func (req *IdpAuthnRequest) WriteResponse(w http.ResponseWriter) error {
 func setNoCacheHeaders(w http.ResponseWriter) {
 	w.Header().Set("Cache-Control", "no-cache, no-store")
 	w.Header().Set("Pragma", "no-cache")
-}
-
-// contentEncryptionMethods are the content encryption algorithms this identity provider can use.
-var contentEncryptionMethods = []xmlenc.BlockCipher{
-	xmlenc.AES128GCM,
-	xmlenc.AES128CBC,
-	xmlenc.AES192CBC,
-	xmlenc.AES256CBC,
-}
-
-// contentEncryption returns the first algorithm the service provider advertises for its encryption
-// key that we can use, as metadata lists them in order of preference. It returns AES-128-CBC if there
-// is none, which is the only option known to work with service providers that advertise nothing.
-func (req *IdpAuthnRequest) contentEncryption() xmlenc.BlockCipher {
-	if keyDescriptor := req.spEncryptionKeyDescriptor(); keyDescriptor != nil {
-		for _, method := range keyDescriptor.EncryptionMethods {
-			for _, candidate := range contentEncryptionMethods {
-				if candidate.Algorithm() == method.Algorithm {
-					return candidate
-				}
-			}
-		}
-	}
-	return xmlenc.AES128CBC
 }
 
 // spEncryptionKeyDescriptor returns the key descriptor of the certificate used to encrypt things to

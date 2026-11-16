@@ -4,6 +4,7 @@
 package xmlenc
 
 import (
+	"crypto"
 	"crypto/rand"
 	"hash"
 
@@ -35,6 +36,14 @@ type Decrypter interface {
 type DigestMethod interface {
 	Algorithm() string
 	Hash() hash.Hash
+}
+
+// CryptoHasher may be implemented by a DigestMethod to identify its hash function, which crypto/rsa needs for
+// RSA-OAEP to use a hash for MGF1 that differs from the digest. A DigestMethod which does not implement it can only
+// be used for RSA-OAEP if its Algorithm is a standard digest identifier, such as SHA-384's
+// http://www.w3.org/2001/04/xmldsig-more#sha384.
+type CryptoHasher interface {
+	CryptoHash() crypto.Hash
 }
 
 var (
