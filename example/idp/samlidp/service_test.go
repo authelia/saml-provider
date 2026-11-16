@@ -14,6 +14,8 @@ import (
 	"gotest.tools/assert"
 	is "gotest.tools/assert/cmp"
 	"gotest.tools/golden"
+
+	"authelia.com/provider/saml"
 )
 
 func TestServicesCrud(t *testing.T) {
@@ -170,7 +172,7 @@ func TestServiceEntityIDOwnership(t *testing.T) {
 func TestNewRejectsDuplicateServiceEntityID(t *testing.T) {
 	store := &MemoryStore{}
 	for _, id := range []string{"a", "b"} {
-		metadata, err := getSPMetadata(strings.NewReader(testServiceMetadata("https://one.example.com/metadata", id)))
+		metadata, err := saml.ParseServiceProviderMetadata([]byte(testServiceMetadata("https://one.example.com/metadata", id)))
 		assert.NilError(t, err)
 		assert.NilError(t, store.Put("/services/"+id, &Service{Metadata: *metadata}))
 	}
@@ -203,7 +205,7 @@ func (s reversedListStore) List(prefix string) ([]string, error) {
 func TestNewReportsDuplicateServicesInSortedOrder(t *testing.T) {
 	store := &MemoryStore{}
 	for _, id := range []string{"a", "b"} {
-		metadata, err := getSPMetadata(strings.NewReader(testServiceMetadata("https://one.example.com/metadata", id)))
+		metadata, err := saml.ParseServiceProviderMetadata([]byte(testServiceMetadata("https://one.example.com/metadata", id)))
 		assert.NilError(t, err)
 		assert.NilError(t, store.Put("/services/"+id, &Service{Metadata: *metadata}))
 	}

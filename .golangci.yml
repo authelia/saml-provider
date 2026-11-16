@@ -53,7 +53,7 @@ linters:
       - path: (.+)\.go$
         text: G104 # 'Errors unhandled. (gosec)
     paths:
-      - example/.*\.go$
+      - example/(service\.go|trivial/.*\.go|idp/idp\.go)$
       - internal/dsig/.*\.go$
 formatters:
   enable:

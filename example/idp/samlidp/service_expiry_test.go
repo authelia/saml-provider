@@ -1,10 +1,8 @@
 package samlidp
 
 import (
-	"errors"
 	"net/http"
 	"net/http/httptest"
-	"os"
 	"strings"
 	"testing"
 	"time"
@@ -73,13 +71,15 @@ func TestPutServiceRejectsExpiredMetadata(t *testing.T) {
 	} {
 		t.Run(name, func(t *testing.T) {
 			test := NewServerTest(t)
+			hardeningAddUser(t, test)
+			cookie := loggedInCookie(t, test)
 			assert.Check(t, is.Equal(putExpiryService(test, expiryMetadata(tc.entity, tc.role, tc.group)), tc.code))
 
-			_, err := test.Server.GetServiceProvider(nil, expiryEntityID)
+			w := idpInitiated(test.Server, cookie)
 			if tc.code == http.StatusNoContent {
-				assert.Check(t, err)
+				assert.Check(t, is.Equal(w.Code, http.StatusOK), w.Body.String())
 			} else {
-				assert.Check(t, errors.Is(err, os.ErrNotExist), "%v", err)
+				assert.Check(t, is.Equal(w.Code, http.StatusNotFound), w.Body.String())
 			}
 		})
 	}
@@ -95,14 +95,14 @@ func TestServiceStopsBeingTrustedWhenMetadataExpires(t *testing.T) {
 	} {
 		t.Run(name, func(t *testing.T) {
 			test := NewServerTest(t)
+			hardeningAddUser(t, test)
+			cookie := loggedInCookie(t, test)
 			assert.Assert(t, is.Equal(putExpiryService(test, metadata), http.StatusNoContent))
-			_, err := test.Server.GetServiceProvider(nil, expiryEntityID)
-			assert.Check(t, err)
+			assert.Check(t, is.Equal(idpInitiated(test.Server, cookie).Code, http.StatusOK))
 
 			now := saml.TimeNow().Add(time.Second)
 			saml.TimeNow = func() time.Time { return now }
-			_, err = test.Server.GetServiceProvider(nil, expiryEntityID)
-			assert.Check(t, errors.Is(err, os.ErrNotExist), "%v", err)
+			assert.Check(t, is.Equal(idpInitiated(test.Server, cookie).Code, http.StatusNotFound))
 		})
 	}
 }
@@ -110,6 +110,8 @@ func TestServiceStopsBeingTrustedWhenMetadataExpires(t *testing.T) {
 // Expired metadata in the store is refused when the server starts, just as if it were registered.
 func TestStoredExpiredServiceIsNotTrusted(t *testing.T) {
 	test := NewServerTest(t)
+	hardeningAddUser(t, test)
+	cookie := loggedInCookie(t, test)
 	assert.Assert(t, is.Equal(putExpiryService(test, expiryMetadata(afterNow, "", "")), http.StatusNoContent))
 
 	now := saml.TimeNow().Add(time.Second)
@@ -121,14 +123,15 @@ func TestStoredExpiredServiceIsNotTrusted(t *testing.T) {
 		URL:         test.Server.IDP.MetadataURL,
 	})
 	assert.NilError(t, err)
-	_, err = server.GetServiceProvider(nil, expiryEntityID)
-	assert.Check(t, errors.Is(err, os.ErrNotExist), "%v", err)
+	assert.Check(t, is.Equal(idpInitiated(server, cookie).Code, http.StatusNotFound))
 }
 
 // The validUntil of a descriptor covers only that descriptor, so an expired one is left out while
 // another stays in use.
 func TestExpiredDescriptorIsLeftOut(t *testing.T) {
 	test := NewServerTest(t)
+	hardeningAddUser(t, test)
+	cookie := loggedInCookie(t, test)
 	descriptor := func(validUntil, acs string) string {
 		return `<SPSSODescriptor protocolSupportEnumeration="urn:oasis:names:tc:SAML:2.0:protocol" validUntil="` + validUntil + `">` +
 			`<AssertionConsumerService Binding="urn:oasis:names:tc:SAML:2.0:bindings:HTTP-POST" Location="` + acs + `" index="1"/>` +
@@ -139,16 +142,26 @@ func TestExpiredDescriptorIsLeftOut(t *testing.T) {
 		`</EntityDescriptor>`
 	assert.Assert(t, is.Equal(putExpiryService(test, metadata), http.StatusNoContent))
 
-	current, err := test.Server.GetServiceProvider(nil, expiryEntityID)
-	assert.NilError(t, err)
-	assert.Assert(t, is.Len(current.SPSSODescriptors, 1))
-	assert.Check(t, is.Equal(current.SPSSODescriptors[0].AssertionConsumerServices[0].Location, "https://expiry.example.com/current"))
+	// The response goes to the descriptor that is current.
+	w := idpInitiated(test.Server, cookie)
+	assert.Check(t, is.Equal(w.Code, http.StatusOK), w.Body.String())
+	assert.Check(t, is.Contains(w.Body.String(), "https://expiry.example.com/current"))
+	assert.Check(t, !strings.Contains(w.Body.String(), "https://expiry.example.com/expired"))
 
 	// The stored metadata keeps both, as it was registered.
 	assert.Check(t, is.Len(test.Server.serviceProviders[expiryEntityID].SPSSODescriptors, 2))
 
 	now := saml.TimeNow().Add(time.Second)
 	saml.TimeNow = func() time.Time { return now }
-	_, err = test.Server.GetServiceProvider(nil, expiryEntityID)
-	assert.Check(t, errors.Is(err, os.ErrNotExist), "%v", err)
+	assert.Check(t, is.Equal(idpInitiated(test.Server, cookie).Code, http.StatusNotFound))
+}
+
+// idpInitiated starts an IdP-initiated login for the service provider through the identity provider
+// of the server, with the session of cookie.
+func idpInitiated(server *Server, cookie *http.Cookie) *httptest.ResponseRecorder {
+	r := httptest.NewRequest(http.MethodGet, "https://idp.example.com/login/expiry", nil)
+	r.AddCookie(cookie)
+	w := httptest.NewRecorder()
+	server.IDP.ServeIDPInitiated(w, r, expiryEntityID, "")
+	return w
 }

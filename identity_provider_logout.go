@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"slices"
 	"time"
 
 	"github.com/beevik/etree"
@@ -26,6 +27,9 @@ type LogoutSessionProvider interface {
 	// req.Request.NameID identifies, and of the sessions that req.Request.SessionIndexes lists, if
 	// there are any. The request has been verified to come from the service provider in
 	// req.ServiceProviderMetadata. Other service providers are not told of the logout.
+	//
+	// Implementations should use req.MatchesSession to decide whether a session is the one the request
+	// names, as a service provider may only end the sessions it was told of (SAMLCore §3.7.3.2).
 	//
 	// It may set headers on w, such as to remove a cookie, but must not write the status or body,
 	// which are the LogoutResponse. An error other than ErrPartialLogout sends a Responder status, and
@@ -51,6 +55,64 @@ type IdpLogoutRequest struct {
 
 	// binding is the binding that the request was received on.
 	binding string
+}
+
+// MatchesSession returns an error unless the request is for the session. The NameID of the request must be
+// the complete identifier the identity provider asserted for the session (SAMLCore §3.7.3.2, §8.3): the
+// same value, Format, NameQualifier and SPNameQualifier, and no SPProvidedID. An omitted or unspecified
+// Format, or an omitted qualifier, doesn't match. This is compared with what DefaultAssertionMaker
+// asserts, so an identity provider with a custom AssertionMaker that asserts another identifier needs
+// IdentityProvider.LogoutNameIDValueOnly, which compares only the value, or its own check. If the request
+// lists session indexes, the index of the session must be one of them.
+func (req *IdpLogoutRequest) MatchesSession(session *Session) error {
+	if session == nil {
+		return errors.New("there is no session")
+	}
+
+	nameID := req.Request.NameID
+	if nameID == nil {
+		return errors.New("the request has no NameID")
+	}
+
+	if nameID.Value != session.NameID {
+		return errors.New("the NameID value is not that of the session")
+	}
+
+	if !req.IDP.LogoutNameIDValueOnly {
+		if req.ServiceProviderMetadata == nil {
+			return errors.New("the request has no service provider metadata")
+		}
+
+		format := session.NameIDFormat
+		if format == "" {
+			format = string(TransientNameIDFormat)
+		}
+
+		// An omitted Format is unspecified (SAMLCore §2.2.2), which is not the format that was asserted, and the
+		// qualifiers may only be omitted where they can be derived from the message, which they can't be in a
+		// request the service provider sends to the identity provider (SAMLCore §8.3.7).
+		if nameID.Format != format {
+			return fmt.Errorf("the NameID format is %q and the session has %q", nameID.Format, format)
+		}
+
+		if nameID.NameQualifier != req.IDP.Metadata().EntityID {
+			return fmt.Errorf("the NameID NameQualifier %q is not that of the identity provider", nameID.NameQualifier)
+		}
+
+		if nameID.SPNameQualifier != req.ServiceProviderMetadata.EntityID {
+			return fmt.Errorf("the NameID SPNameQualifier %q is not that of the service provider", nameID.SPNameQualifier)
+		}
+
+		if nameID.SPProvidedID != "" {
+			return errors.New("the NameID has a SPProvidedID, which the identity provider does not assert")
+		}
+	}
+
+	if len(req.Request.SessionIndexes) != 0 && !slices.ContainsFunc(req.Request.SessionIndexes, func(i SessionIndex) bool { return i.Value == session.Index }) {
+		return errors.New("the session index is not one the request lists")
+	}
+
+	return nil
 }
 
 // ServeSLO handles a SAML LogoutRequest from a service provider, on the HTTP-Redirect or HTTP-POST
@@ -147,7 +209,7 @@ func (req *IdpLogoutRequest) Validate() error {
 	}
 
 	serviceProviderID := req.Request.Issuer.Value
-	serviceProvider, err := req.IDP.ServiceProviderProvider.GetServiceProvider(req.HTTPRequest, serviceProviderID)
+	serviceProvider, err := req.IDP.serviceProvider(req.HTTPRequest, serviceProviderID)
 	if errors.Is(err, os.ErrNotExist) {
 		return fmt.Errorf("cannot handle request from unknown service provider %s", serviceProviderID)
 	} else if err != nil {

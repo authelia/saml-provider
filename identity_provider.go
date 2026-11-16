@@ -89,7 +89,7 @@ const defaultAuthnContextClassRef = "urn:oasis:names:tc:SAML:2.0:ac:classes:Pass
 
 // SessionProvider is an interface used by IdentityProvider to determine the
 // Session associated with a request. For an example implementation, see
-// GetSession in the samlidp package.
+// GetSession in the example/idp/samlidp package.
 type SessionProvider interface {
 	// GetSession returns the remote user session associated with the http.Request.
 	//
@@ -127,6 +127,10 @@ type ServiceProviderProvider interface {
 	// service provider ID, which is typically the service provider's
 	// metadata URL. If an appropriate service provider cannot be found then
 	// the returned error must be os.ErrNotExist.
+	//
+	// IdentityProvider drops expired metadata and descriptors itself (see CurrentMetadata), so a provider
+	// may return the stored metadata as is. ParseServiceProviderMetadata and
+	// IdentityProvider.CheckServiceProviderMetadata are there for registering metadata.
 	GetServiceProvider(r *http.Request, serviceProviderID string) (*EntityDescriptor, error)
 }
 
@@ -373,6 +377,12 @@ type IdentityProvider struct {
 	// that order, so that a service provider which lists no key transport algorithm receives SHA-1. The legacy
 	// identifiers of SHA-256 and SHA-512 are accepted, and the standard ones are written.
 	KeyTransportDigestMethods []string
+
+	// LogoutNameIDValueOnly makes IdpLogoutRequest.MatchesSession compare only the NameID value and the session
+	// indexes of a LogoutRequest, as earlier versions did, for service providers that don't echo the Format and
+	// qualifiers of the NameID they were given. It is off by default, which compares the whole identifier
+	// (SAMLCore §3.7.3.2).
+	LogoutNameIDValueOnly bool
 }
 
 // ErrInsecureEndpoint is returned when the endpoint that a response would be sent to is not secure.
@@ -704,7 +714,7 @@ func (idp *IdentityProvider) ServeIDPInitiated(w http.ResponseWriter, r *http.Re
 	}
 
 	var err error
-	req.ServiceProviderMetadata, err = idp.ServiceProviderProvider.GetServiceProvider(r, serviceProviderID)
+	req.ServiceProviderMetadata, err = idp.serviceProvider(r, serviceProviderID)
 	if err == os.ErrNotExist {
 		idp.logger().Printf("cannot find service provider: %s", serviceProviderID)
 		http.Error(w, http.StatusText(http.StatusNotFound), http.StatusNotFound)
@@ -765,6 +775,21 @@ type IdpAuthnRequest struct {
 // RedirectQueryFormField is the POST form field which re-presents a signed HTTP-Redirect request. See
 // IdpAuthnRequest.RedirectQuery.
 const RedirectQueryFormField = "SAMLRedirectQuery"
+
+// ResumeFormValues returns the hidden form fields a SessionProvider which shows a login form must
+// include so that posting the form back to the SSO endpoint resumes this request.
+func (req *IdpAuthnRequest) ResumeFormValues() url.Values {
+	values := url.Values{
+		"SAMLRequest": {base64.StdEncoding.EncodeToString(req.RequestBuffer)},
+		"RelayState":  {req.RelayState},
+	}
+
+	if req.RedirectQuery != "" {
+		values.Set(RedirectQueryFormField, req.RedirectQuery)
+	}
+
+	return values
+}
 
 // NewIdpAuthnRequest returns a new IdpAuthnRequest for the given HTTP request to the authorization
 // service.
@@ -870,7 +895,7 @@ func (req *IdpAuthnRequest) Validate() error {
 
 	// find the service provider
 	serviceProviderID := req.Request.Issuer.Value
-	serviceProvider, err := req.IDP.ServiceProviderProvider.GetServiceProvider(req.HTTPRequest, serviceProviderID)
+	serviceProvider, err := req.IDP.serviceProvider(req.HTTPRequest, serviceProviderID)
 	if err == os.ErrNotExist {
 		return fmt.Errorf("cannot handle request from unknown service provider %s", serviceProviderID)
 	} else if err != nil {
