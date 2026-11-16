@@ -78,6 +78,40 @@ func TestCheckServiceProviderEndpoint(t *testing.T) {
 	}
 }
 
+func TestCheckServiceProviderBackChannelEndpoint(t *testing.T) {
+	testCases := []struct {
+		name     string
+		location string
+		insecure bool
+		ok       bool
+	}{
+		{"ShouldAllowHTTPS", "https://sp.example.com/slo", false, true},
+		{"ShouldAllowHTTPSLoopback", "https://127.0.0.1:8443/slo", false, true},
+		{"ShouldRefuseHTTPLoopbackAddress", "http://127.0.0.1:8080/slo", false, false},
+		{"ShouldRefuseHTTPLocalhost", "http://localhost:8080/slo", false, false},
+		{"ShouldRefuseHTTP", "http://sp.example.com/slo", false, false},
+		{"ShouldAllowHTTPLoopbackWithAllowInsecure", "http://127.0.0.1:8080/slo", true, true},
+		{"ShouldAllowHTTPWithAllowInsecure", "http://sp.example.com/slo", true, true},
+		{"ShouldRefuseRelative", "/slo", false, false},
+		{"ShouldRefuseRelativeWithAllowInsecure", "/slo", true, false},
+		{"ShouldRefuseSchemeRelativeWithAllowInsecure", "//sp.example.com/slo", true, false},
+		{"ShouldRefuseNotHTTPWithAllowInsecure", "ftp://sp.example.com/slo", true, false},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			idp := &IdentityProvider{AllowInsecureServiceProviderEndpoints: tc.insecure}
+
+			err := idp.CheckServiceProviderBackChannelEndpoint(tc.location)
+			if tc.ok {
+				assert.Check(t, err)
+			} else {
+				assert.Check(t, errors.Is(err, ErrInsecureEndpoint), "error: %v", err)
+			}
+		})
+	}
+}
+
 // insecureEndpointTestIDP returns an identity provider whose service provider has the given ACS endpoints.
 func insecureEndpointTestIDP(t *testing.T, acs ...IndexedEndpoint) *IdentityProviderTest {
 	t.Helper()

@@ -15,6 +15,7 @@ import (
 	"fmt"
 	"html/template"
 	"io"
+	"mime"
 	"net"
 	"net/http"
 	"net/netip"
@@ -315,6 +316,16 @@ type IdentityProvider struct {
 	// Defaults to a form which posts SAMLRequest and RelayState.
 	LogoutRequestFormTemplate *template.Template
 
+	// SOAPLogoutURL is the single logout service on the SOAP binding, which ServeSOAPLogout handles. When it is set
+	// and the SessionProvider implements LogoutSessionProvider, the metadata lists it. It may share its path
+	// with LogoutURL, as Handler tells the two apart by the Content-Type.
+	SOAPLogoutURL url.URL
+
+	// HTTPClient sends back-channel messages, such as a LogoutRequest over SOAP. Defaults to a client with a
+	// 10 second timeout. A client that is set is copied, and the copy never follows a redirect, whatever its
+	// CheckRedirect, and has the 10 second timeout if its Timeout is 0; its Transport is kept.
+	HTTPClient *http.Client
+
 	// WantAuthnRequestsSigned requires every AuthnRequest to be signed, and is declared in the
 	// metadata. A request is also required to be signed if the metadata of its service provider
 	// sets AuthnRequestsSigned, and any signature that is present is always verified.
@@ -421,6 +432,37 @@ func (idp *IdentityProvider) CheckServiceProviderEndpoint(location string) error
 	}
 
 	return fmt.Errorf("cannot send a response to %q: %w", location, ErrInsecureEndpoint)
+}
+
+// CheckServiceProviderBackChannelEndpoint returns an error that wraps ErrInsecureEndpoint if the
+// identity provider would refuse to send a back-channel message, such as a LogoutRequest over SOAP,
+// to location, which must pass CheckServiceProviderEndpoint and be an absolute https URL, unless
+// AllowInsecureServiceProviderEndpoints allows any http URL. Unlike CheckServiceProviderEndpoint, an
+// http URL on a loopback host is not exempt: that exemption is for messages the browser delivers,
+// whereas a back-channel message is sent by the identity provider itself, and a loopback URL would
+// reach services on its own host. A ServiceProviderProvider can use it to refuse unusable metadata
+// when it is registered.
+func (idp *IdentityProvider) CheckServiceProviderBackChannelEndpoint(location string) error {
+	if err := idp.CheckServiceProviderEndpoint(location); err != nil {
+		return err
+	}
+
+	if idp.AllowInsecureServiceProviderEndpoints || endpointScheme(location) == "https" {
+		return nil
+	}
+
+	return fmt.Errorf("cannot send a back-channel message to %q: %w", location, ErrInsecureEndpoint)
+}
+
+// checkServiceProviderBindingEndpoint checks location with CheckServiceProviderBackChannelEndpoint if
+// binding is a back-channel binding, which the identity provider sends itself, and otherwise with
+// CheckServiceProviderEndpoint.
+func (idp *IdentityProvider) checkServiceProviderBindingEndpoint(binding, location string) error {
+	if binding == SOAPBinding {
+		return idp.CheckServiceProviderBackChannelEndpoint(location)
+	}
+
+	return idp.CheckServiceProviderEndpoint(location)
 }
 
 // endpointScheme returns the lower case scheme of location if it is an absolute URL with a host, or
@@ -567,21 +609,69 @@ func (idp *IdentityProvider) Metadata() *EntityDescriptor {
 		}
 	}
 
+	if _, ok := idp.SessionProvider.(LogoutSessionProvider); ok && idp.SOAPLogoutURL.String() != "" {
+		ed.IDPSSODescriptors[0].SingleLogoutServices = append(ed.IDPSSODescriptors[0].SingleLogoutServices, Endpoint{
+			Binding:  SOAPBinding,
+			Location: idp.SOAPLogoutURL.String(),
+		})
+	}
+
 	return ed
 }
 
-// Handler returns an [http.Handler] that serves the metadata and SSO URLs, and the logout URL if it
-// is set.
+// Handler returns an [http.Handler] that serves the metadata and SSO URLs, and the logout URL and SOAP logout URL
+// if they are set. A URL with an empty path is served at "/". When LogoutURL and SOAPLogoutURL share a path, a
+// POST with a text/xml body there goes to ServeSOAPLogout and anything else to ServeSLO.
 func (idp *IdentityProvider) Handler() http.Handler {
 	mux := http.NewServeMux()
-	mux.HandleFunc(idp.MetadataURL.Path, idp.ServeMetadata)
-	mux.HandleFunc(idp.SSOURL.Path, idp.ServeSSO)
+	mux.HandleFunc(handlerPath(idp.MetadataURL), idp.ServeMetadata)
+	mux.HandleFunc(handlerPath(idp.SSOURL), idp.ServeSSO)
 
-	if idp.LogoutURL.String() != "" {
-		mux.HandleFunc(idp.LogoutURL.Path, idp.ServeSLO)
+	slo, soap := idp.LogoutURL.String() != "", idp.SOAPLogoutURL.String() != ""
+
+	switch {
+	case slo && soap && handlerPath(idp.LogoutURL) == handlerPath(idp.SOAPLogoutURL):
+		mux.HandleFunc(handlerPath(idp.LogoutURL), func(w http.ResponseWriter, r *http.Request) {
+			if isSOAPRequest(r) {
+				idp.ServeSOAPLogout(w, r)
+
+				return
+			}
+
+			idp.ServeSLO(w, r)
+		})
+	default:
+		if slo {
+			mux.HandleFunc(handlerPath(idp.LogoutURL), idp.ServeSLO)
+		}
+
+		if soap {
+			mux.HandleFunc(handlerPath(idp.SOAPLogoutURL), idp.ServeSOAPLogout)
+		}
 	}
 
 	return mux
+}
+
+// handlerPath returns the path of u to serve it at on a mux, which is "/" when the path is empty.
+func handlerPath(u url.URL) string {
+	if u.Path == "" {
+		return "/"
+	}
+
+	return u.Path
+}
+
+// isSOAPRequest reports whether r is a POST with a text/xml body, which a SOAP 1.1 request is, and which no
+// front-channel binding sends.
+func isSOAPRequest(r *http.Request) bool {
+	if r.Method != http.MethodPost {
+		return false
+	}
+
+	mediaType, _, err := mime.ParseMediaType(r.Header.Get("Content-Type"))
+
+	return err == nil && mediaType == "text/xml"
 }
 
 // ServeMetadata is an [http.HandlerFunc] that serves the IDP metadata.
