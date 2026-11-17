@@ -55,7 +55,7 @@ least the subset of SAML known as [interoperable SAML](https://kantarainitiative
 | Web Browser SSO (IdP-initiated/unsolicited) | ✅  | ✅ |
 | Single Logout                               | ⚠️  | ⚠️ |
 | Artifact Resolution                         | ✅  | ✅ |
-| Enhanced Client or Proxy (ECP)              | ❌  | ❌ |
+| Enhanced Client or Proxy (ECP)              | ⚠️  | ❌ |
 | Holder-of-Key Web Browser SSO               | ❌  | ❌ |
 | Name Identifier Management                  | ❌  | ❌ |
 | Name Identifier Mapping                     | ❌  | ❌ |
@@ -204,6 +204,25 @@ least the subset of SAML known as [interoperable SAML](https://kantarainitiative
   - A SOAP `SingleLogoutService` must be `https`: unlike an endpoint the browser is sent to, an `http` one on a
     loopback host is refused, as the IdP itself would connect to it (`CheckServiceProviderBackChannelEndpoint`).
     `AllowInsecureServiceProviderEndpoints` allows any `http` URL.
+- **Enhanced Client or Proxy (ECP):** `IdentityProvider.ServeECP` handles an `AuthnRequest` that a non-browser client
+  relays in a SOAP envelope at `IdentityProvider.ECPURL`, and answers on the same connection with the signed `Response`
+  in a SOAP envelope, with the `ecp:Response` header block, and `ecp:RequestAuthenticated` when the request's signature
+  was verified (SAMLProfiles §4.2, ECP v2.0 §2.3.4 to §2.3.6). The metadata lists a SOAP `SingleSignOnService` when
+  `ECPURL` is set and the `SessionProvider` implements `ECPSessionProvider`, and `ECPURL` may share its path with
+  `SSOURL`.
+  - The principal is authenticated by `ECPSessionProvider.GetECPSession`, typically from HTTP Basic credentials, which
+    answers `401` itself when there are none. `GetSession` and browser sessions are not used. `IsPassive` is answered
+    `Responder/NoPassive`, and `ForceAuthn` is left to the provider. Once the principal is authenticated the request
+    is used up, as for Web SSO: a replay is answered `Requester/RequestDenied`, and the assertion is given to
+    `IdentityProvider.AssertionStore`.
+  - The `Response` is bound to an `AssertionConsumerService` with the PAOS binding from the SP's metadata, named by the
+    request or the default. A request that fails before that endpoint is known, such as one from an unknown SP, with a
+    missing or invalid signature, or naming an unlisted ACS, gets a SOAP `Client` fault; later failures are error
+    statuses as for Web SSO, in the same envelope. A signed request needs no `Destination`.
+  - Only bearer confirmation is supported. Channel bindings are not verified: a request or client that sends
+    `cb:ChannelBindings` is answered `Requester/RequestUnsupported`. Holder-of-key confirmation, the delegation
+    audience and unsolicited responses with `ecp:RelayState` are not supported. PAOS is only used between the client
+    and the SP, so the IdP doesn't speak it.
 - **Insecure endpoints:** assertions are bearer tokens, so responses are only sent to an SP endpoint that is `https`, or
   `http` on a loopback host (`localhost`, `*.localhost`, `127.0.0.0/8` or `::1`). This covers the
   `AssertionConsumerService` and the `SingleLogoutService` that receives a `LogoutResponse`. A request that names an
@@ -230,9 +249,9 @@ least the subset of SAML known as [interoperable SAML](https://kantarainitiative
     `samlidp` does not serve the endpoint.
 - **Assertion Query/Request and Attribute Query:** `AttributeQuery`, `AuthnQuery` and `AssertionIDRequest` are served
   on the SOAP binding only (SAMLProf §6); the URI binding and `AuthzDecisionQuery` are not supported. Each has its own
-  handler and URL, which need their own paths: `ServeAttributeQuery` at `IdentityProvider.AttributeServiceURL`,
-  `ServeAuthnQuery` at `AuthnQueryServiceURL` and `ServeAssertionIDRequest` at `AssertionIDRequestServiceURL`, and
-  `Handler` serves those that are set.
+  handler and URL: `ServeAttributeQuery` at `IdentityProvider.AttributeServiceURL`, `ServeAuthnQuery` at
+  `AuthnQueryServiceURL` and `ServeAssertionIDRequest` at `AssertionIDRequestServiceURL`, and `Handler` serves those
+  that are set.
   - The request must carry an enveloped signature by its issuer, as for a `LogoutRequest` over SOAP, and is answered
     on the same connection with a signed `Response`. One that is unsigned or can't be verified is answered
     `Requester/RequestDenied`, another message `Requester/RequestUnsupported`, and a wrong version, age or
@@ -261,7 +280,10 @@ least the subset of SAML known as [interoperable SAML](https://kantarainitiative
     sign-on or a query issues, signed and before encryption. Without it the request is answered
     `Responder/RequestUnsupported` and the service isn't in the metadata. An assertion is only returned to the SP it
     was issued to, and at most 32 are returned for one request. `samlidp` implements neither interface.
-- **SOAP:** used for single logout, artifact resolution and the assertion query and request protocol only.
+- **SOAP:** used for single logout, artifact resolution, the assertion query and request protocol and ECP only. The
+  URLs of these services may share a path with each other, and with `SSOURL` or `LogoutURL`: `Handler` sends a POST
+  with a `text/xml` body to the SOAP service for the message in the `Body` of the envelope, which it reads within the
+  64 KiB limit of a SOAP request, and anything else to the front-channel service of the path.
 - **Verify signed `AuthnRequest`:** any signature on the HTTP Redirect or HTTP POST bindings is verified, and one is
   required if the SP metadata sets `AuthnRequestsSigned` or `IdentityProvider.WantAuthnRequestsSigned` is set. SHA-1
   signatures are accepted. A custom login form must send `IdpAuthnRequest.RedirectQuery` in the `SAMLRedirectQuery`

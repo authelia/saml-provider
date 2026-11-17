@@ -248,8 +248,6 @@ func soapHeaderAttrIsTrue(header *etree.Element, local string) bool {
 
 // receiveSOAPRequest answers a non-POST with 405 and a bad envelope with a fault, logging the reason, and
 // returns false in both cases.
-//
-//nolint:unparam // No handler understands a header block yet, so understood is always empty.
 func (idp *IdentityProvider) receiveSOAPRequest(w http.ResponseWriter, r *http.Request, understood ...xml.Name) (*soapRequest, bool) {
 	if r.Method != http.MethodPost {
 		idp.logger().Printf("failed to read SOAP request: %s", "the method is not POST")
@@ -287,17 +285,22 @@ func writeSOAPDocument(w http.ResponseWriter, status int, doc *etree.Document) e
 		return fmt.Errorf("failed to serialize SOAP envelope: %w", err)
 	}
 
+	return writeSOAPBytes(w, status, buf)
+}
+
+// writeSOAPBytes writes a serialized SOAP envelope.
+func writeSOAPBytes(w http.ResponseWriter, status int, buf []byte) error {
 	setNoCacheHeaders(w)
 	w.Header().Set("Content-Type", "text/xml; charset=utf-8")
 	w.WriteHeader(status)
 
-	_, err = w.Write(buf)
+	_, err := w.Write(buf)
 
 	return err
 }
 
-// writeSOAPResponse writes a 200 SOAP envelope carrying the header blocks, if any, and the message.
-func writeSOAPResponse(w http.ResponseWriter, headers []*etree.Element, message *etree.Element) error {
+// newSOAPResponse returns a SOAP envelope carrying the header blocks, if any, and the message.
+func newSOAPResponse(headers []*etree.Element, message *etree.Element) *etree.Document {
 	doc, envelope := newSOAPEnvelope()
 
 	if len(headers) != 0 {
@@ -310,7 +313,12 @@ func writeSOAPResponse(w http.ResponseWriter, headers []*etree.Element, message 
 
 	envelope.CreateElement("soapenv:Body").AddChild(message.Copy())
 
-	return writeSOAPDocument(w, http.StatusOK, doc)
+	return doc
+}
+
+// writeSOAPResponse writes a 200 SOAP envelope carrying the header blocks, if any, and the message.
+func writeSOAPResponse(w http.ResponseWriter, headers []*etree.Element, message *etree.Element) error {
+	return writeSOAPDocument(w, http.StatusOK, newSOAPResponse(headers, message))
 }
 
 // writeSOAPFault writes a 500 SOAP envelope carrying the fault.

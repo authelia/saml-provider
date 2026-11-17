@@ -21,6 +21,10 @@ const HTTPArtifactBinding = "urn:oasis:names:tc:SAML:2.0:bindings:HTTP-Artifact"
 // SOAPBinding is the official URN for the SOAP binding (transport).
 const SOAPBinding = "urn:oasis:names:tc:SAML:2.0:bindings:SOAP"
 
+// PAOSBinding is the official URN for the reverse SOAP (PAOS) binding, which a service provider receives the Response
+// of the Enhanced Client or Proxy profile on.
+const PAOSBinding = "urn:oasis:names:tc:SAML:2.0:bindings:PAOS"
+
 // SOAPBindingV1 is the URN for the SOAP binding in SAML 1.0.
 const SOAPBindingV1 = "urn:oasis:names:tc:SAML:1.0:bindings:SOAP-binding"
 
@@ -301,6 +305,7 @@ func checkEndpointLocation(binding string, location string) (string, error) {
 		HTTPRedirectBinding,
 		HTTPArtifactBinding,
 		SOAPBinding,
+		PAOSBinding,
 		SOAPBindingV1:
 		locationURL, err := url.Parse(location)
 		if err != nil {

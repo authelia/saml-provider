@@ -99,7 +99,7 @@ func (idp *IdentityProvider) replayStore() ReplayStore {
 // It must only be called for a message that is authenticated, or that the identity provider is about to act on
 // for an authenticated user, and has passed every other check, so that nobody else can fill the store. That is
 // after the signature is verified and after the checks of the request stage, so the endpoint for the response is
-// already resolved from metadata. Every handler of a request calls it: ServeSSO through
+// already resolved from metadata. Every handler of a request calls it: ServeSSO and ServeECP through
 // IdpAuthnRequest.CheckReplay, IdpLogoutRequest.Validate, and the assertion query and request services.
 //
 // The error is a *statusError. A replay is Requester with RequestDenied and wraps ErrReplayed. A failure of the
