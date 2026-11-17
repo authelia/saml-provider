@@ -62,7 +62,7 @@ func TestArtifactResolutionOnlyContactsLocationInMetadata(t *testing.T) {
 				HTTPClient:  &http.Client{Transport: transport},
 			}
 			assert.NilError(t, xml.Unmarshal(test.IDPMetadata, sp.IDPMetadata))
-			sp.IDPMetadata.IDPSSODescriptors[0].ArtifactResolutionServices = []Endpoint{
+			sp.IDPMetadata.IDPSSODescriptors[0].ArtifactResolutionServices = []IndexedEndpoint{
 				{Binding: SOAPBinding, Location: location},
 			}
 
@@ -121,7 +121,7 @@ func TestArtifactResolutionDoesNotFollowRedirects(t *testing.T) {
 						HTTPClient:  client,
 					}
 					assert.NilError(t, xml.Unmarshal(test.IDPMetadata, sp.IDPMetadata))
-					sp.IDPMetadata.IDPSSODescriptors[0].ArtifactResolutionServices = []Endpoint{{Binding: SOAPBinding, Location: idp.URL}}
+					sp.IDPMetadata.IDPSSODescriptors[0].ArtifactResolutionServices = []IndexedEndpoint{{Binding: SOAPBinding, Location: idp.URL}}
 
 					req, err := http.NewRequest(http.MethodPost, sp.AcsURL.String(), strings.NewReader(url.Values{"SAMLart": {"artifact"}}.Encode()))
 					assert.NilError(t, err)
@@ -169,7 +169,7 @@ func artifactRequestTo(t *testing.T, location string) (*ServiceProvider, *http.R
 		IDPMetadata: &EntityDescriptor{},
 	}
 	assert.NilError(t, xml.Unmarshal(test.IDPMetadata, sp.IDPMetadata))
-	sp.IDPMetadata.IDPSSODescriptors[0].ArtifactResolutionServices = []Endpoint{{Binding: SOAPBinding, Location: location}}
+	sp.IDPMetadata.IDPSSODescriptors[0].ArtifactResolutionServices = []IndexedEndpoint{{Binding: SOAPBinding, Location: location}}
 
 	req, err := http.NewRequest(http.MethodPost, sp.AcsURL.String(), strings.NewReader(url.Values{"SAMLart": {"artifact"}}.Encode()))
 	assert.NilError(t, err)

@@ -54,7 +54,7 @@ least the subset of SAML known as [interoperable SAML](https://kantarainitiative
 | Web Browser SSO (SP-initiated)              | ✅  | ✅ |
 | Web Browser SSO (IdP-initiated/unsolicited) | ✅  | ✅ |
 | Single Logout                               | ⚠️  | ⚠️ |
-| Artifact Resolution                         | ❌  | ✅ |
+| Artifact Resolution                         | ✅  | ✅ |
 | Enhanced Client or Proxy (ECP)              | ❌  | ❌ |
 | Holder-of-Key Web Browser SSO               | ❌  | ❌ |
 | Name Identifier Management                  | ❌  | ❌ |
@@ -70,7 +70,7 @@ least the subset of SAML known as [interoperable SAML](https://kantarainitiative
 | HTTP Redirect (`AuthnRequest`) | ✅  | ✅ |
 | HTTP POST (`AuthnRequest`)     | ✅  | ✅ |
 | HTTP POST (`Response`)         | ✅  | ✅ |
-| HTTP Artifact (`Response`)     | ❌  | ✅ |
+| HTTP Artifact (`Response`)     | ✅  | ✅ |
 | SOAP                           | ⚠️  | ⚠️ |
 | HTTP POST "SimpleSign"         | ❌  | ❌ |
 | Reverse SOAP (PAOS)            | ❌  | ❌ |
@@ -212,8 +212,23 @@ least the subset of SAML known as [interoperable SAML](https://kantarainitiative
   `samlidp.Options.AllowInsecureServiceProviderEndpoints`, to allow any `http` URL, only for testing. `samlidp` refuses
   to register an SP whose HTTP-POST ACS endpoints are all refused, using `CheckServiceProviderMetadata`, and the
   identity provider only uses metadata that `CurrentMetadata` finds unexpired.
-- **Artifact Resolution and HTTP Artifact:** not supported, and there is no `ArtifactResolutionService`.
-  Authentication (SSO) responses are only ever delivered via HTTP POST; SOAP is supported only for single logout.
+- **Artifact Resolution and HTTP Artifact:** off unless `IdentityProvider.ArtifactResolutionURL` is set. Then the
+  metadata lists the `ArtifactResolutionService` (SOAP, index 0), and an SSO `Response`, error responses included, is
+  delivered by artifact when the selected `AssertionConsumerService` has the HTTP Artifact binding: because the request
+  names it by index, URL or `ProtocolBinding`, or because it is the default. The browser posts a form to the ACS with
+  a type 0x0004 artifact, which keeps it out of URLs, logs and the `Referer` header, or is redirected there with
+  `ArtifactRedirectEncoding`, and the SP resolves it at `IdentityProvider.ServeArtifactResolution`.
+  - The `ArtifactResolve` must be signed by the SP the response was issued for. Any other request that is understood
+    gets a `Success` response with no message, as SAMLCore §3.5.3 requires: unsigned or unverifiable, expired, or for
+    an artifact that is unknown, expired, already resolved or issued for another SP. An artifact that another SP
+    presents is used up. The `ArtifactResponse` is always signed. The endpoint must be served over TLS.
+  - An artifact is single use and lives for `ArtifactLifetime`, one minute by default. The response waits in
+    `IdentityProvider.ArtifactStore`, and single use is enforced with `ReplayStore`. Both default to in-memory stores
+    that are private to the process, so an IdP which runs as several instances must set stores they share. The
+    stored response holds the assertion, which is only encrypted if the SP publishes an encryption key.
+  - Only the SSO `Response` is sent by artifact. Logout messages are not, and the IdP does not receive artifacts.
+    `samlidp` does not serve the endpoint.
+- **SOAP:** used for single logout and artifact resolution only.
 - **Verify signed `AuthnRequest`:** any signature on the HTTP Redirect or HTTP POST bindings is verified, and one is
   required if the SP metadata sets `AuthnRequestsSigned` or `IdentityProvider.WantAuthnRequestsSigned` is set. SHA-1
   signatures are accepted. A custom login form must send `IdpAuthnRequest.RedirectQuery` in the `SAMLRedirectQuery`
@@ -257,8 +272,8 @@ least the subset of SAML known as [interoperable SAML](https://kantarainitiative
   as 2.1 or a version that isn't a number). A request that is expired, issued in the future, past its `NotOnOrAfter` (a
   `LogoutRequest`) or has the wrong `Destination` is `Requester` with `RequestDenied`. The `Destination` of an
   `AuthnRequest` is only checked when `IdentityProvider.WantAuthnRequestsSigned` is set or the request has one. A
-  `ProtocolBinding` other than HTTP POST, the only binding responses are sent with, is `Responder` with
-  `UnsupportedBinding`, sent to the default HTTP POST endpoint of the metadata, provided any
+  `ProtocolBinding` other than HTTP POST, or HTTP Artifact when `ArtifactResolutionURL` is set, is `Responder` with
+  `UnsupportedBinding`, sent to the default endpoint of the metadata with a supported binding, provided any
   `AssertionConsumerServiceURL` of the request is listed there. A failure of `AssertionMaker` is `Responder`, or
   `Requester` with `InvalidNameIDPolicy` if it wraps `ErrInvalidNameIDPolicy`. A failure to sign or encrypt the response
   or to render the template is `Responder`. An application with its own handler gets the same mapping from

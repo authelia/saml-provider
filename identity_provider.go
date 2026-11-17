@@ -426,6 +426,40 @@ type IdentityProvider struct {
 	// only read and written with sync/atomic, and is not an atomic.Pointer so that an IdentityProvider may
 	// still be copied: a copy shares the store if it was already made, and otherwise makes its own.
 	defaultReplayStore unsafe.Pointer
+
+	// ArtifactResolutionURL is the artifact resolution service on the SOAP binding, which
+	// ServeArtifactResolution handles, and must have a path of its own. Setting it enables the HTTP-Artifact
+	// binding for responses: the metadata lists the service, an AssertionConsumerService with the
+	// HTTP-Artifact binding may be selected, and a request may name that binding as its ProtocolBinding. The
+	// response then waits in the ArtifactStore while the browser takes an artifact to the service provider,
+	// which resolves it here. It must be served over TLS, as SAMLProf §4.1.4.4 requires the exchange to be
+	// confidential.
+	ArtifactResolutionURL url.URL
+
+	// ArtifactStore keeps the responses that are delivered with the HTTP-Artifact binding until their
+	// artifact is resolved. Defaults to a MemoryArtifactStore of DefaultMemoryArtifactStoreCapacity, which
+	// is private to this process: identity providers that run as several instances must set a store that
+	// they share, and a ReplayStore that they share, which is what makes an artifact single use.
+	ArtifactStore ArtifactStore
+
+	// ArtifactLifetime is how long an artifact can be resolved for after it is issued. Defaults to
+	// DefaultArtifactLifetime.
+	ArtifactLifetime time.Duration
+
+	// ArtifactRedirectEncoding delivers an artifact in the query of a redirect to the assertion consumer
+	// service (SAMLBind §3.6.3.2), instead of in a form that the browser posts to it (§3.6.3.3), which is the
+	// default. An endpoint with the HTTP-Artifact binding must accept both. The form is the default because
+	// it keeps the artifact out of the URL, and so out of the history of the browser, the logs of servers and
+	// proxies, and the Referer header: an artifact is a bearer reference to the response until it is resolved.
+	ArtifactRedirectEncoding bool
+
+	// ArtifactFormTemplate renders the form, with an IdpAuthnRequestArtifact. Defaults to a form which
+	// posts SAMLart and RelayState.
+	ArtifactFormTemplate *template.Template
+
+	// defaultArtifactStore is the *MemoryArtifactStore that artifactStore makes when ArtifactStore is not
+	// set, kept like defaultReplayStore.
+	defaultArtifactStore unsafe.Pointer
 }
 
 // ErrInsecureEndpoint is returned when the endpoint that a response would be sent to is not secure.
@@ -639,12 +673,26 @@ func (idp *IdentityProvider) Metadata() *EntityDescriptor {
 		})
 	}
 
+	// SAMLBind §3.6.7 as changed by errata E2: an entity that sends messages with the HTTP-Artifact binding
+	// lists the indexed endpoints at which its artifacts are resolved. The index is the EndpointIndex of the
+	// artifacts (SAMLProf §5.5).
+	if idp.artifactEnabled() {
+		ed.IDPSSODescriptors[0].ArtifactResolutionServices = []IndexedEndpoint{
+			{
+				Binding:  SOAPBinding,
+				Location: idp.ArtifactResolutionURL.String(),
+				Index:    artifactResolutionServiceIndex,
+			},
+		}
+	}
+
 	return ed
 }
 
-// Handler returns an [http.Handler] that serves the metadata and SSO URLs, and the logout URL and SOAP logout URL
-// if they are set. A URL with an empty path is served at "/". When LogoutURL and SOAPLogoutURL share a path, a
-// POST with a text/xml body there goes to ServeSOAPLogout and anything else to ServeSLO.
+// Handler returns an [http.Handler] that serves the metadata and SSO URLs, and the logout URL, SOAP logout URL
+// and artifact resolution URL if they are set. A URL with an empty path is served at "/". When LogoutURL and
+// SOAPLogoutURL share a path, a POST with a text/xml body there goes to ServeSOAPLogout and anything else to
+// ServeSLO.
 func (idp *IdentityProvider) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc(handlerPath(idp.MetadataURL), idp.ServeMetadata)
@@ -671,6 +719,10 @@ func (idp *IdentityProvider) Handler() http.Handler {
 		if soap {
 			mux.HandleFunc(handlerPath(idp.SOAPLogoutURL), idp.ServeSOAPLogout)
 		}
+	}
+
+	if idp.artifactEnabled() {
+		mux.HandleFunc(handlerPath(idp.ArtifactResolutionURL), idp.ServeArtifactResolution)
 	}
 
 	return mux
@@ -715,11 +767,13 @@ func (idp *IdentityProvider) ServeMetadata(w http.ResponseWriter, _ *http.Reques
 // then it prompts the user via XXX.
 //
 // If the session already exists, then it produces a SAML assertion and
-// returns an HTTP response according to the specified binding. The
-// only supported binding right now is the HTTP-POST binding which returns
+// returns an HTTP response according to the binding of the assertion
+// consumer service. That is the HTTP-POST binding, which returns
 // an HTML form in the appropriate format with Javascript to automatically
 // submit that form the to service provider's Assertion Customer Service
-// endpoint.
+// endpoint, or, if ArtifactResolutionURL is set, the HTTP-Artifact binding,
+// which sends the browser there with an artifact that the service provider
+// resolves with ServeArtifactResolution.
 //
 // If the SAML request is invalid or cannot be verified a simple StatusBadRequest
 // response is sent. Once the ACS endpoint has been resolved from the metadata of the
@@ -1225,11 +1279,32 @@ func (req *IdpAuthnRequest) listsACSLocation(location string) bool {
 	return false
 }
 
+// responseBindings returns the bindings that this identity provider can send a response with: HTTP-POST, and
+// HTTP-Artifact if it has an ArtifactResolutionURL at which the artifact can be resolved.
+func (idp *IdentityProvider) responseBindings() []string {
+	if idp.artifactEnabled() {
+		return []string{HTTPPostBinding, HTTPArtifactBinding}
+	}
+
+	return []string{HTTPPostBinding}
+}
+
 // supportedProtocolBinding reports whether the response can be sent with the ProtocolBinding of the
-// request (SAMLCore §3.4.1): HTTP-POST, the only binding this identity provider sends responses with, or
-// none, which leaves the binding to the endpoint.
+// request (SAMLCore §3.4.1): one of the bindings this identity provider sends responses with, or none,
+// which leaves the binding to the endpoint.
 func (req *IdpAuthnRequest) supportedProtocolBinding() bool {
-	return req.Request.ProtocolBinding == "" || req.Request.ProtocolBinding == HTTPPostBinding
+	return req.Request.ProtocolBinding == "" || slices.Contains(req.IDP.responseBindings(), req.Request.ProtocolBinding)
+}
+
+// acsBindings returns the bindings of the endpoints that the response to the request may be sent to: the
+// ProtocolBinding of the request, which the identity provider must honour if it can (SAMLProf §4.1.3.5), or
+// every binding it sends responses with if the request names none, or one that is not supported.
+func (req *IdpAuthnRequest) acsBindings() []string {
+	if req.Request.ProtocolBinding != "" && req.supportedProtocolBinding() {
+		return []string{req.Request.ProtocolBinding}
+	}
+
+	return req.IDP.responseBindings()
 }
 
 // checkAuthnRequestSize returns an error if the decoded request is larger than maxAuthnRequestSize.
@@ -1265,8 +1340,10 @@ func isValidAuthnRequestID(id string) bool {
 	return true
 }
 
-// getACSEndpoint finds the endpoint to deliver the response to. HTTP-POST is the only binding this
-// identity provider can send a response with, so other endpoints are never selected.
+// getACSEndpoint finds the endpoint to deliver the response to. HTTP-POST, and HTTP-Artifact when the
+// identity provider has an ArtifactResolutionURL, are the only bindings it can send a response with, so
+// other endpoints are never selected, and neither are those of another binding than a ProtocolBinding
+// that the request names.
 //
 // An endpoint that the request names, by index or URL, is refused if it is insecure, as described by
 // IdentityProvider.AllowInsecureServiceProviderEndpoints, rather than replaced by another endpoint.
@@ -1275,7 +1352,7 @@ func isValidAuthnRequestID(id string) bool {
 //
 // AssertionConsumerServiceIndex is mutually exclusive with AssertionConsumerServiceURL and
 // ProtocolBinding (SAMLCore §3.4.1), so a request with both is refused. A request whose ProtocolBinding
-// is another binding than HTTP-POST gets the default endpoint, which only receives the UnsupportedBinding
+// is a binding that is not supported gets the default endpoint, which only receives the UnsupportedBinding
 // status that checkRequestStage reports, as long as any AssertionConsumerServiceURL it names is listed in
 // the metadata with some binding.
 func (req *IdpAuthnRequest) getACSEndpoint() error {
@@ -1302,15 +1379,19 @@ func (req *IdpAuthnRequest) getACSEndpoint() error {
 	return req.useDefaultACSEndpoint()
 }
 
-// useRequestedACSEndpoint selects the HTTP-POST endpoint that the request names by index or location.
+// useRequestedACSEndpoint selects the endpoint that the request names by index or location, among those
+// with one of acsBindings. Several endpoints may share a location with different bindings, in which case
+// the first in the metadata is used.
 func (req *IdpAuthnRequest) useRequestedACSEndpoint(index, location string) error {
+	bindings := req.acsBindings()
+
 	for _, match := range []func(endpoint IndexedEndpoint) bool{
 		func(endpoint IndexedEndpoint) bool { return index != "" && strconv.Itoa(endpoint.Index) == index },
 		func(endpoint IndexedEndpoint) bool { return location != "" && endpoint.Location == location },
 	} {
 		for _, spssoDescriptor := range req.ServiceProviderMetadata.SPSSODescriptors {
 			for _, endpoint := range spssoDescriptor.AssertionConsumerServices {
-				if endpoint.Binding == HTTPPostBinding && match(endpoint) {
+				if slices.Contains(bindings, endpoint.Binding) && match(endpoint) {
 					if err := req.IDP.CheckServiceProviderEndpoint(endpoint.Location); err != nil {
 						return err
 					}
@@ -1326,16 +1407,18 @@ func (req *IdpAuthnRequest) useRequestedACSEndpoint(index, location string) erro
 	return os.ErrNotExist
 }
 
-// useDefaultACSEndpoint selects the default HTTP-POST endpoint as defined by SAMLMetadata §2.2.3: the
-// first with isDefault set to true, otherwise the first without isDefault set to false, otherwise
-// the first.
+// useDefaultACSEndpoint selects the default endpoint among those with one of acsBindings, as defined by
+// SAMLMetadata §2.2.3: the first with isDefault set to true, otherwise the first without isDefault set to
+// false, otherwise the first.
 //
 // Insecure endpoints, as described by IdentityProvider.AllowInsecureServiceProviderEndpoints, are
 // left out of that sequence, as endpoints of a binding that this identity provider doesn't support
 // are. So a service provider which lists an http endpoint as the default, alongside an https one,
-// receives the response at the https endpoint. If every HTTP-POST endpoint is insecure it returns an
+// receives the response at the https endpoint. If every such endpoint is insecure it returns an
 // error which wraps ErrInsecureEndpoint.
 func (req *IdpAuthnRequest) useDefaultACSEndpoint() error {
+	bindings := req.acsBindings()
+
 	preference := func(endpoint IndexedEndpoint) int {
 		switch {
 		case endpoint.IsDefault == nil:
@@ -1353,7 +1436,7 @@ func (req *IdpAuthnRequest) useDefaultACSEndpoint() error {
 
 	for _, spssoDescriptor := range req.ServiceProviderMetadata.SPSSODescriptors {
 		for _, endpoint := range spssoDescriptor.AssertionConsumerServices {
-			if endpoint.Binding != HTTPPostBinding || preference(endpoint) <= best {
+			if !slices.Contains(bindings, endpoint.Binding) || preference(endpoint) <= best {
 				continue
 			}
 
@@ -2155,7 +2238,15 @@ var ErrResponseNotBuilt = errors.New("the response could not be built")
 // `Response` is not already set, it calls MakeResponse to produce it. The response is written by
 // PublishResponse, so if it carries an assertion nothing is written once a logout of the session has
 // begun.
+//
+// If ACSEndpoint has the HTTP-Artifact binding, the response is kept in the ArtifactStore and the browser
+// is sent to the endpoint with the artifact from ArtifactBinding instead, in a form or, with
+// ArtifactRedirectEncoding, in the query of a redirect.
 func (req *IdpAuthnRequest) WriteResponse(w http.ResponseWriter) error {
+	if req.ACSEndpoint != nil && req.ACSEndpoint.Binding == HTTPArtifactBinding {
+		return req.writeArtifactResponse(w)
+	}
+
 	form, err := req.PostBinding()
 	if err != nil {
 		return fmt.Errorf("%w: %w", ErrResponseNotBuilt, err)

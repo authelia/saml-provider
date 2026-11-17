@@ -248,6 +248,8 @@ func soapHeaderAttrIsTrue(header *etree.Element, local string) bool {
 
 // receiveSOAPRequest answers a non-POST with 405 and a bad envelope with a fault, logging the reason, and
 // returns false in both cases.
+//
+//nolint:unparam // No handler understands a header block yet, so understood is always empty.
 func (idp *IdentityProvider) receiveSOAPRequest(w http.ResponseWriter, r *http.Request, understood ...xml.Name) (*soapRequest, bool) {
 	if r.Method != http.MethodPost {
 		idp.logger().Printf("failed to read SOAP request: %s", "the method is not POST")
