@@ -59,9 +59,24 @@ type IdpLogoutRequest struct {
 	// in the query.
 	RedirectQuery string
 
+	// NameIDEncrypted is whether the request identified the principal with an EncryptedID (SAMLCore §3.7.1),
+	// which Validate decrypted into Request.NameID.
+	NameIDEncrypted bool
+
+	// Unidentified is whether the request has an EncryptedID that Validate couldn't decrypt. Such a request is
+	// valid and names no session: Request.NameID is then a random identifier that was never asserted, and
+	// MatchesSession never matches. It is answered exactly as a request for a principal with no session is,
+	// because an answer which tells the requester that decryption failed would let it use the identity provider
+	// to learn about a ciphertext that it didn't make (errata E93). GetLogoutSessions is still called, so that
+	// the time taken doesn't tell either, and whatever it returns is ignored.
+	Unidentified bool
+
 	// binding is the binding that the request was received on. On SOAP the response goes back on the same
 	// connection, so SLOEndpoint is not assigned and the response has no Destination.
 	binding string
+
+	// verifiedEl is the element of the request that its signature covers, which the EncryptedID is taken from.
+	verifiedEl *etree.Element
 }
 
 // MatchesSession returns an error unless the request is for the session. The NameID of the request must be
@@ -71,7 +86,8 @@ type IdpLogoutRequest struct {
 // Format, or an omitted qualifier, doesn't match. This is compared with what DefaultAssertionMaker
 // asserts, so an identity provider with a custom AssertionMaker that asserts another identifier needs
 // IdentityProvider.LogoutNameIDValueOnly, which compares only the value, or its own check. If the request
-// lists session indexes, the index of the session must be one of them.
+// lists session indexes, the index of the session must be one of them. A NameID that the request
+// held as an EncryptedID is compared in the same way, and a request which is Unidentified matches no session.
 //
 // Session.NameID is only compared when Session.NameIDFormat is set, because a session without a format
 // has no NameID of its own that the identity provider asserts. The NameID asserted to a service provider
@@ -83,6 +99,10 @@ type IdpLogoutRequest struct {
 func (req *IdpLogoutRequest) MatchesSession(r *http.Request, session *Session) error {
 	if session == nil {
 		return errors.New("there is no session")
+	}
+
+	if req.Unidentified {
+		return errors.New("the EncryptedID of the request could not be decrypted")
 	}
 
 	nameID := req.Request.NameID
@@ -238,7 +258,7 @@ func (idp *IdentityProvider) ServeSLO(w http.ResponseWriter, r *http.Request) {
 		idp.logger().Printf("cannot terminate session: the session provider does not implement LogoutSessionProvider")
 
 		status.StatusCode.Value = StatusResponder
-	} else if sessions, err := provider.GetLogoutSessions(r, req); err != nil {
+	} else if sessions, err := req.logoutSessions(r, provider); err != nil {
 		idp.logger().Printf("cannot find sessions to terminate: %s", err)
 
 		status.StatusCode.Value = StatusResponder
@@ -256,6 +276,72 @@ func (idp *IdentityProvider) ServeSLO(w http.ResponseWriter, r *http.Request) {
 	}
 
 	idp.writeLogoutResponse(w, req, status)
+}
+
+// logoutSessions returns the sessions that the request names, from provider. A request whose EncryptedID couldn't
+// be decrypted names none: the provider is asked all the same, with the random NameID of the request, so that such
+// a request takes as long as one which names nobody, and its answer is ignored.
+func (req *IdpLogoutRequest) logoutSessions(r *http.Request, provider LogoutSessionProvider) ([]*Session, error) {
+	sessions, err := provider.GetLogoutSessions(r, req)
+	if req.Unidentified {
+		return nil, nil
+	}
+
+	return sessions, err
+}
+
+// identifyPrincipal assigns Request.NameID from the EncryptedID of the request, if it has one in place of the
+// NameID (SAMLCore §3.7.1). It must only run once the signature is verified, as the EncryptedID is taken from the
+// content that the signature covers and decrypted with the key of the identity provider: SAMLCore §6.2 has the
+// requester encrypt and then sign, and errata E93 has the receiver require integrity protection before it
+// processes encrypted data. The EncryptedID must be encrypted with algorithms that the identity provider allows.
+//
+// It returns an error for a request with no identifier, or with both. A request whose EncryptedID can't be
+// decrypted is not an error: it is marked Unidentified and given a random NameID, and the reason is only logged.
+func (req *IdpLogoutRequest) identifyPrincipal() error {
+	var (
+		encryptedIDEl *etree.Element
+		err           error
+	)
+
+	if req.verifiedEl != nil {
+		if encryptedIDEl, err = findChild(req.verifiedEl, samlAssertionNamespace, "EncryptedID"); err != nil {
+			return err
+		}
+	}
+
+	if encryptedIDEl == nil {
+		// BaseID is not supported, so these are the only ways to identify the principal.
+		if req.Request.NameID == nil || req.Request.NameID.Value == "" {
+			return errors.New("request has no NameID")
+		}
+
+		return nil
+	}
+
+	if req.Request.NameID != nil {
+		return errors.New("request has both a NameID and an EncryptedID")
+	}
+
+	req.NameIDEncrypted = true
+
+	decrypter, err := req.IDP.elementDecrypter()
+	if err == nil {
+		req.Request.NameID, err = decrypter.decryptNameID(encryptedIDEl)
+	}
+
+	if err != nil {
+		req.IDP.logger().Printf("cannot decrypt the EncryptedID of the logout request from %s: %s", req.Request.Issuer.Value, err)
+
+		// The stand-in is 256 bits from RandReader, so it is not the identifier of anyone.
+		req.Unidentified = true
+		req.Request.NameID = &NameID{
+			Format: string(TransientNameIDFormat),
+			Value:  base64.RawURLEncoding.EncodeToString(randomBytes(32)),
+		}
+	}
+
+	return nil
 }
 
 // withPartialLogout returns status with a PartialLogout second-level status if it is a plain Success.
@@ -453,7 +539,8 @@ func NewIdpLogoutRequest(idp *IdentityProvider, r *http.Request) (*IdpLogoutRequ
 }
 
 // Validate checks that the logout request is valid and signed by its service provider, and assigns
-// the Request, ServiceProviderMetadata and SLOEndpoint properties. On the SOAP binding the request must
+// the Request, ServiceProviderMetadata and SLOEndpoint properties. An EncryptedID is decrypted into
+// Request.NameID, and the request is marked Unidentified if it can't be. On the SOAP binding the request must
 // carry an enveloped signature, and SLOEndpoint is not assigned, as the response goes back on the
 // connection of the request.
 //
@@ -501,9 +588,8 @@ func (req *IdpLogoutRequest) Validate() error {
 		return err
 	}
 
-	// BaseID and EncryptedID are not supported, so this is the only way to identify the principal.
-	if req.Request.NameID == nil || req.Request.NameID.Value == "" {
-		return errors.New("request has no NameID")
+	if err := req.identifyPrincipal(); err != nil {
+		return err
 	}
 
 	if err := req.getSLOEndpoint(); err != nil {
@@ -540,8 +626,10 @@ func (req *IdpLogoutRequest) validateSOAP() error {
 		return err
 	}
 
-	if req.Request.NameID == nil || req.Request.NameID.Value == "" {
-		return errors.New("request has no NameID")
+	req.verifiedEl = verified
+
+	if err = req.identifyPrincipal(); err != nil {
+		return err
 	}
 
 	if err := req.checkRequestStage(); err != nil {
@@ -647,6 +735,9 @@ func (req *IdpLogoutRequest) verifySignature() error {
 		if err := verifyRedirectSignature(req.RedirectQuery, "SAMLRequest", certificates); err != nil {
 			return fmt.Errorf("invalid request signature: %w", err)
 		}
+
+		// The signature in the query covers the whole message.
+		req.verifiedEl = doc.Root()
 	}
 
 	if signatureEl != nil {
@@ -658,6 +749,8 @@ func (req *IdpLogoutRequest) verifySignature() error {
 		if err := req.useVerifiedRequest(verified); err != nil {
 			return err
 		}
+
+		req.verifiedEl = verified
 	}
 
 	// SAMLBind §3.4.5.2 and §3.5.5.2 require this of a signed message. The value is checked against

@@ -122,9 +122,51 @@ func TestIDPMetadataOmitsEncryptionForECDSACertificate(t *testing.T) {
 }
 
 func TestIDPMetadataAdvertisesEncryptionForRSACertificate(t *testing.T) {
-	test := NewIdentityProviderTest(t)
+	test := NewIdentityProviderTest(t, applyKey)
 	descriptors := test.IDP.Metadata().IDPSSODescriptors[0].KeyDescriptors
 	assert.Check(t, is.DeepEqual([]string{"signing", "encryption"}, keyDescriptorUses(descriptors)))
+}
+
+// What is encrypted to the identity provider can only be decrypted with a private key that it holds.
+func TestIDPMetadataOmitsEncryptionWithoutDecryptionKey(t *testing.T) {
+	for name, opts := range map[string][]idpTestOpts{"no key": nil, "signer": {applySigner}} {
+		t.Run(name, func(t *testing.T) {
+			test := NewIdentityProviderTest(t, opts...)
+			descriptors := test.IDP.Metadata().IDPSSODescriptors[0].KeyDescriptors
+			assert.Check(t, is.DeepEqual([]string{"signing"}, keyDescriptorUses(descriptors)))
+		})
+	}
+}
+
+func TestIDPMetadataListsTheEncryptionMethodsItAccepts(t *testing.T) {
+	algorithms := func(test *IdentityProviderTest) []EncryptionMethod {
+		return test.IDP.Metadata().IDPSSODescriptors[0].KeyDescriptors[1].EncryptionMethods
+	}
+
+	t.Run("defaults put gcm first", func(t *testing.T) {
+		test := NewIdentityProviderTest(t, applyKey)
+		assert.Check(t, is.DeepEqual([]EncryptionMethod{
+			method(aes128GCM), method(aes192GCM), method(aes256GCM),
+			method(aes128CBC), method(aes192CBC), method(aes256CBC),
+			method(rsaOAEP), method(rsaOAEP11),
+		}, algorithms(test)))
+	})
+
+	t.Run("restricted", func(t *testing.T) {
+		test := NewIdentityProviderTest(t, applyKey)
+		test.IDP.ContentEncryptionMethods = []string{aes256CBC, aes256GCM}
+		test.IDP.KeyTransportMethods = []string{rsaOAEP11}
+		test.IDP.KeyTransportDigestMethods = []string{digestSHA256, digestSHA512}
+		assert.Check(t, is.DeepEqual([]EncryptionMethod{
+			method(aes256GCM), method(aes256CBC), oaepMethod(rsaOAEP11, digestSHA256, mgf1SHA256),
+		}, algorithms(test)))
+	})
+
+	t.Run("misconfigured", func(t *testing.T) {
+		test := NewIdentityProviderTest(t, applyKey)
+		test.IDP.ContentEncryptionMethods = []string{tripleDES}
+		assert.Check(t, is.DeepEqual([]string{"signing"}, keyDescriptorUses(test.IDP.Metadata().IDPSSODescriptors[0].KeyDescriptors)))
+	})
 }
 
 // derSignatureVerifier accepts a peer which signs in DER, by converting the signature on the element

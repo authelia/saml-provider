@@ -97,6 +97,12 @@ type LogoutRequest struct {
 	NameID       *NameID
 	Signature    *etree.Element
 
+	// EncryptedID is the EncryptedID element which identifies the principal in place of the NameID (SAMLCore
+	// §3.7.1). Element writes it and not the NameID when it is set. It isn't unmarshalled: the receiver decrypts
+	// it from the element whose signature it verified, as IdpLogoutRequest.Validate and
+	// ServiceProvider.DecryptNameID do.
+	EncryptedID *etree.Element `xml:"-"`
+
 	SessionIndexes []SessionIndex `xml:"urn:oasis:names:tc:SAML:2.0:protocol SessionIndex"`
 }
 
@@ -125,7 +131,11 @@ func (r *LogoutRequest) Element() *etree.Element {
 		el.AddChild(r.Signature)
 	}
 
-	if r.NameID != nil {
+	// The schema has one identifier, and a NameID must never be written beside its own ciphertext.
+	switch {
+	case r.EncryptedID != nil:
+		el.AddChild(r.EncryptedID.Copy())
+	case r.NameID != nil:
 		el.AddChild(r.NameID.Element())
 	}
 
@@ -931,14 +941,24 @@ type Subject struct {
 	XMLName xml.Name `xml:"urn:oasis:names:tc:SAML:2.0:assertion Subject"`
 	// BaseID               *BaseID  ... TODO.
 	NameID *NameID
-	// EncryptedID          *EncryptedID  ... TODO.
+
+	// EncryptedID is the EncryptedID element which identifies the subject in place of the NameID (SAMLCore
+	// §2.2.4). Element writes it and not the NameID when it is set. It isn't unmarshalled: a service provider
+	// decrypts it, and the Subject it returns has the NameID.
+	EncryptedID *etree.Element `xml:"-"`
+
 	SubjectConfirmations []SubjectConfirmation `xml:"SubjectConfirmation"`
 }
 
 // Element returns an etree.Element representing the object in XML form.
 func (a *Subject) Element() *etree.Element {
 	el := etree.NewElement("saml:Subject")
-	if a.NameID != nil {
+
+	// The schema has one identifier, and a NameID must never be written beside its own ciphertext.
+	switch {
+	case a.EncryptedID != nil:
+		el.AddChild(a.EncryptedID.Copy())
+	case a.NameID != nil:
 		el.AddChild(a.NameID.Element())
 	}
 
@@ -1012,7 +1032,11 @@ type SubjectConfirmation struct {
 	Method string `xml:",attr"`
 	// BaseID               *BaseID  ... TODO.
 	NameID *NameID
-	// EncryptedID          *EncryptedID  ... TODO.
+
+	// EncryptedID is the EncryptedID element which identifies the confirming entity in place of the NameID
+	// (SAMLCore §2.4.1.1), as for Subject.
+	EncryptedID *etree.Element `xml:"-"`
+
 	SubjectConfirmationData *SubjectConfirmationData
 }
 
@@ -1021,7 +1045,10 @@ func (a *SubjectConfirmation) Element() *etree.Element {
 	el := etree.NewElement("saml:SubjectConfirmation")
 	el.CreateAttr("Method", a.Method)
 
-	if a.NameID != nil {
+	switch {
+	case a.EncryptedID != nil:
+		el.AddChild(a.EncryptedID.Copy())
+	case a.NameID != nil:
 		el.AddChild(a.NameID.Element())
 	}
 
@@ -1375,6 +1402,11 @@ func (a *AuthnContextClassRef) Element() *etree.Element {
 // See http://docs.oasis-open.org/security/saml/v2.0/saml-core-2.0-os.pdf §2.7.3.
 type AttributeStatement struct {
 	Attributes []Attribute `xml:"Attribute"`
+
+	// EncryptedAttributes are the EncryptedAttribute elements of the statement (SAMLCore §2.7.3.2), which
+	// Element writes after the Attributes. They aren't unmarshalled: a service provider decrypts them, and the
+	// statement it returns has them among the Attributes.
+	EncryptedAttributes []*etree.Element `xml:"-"`
 }
 
 // Element returns an etree.Element representing the object in XML form.
@@ -1382,6 +1414,10 @@ func (a *AttributeStatement) Element() *etree.Element {
 	el := etree.NewElement("saml:AttributeStatement")
 	for _, v := range a.Attributes {
 		el.AddChild(v.Element())
+	}
+
+	for _, v := range a.EncryptedAttributes {
+		el.AddChild(v.Copy())
 	}
 
 	return el

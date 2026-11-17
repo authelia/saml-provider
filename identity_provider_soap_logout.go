@@ -39,14 +39,21 @@ func (idp *IdentityProvider) httpClient() *http.Client {
 }
 
 // sendSOAPLogoutRequest logs participant state.Participants[i] out over SOAP at endpoint and records its
-// Outcome and Reason. It leaves state.Current at -1 and PendingRequestID empty. The exchange is not cancelled with
+// Outcome and Reason. A participant whose NameID must be encrypted and can't be is Skipped. It leaves
+// state.Current at -1 and PendingRequestID empty. The exchange is not cancelled with
 // r: the sessions are already ended and the participant records consumed, so a participant abandoned because the
 // client went away could never be retried. HTTPClient's timeout still bounds it.
-func (idp *IdentityProvider) sendSOAPLogoutRequest(r *http.Request, state *LogoutState, i int, endpoint *Endpoint) {
+func (idp *IdentityProvider) sendSOAPLogoutRequest(r *http.Request, state *LogoutState, i int, metadata *EntityDescriptor, endpoint *Endpoint) {
 	r = r.WithContext(context.WithoutCancel(r.Context()))
 
 	participant := &state.Participants[i]
-	request := idp.makeLogoutRequest(state, participant, endpoint)
+
+	request, err := idp.makeLogoutRequest(state, participant, metadata, endpoint)
+	if err != nil {
+		skipLogoutParticipant(participant, err)
+
+		return
+	}
 
 	state.Current, state.PendingRequestID = i, request.ID
 
@@ -211,7 +218,7 @@ func (idp *IdentityProvider) soapLogoutStatus(r *http.Request, req *IdpLogoutReq
 		return Status{StatusCode: StatusCode{Value: StatusResponder}}
 	}
 
-	sessions, err := provider.GetLogoutSessions(r, req)
+	sessions, err := req.logoutSessions(r, provider)
 	if err != nil {
 		idp.logger().Printf("cannot find sessions to terminate: %s", err)
 
@@ -268,7 +275,7 @@ func (idp *IdentityProvider) backChannelLogout(r *http.Request, state *LogoutSta
 			continue
 		}
 
-		idp.sendSOAPLogoutRequest(r, state, i, endpoint)
+		idp.sendSOAPLogoutRequest(r, state, i, metadata, endpoint)
 	}
 }
 

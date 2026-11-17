@@ -35,6 +35,10 @@ type Options struct {
 	CookieName            string
 	RelayStateFunc        func(w http.ResponseWriter, r *http.Request) string
 	LogoutBindings        []string
+
+	// EncryptNameID sets saml.ServiceProvider.EncryptNameID, which requests that the identity provider sends the
+	// name identifier as an EncryptedID, and sends it as one in a LogoutRequest.
+	EncryptNameID bool
 }
 
 func getDefaultSigningMethod(signer crypto.Signer) jose.SignatureAlgorithm {
@@ -151,6 +155,7 @@ func DefaultServiceProvider(opts Options) saml.ServiceProvider {
 		AllowIDPInitiated:     opts.AllowIDPInitiated,
 		DefaultRedirectURI:    opts.DefaultRedirectURI,
 		LogoutBindings:        opts.LogoutBindings,
+		EncryptNameID:         opts.EncryptNameID,
 	}
 }
 

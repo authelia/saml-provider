@@ -62,9 +62,16 @@ func TestNewLogoutStateGroupKeyIgnoresSPProvidedIDAndEmptyIndexes(t *testing.T) 
 	idp := &IdentityProvider{MetadataURL: mustParseURL("https://idp.example.com/metadata")}
 	endpoint := &Endpoint{Location: "https://sp.example.com/slo"}
 
-	assert.Check(t, cmp.Len(idp.makeLogoutRequest(state, &state.Participants[0], endpoint).SessionIndexes, 0))
-	assert.Check(t, cmp.Len(idp.makeLogoutRequest(state, &state.Participants[1], endpoint).SessionIndexes, 0))
-	assert.DeepEqual(t, idp.makeLogoutRequest(state, &state.Participants[2], endpoint).SessionIndexes, []SessionIndex{{Value: "3"}})
+	indexes := func(i int) []SessionIndex {
+		request, err := idp.makeLogoutRequest(state, &state.Participants[i], nil, endpoint)
+		assert.NilError(t, err)
+
+		return request.SessionIndexes
+	}
+
+	assert.Check(t, cmp.Len(indexes(0), 0))
+	assert.Check(t, cmp.Len(indexes(1), 0))
+	assert.DeepEqual(t, indexes(2), []SessionIndex{{Value: "3"}})
 }
 
 func TestNewLogoutStateOrdersByEarliestIssueInstant(t *testing.T) {

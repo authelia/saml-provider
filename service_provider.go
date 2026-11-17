@@ -29,7 +29,6 @@ import (
 	"authelia.com/provider/saml/internal/dsig"
 	"authelia.com/provider/saml/internal/dsig/etreeutils"
 	"authelia.com/provider/saml/logger"
-	"authelia.com/provider/saml/xmlenc"
 )
 
 // NameIDFormat is the format of the id.
@@ -121,6 +120,17 @@ type ServiceProvider struct {
 	// AuthnNameIDFormat is the format used in the NameIDPolicy for
 	// authentication requests.
 	AuthnNameIDFormat NameIDFormat
+
+	// EncryptNameID keeps the name identifier from intermediaries, such as the browser. Authentication
+	// requests then have the encrypted format in the NameIDPolicy, which requires the identity provider to
+	// send an EncryptedID (SAMLCore §3.4.1.1), and MakeLogoutRequest sends the identifier as an EncryptedID,
+	// encrypted to the encryption key in the metadata of the identity provider (SAMLProfiles §4.4.5), or fails
+	// if it has none. A service provider can't request a particular kind of identifier to be encrypted (errata
+	// E6), so AuthnNameIDFormat is then only listed in the metadata, which the identity provider may use to
+	// choose one, and is the Format of the NameID that MakeLogoutRequest encrypts.
+	//
+	// An EncryptedID or EncryptedAttribute in an assertion is always decrypted, whether this is set or not.
+	EncryptNameID bool
 
 	// MetadataValidDuration is a duration used to calculate validUntil
 	// attribute in the metadata endpoint.
@@ -567,7 +577,12 @@ func (sp *ServiceProvider) MakeArtifactResolveRequest(artifactID string) (*Artif
 // that uses the specified binding (HTTPRedirectBinding or HTTPPostBinding).
 func (sp *ServiceProvider) MakeAuthenticationRequest(idpURL string, binding string, resultBinding string) (*AuthnRequest, error) {
 	allowCreate := true
+
 	nameIDFormat := sp.nameIDFormat()
+	if sp.EncryptNameID {
+		nameIDFormat = string(EncryptedNameIDFormat)
+	}
+
 	req := AuthnRequest{
 		AssertionConsumerServiceURL: sp.AcsURL.String(),
 		Destination:                 idpURL,
@@ -1238,39 +1253,13 @@ func (sp *ServiceProvider) parseEncryptedAssertion(encryptedAssertionEl *etree.E
 	return sp.parseAssertion(assertionEl, possibleRequestIDs, now, signatureRequirement)
 }
 
+// elementDecrypter returns the decrypter of the elements which are encrypted to the service provider.
+func (sp *ServiceProvider) elementDecrypter() elementDecrypter {
+	return elementDecrypter{key: sp.Key, recipient: firstSet(sp.EntityID, sp.MetadataURL.String())}
+}
+
 func (sp *ServiceProvider) decryptElement(encryptedEl *etree.Element) (*etree.Element, error) {
-	encryptedDataEl, err := findOneChild(encryptedEl, "http://www.w3.org/2001/04/xmlenc#", "EncryptedData")
-	if err != nil {
-		return nil, err
-	}
-
-	var key interface{} = sp.Key
-
-	keyEl := encryptedEl.FindElement("./EncryptedKey")
-	if keyEl != nil {
-		var err error
-
-		key, err = xmlenc.Decrypt(sp.Key, keyEl)
-		if err != nil {
-			return nil, fmt.Errorf("failed to decrypt key from response: %s", err)
-		}
-	}
-
-	plaintextEl, err := xmlenc.Decrypt(key, encryptedDataEl)
-	if err != nil {
-		return nil, err
-	}
-
-	if err := xrv.Validate(bytes.NewReader(plaintextEl)); err != nil {
-		return nil, fmt.Errorf("plaintext response contains invalid XML: %s", err)
-	}
-
-	doc := etree.NewDocument()
-	if err := doc.ReadFromBytes(plaintextEl); err != nil {
-		return nil, fmt.Errorf("cannot parse plaintext response %v", err)
-	}
-
-	return doc.Root(), nil
+	return sp.elementDecrypter().decrypt(encryptedEl)
 }
 
 func (sp *ServiceProvider) parseAssertion(assertionEl *etree.Element, possibleRequestIDs []string, now time.Time, signatureRequirement signatureRequirement) (*Assertion, error) {
@@ -1281,6 +1270,12 @@ func (sp *ServiceProvider) parseAssertion(assertionEl *etree.Element, possibleRe
 		}
 
 		assertionEl = verifiedEl
+	}
+
+	// SAMLCore §6.2: an encrypted NameID or Attribute was encrypted before the assertion was signed, so it is
+	// decrypted after the signature is verified, from the content that the signature covers.
+	if err := sp.decryptAssertionParts(assertionEl); err != nil {
+		return nil, err
 	}
 
 	// parse the assertion we just validated.
@@ -1294,6 +1289,136 @@ func (sp *ServiceProvider) parseAssertion(assertionEl *etree.Element, possibleRe
 	}
 
 	return &assertion, nil
+}
+
+// decryptAssertionParts replaces each EncryptedID in the Subject of assertionEl and in its SubjectConfirmations
+// with the NameID it holds (SAMLCore §2.2.4), and each EncryptedAttribute in its AttributeStatements with the
+// Attribute it holds (SAMLCore §2.7.3.2), in the same place. The assertion that is parsed from it is then the
+// same as one which was sent with them in plaintext. An EncryptedID which holds anything but a NameID isn't
+// supported.
+func (sp *ServiceProvider) decryptAssertionParts(assertionEl *etree.Element) error {
+	decrypter := sp.elementDecrypter()
+
+	subjectEls, err := findChildren(assertionEl, samlAssertionNamespace, "Subject")
+	if err != nil {
+		return err
+	}
+
+	for _, subjectEl := range subjectEls {
+		confirmationEls, err := findChildren(subjectEl, samlAssertionNamespace, "SubjectConfirmation")
+		if err != nil {
+			return err
+		}
+
+		for _, parentEl := range append([]*etree.Element{subjectEl}, confirmationEls...) {
+			if err = decryptChildElements(decrypter, parentEl, "EncryptedID", "NameID", true); err != nil {
+				return err
+			}
+		}
+	}
+
+	statementEls, err := findChildren(assertionEl, samlAssertionNamespace, "AttributeStatement")
+	if err != nil {
+		return err
+	}
+
+	for _, statementEl := range statementEls {
+		if err = decryptChildElements(decrypter, statementEl, "EncryptedAttribute", "Attribute", false); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+// decryptChildElements replaces each child of parentEl which is the SAML encrypted element named encryptedTag with
+// the element named tag that it holds. With single there may be only one, and no element named tag beside it, as
+// for the identifier of a subject, where the schema has a choice of one.
+func decryptChildElements(decrypter elementDecrypter, parentEl *etree.Element, encryptedTag, tag string, single bool) error {
+	encryptedEls, err := findChildren(parentEl, samlAssertionNamespace, encryptedTag)
+	if err != nil || len(encryptedEls) == 0 {
+		return err
+	}
+
+	if single {
+		plainEls, err := findChildren(parentEl, samlAssertionNamespace, tag)
+		if err != nil {
+			return err
+		}
+
+		if len(encryptedEls)+len(plainEls) != 1 {
+			return fmt.Errorf("the %s has more than one of %s and %s", parentEl.Tag, tag, encryptedTag)
+		}
+	}
+
+	for _, encryptedEl := range encryptedEls {
+		plainEl, err := decrypter.decryptElement(encryptedEl, tag)
+		if err != nil {
+			return fmt.Errorf("failed to decrypt %s: %w", encryptedTag, err)
+		}
+
+		index := encryptedEl.Index()
+		parentEl.RemoveChildAt(index)
+		parentEl.InsertChildAt(index, plainEl)
+	}
+
+	return nil
+}
+
+// DecryptNameID returns the NameID that an EncryptedID element holds (SAMLCore §2.2.4), decrypted with Key. It is
+// for an EncryptedID that ParseResponse doesn't see, such as that of a LogoutRequest the identity provider sent
+// (SAMLCore §3.7.1). The caller must first verify the signature of the message, and pass the EncryptedID of the
+// content that the signature covers (SAMLCore §6.2, errata E93). The error may describe why decryption failed,
+// and must not be sent to the peer.
+func (sp *ServiceProvider) DecryptNameID(encryptedID *etree.Element) (*NameID, error) {
+	if encryptedID == nil {
+		return nil, errors.New("there is no EncryptedID")
+	}
+
+	return sp.elementDecrypter().decryptNameID(encryptedID)
+}
+
+// idpElementEncrypter returns the encrypter of elements to the identity provider: to the first RSA key in its
+// metadata that is for encryption, or else the first that is for any use, with the algorithms negotiated from the
+// EncryptionMethods of that key (SAMLProfiles §4.4.5, SAMLMeta §2.4.1.1).
+func (sp *ServiceProvider) idpElementEncrypter() (*elementEncrypter, error) {
+	if sp.IDPMetadata == nil {
+		return nil, errors.New("cannot encrypt to the identity provider without its metadata")
+	}
+
+	policy, err := (*IdentityProvider)(nil).encryptionPolicy()
+	if err != nil {
+		return nil, err
+	}
+
+	for _, use := range []string{"encryption", ""} {
+		for _, descriptor := range sp.IDPMetadata.IDPSSODescriptors {
+			for _, keyDescriptor := range descriptor.KeyDescriptors {
+				if keyDescriptor.Use != use {
+					continue
+				}
+
+				// Only RSA key transport is supported, so a key of another type can't be encrypted to.
+				cert, err := parseCert(firstCertificateData(keyDescriptor))
+				if err != nil {
+					continue
+				}
+
+				if _, ok := cert.PublicKey.(*rsa.PublicKey); !ok {
+					continue
+				}
+
+				encrypter, err := policy.encrypter(keyDescriptor.EncryptionMethods)
+				if err != nil {
+					return nil, fmt.Errorf("%s: %w", sp.IDPMetadata.EntityID, err)
+				}
+
+				return &elementEncrypter{certificate: cert, encrypter: encrypter, recipient: sp.IDPMetadata.EntityID}, nil
+			}
+		}
+	}
+
+	return nil, fmt.Errorf("the identity provider %q has no RSA encryption key in its metadata", sp.IDPMetadata.EntityID)
 }
 
 // validateAssertion checks that the conditions specified in assertion match
@@ -1550,7 +1675,8 @@ func (sp *ServiceProvider) SignLogoutRequest(req *LogoutRequest) error {
 	return nil
 }
 
-// MakeLogoutRequest produces a new LogoutRequest object for idpURL.
+// MakeLogoutRequest produces a new LogoutRequest object for idpURL. With EncryptNameID it identifies the
+// principal with an EncryptedID in place of the NameID.
 func (sp *ServiceProvider) MakeLogoutRequest(idpURL, nameID string) (*LogoutRequest, error) {
 	req := LogoutRequest{
 		ID:           fmt.Sprintf("id-%x", randomBytes(20)),
@@ -1568,6 +1694,22 @@ func (sp *ServiceProvider) MakeLogoutRequest(idpURL, nameID string) (*LogoutRequ
 			SPNameQualifier: sp.Metadata().EntityID,
 		},
 	}
+
+	// SAMLCore §6.2: the NameID is encrypted first, and the signature is then calculated over the message
+	// which contains the EncryptedID.
+	if sp.EncryptNameID {
+		encrypter, err := sp.idpElementEncrypter()
+		if err != nil {
+			return nil, err
+		}
+
+		if req.EncryptedID, err = encrypter.encryptNameID(req.NameID); err != nil {
+			return nil, fmt.Errorf("cannot encrypt the NameID: %w", err)
+		}
+
+		req.NameID = nil
+	}
+
 	if sp.SignatureMethod != "" {
 		if err := sp.SignLogoutRequest(&req); err != nil {
 			return nil, err
@@ -2067,8 +2209,6 @@ func findOneChild(parentEl *etree.Element, childNS string, childTag string) (*et
 }
 
 // findChild finds the specified child element. Returns (nil, nil) of the element doesn't exist.
-//
-//nolint:unparam // The namespace is a parameter of the lookup, and is the XML signature namespace at every call.
 func findChild(parentEl *etree.Element, childNS string, childTag string) (*etree.Element, error) {
 	children, err := findChildren(parentEl, childNS, childTag)
 	if err != nil {

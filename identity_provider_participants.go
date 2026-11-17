@@ -13,6 +13,11 @@ type SessionParticipant struct {
 	NameID                  NameID
 	SessionIndex            string
 	IssueInstant            time.Time
+
+	// NameIDEncrypted is whether the NameID was asserted as an EncryptedID. A LogoutRequest to the service
+	// provider then identifies the principal with an EncryptedID too, so that the identifier which was kept
+	// from intermediaries at login isn't shown to them at logout.
+	NameIDEncrypted bool
 }
 
 // ErrSessionParticipantsClosed may be returned by SessionParticipantProvider.AddSessionParticipant for a session whose
@@ -65,6 +70,7 @@ func (req *IdpAuthnRequest) sessionParticipant() (*SessionParticipant, error) {
 		NameID:                  *req.Assertion.Subject.NameID,
 		SessionIndex:            req.Assertion.AuthnStatements[0].SessionIndex,
 		IssueInstant:            req.Now,
+		NameIDEncrypted:         req.nameIDEncrypted,
 	}, nil
 }
 

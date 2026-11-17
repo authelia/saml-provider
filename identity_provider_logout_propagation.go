@@ -61,8 +61,11 @@ func (idp *IdentityProvider) logoutRequestEndpoint(metadata *EntityDescriptor, b
 	return nil, errors.New("the service provider has no single logout service with a supported binding")
 }
 
-// makeLogoutRequest returns the unsigned LogoutRequest for p.
-func (idp *IdentityProvider) makeLogoutRequest(state *LogoutState, p *LogoutParticipant, endpoint *Endpoint) *LogoutRequest {
+// makeLogoutRequest returns the unsigned LogoutRequest for p, whose metadata is given. A participant that was
+// asserted its NameID as an EncryptedID is identified with an EncryptedID again (SAMLCore §3.7.1), encrypted to
+// its encryption key before the request is signed (SAMLCore §6.2). If that fails an error is returned, rather than
+// a request which shows the NameID.
+func (idp *IdentityProvider) makeLogoutRequest(state *LogoutState, p *LogoutParticipant, metadata *EntityDescriptor, endpoint *Endpoint) (*LogoutRequest, error) {
 	request := &LogoutRequest{
 		ID:           fmt.Sprintf("id-%x", randomBytes(20)),
 		Version:      "2.0",
@@ -80,7 +83,22 @@ func (idp *IdentityProvider) makeLogoutRequest(state *LogoutState, p *LogoutPart
 		request.SessionIndexes = append(request.SessionIndexes, SessionIndex{Value: index})
 	}
 
-	return request
+	if !p.NameIDEncrypted {
+		return request, nil
+	}
+
+	encrypter, err := idp.serviceProviderElementEncrypter(metadata)
+	if err != nil {
+		return nil, fmt.Errorf("cannot encrypt the NameID of the logout request: %w", err)
+	}
+
+	if request.EncryptedID, err = encrypter.encryptNameID(&p.NameID); err != nil {
+		return nil, fmt.Errorf("cannot encrypt the NameID of the logout request: %w", err)
+	}
+
+	request.NameID = nil
+
+	return request, nil
 }
 
 // continueLogout sends the browser to the next pending participant. A participant reached only on the SOAP binding
@@ -123,12 +141,17 @@ func (idp *IdentityProvider) continueLogout(w http.ResponseWriter, r *http.Reque
 		}
 
 		if endpoint.Binding == SOAPBinding {
-			idp.sendSOAPLogoutRequest(r, state, current, endpoint)
+			idp.sendSOAPLogoutRequest(r, state, current, metadata, endpoint)
 
 			continue
 		}
 
-		request := idp.makeLogoutRequest(state, participant, endpoint)
+		request, err := idp.makeLogoutRequest(state, participant, metadata, endpoint)
+		if err != nil {
+			skipLogoutParticipant(participant, err)
+
+			continue
+		}
 
 		write, err := idp.prepareLogoutRequest(w, r, state, request, endpoint)
 		if err != nil {

@@ -33,6 +33,11 @@ type LogoutParticipant struct {
 	SessionIndexes          []string
 	Outcome                 LogoutOutcome
 
+	// NameIDEncrypted is whether the LogoutRequest identifies the principal with an EncryptedID, because the
+	// NameID was asserted to the service provider as one. A service provider that can no longer be encrypted to
+	// is Skipped.
+	NameIDEncrypted bool
+
 	// Reason is a status code or error, for the application. It is never sent to a service provider.
 	Reason string
 }
@@ -204,6 +209,9 @@ func newLogoutState(idp *IdentityProvider, participants []SessionParticipant, ex
 		}
 
 		group := &state.Participants[i]
+
+		// The NameID is one that was kept from intermediaries, if it ever was.
+		group.NameIDEncrypted = group.NameIDEncrypted || participant.NameIDEncrypted
 
 		if participant.SessionIndex == "" {
 			unindexed[i], group.SessionIndexes = true, nil
