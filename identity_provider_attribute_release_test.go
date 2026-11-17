@@ -23,15 +23,15 @@ const (
 	affiliationAttributeName = "urn:oid:1.3.6.1.4.1.5923.1.1.1.1"
 )
 
-type attributeReleasePolicyFunc func(*IdpAuthnRequest, *Session, []Attribute) ([]Attribute, error)
+type attributeReleasePolicyFunc func(AttributeReleaseRequest, *Session, []Attribute) ([]Attribute, error)
 
-func (f attributeReleasePolicyFunc) ReleaseAttributes(req *IdpAuthnRequest, session *Session, candidates []Attribute) ([]Attribute, error) {
+func (f attributeReleasePolicyFunc) ReleaseAttributes(req AttributeReleaseRequest, session *Session, candidates []Attribute) ([]Attribute, error) {
 	return f(req, session, candidates)
 }
 
 // releaseEveryAttribute releases every candidate, for tests of how attributes are stated rather than
 // which are released.
-var releaseEveryAttribute = attributeReleasePolicyFunc(func(_ *IdpAuthnRequest, _ *Session, candidates []Attribute) ([]Attribute, error) {
+var releaseEveryAttribute = attributeReleasePolicyFunc(func(_ AttributeReleaseRequest, _ *Session, candidates []Attribute) ([]Attribute, error) {
 	return candidates, nil
 })
 
@@ -260,7 +260,7 @@ func TestDefaultAttributeReleasePolicyReleasesRequestedNameIDValues(t *testing.T
 // its candidates can't change the custom attributes of the session.
 func TestDefaultAssertionMakerCopiesCustomAttributes(t *testing.T) {
 	test := NewIdentityProviderTest(t, applyKey)
-	test.IDP.AttributeReleasePolicy = attributeReleasePolicyFunc(func(_ *IdpAuthnRequest, _ *Session, candidates []Attribute) ([]Attribute, error) {
+	test.IDP.AttributeReleasePolicy = attributeReleasePolicyFunc(func(_ AttributeReleaseRequest, _ *Session, candidates []Attribute) ([]Attribute, error) {
 		for i := range candidates {
 			for j := range candidates[i].Values {
 				candidates[i].Values[j].Value = "changed"
@@ -418,7 +418,7 @@ func TestDefaultAssertionMakerUsesConfiguredAttributeReleasePolicy(t *testing.T)
 
 		var candidates []Attribute
 
-		test.IDP.AttributeReleasePolicy = attributeReleasePolicyFunc(func(_ *IdpAuthnRequest, _ *Session, c []Attribute) ([]Attribute, error) {
+		test.IDP.AttributeReleasePolicy = attributeReleasePolicyFunc(func(_ AttributeReleaseRequest, _ *Session, c []Attribute) ([]Attribute, error) {
 			candidates = c
 			return c, nil
 		})
@@ -441,7 +441,7 @@ func TestDefaultAssertionMakerUsesConfiguredAttributeReleasePolicy(t *testing.T)
 
 	t.Run("releases nothing", func(t *testing.T) {
 		test := NewIdentityProviderTest(t, applyKey)
-		test.IDP.AttributeReleasePolicy = attributeReleasePolicyFunc(func(*IdpAuthnRequest, *Session, []Attribute) ([]Attribute, error) {
+		test.IDP.AttributeReleasePolicy = attributeReleasePolicyFunc(func(AttributeReleaseRequest, *Session, []Attribute) ([]Attribute, error) {
 			return nil, nil
 		})
 		req := attributeReleaseRequest(t, test, "", service(0, nil, requested(mailAttributeName, uriAttrNameFormat)))
@@ -450,7 +450,7 @@ func TestDefaultAssertionMakerUsesConfiguredAttributeReleasePolicy(t *testing.T)
 
 	t.Run("refuses", func(t *testing.T) {
 		test := NewIdentityProviderTest(t, applyKey)
-		test.IDP.AttributeReleasePolicy = attributeReleasePolicyFunc(func(*IdpAuthnRequest, *Session, []Attribute) ([]Attribute, error) {
+		test.IDP.AttributeReleasePolicy = attributeReleasePolicyFunc(func(AttributeReleaseRequest, *Session, []Attribute) ([]Attribute, error) {
 			return nil, errors.New("refused")
 		})
 		req := attributeReleaseRequest(t, test, "")
@@ -485,8 +485,14 @@ func TestServeSSOReleasesAttributesOfRequestedService(t *testing.T) {
 
 	var released []Attribute
 
-	test.IDP.AttributeReleasePolicy = attributeReleasePolicyFunc(func(req *IdpAuthnRequest, session *Session, candidates []Attribute) ([]Attribute, error) {
+	test.IDP.AttributeReleasePolicy = attributeReleasePolicyFunc(func(req AttributeReleaseRequest, session *Session, candidates []Attribute) ([]Attribute, error) {
 		var err error
+
+		assert.Check(t, req.AuthnRequest != nil)
+		assert.Check(t, req.Query == nil)
+		assert.Check(t, is.Len(req.Requested, 0))
+		assert.Check(t, is.Equal(req.ServiceProviderMetadata.EntityID, test.SP.MetadataURL.String()))
+		assert.Check(t, req.HTTPRequest != nil)
 
 		released, err = DefaultAttributeReleasePolicy{}.ReleaseAttributes(req, session, candidates)
 

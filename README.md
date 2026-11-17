@@ -59,7 +59,7 @@ least the subset of SAML known as [interoperable SAML](https://kantarainitiative
 | Holder-of-Key Web Browser SSO               | ❌  | ❌ |
 | Name Identifier Management                  | ❌  | ❌ |
 | Name Identifier Mapping                     | ❌  | ❌ |
-| Assertion Query/Request and Attribute Query | ❌  | ❌ |
+| Assertion Query/Request and Attribute Query | ⚠️  | ❌ |
 | Identity Provider Discovery                 | ❌  | ❌ |
 | SP Request Initiation                       | N/A | ❌ |
 
@@ -228,7 +228,40 @@ least the subset of SAML known as [interoperable SAML](https://kantarainitiative
     stored response holds the assertion, which is only encrypted if the SP publishes an encryption key.
   - Only the SSO `Response` is sent by artifact. Logout messages are not, and the IdP does not receive artifacts.
     `samlidp` does not serve the endpoint.
-- **SOAP:** used for single logout and artifact resolution only.
+- **Assertion Query/Request and Attribute Query:** `AttributeQuery`, `AuthnQuery` and `AssertionIDRequest` are served
+  on the SOAP binding only (SAMLProf §6); the URI binding and `AuthzDecisionQuery` are not supported. Each has its own
+  handler and URL, which need their own paths: `ServeAttributeQuery` at `IdentityProvider.AttributeServiceURL`,
+  `ServeAuthnQuery` at `AuthnQueryServiceURL` and `ServeAssertionIDRequest` at `AssertionIDRequestServiceURL`, and
+  `Handler` serves those that are set.
+  - The request must carry an enveloped signature by its issuer, as for a `LogoutRequest` over SOAP, and is answered
+    on the same connection with a signed `Response`. One that is unsigned or can't be verified is answered
+    `Requester/RequestDenied`, another message `Requester/RequestUnsupported`, and a wrong version, age or
+    `Destination` the status single sign-on uses. A request that isn't a SOAP 1.1 envelope gets a SOAP fault.
+    A request that was already answered is a replay, and is answered `Requester/RequestDenied`.
+  - Queries need a `SessionProvider` that implements `QuerySessionProvider`, which finds the principal and its
+    sessions by the `NameID` of the query. Without it they are answered `Responder/RequestUnsupported`, and the
+    metadata has no `AttributeAuthorityDescriptor` or `AuthnAuthorityDescriptor`. The provider decides which NameIDs
+    an SP may ask about, and a transient NameID can only be found if the application stores the ones it issues. The
+    `Subject` must be a `NameID` alone: an `EncryptedID`, a `BaseID` or a `SubjectConfirmation` is answered
+    `Requester/RequestUnsupported`, a `SPNameQualifier` that isn't the SP or an affiliation it is a member of
+    `Requester/RequestDenied`. A principal that isn't found is answered `Success` with no assertion.
+  - The assertion carries the `NameID` of the query and no `SubjectConfirmation`, is signed, and is encrypted as for
+    single sign-on when the SP has an encryption key. When there is nothing to state the answer is `Success` with no
+    assertion (SAMLCore §3.3.4).
+  - An `AttributeQuery` is never answered with more than single sign-on would state. The attributes are those of the
+    default `AttributeConsumingService` in the SP metadata, narrowed to the attributes and values the query names, so
+    an SP whose metadata requests none receives none. `IdentityProvider.AttributeReleasePolicy` decides for queries
+    too, and gets an `AttributeReleaseRequest` with that service as `Ceiling` and the attributes of the query as
+    `Requested`; whatever it releases is still narrowed to the query. An attribute named twice or without a `Name` is
+    answered `Requester/InvalidAttrNameOrValue`.
+  - An `AuthnQuery` is answered with one `AuthnStatement` for each session that `GetAuthnSessions` returns, has the
+    `SessionIndex` of the query, and satisfies its `RequestedAuthnContext` by `IdentityProvider.AuthnContextEnforcer`.
+    Nobody is authenticated by it.
+  - An `AssertionIDRequest` needs `IdentityProvider.AssertionStore`, which is given every assertion that single
+    sign-on or a query issues, signed and before encryption. Without it the request is answered
+    `Responder/RequestUnsupported` and the service isn't in the metadata. An assertion is only returned to the SP it
+    was issued to, and at most 32 are returned for one request. `samlidp` implements neither interface.
+- **SOAP:** used for single logout, artifact resolution and the assertion query and request protocol only.
 - **Verify signed `AuthnRequest`:** any signature on the HTTP Redirect or HTTP POST bindings is verified, and one is
   required if the SP metadata sets `AuthnRequestsSigned` or `IdentityProvider.WantAuthnRequestsSigned` is set. SHA-1
   signatures are accepted. A custom login form must send `IdpAuthnRequest.RedirectQuery` in the `SAMLRedirectQuery`
@@ -283,7 +316,8 @@ least the subset of SAML known as [interoperable SAML](https://kantarainitiative
   `PassiveSessionProvider` to serve these requests. Otherwise they receive an `AuthnFailed` or `NoPassive` status.
   `samlidp` implements both, resuming its login form with `IdpAuthnRequest.ResumeFormValues`, and returns `NoPassive`
   if both are set, as it can only authenticate with a login form.
-- **`RequestedAuthnContext`:** a request that the assertion can't satisfy receives a `NoAuthnContext` status.
+- **`RequestedAuthnContext`:** a request that the assertion can't satisfy receives a `NoAuthnContext` status. The
+  `AuthnContextEnforcer` is asked about the class of each `AuthnStatement` with `SatisfiesAuthnContext`.
   `DefaultAssertionMaker` asserts `Session.AuthnContextClassRef`, or `PasswordProtectedTransport` when the session sets
   none, and a custom `AssertionMaker` can set a different class. `minimum`, `maximum` and `better` need `DefaultAuthnContextEnforcer.Strength` to rank classes. Without it,
   `minimum` and `maximum` only match a listed class, and `better` never matches. `AuthnContextDeclRef` is not supported and is always refused. Set
@@ -313,7 +347,7 @@ least the subset of SAML known as [interoperable SAML](https://kantarainitiative
   refusals use it.
   Other failures produce an HTTP error.
 - **Replay detection:** the ID of every `AuthnRequest` that is answered for a session, and of every verified
-  `LogoutRequest` on any binding, is recorded in `IdentityProvider.ReplayStore` until the request expires, and a
+  `LogoutRequest` on any binding, `AttributeQuery`, `AuthnQuery` and `AssertionIDRequest`, is recorded in `IdentityProvider.ReplayStore` until the request expires, and a
   request presented again is answered with `Requester` and `RequestDenied`. A request that a login form re-presents
   is not a replay. The default store is a bounded `MemoryReplayStore` that is private to the process, so an IdP which
   runs as several instances must set a `ReplayStore` they share. If the store fails or is full the request is refused.
