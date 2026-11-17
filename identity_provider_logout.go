@@ -224,7 +224,7 @@ func (req *IdpLogoutRequest) matchesSessionNameIDValue(r *http.Request, session 
 		}
 
 		// A NameID of the entity format is asserted without qualifiers (SAMLCore §8.3.6).
-		nameQualifier, spNameQualifier := req.IDP.Metadata().EntityID, req.ServiceProviderMetadata.EntityID
+		nameQualifier, spNameQualifier := req.IDP.entityID(), req.ServiceProviderMetadata.EntityID
 		if !nameIDFormatHasQualifiers(nameID.Format) {
 			nameQualifier, spNameQualifier = "", ""
 		}
@@ -896,7 +896,7 @@ func (req *IdpLogoutRequest) MakeResponse(status Status) *LogoutResponse {
 		IssueInstant: req.Now,
 		Issuer: &Issuer{
 			Format: "urn:oasis:names:tc:SAML:2.0:nameid-format:entity",
-			Value:  req.IDP.MetadataURL.String(),
+			Value:  req.IDP.entityID(),
 		},
 		Status: status,
 	}

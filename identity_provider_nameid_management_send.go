@@ -91,7 +91,7 @@ func (idp *IdentityProvider) SendManageNameIDRequest(r *http.Request, servicePro
 		IssueInstant: TimeNow(),
 		Destination:  endpoint.Location,
 		// SAMLProfiles §4.5.4.1: the Issuer MUST be the requesting entity.
-		Issuer:    &Issuer{Format: string(EntityNameIDFormat), Value: idp.MetadataURL.String()},
+		Issuer:    &Issuer{Format: string(EntityNameIDFormat), Value: idp.entityID()},
 		NameID:    &change.NameID,
 		NewID:     change.NewID,
 		Terminate: change.Terminate,

@@ -294,7 +294,7 @@ func (req *IdpAuthnRequest) completeNameID(nameID *NameID, format, spNameQualifi
 	}
 
 	if issued.NameQualifier == "" {
-		issued.NameQualifier = req.IDP.Metadata().EntityID
+		issued.NameQualifier = req.IDP.entityID()
 	}
 
 	return &issued

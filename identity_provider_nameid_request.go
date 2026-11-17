@@ -421,7 +421,7 @@ func (idp *IdentityProvider) checkSubjectNameID(r *http.Request, nameID *NameID,
 		}
 	}
 
-	if q := nameID.NameQualifier; q != "" && nameID.Format == string(PersistentNameIDFormat) && q != idp.MetadataURL.String() {
+	if q := nameID.NameQualifier; q != "" && nameID.Format == string(PersistentNameIDFormat) && q != idp.entityID() {
 		return errors.New("the NameID has the NameQualifier of another identity provider")
 	}
 

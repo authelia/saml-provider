@@ -125,6 +125,10 @@ least the subset of SAML known as [interoperable SAML](https://kantarainitiative
 
 ### Identity Provider Limitations
 
+- **Entity ID:** the IdP has a single entity ID for every SP, `IdentityProvider.EntityID` (`samlidp.Options.EntityID`),
+  or `MetadataURL` if that is empty. It is the `entityID` of the metadata, the `Issuer` of every message and the
+  `NameQualifier` of every `NameID`, and the metadata is still served at `MetadataURL`. It must be an absolute URI of
+  at most 1024 characters, or the metadata and every message are refused.
 - **Single Logout:** the front channel and the SOAP back channel are supported; the Asynchronous Single Logout Profile
   Extension is not. `IdentityProvider.ServeSLO` handles a `LogoutRequest` from an SP on the HTTP Redirect or HTTP POST
   binding at `IdentityProvider.LogoutURL`, and answers with a signed `LogoutResponse`. The request must be signed.

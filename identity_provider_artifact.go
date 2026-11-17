@@ -276,7 +276,7 @@ func (idp *IdentityProvider) artifactLifetime() time.Duration {
 // artifactKey returns the key that the message of the artifact has in the ArtifactStore, and the artifact in the
 // ReplayStore. It is a digest, so neither store holds a value that could be presented as an artifact.
 func (idp *IdentityProvider) artifactKey(artifact Artifact) string {
-	return replayKey(replayKindArtifact, idp.MetadataURL.String(), string(artifact.MessageHandle[:]))
+	return replayKey(replayKindArtifact, idp.entityID(), string(artifact.MessageHandle[:]))
 }
 
 // issueArtifact saves message in the ArtifactStore for the service provider, which is the only one that can
@@ -293,7 +293,7 @@ func (idp *IdentityProvider) issueArtifact(ctx context.Context, serviceProviderE
 
 	artifact = Artifact{
 		EndpointIndex: artifactResolutionServiceIndex,
-		SourceID:      ArtifactSourceID(idp.MetadataURL.String()),
+		SourceID:      ArtifactSourceID(idp.entityID()),
 	}
 	copy(artifact.MessageHandle[:], randomBytes(len(artifact.MessageHandle)))
 
@@ -574,7 +574,7 @@ func (req *artifactResolveRequest) resolve() (*etree.Element, error) {
 	}
 
 	// SAMLBind §3.6.4.2: the SourceID names the issuer, and the EndpointIndex the endpoint to resolve it at.
-	if artifact.SourceID != ArtifactSourceID(idp.MetadataURL.String()) || artifact.EndpointIndex != artifactResolutionServiceIndex {
+	if artifact.SourceID != ArtifactSourceID(idp.entityID()) || artifact.EndpointIndex != artifactResolutionServiceIndex {
 		return nil, artifactNotResolved("%s sent an artifact that this identity provider did not issue", req.requester)
 	}
 
@@ -734,7 +734,7 @@ func (req *artifactResolveRequest) writeResponse(w http.ResponseWriter, status S
 		IssueInstant: req.Now,
 		Issuer: &Issuer{
 			Format: "urn:oasis:names:tc:SAML:2.0:nameid-format:entity",
-			Value:  req.IDP.MetadataURL.String(),
+			Value:  req.IDP.entityID(),
 		},
 		Status: status,
 	}
