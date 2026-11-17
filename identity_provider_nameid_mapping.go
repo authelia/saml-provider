@@ -294,7 +294,7 @@ func (idp *IdentityProvider) ServeNameIDMapping(w http.ResponseWriter, r *http.R
 		response = idp.mapNameID(r, req)
 	}
 
-	if err := idp.writeSOAPMessage(w, response); err != nil {
+	if err := idp.writeSOAPMessage(w, r, req.ServiceProviderMetadata, response); err != nil {
 		idp.logger().Printf("failed to write name identifier mapping response: %s", err)
 		writeSOAPFault(w, &soapFault{Code: "Server", String: soapFaultStringProcessing})
 	}

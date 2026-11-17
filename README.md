@@ -95,6 +95,8 @@ least the subset of SAML known as [interoperable SAML](https://kantarainitiative
 | Feature                                      | IdP | SP  |
 |:---------------------------------------------|:---:|:---:|
 | Sign `Response` and `Assertion`              | ✅  | N/A |
+| Sign only the `Response` or the `Assertion`, for each SP | ✅  | N/A |
+| Signature and digest algorithm for each SP   | ✅  | N/A |
 | Verify signed `Response` and `Assertion`     | N/A | ✅  |
 | Sign `AuthnRequest`                          | N/A | ✅  |
 | Verify signed `AuthnRequest`                 | ✅  | N/A |
@@ -525,6 +527,44 @@ least the subset of SAML known as [interoperable SAML](https://kantarainitiative
   restrict `SignatureMethod`, which is what the IdP signs with, and the SP of this package still accepts SHA-1.
 - **Signature defaults:** `SignatureMethod` defaults to RSA-SHA256 for RSA keys, and SHA-1 is only used if set explicitly.
   For ECDSA keys it defaults to the hash matching the curve: SHA-256 for P-256, SHA-384 for P-384 and SHA-512 for P-521.
+- **Issuance for each service provider:** `IdentityProvider.IssuancePolicy` decides, for each SP, what is signed, with
+  which algorithms, and how its assertions are issued. Without one, every SP gets the settings of the IdP and both
+  signatures. `DefaultIssuancePolicy.ServiceProviders` maps an entity ID to what differs for it, and a field that is
+  zero leaves the setting of the IdP as it is:
+
+  ```go
+  idp.IssuancePolicy = saml.DefaultIssuancePolicy{ServiceProviders: map[string]saml.ServiceProviderIssuance{
+      "https://legacy.example.com/metadata": {
+          Sign:              saml.SignAssertion,
+          SignatureMethod:   "http://www.w3.org/2000/09/xmldsig#rsa-sha1",
+          AssertionLifetime: 5 * time.Minute,
+      },
+  }}
+  ```
+
+  A policy of your own implements `Issuance(req IssuanceRequest) (Issuance, error)` and returns `req.Defaults`, which
+  holds the settings of the IdP, changed as it wants. It is given the metadata of the SP, the assertion consumer
+  service and the session.
+  - `Sign` is `SignResponseAndAssertion` (the default), `SignAssertion` or `SignResponse`. One of the two is always
+    signed, on every binding, and a `Response` that reports an error is always signed, as it has no assertion.
+    `SignResponse` still signs the assertion for an SP whose metadata sets `WantAssertionsSigned`, which is what
+    SAML2Int requires (SDP-IDP09, SDP-MD01), so a change of that metadata never breaks a login. The
+    `ArtifactResponse` of the HTTP-Artifact binding and the `Response` to a query are always signed, whatever is
+    signed inside them.
+  - `SignatureMethod` and `DigestMethod` apply to every message the IdP signs for that SP: the `Response` and
+    `Assertion`, an `ArtifactResponse`, the `Response` to a query, a `LogoutRequest` or `LogoutResponse` (as the
+    `SigAlg` on the HTTP-Redirect binding), and the messages of name identifier management and mapping. The metadata
+    of the IdP always uses `IdentityProvider.SignatureMethod`. The digest is that of the signature method unless
+    `DigestMethod` names SHA-1, SHA-256, SHA-384 or SHA-512, so naming RSA-SHA1 for an SP is all it takes to sign
+    with SHA-1 for it, and for no other. A method for another type of key than the IdP has, or one that isn't
+    supported, sends nothing to that SP.
+  - `AssertionLifetime` and `IncludeSessionNotOnOrAfter` replace those of the IdP for the assertions of single
+    sign-on, and `AdditionalAudiences` adds audiences to their `AudienceRestriction` after the entity ID of the SP.
+    They are applied by `DefaultAssertionMaker`; another `AssertionMaker` reads them from
+    `IdpAuthnRequest.Issuance`.
+  - With `SignAssertion` and an encrypted assertion, nothing the IdP signs covers the ciphertext, so prefer a GCM
+    cipher in `ContentEncryptionMethods` for such an SP (errata E93). With `SignResponse` the assertion that
+    `AssertionStore` keeps, and an `AssertionIDRequest` returns in a signed `Response`, is not signed itself.
 - **SPs with ECDSA certificates:** a service provider whose metadata allows encryption with an ECDSA certificate is
   rejected, including a certificate with no `use`, because assertions cannot be encrypted to it. It must set
   `use="signing"`.

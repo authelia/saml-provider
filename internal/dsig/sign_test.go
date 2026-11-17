@@ -3,6 +3,7 @@ package dsig
 import (
 	"crypto"
 	"crypto/tls"
+	"crypto/x509"
 	"encoding/base64"
 	"testing"
 
@@ -170,4 +171,33 @@ func TestSignWithECDSA(t *testing.T) {
 	require.NoError(t, err)
 
 	testSignWithContext(t, ctx, method, crypto.SHA512)
+}
+
+func TestSignWithSeparateDigestMethod(t *testing.T) {
+	randomKeyStore := RandomKeyStoreForTest().(*MemoryX509KeyStore)
+	ctx, err := NewSigningContext(randomKeyStore.privateKey, [][]byte{randomKeyStore.cert})
+	require.NoError(t, err)
+
+	require.NoError(t, ctx.SetSignatureMethod(RSASHA1SignatureMethod))
+	require.NoError(t, ctx.SetDigestMethod("http://www.w3.org/2001/04/xmlenc#sha512"))
+	require.Equal(t, RSASHA1SignatureMethod, ctx.GetSignatureMethodIdentifier())
+	require.Equal(t, "http://www.w3.org/2001/04/xmlenc#sha512", ctx.GetDigestAlgorithmIdentifier())
+
+	// The digest is that of the DigestMethod, and the signature still verifies.
+	testSignWithContext(t, ctx, RSASHA1SignatureMethod, crypto.SHA512)
+
+	el := &etree.Element{Tag: "Root"}
+	el.CreateAttr("ID", "id-1")
+
+	signed, err := ctx.SignEnveloped(el)
+	require.NoError(t, err)
+
+	cert, err := x509.ParseCertificate(randomKeyStore.cert)
+	require.NoError(t, err)
+
+	validation := NewDefaultValidationContext(&MemoryX509CertificateStore{Roots: []*x509.Certificate{cert}})
+	_, err = validation.Validate(signed)
+	require.NoError(t, err)
+
+	require.Error(t, ctx.SetDigestMethod("http://www.w3.org/2001/04/xmldsig-more#md5"))
 }

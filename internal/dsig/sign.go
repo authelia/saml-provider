@@ -22,6 +22,10 @@ import (
 type SigningContext struct {
 	Hash crypto.Hash
 
+	// DigestHash is the hash of the DigestMethod of the Reference, when it differs from Hash, which is that of
+	// the SignatureMethod. Zero means Hash.
+	DigestHash crypto.Hash
+
 	// This field will be nil and unused if the SigningContext is created with
 	// NewSigningContext
 	KeyStore      X509KeyStore
@@ -96,13 +100,41 @@ func (ctx *SigningContext) SetSignatureMethod(algorithmID string) error {
 	return nil
 }
 
+// SetDigestMethod sets the DigestMethod of the Reference to the algorithm with that identifier, which is
+// otherwise the digest of the SignatureMethod.
+func (ctx *SigningContext) SetDigestMethod(algorithmID string) error {
+	hash, ok := digestAlgorithmsByIdentifier[algorithmID]
+	if !ok {
+		return fmt.Errorf("unknown DigestMethod: %s", algorithmID)
+	}
+
+	ctx.DigestHash = hash
+
+	return nil
+}
+
+// digestHash returns the hash of the DigestMethod.
+func (ctx *SigningContext) digestHash() crypto.Hash {
+	if ctx.DigestHash != 0 {
+		return ctx.DigestHash
+	}
+
+	return ctx.Hash
+}
+
+// digest returns the digest of el for its Reference, with the hash of the DigestMethod.
 func (ctx *SigningContext) digest(el *etree.Element) ([]byte, error) {
+	return ctx.hashElement(el, ctx.digestHash())
+}
+
+// hashElement returns the hash of the canonical form of el.
+func (ctx *SigningContext) hashElement(el *etree.Element, algorithm crypto.Hash) ([]byte, error) {
 	canonical, err := ctx.Canonicalizer.Canonicalize(el)
 	if err != nil {
 		return nil, err
 	}
 
-	hash := ctx.Hash.New()
+	hash := algorithm.New()
 	_, err = hash.Write(canonical)
 	if err != nil {
 		return nil, err
@@ -263,7 +295,8 @@ func (ctx *SigningContext) ConstructSignature(el *etree.Element, enveloped bool)
 		return nil, err
 	}
 
-	digest, err := ctx.digest(detatchedSignedInfo)
+	// The SignedInfo is hashed with the hash of the SignatureMethod, not that of the DigestMethod.
+	digest, err := ctx.hashElement(detatchedSignedInfo, ctx.Hash)
 	if err != nil {
 		return nil, err
 	}
@@ -319,7 +352,7 @@ func (ctx *SigningContext) GetSignatureMethodIdentifier() string {
 }
 
 func (ctx *SigningContext) GetDigestAlgorithmIdentifier() string {
-	if ident, ok := digestAlgorithmIdentifiers[ctx.Hash]; ok {
+	if ident, ok := digestAlgorithmIdentifiers[ctx.digestHash()]; ok {
 		return ident
 	}
 	return ""

@@ -111,7 +111,7 @@ func (idp *IdentityProvider) SendManageNameIDRequest(r *http.Request, servicePro
 		return err
 	}
 
-	signingContext, err := idp.signingContext()
+	signingContext, err := idp.signingContextFor(r, metadata)
 	if err != nil {
 		return fmt.Errorf("cannot sign the name identifier management request: %w", err)
 	}

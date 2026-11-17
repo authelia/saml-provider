@@ -402,14 +402,14 @@ func (req *IdpManageNameIDRequest) WriteResponse(w http.ResponseWriter, status S
 	response := req.MakeResponse(status)
 
 	if req.binding == SOAPBinding {
-		return req.IDP.writeSOAPMessage(w, response)
+		return req.IDP.writeSOAPMessage(w, req.HTTPRequest, req.ServiceProviderMetadata, response)
 	}
 
 	if req.ResponseEndpoint == nil {
 		return errors.New("the request has no response endpoint")
 	}
 
-	return req.IDP.writeFrontChannelResponse(w, req.HTTPRequest, req.ResponseEndpoint.Binding, response.Destination, req.RelayState, response)
+	return req.IDP.writeFrontChannelResponse(w, req.HTTPRequest, req.ServiceProviderMetadata, req.ResponseEndpoint.Binding, response.Destination, req.RelayState, response)
 }
 
 // ServeManageNameID handles a SAML ManageNameIDRequest from a service provider on the HTTP-Redirect or

@@ -182,7 +182,7 @@ func TestParseArtifactResponseUsesSignedAttributes(t *testing.T) {
 	artifact.AddChild(inner.Root())
 
 	req := &IdpAuthnRequest{IDP: &test.IDP}
-	signingContext, err := req.signingContext()
+	signingContext, err := req.IDP.signingContext()
 	assert.NilError(t, err)
 	signed, err := signingContext.SignEnveloped(artifact)
 	assert.NilError(t, err)
