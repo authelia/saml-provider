@@ -130,15 +130,12 @@ func (m *EntityDescriptor) HasEntityCategory(category string) bool {
 // value, so SubjectIDRequirementUnspecified is returned if it has none, one that the profile doesn't define, or
 // two that differ.
 //
-// SAML2Int (SDP-IDP15) requires an identity provider to honour it. It is meant for an AttributeReleasePolicy,
-// which has the metadata as AttributeReleaseRequest.ServiceProviderMetadata: release the candidate whose name
-// Requests reports, SubjectIDAttributeName or PairwiseIDAttributeName, to a service provider that doesn't list it
-// as a RequestedAttribute, prefer the pairwise-id for SubjectIDRequirementAny unless the service provider is
-// trusted with an identifier it shares with others, and release neither for SubjectIDRequirementNone. If the
-// attribute that is required can't be stated, the policy may return an error or release without it (SDP-IDP16).
-// DefaultAttributeReleasePolicy doesn't read it. Unlike an entity category the requirement is the service
-// provider's own to state, and asks for no more than an identifier, but subject-id is one that every service
-// provider shares, so a policy may still want to decide who receives it.
+// SAML2Int (SDP-IDP15) requires an identity provider to honour it, and DefaultAttributeReleasePolicy does: it
+// releases the attribute whose name Requests reports to a service provider that doesn't list it as a
+// RequestedAttribute, the pairwise-id for SubjectIDRequirementAny if there is one, and neither for
+// SubjectIDRequirementNone. Unlike an entity category the requirement is the service provider's own to state, and
+// asks for no more than an identifier, but subject-id is one that every service provider shares, so a policy of
+// the application may still want to decide who receives it.
 func (m *EntityDescriptor) SubjectIDRequirement() SubjectIDRequirement {
 	values := m.EntityAttributeValues(SubjectIDRequirementAttributeName)
 	if len(values) == 0 {

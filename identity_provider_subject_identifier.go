@@ -46,7 +46,8 @@ func ValidateSubjectIdentifier(value string) error {
 //
 // The attribute is offered to the AttributeReleasePolicy with the other attributes of the principal, for single
 // sign-on and for an AttributeQuery, so it is only stated to a service provider that the policy releases it to:
-// with DefaultAttributeReleasePolicy, one whose metadata requests it.
+// with DefaultAttributeReleasePolicy, one whose metadata requests it, requires it with the subject-id:req entity
+// attribute, or is in an entity category whose attributes hold it.
 type PairwiseIDProvider interface {
 	// PairwiseID returns the value of the pairwise-id attribute of the principal of session for serviceProvider,
 	// which is uniqueID@scope, or "" if there is none. idpEntityID is the entity ID of the identity provider.

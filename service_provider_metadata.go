@@ -106,7 +106,7 @@ func ParseServiceProvidersMetadata(data []byte) ([]*EntityDescriptor, error) {
 			return nil, err
 		}
 
-		entities := serviceProvidersOf(group, time.Time{}, nil)
+		entities := serviceProvidersOf(group, time.Time{}, nil, nil)
 		if len(entities) == 0 {
 			return nil, errors.New("metadata contained no service provider metadata")
 		}
@@ -120,9 +120,19 @@ func ParseServiceProvidersMetadata(data []byte) ([]*EntityDescriptor, error) {
 // serviceProvidersOf appends to entities each entity of group and of the groups within it that has a service
 // provider descriptor, with the earliest of its own validUntil, that of group and validUntil, the earliest of the
 // groups around group. The zero time counts as no validUntil.
-func serviceProvidersOf(group *EntitiesDescriptor, validUntil time.Time, entities []*EntityDescriptor) []*EntityDescriptor {
+//
+// Each entity also has the entity attributes of group and of the groups around group, which are inherited, after
+// its own, those of the nearest group first: the attributes in the Extensions of an EntitiesDescriptor "are bound
+// to each EntityDescriptor within" it (SAML V2.0 Metadata Extension for Entity Attributes §2.3). The Extensions of
+// such an entity are a copy, so group is not changed.
+func serviceProvidersOf(group *EntitiesDescriptor, validUntil time.Time, inherited []Attribute, entities []*EntityDescriptor) []*EntityDescriptor {
 	if group.ValidUntil != nil {
 		validUntil = earliestValidUntil(validUntil, *group.ValidUntil)
+	}
+
+	if group.Extensions != nil && group.Extensions.EntityAttributes != nil {
+		// A new slice, as the groups within this one must not share what they append to it.
+		inherited = slices.Concat(group.Extensions.EntityAttributes.Attributes, inherited)
 	}
 
 	for i := range group.EntityDescriptors {
@@ -132,14 +142,41 @@ func serviceProvidersOf(group *EntitiesDescriptor, validUntil time.Time, entitie
 		}
 
 		entity.ValidUntil = earliestValidUntil(entity.ValidUntil, validUntil)
+		entity.Extensions = inheritEntityAttributes(entity.Extensions, inherited)
 		entities = append(entities, &entity)
 	}
 
 	for i := range group.EntitiesDescriptors {
-		entities = serviceProvidersOf(&group.EntitiesDescriptors[i], validUntil, entities)
+		entities = serviceProvidersOf(&group.EntitiesDescriptors[i], validUntil, inherited, entities)
 	}
 
 	return entities
+}
+
+// inheritEntityAttributes returns extensions, or a copy of them that also has the entity attributes inherited
+// if there are any. Each attribute is a copy, so a change to one entity is not a change to another.
+func inheritEntityAttributes(extensions *Extensions, inherited []Attribute) *Extensions {
+	if len(inherited) == 0 {
+		return extensions
+	}
+
+	result := &Extensions{}
+	if extensions != nil {
+		*result = *extensions
+	}
+
+	var attributes []Attribute
+	if result.EntityAttributes != nil {
+		attributes = slices.Clone(result.EntityAttributes.Attributes)
+	}
+
+	for _, attribute := range inherited {
+		attributes = append(attributes, attribute.clone())
+	}
+
+	result.EntityAttributes = &EntityAttributes{Attributes: attributes}
+
+	return result
 }
 
 // earliestValidUntil returns the earlier of a and b, where the zero time counts as no validUntil.

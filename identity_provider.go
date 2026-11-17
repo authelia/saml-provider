@@ -65,13 +65,19 @@ type Session struct {
 	// refuses is not stated. PersistentNameIDProvider derives its identifiers from it when it is set.
 	SubjectID string
 
-	Groups                 []string
-	UserName               string
-	UserEmail              string
-	UserCommonName         string
-	UserSurname            string
-	UserGivenName          string
-	UserScopedAffiliation  string
+	Groups                []string
+	UserName              string
+	UserEmail             string
+	UserCommonName        string
+	UserSurname           string
+	UserGivenName         string
+	UserScopedAffiliation string
+
+	// UserDisplayName is the name of the principal to show to others, which is stated as the displayName
+	// attribute. The attribute bundles of the REFEDS entity categories hold it, see
+	// DefaultAttributeReleasePolicy.EntityCategoryAttributes.
+	UserDisplayName string `json:",omitempty"`
+
 	EduPersonPrincipalName string `json:",omitempty"`
 
 	CustomAttributes []Attribute
@@ -295,8 +301,8 @@ type AttributeReleaseRequest struct {
 
 	// Requested lists the attributes that an AttributeQuery names (SAMLCore §3.3.2.3). It is empty for
 	// single sign-on and for a query that names none, which asks for every attribute that policy
-	// allows. The candidates have already been narrowed to these, and what the policy returns is
-	// narrowed to them again.
+	// allows. The candidates are not narrowed to these, so that the policy decides as it does for single
+	// sign-on, and what the policy returns is narrowed to them.
 	Requested []Attribute
 
 	// AuthnRequest is the request, for single sign-on, and nil for an AttributeQuery.
@@ -684,7 +690,7 @@ type IdentityProvider struct {
 	EncryptionCertificateEnforcer EncryptionCertificateEnforcer
 
 	// AttributeReleasePolicy decides which attributes DefaultAssertionMaker and ServeAttributeQuery
-	// state to each service provider. Defaults to DefaultAttributeReleasePolicy, which only releases
+	// state to each service provider. Defaults to DefaultAttributeReleasePolicy{}, which only releases
 	// the attributes that the AttributeConsumingService of the request lists, and none if there is no
 	// such service. It is not used by any other AssertionMaker.
 	AttributeReleasePolicy AttributeReleasePolicy
@@ -2288,6 +2294,18 @@ func sessionAttributes(session *Session) []Attribute {
 		})
 	}
 
+	if session.UserDisplayName != "" {
+		attributes = append(attributes, Attribute{
+			FriendlyName: "displayName",
+			Name:         DisplayNameAttributeName,
+			NameFormat:   "urn:oasis:names:tc:SAML:2.0:attrname-format:uri",
+			Values: []AttributeValue{{
+				Type:  "xs:string",
+				Value: session.UserDisplayName,
+			}},
+		})
+	}
+
 	if session.UserScopedAffiliation != "" {
 		attributes = append(attributes, Attribute{
 			FriendlyName: "scopedAffiliation",
@@ -2451,57 +2469,6 @@ func defaultAttributeConsumingService(services []AttributeConsumingService) *Att
 	}
 
 	return selected
-}
-
-// DefaultAttributeReleasePolicy releases only the attributes that the service provider requests in
-// the RequestedAttribute elements of its AttributeConsumingService, which is the Ceiling of the
-// AttributeReleaseRequest: the one IdpAuthnRequest.AttributeConsumingService selects for single sign-on,
-// and the default one for an AttributeQuery. If there is no such service, no attributes are released,
-// and the assertion only identifies the principal by its NameID.
-//
-// A candidate is released if a RequestedAttribute has the same Name and a compatible NameFormat. The
-// Name must be identical, as SAMLCore §1.3.1 requires an exact binary comparison. FriendlyName is never
-// used, because SAMLCore §2.7.3.1 says it "MUST NOT be used as a basis for formally identifying SAML
-// attributes". A missing NameFormat is urn:oasis:names:tc:SAML:2.0:attrname-format:unspecified, as
-// SAMLCore §2.7.3.1 and errata E89 say, and the unspecified format is compatible with any other,
-// since it leaves the interpretation of the name to the implementation (SAMLCore §8.2.1).
-//
-// If the matching RequestedAttribute elements list values, only those values of the candidate are
-// released, as SAMLMeta §2.4.4.2 says that only matching values are relevant to the service, and the
-// candidate is withheld if it has none of them. Values are compared exactly, and a NameID value by its
-// content and qualifiers.
-//
-// The attributes that an AttributeQuery names only narrow this further, in the same way, so that a query
-// is never answered with an attribute or a value that single sign-on would not state.
-type DefaultAttributeReleasePolicy struct {
-}
-
-// ReleaseAttributes implements AttributeReleasePolicy.
-func (DefaultAttributeReleasePolicy) ReleaseAttributes(req AttributeReleaseRequest, _ *Session, candidates []Attribute) ([]Attribute, error) {
-	if req.Ceiling == nil {
-		return nil, nil
-	}
-
-	var released []Attribute
-
-	for _, candidate := range candidates {
-		if attribute, ok := releaseRequestedAttribute(req.Ceiling.RequestedAttributes, candidate); ok {
-			released = append(released, attribute)
-		}
-	}
-
-	return narrowToQueriedAttributes(req.Requested, released), nil
-}
-
-// releaseRequestedAttribute returns the part of candidate which requested asks for, and false if it
-// asks for none of it.
-func releaseRequestedAttribute(requested []RequestedAttribute, candidate Attribute) (Attribute, bool) {
-	attributes := make([]Attribute, 0, len(requested))
-	for _, r := range requested {
-		attributes = append(attributes, r.Attribute)
-	}
-
-	return narrowAttribute(attributes, candidate)
 }
 
 // narrowAttribute returns the part of candidate which wanted asks for, and false if it asks for none of
