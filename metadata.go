@@ -285,7 +285,10 @@ type EncryptionMethod struct {
 	MGF *MGF `xml:"http://www.w3.org/2009/xmlenc11# MGF,omitempty"`
 }
 
-// DigestMethod represents a ds:DigestMethod element, which identifies a digest algorithm of XML Signature.
+// DigestMethod represents a ds:DigestMethod element, which identifies a digest algorithm of XML Signature, and the
+// alg:DigestMethod element of Extensions, which says that an entity can verify a signature whose digest is made
+// with the algorithm (Metadata Profile for Algorithm Support §2.4). The schema allows an alg:DigestMethod to hold
+// what an algorithm defines beyond its identifier; no digest of XML Signature defines anything, and it is not kept.
 type DigestMethod struct {
 	Algorithm string `xml:"Algorithm,attr"`
 }

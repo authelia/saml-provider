@@ -74,7 +74,9 @@ func TestParseMetadataExtensionsOfAFederationServiceProvider(t *testing.T) {
 		},
 	}, metadata.Extensions.EntityAttributes.Attributes))
 
-	assert.Check(t, is.Len(metadata.Extensions.Other, 2))
+	// The algorithm support extension is modelled, so only the extension that isn't is kept as it was.
+	assert.Check(t, is.Len(metadata.Extensions.DigestMethods, 1))
+	assert.Check(t, is.Len(metadata.Extensions.Other, 1))
 
 	role := metadata.SPSSODescriptors[0]
 	assert.Assert(t, role.Extensions != nil)
@@ -449,12 +451,17 @@ func federationMetadataInfo() MetadataInfo {
 	}
 }
 
-func TestIDPMetadataPublishesNoExtensionsByDefault(t *testing.T) {
+func TestIDPMetadataPublishesOnlyAlgorithmSupportByDefault(t *testing.T) {
 	test := NewIdentityProviderTest(t)
 
 	metadata := test.IDP.Metadata()
 
-	assert.Check(t, metadata.Extensions == nil)
+	// The algorithms that are accepted on a signature are always known, and nothing else is.
+	assert.Assert(t, metadata.Extensions != nil)
+	assert.Check(t, is.DeepEqual(&Extensions{
+		DigestMethods:  metadata.Extensions.DigestMethods,
+		SigningMethods: metadata.Extensions.SigningMethods,
+	}, metadata.Extensions))
 	assert.Check(t, metadata.Organization == nil)
 	assert.Check(t, is.Len(metadata.ContactPeople, 0))
 	assert.Check(t, metadata.IDPSSODescriptors[0].Extensions == nil)
@@ -462,7 +469,7 @@ func TestIDPMetadataPublishesNoExtensionsByDefault(t *testing.T) {
 
 	buf, err := xml.Marshal(metadata)
 	assert.NilError(t, err)
-	assert.Check(t, !strings.Contains(string(buf), "Extensions"))
+	assert.Check(t, is.Equal(1, strings.Count(string(buf), "<Extensions>")))
 }
 
 func TestIDPMetadataPublishesMetadataInfo(t *testing.T) {

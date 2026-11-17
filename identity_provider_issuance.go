@@ -41,12 +41,16 @@ type Issuance struct {
 
 	// SignatureMethod is the identifier of the signature algorithm, such as
 	// http://www.w3.org/2001/04/xmldsig-more#rsa-sha256, which must be one for the type of the key of the
-	// identity provider. Empty means the one that IdentityProvider.SignatureMethod gives.
+	// identity provider. Empty means the one of IssuanceRequest.Defaults: the first that the metadata of the
+	// service provider lists and the identity provider can sign with, or else the one that
+	// IdentityProvider.SignatureMethod gives.
 	SignatureMethod string
 
 	// DigestMethod is the identifier of the digest of what is signed, such as
 	// http://www.w3.org/2001/04/xmlenc#sha256. Empty means the digest of SignatureMethod, which is SHA-1 for
-	// RSA-SHA1. The supported digests are SHA-1, SHA-256, SHA-384 and SHA-512.
+	// RSA-SHA1, unless the metadata of the service provider lists the digests it supports, and then the first of
+	// them that the identity provider uses, which is the one of IssuanceRequest.Defaults. The supported digests
+	// are SHA-1, SHA-256, SHA-384 and SHA-512.
 	DigestMethod string
 
 	// AssertionLifetime is how long after it is made that the assertion states it is valid, as
@@ -91,6 +95,11 @@ type IssuanceRequest struct {
 	// Defaults is what the settings of the identity provider give: both signatures, its SignatureMethod, or the
 	// default for its key if that is empty, its AssertionLifetime, or MaxIssueDelay if that is zero, and its
 	// IncludeSessionNotOnOrAfter. A policy returns it, changed as it wants.
+	//
+	// If the metadata of the service provider lists the signature or digest algorithms it supports, as
+	// alg:SigningMethod or alg:DigestMethod, the SignatureMethod and DigestMethod of Defaults are the first of each
+	// that the identity provider can sign with, in place of its own (Metadata Profile for Algorithm Support §2.5).
+	// A method with SHA-1 is never chosen that way. A policy that sets either replaces what was negotiated.
 	Defaults Issuance
 }
 
@@ -124,10 +133,12 @@ type ServiceProviderIssuance struct {
 	// Sign is which of the Response and the Assertion are signed. See Issuance.Sign.
 	Sign ResponseSigning
 
-	// SignatureMethod is the identifier of the signature algorithm. See Issuance.SignatureMethod.
+	// SignatureMethod is the identifier of the signature algorithm. See Issuance.SignatureMethod. It is used
+	// whatever the metadata of the service provider lists.
 	SignatureMethod string
 
-	// DigestMethod is the identifier of the digest. See Issuance.DigestMethod.
+	// DigestMethod is the identifier of the digest. See Issuance.DigestMethod. It is used whatever the metadata of
+	// the service provider lists.
 	DigestMethod string
 
 	// AssertionLifetime replaces IdentityProvider.AssertionLifetime.
@@ -245,10 +256,27 @@ func (idp *IdentityProvider) defaultIssuance() (Issuance, error) {
 // of req filled in, and returns the answer once it is known to be one that can be carried out. Nothing else asks
 // the policy, so every message is issued by an answer that passed here.
 func (idp *IdentityProvider) issuance(req IssuanceRequest) (Issuance, error) {
-	defaults, err := idp.defaultIssuance()
+	issuance, notes, err := idp.resolveIssuance(req)
 	if err != nil {
 		return Issuance{}, err
 	}
+
+	idp.logAlgorithmFallback(req.ServiceProviderMetadata, notes)
+
+	return issuance, nil
+}
+
+// resolveIssuance is issuance, which logs what this returns as notes: why an algorithm that is used was not
+// negotiated with the service provider although its metadata lists algorithms. See negotiateAlgorithms.
+func (idp *IdentityProvider) resolveIssuance(req IssuanceRequest) (Issuance, []negotiationNote, error) {
+	defaults, err := idp.defaultIssuance()
+	if err != nil {
+		return Issuance{}, nil, err
+	}
+
+	own := defaults
+
+	defaults, notes := idp.negotiateAlgorithms(req, defaults)
 
 	req.Defaults = defaults
 
@@ -259,15 +287,24 @@ func (idp *IdentityProvider) issuance(req IssuanceRequest) (Issuance, error) {
 
 	issuance, err := policy.Issuance(req)
 	if err != nil {
-		return Issuance{}, fmt.Errorf("IssuancePolicy: %w", err)
+		return Issuance{}, nil, fmt.Errorf("IssuancePolicy: %w", err)
 	}
 
 	issuance, err = idp.completeIssuance(req, issuance)
 	if err != nil {
-		return Issuance{}, fmt.Errorf("IssuancePolicy: %w", err)
+		return Issuance{}, nil, fmt.Errorf("IssuancePolicy: %w", err)
 	}
 
-	return issuance, nil
+	// What the policy chose for the service provider is not a failure to negotiate.
+	notes = slices.DeleteFunc(notes, func(note negotiationNote) bool {
+		if note.signature {
+			return issuance.SignatureMethod != own.SignatureMethod
+		}
+
+		return issuance.DigestMethod != own.DigestMethod
+	})
+
+	return issuance, notes, nil
 }
 
 // completeIssuance returns issuance, which the policy gave for req, with what it left empty filled in from the
@@ -288,6 +325,11 @@ func (idp *IdentityProvider) completeIssuance(req IssuanceRequest, issuance Issu
 
 	if issuance.SignatureMethod == "" {
 		issuance.SignatureMethod = req.Defaults.SignatureMethod
+	}
+
+	// The digest of the Defaults is one that was negotiated with the service provider, or empty.
+	if issuance.DigestMethod == "" {
+		issuance.DigestMethod = req.Defaults.DigestMethod
 	}
 
 	if issuance.AssertionLifetime < 0 {
@@ -363,12 +405,25 @@ func (req *IdpAuthnRequest) Issuance(session *Session) (Issuance, error) {
 		issuanceRequest.ACSEndpoint, issuanceRequest.AuthnRequest = req.ACSEndpoint, req
 	}
 
-	return req.IDP.issuance(issuanceRequest)
+	issuance, notes, err := req.IDP.resolveIssuance(issuanceRequest)
+	if err != nil {
+		return Issuance{}, err
+	}
+
+	// The policy is asked for each part of a response, and what was not negotiated is logged for the first.
+	if len(notes) != 0 && !req.algorithmFallbackLogged {
+		req.algorithmFallbackLogged = true
+
+		req.IDP.logAlgorithmFallback(req.ServiceProviderMetadata, notes)
+	}
+
+	return issuance, nil
 }
 
 // signingContextFor returns a context which signs a message for the service provider with that metadata, with
-// the SignatureMethod and DigestMethod that the IssuancePolicy gives for it. The metadata is nil when the
-// service provider isn't known, and the settings of the identity provider are then used.
+// the SignatureMethod and DigestMethod that the IssuancePolicy gives for it, which are those negotiated from the
+// algorithms its metadata lists unless the policy chose others. The metadata is nil when the service provider
+// isn't known, and the settings of the identity provider are then used.
 func (idp *IdentityProvider) signingContextFor(r *http.Request, metadata *EntityDescriptor) (*dsig.SigningContext, error) {
 	if metadata == nil {
 		return idp.signingContext()

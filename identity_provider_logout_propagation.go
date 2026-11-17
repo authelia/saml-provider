@@ -478,13 +478,22 @@ func (idp *IdentityProvider) finishLogout(w http.ResponseWriter, r *http.Request
 	}
 
 	if origin := state.Origin; origin != nil {
+		// The response is signed with the algorithms for the service provider that asked. If it is no longer
+		// known it is still answered, at the endpoint that was checked when it asked, with those of the identity
+		// provider.
+		metadata, err := idp.serviceProvider(r, origin.ServiceProviderEntityID)
+		if err != nil {
+			metadata = nil
+		}
+
 		req := &IdpLogoutRequest{
-			IDP:         idp,
-			HTTPRequest: r,
-			RelayState:  origin.RelayState,
-			Request:     LogoutRequest{ID: origin.RequestID},
-			SLOEndpoint: &origin.SLOEndpoint,
-			Now:         TimeNow(),
+			IDP:                     idp,
+			HTTPRequest:             r,
+			RelayState:              origin.RelayState,
+			Request:                 LogoutRequest{ID: origin.RequestID},
+			ServiceProviderMetadata: metadata,
+			SLOEndpoint:             &origin.SLOEndpoint,
+			Now:                     TimeNow(),
 		}
 
 		return req.WriteResponse(w, state.status())

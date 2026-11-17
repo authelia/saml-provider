@@ -19,6 +19,7 @@ const (
 	xsiNamespace    = "http://www.w3.org/2001/XMLSchema-instance"
 	xmlNamespace    = "http://www.w3.org/XML/1998/namespace"
 	refedsNamespace = "http://refeds.org/metadata"
+	algNamespace    = "urn:oasis:names:tc:SAML:metadata:algsupport"
 )
 
 // REFEDSSecurityContactType is the ContactPerson.REFEDSContactType of the security contact that the REFEDS Security
@@ -52,6 +53,15 @@ type Extensions struct {
 
 	// Scopes are the scopes that an identity provider may assert, on its EntityDescriptor or a role descriptor.
 	Scopes []Scope `xml:"urn:mace:shibboleth:metadata:1.0 Scope"`
+
+	// DigestMethods are the digest algorithms that the entity can verify in an XML signature, in its order of
+	// preference, on an EntityDescriptor or a role descriptor. EntityDescriptor.DigestMethods returns those that
+	// apply to a role.
+	DigestMethods []DigestMethod `xml:"urn:oasis:names:tc:SAML:metadata:algsupport DigestMethod"`
+
+	// SigningMethods are the signature algorithms that the entity can verify, in its order of preference, on an
+	// EntityDescriptor or a role descriptor. EntityDescriptor.SigningMethods returns those that apply to a role.
+	SigningMethods []SigningMethod `xml:"urn:oasis:names:tc:SAML:metadata:algsupport SigningMethod"`
 
 	// Other holds every other element.
 	Other []ExtensionElement `xml:",any"`
@@ -348,7 +358,8 @@ func (m ExtensionElement) MarshalXML(e *xml.Encoder, _ xml.StartElement) error {
 // isEmpty reports whether there is nothing to marshal.
 func (m *Extensions) isEmpty() bool {
 	return m == nil || (m.RegistrationInfo == nil && m.PublicationInfo == nil && m.EntityAttributes.isEmpty() &&
-		m.UIInfo.isEmpty() && m.DiscoHints.isEmpty() && len(m.Scopes) == 0 && len(m.Other) == 0)
+		m.UIInfo.isEmpty() && m.DiscoHints.isEmpty() && len(m.Scopes) == 0 && len(m.DigestMethods) == 0 &&
+		len(m.SigningMethods) == 0 && len(m.Other) == 0)
 }
 
 func (m *EntityAttributes) isEmpty() bool {
@@ -385,6 +396,14 @@ func (m Extensions) MarshalXML(e *xml.Encoder, start xml.StartElement) error {
 
 	for _, scope := range m.Scopes {
 		w.leaf("shibmd:Scope", scope.Value, extAttr("xmlns:shibmd", shibmdNamespace), extAttr("regexp", strconv.FormatBool(scope.Regexp)))
+	}
+
+	for _, method := range m.DigestMethods {
+		w.leaf("alg:DigestMethod", "", extAttr("xmlns:alg", algNamespace), extAttr("Algorithm", method.Algorithm))
+	}
+
+	for _, method := range m.SigningMethods {
+		method.write(w)
 	}
 
 	for _, other := range m.Other {

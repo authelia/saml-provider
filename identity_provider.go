@@ -681,6 +681,10 @@ type IdentityProvider struct {
 	// DefaultIssuancePolicy with no options set, which signs both with SignatureMethod and issues every assertion
 	// with AssertionLifetime and IncludeSessionNotOnOrAfter. Whatever it decides, an assertion is signed for a
 	// service provider whose metadata sets WantAssertionsSigned.
+	//
+	// For a service provider whose metadata lists the signature or digest algorithms it supports, as
+	// alg:SigningMethod or alg:DigestMethod, the first of each that the identity provider can sign with is used in
+	// place of SignatureMethod, unless the policy names another. See IssuanceRequest.Defaults.
 	IssuancePolicy IssuancePolicy
 
 	// EncryptionCertificateEnforcer decides whether the encryption certificate of a service provider
@@ -757,6 +761,10 @@ type IdentityProvider struct {
 	// them, and list the SHA-1 digest in DigestMethods. An identifier that isn't supported is an error, which
 	// refuses every signed message. It has no effect on SignatureMethod, which is what the identity provider signs
 	// with, or on a MetadataVerifier, which has lists of its own.
+	//
+	// The metadata lists them, or the default, as alg:SigningMethod in the Extensions of the EntityDescriptor, in
+	// this order, which a service provider reads as the order of preference (Metadata Profile for Algorithm
+	// Support §2.4). So list SHA-1 last if it must be accepted.
 	SignatureMethods []string
 
 	// DigestMethods lists the identifiers of the digest algorithms that the identity provider accepts in the XML
@@ -764,7 +772,7 @@ type IdentityProvider struct {
 	// one of them. The supported digests are SHA-1, SHA-256, SHA-384 and SHA-512, and empty means all of them but
 	// SHA-1, which is "http://www.w3.org/2000/09/xmldsig#sha1". It doesn't apply to a signature on the
 	// HTTP-Redirect binding, which has no digest of its own, or to KeyTransportDigestMethods, which is for
-	// encryption.
+	// encryption. The metadata lists them as alg:DigestMethod, as it does the SignatureMethods.
 	DigestMethods []string
 
 	// LogoutNameIDValueOnly makes IdpLogoutRequest.MatchesSession compare only the NameID value and the session
@@ -1474,6 +1482,10 @@ type IdpAuthnRequest struct {
 
 	// requestAuthenticated is set by Validate if the request has a signature, which was verified.
 	requestAuthenticated bool
+
+	// algorithmFallbackLogged is set by Issuance once it has logged that an algorithm was not negotiated with the
+	// service provider, so that it is logged once for the response and not for each of its parts.
+	algorithmFallbackLogged bool
 }
 
 // RedirectQueryFormField is the POST form field which re-presents a signed HTTP-Redirect request. See
