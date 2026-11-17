@@ -1,0 +1,466 @@
+
+SAML V2.0 Deployment Profile for Federation Interoperability
+Version
+2.00
+Date
+2019-12-09
+Location
+https://kantarainitiative.github.io/SAMLprofiles/saml2int.html
+Status
+This Group Recommendation Specification was developed and approved by the Federation Interoperability Working Group (FIWG) and later approved by All Member Ballot on 2020-02-26. See the Kantara Initiative Operating Procedures for more information https://kantarainitiative.org/confluence/display/GI/All+Policies?preview=/37750179/104600198/KI%20Operating%20Procedures%20Version%203.0.pdf
+Contributors - V2.0
+	•	Keith Wessel (University of Illinois at Urbana-Champaign) - Editor
+	•	Scott Cantor (Ohio State University)
+	•	Eric Goodman (University of California, Office of the President)
+	•	Andrew Morgan (Oregon State University)
+	•	Judith Bush (OCLC)
+	•	Thomas Lenggenhager (SWITCH)
+	•	Alex Stuart (JISC)
+	•	Keith Hazelton (Internet2)
+	•	Chris Phillips (CANARIE)
+	•	Nicholas Roy (Internet2)
+	•	Alan Buxey (MyUniDays, LTD.)
+Contributors - previous versions
+	•	Andreas Åkre Solberg (UNINETT)
+	•	Eve Maler (ForgeRock)
+	•	Leif Johansson (SUNET)
+	•	Jeff Hodges (Kings Mountain Systems)
+	•	Ian Young (Independent)
+	•	Nate Klingenstein (Signet, Inc.)
+	•	Bob Morgan (University of Washington)
+Abstract
+This profile specifies behavior and options that deployments of the SAML V2.0 Web Browser SSO profile [SAML2Prof], and related profiles, are required or permitted to rely on. This deployment profile should not be confused with a SAML implementation profile, such as [SAML2Impl]. A deployment profile specifies how software should be configured given a specific set of deployment goals. An implementation profile tells software developers how they must implement their software in order to meet basic requirements.
+Copyright Notice
+SAML V2.0 Deployment Profile for Federation Interoperability ©2019 by the respective contributors, used under license. All rights reserved.
+License
+This work is licensed under the Creative Commons Attribution-ShareAlike 4.0 International License.
+Table of Contents
+	•	1. Introduction
+	•	1.1. Notation and Terminology
+	•	2. Common Requirements
+	•	2.1. General
+	•	2.2. Metadata and Trust Management
+	•	2.3. Cryptographic Algorithms
+	•	3. Service Provider Requirements
+	•	3.1. Web Browser SSO
+	•	3.2. Single Logout
+	•	3.3. Metadata and Trust Management
+	•	4. Identity Provider Requirements
+	•	4.1. Web Browser SSO
+	•	4.2. Single Logout
+	•	4.3. Metadata and Trust Management
+	•	5. References
+	•	5.1. Normative
+	•	5.2. Non-Normative
+1. Introduction
+This revision, the first major rewrite of this material, reflects the input of many experienced implementers and deployers of this technology and best practice developed over 15 years of experience with varied approaches. While it has an emphasis on highly-scaled multi-lateral federation deployments involving thousands of Identity Providers (IdPs) and Service Providers (SPs), most of these requirements are applicable to virtually any significant deployment of SAML SSO.
+The requirements specified are in addition to all normative requirements of the underlying Web Browser SSO and Single Logout profiles [SAML2Prof], as modified by the Approved Errata [SAML2Err], and readers are assumed to be familiar with all relevant reference documents. Any such requirements are not repeated here except where deemed necessary to highlight a point of discussion or draw attention to an issue addressed in errata, but remain implied.
+Nothing in this profile should be taken to imply that disclosing personally identifiable information, or indeed any information, is required from an IdP with respect to any particular SP. That remains at the discretion of applicable settings, user consent, or other appropriate means in accordance with regulations and policies. However, this profile does obligate IdPs to honor certain key signals from an SP in the area of subject identification and requires successful responses to include specific SAML Attributes [X500SAMLattr] under certain conditions. Failure is always an option.
+Note that SAML features that are optional, or lack mandatory processing rules, are assumed to be optional and out of scope of this profile if not otherwise precluded or given specific processing rules.
+This profile addresses only behavior specific to the direct participants in the covered profiles. It does not include additional processing requirements that may be important when proxying.
+1.1. Notation and Terminology
+The key words "MUST", "MUST NOT", "REQUIRED", "SHALL", "SHALL NOT", "SHOULD", "SHOULD NOT", "RECOMMENDED", "NOT RECOMMENDED", "MAY", and "OPTIONAL" in this document are to be interpreted as described in BCP 14 [RFC2119] [RFC8174] when, and only when, they appear in all capitals, as shown here.
+This specification uses the following typographical conventions in text: <ns:Element>, Attribute, Datatype, OtherCode. The normative requirements of this specification are individually labeled with a unique identifier in the following form: [SDP-EXAMPLE01]. All information within these requirements should be considered normative unless it is set in italic type. Italicized text is non-normative and is intended to provide additional information that may be helpful in implementing the normative requirements.
+The abbreviations IdP and SP are used below to refer to Identity Providers and Service Providers in the sense of their usage within the SAML Browser SSO and Single Logout profiles.
+Whether explicit or implicit, all the requirements in this document are meant to apply to deployments of SAML profiles and may involve explicit support for requirements by SAML-implementing software and/or supplemental support via application code. Deployments of a Service Provider may refer to both stand-alone implementations of SAML, libraries integrated with an application, or any combination of the two. It is difficult to define a clear boundary between a Service Provider and the application/service it represents, and unnecessary to do so for the purposes of this document.
+1.1.1. References to SAML 2.0 specification
+When referring to elements from the SAML 2.0 core specification [SAML2Core], the following syntax is used:
+	•	<samlp:ProtocolElement> - for elements from the SAML 2.0 Protocol namespace.
+	•	<saml:AssertionElement> - for elements from the SAML 2.0 Assertion namespace.
+When referring to elements from the SAML 2.0 metadata specification [SAML2Meta], the following syntax is used:
+	•	<md:MetadataElement>
+When referring to elements from the SAML 2.0 Metadata Extensions for Login and Discovery User Interface specification [MetaUI], the following syntax is used:
+	•	<mdui:MetadataElement>
+When referring to elements from the SAML 2.0 Metadata Extension for Entity Attributes specification [MetaAttr], the following syntax is used:
+	•	<mdattr:MetadataElement>
+When referring to elements from the SAML V2.0 Subject Identifier Attributes Profile specification [SAML2SubjId], the following syntax is used:
+	•	<shibmd:Element>
+When referring to elements from the SAML V2.0 Asynchronous Single Logout Protocol Extension specification [SAML2ASLO], the following syntax is used:
+	•	<aslo:Element>
+When referring to elements from the XML-Signature Syntax and Processing Version 1.1 WWWC Recommendation [XMLSig], the following syntax is used:
+	•	<ds:Element>
+2. Common Requirements
+This section includes material of general significance to both IdPs and SPs. Subsequent sections provide guidance specific to those roles.
+2.1. General
+Clock Skew
+[SDP-G01]
+Deployments MUST allow between three (3) and five (5) minutes of clock skew — in either direction — when interpreting xsd:dateTime values in assertions and when enforcing security policies based thereupon.
+The following is a non-exhaustive list of items to which this directive applies: NotBefore, NotOnOrAfter, and validUntil XML attributes found on <saml:Conditions>, <saml:SubjectConfirmationData>, <samlp:LogoutRequest>, <md:EntityDescriptor>, <md:EntitiesDescriptor>, <md:RoleDescriptor>, and <md:AffiliationDescriptor> elements.
+Data Size
+[SDP-G02]
+Unless otherwise specified, deployments MUST limit the size of each string-valued XML element and attribute they produce to 256 characters.
+This requirement is generic, but is primarily targeted at the content of the <saml:NameID> and <saml:AttributeValue> elements.
+Document Type Definitions
+[SDP-G03]
+Deployments MUST NOT produce any SAML protocol message that contains a (DTD) Document Type Definition.
+SAML entityIDs
+[SDP-G04]
+Deployments MUST be named via an absolute URI whose total length MUST NOT exceed 256 characters.
+An entityID should be chosen in a manner that minimizes the likelihood of it changing for political or technical reasons, including for example a change to a different software implementation or hosting provider.
+2.2. Metadata and Trust Management
+2.2.1. Metadata Consumption and Use
+[SDP-MD01]
+Deployments MUST provision their behavior in the following areas based solely on the consumption of SAML Metadata [SAML2Meta] on an automated, periodic or real-time basis using (where applicable) the processing rules defined by the SAML Metadata Interoperability profile [SAML2MDIOP]:
+	•	indications of support for Web Browser SSO and Single Logout profiles
+	•	selection, determination, and verification of SAML endpoints and bindings
+	•	determination of the trustworthiness of XML signing keys and TLS client and server certificates
+	•	selection of XML Encryption keys
+	•	determination of subject identifier SAML Attribute(s) to provide (per [SAML2SubjId])
+	•	optional signing of assertions via the WantAssertionsSigned flag
+	•	optional enforcement of request signing via the AuthnRequestsSigned flag
+Deployments MUST NOT require out of band communication or coordination for the management of any behavior by peers included within the enumerated areas identified above. Deployments MAY of course rely on additional sources of policy, including other metadata content, in order to make determinations whether to successfully interact with peers or refuse to do so.
+[SDP-MD02]
+Consumption of metadata MUST be contingent on verification of a signature (STRONGLY RECOMMENDED) or TLS server certificate. It MUST be possible to communicate changes to the keys within the metadata without also changing the key used to establish trust in the metadata.
+In most cases, this requirement implies that a key communicated via metadata will not also be used to sign and verify the same metadata, but it is possible to construct scenarios in which this may happen if metadata verification relies on a chain of certificates signed by an ultimately trusted Certificate Authority. The details of such an approach are beyond the scope of this document.
+Metadata Validity
+[SDP-MD03]
+Metadata without a validUntil attribute on its root element MUST be rejected. Metadata whose root element’s validUntil attribute extends beyond a deployer- or community-imposed threshold MUST be rejected.
+These are critical (but very simple to implement) requirements for secure application of [SAML2MDIOP] because it is the method by which keys are revoked and the window of revocation is established.
+2.2.2. Metadata Production
+[SDP-MD04]
+Deployments MUST have the ability to provide SAML metadata capturing their requirements and characteristics in the areas identified above in a secure fashion, the specifics of which will necessarily vary by context and community. The use of services offering third-party validation, curation, signing, and publishing of metadata is a recommended practice.
+An entity’s metadata MUST NOT contain content that advertises profile support or features that aren’t supported by that entity’s deployment, but it MAY include content indicating support for profiles or features beyond the scope of this profile.
+As an example, deployments that lack support for, or have not tested and integrated an implementation’s support for the HTTP-Artifact binding [SAML2Bind] must omit such endpoints.
+This profile does not mandate any specific automated support for the production of metadata by a deployment. In fact, automatic generation of metadata has a strong tendency to undermine the correct functioning of peer deployments in the face of key rollover or changes to endpoints or other software features because it tends to change too suddenly to accommodate a graceful transition between states.
+Keys and Certificates
+[SDP-MD05]
+Public keys used for signing, encryption, and TLS client and server authentication MUST be expressed via X.509 certificates included in metadata via <md:KeyDescriptor> elements.
+By virtue of [SAML2MDIOP], this profile (and SAML in general) does not place requirements on the non-key material contained in X.509 certificates in metadata. However, the following are suggested practices to avoid interoperability issues with deployments outside the scope of this profile:
+	•	use long-lived certificates
+	•	use self-signed certificates
+	•	do not use expired certificates
+	•	do not sign certificates with MD5- or SHA1-based signature algorithms
+[SDP-MD06]
+RSA public keys MUST be at least 2048 bits in length. At least 3072 bits is RECOMMENDED for new deployments.
+[SDP-MD07]
+EC public keys MUST be at least 256 bits in length.
+[SDP-MD08]
+By virtue of the profile’s overall requirements, an IdP’s metadata MUST include at least one signing certificate (that is, an <md:KeyDescriptor> with no use attribute or one set to signing), and an SP’s metadata MUST include at least one encryption certificate (that is, an <md:KeyDescriptor> with no use attribute or one set to encryption).
+Discovery and User Interface Elements
+[SDP-MD09]
+Metadata MUST include an <mdui:UIInfo> element as defined in [MetaUI] containing at least the child elements <mdui:DisplayName> and <mdui:Logo>. An SP’s metadata MUST include the child element <PrivacyStatementURL>
+[SDP-MD10]
+The content of the <mdui:Logo> element MUST be either an https URL or an in-line image embedded in a data URI element. The size of the data URI used in a <mdui:Logo> element is not limited to 256 characters.
+Specific details around logo formats including image size, encoding and aspect ratio should be coordinated with the common practice of the entity’s community of SAML peers.
+[SDP-MD11]
+Metadata MUST include an <md:ContactPerson> element within the <md:EntityDescriptor> element, with a contactType of technical and an <md:EmailAddress> element.
+[SDP-MD12]
+An IdP’s metadata MUST include the errorURL attribute on its <md:IDPSSODescriptor> element. The content of the errorURL attribute MUST be an https URL resolving to an HTML page.
+The errorURL HTML page should be suitable for referral by SPs if they receive insufficient attributes from the IdP to successfully authenticate or authorize the user’s access. The page should provide information targeted at the end user explaining how to contact the operator of the IdP to request addition of the necessary attributes to the assertions.
+2.3. Cryptographic Algorithms
+[SDP-ALG01]
+Deployments MUST support, and use, the following XML Signature and Encryption algorithms when communicating with peers in the context of this profile. Where multiple choices exist, any of the listed options may be used. The profile will be updated as necessary to reflect changes in government and industry recommendations regarding algorithm usage.
+This profile does not impose specific algorithm or version requirements regarding the use of TLS between clients and servers and defers to existing industry best practices or other deployment guidance in that area.
+	•	Digest
+	◦	http://www.w3.org/2001/04/xmlenc#sha256 [XMLEnc]
+	•	
+	•	Signature
+	◦	http://www.w3.org/2001/04/xmldsig-more#rsa-sha256 [RFC4051]
+	◦	http://www.w3.org/2001/04/xmldsig-more#ecdsa-sha256 [RFC4051]
+	•	
+	•	Block Encryption
+	◦	http://www.w3.org/2009/xmlenc11#aes128-gcm [XMLEnc]
+	◦	http://www.w3.org/2009/xmlenc11#aes256-gcm [XMLEnc]
+	•	
+	•	Key Transport
+	◦	http://www.w3.org/2001/04/xmlenc#rsa-oaep-mgf1p [XMLEnc]
+	•	
+	•	Key Transport Digest
+	◦	http://www.w3.org/2000/09/xmldsig#sha1 [XMLSig]
+	•	
+This profile cannot preclude the use of other algorithms when communicating with peers outside the scope of this profile, but the other algorithms in common use are generally considered to be weakening (e.g., SHA-1) or broken outright (e.g., RSA PKCS#1.5). Note that the use of AES-CBC block encryption algorithms remains widespread at the time of authoring, but are known to be broken [XMLEncBreak].
+The key transport requirement is defined in the interest of avoiding interoperability problems without a compelling security benefit. The original OAEP padding method defaults to the use of SHA-1 as a digest algorithm (as mandated above) and assumes the use of the "MGF1 with SHA-1" mask generation function.
+3. Service Provider Requirements
+This section provides requirements specific to SPs, in addition to the Common Requirements above.
+3.1. Web Browser SSO
+[SDP-SP01]
+SPs MUST support the Web Browser SSO profile [SAML2Prof], as updated by the Approved Errata [SAML2Err], with behavior, capabilities, and options consistent with the additional constraints specified in this section.
+3.1.1. Requests
+Binding
+[SDP-SP02]
+The HTTP-Redirect binding [SAML2Bind] MUST be used for the transmission of <samlp:AuthnRequest> messages.
+[SDP-SP03]
+Requests MUST NOT be issued inside an HTML frame or via any mechanism that would require the use of third-party cookies by the IdP to establish or recover a session with the User Agent. This will typically imply that requests will involve a full-frame redirect, in order that the top level window origin be associated with the IdP.
+Request Content
+[SDP-SP04]
+The <samlp:AuthnRequest> message MUST either omit the <samlp:NameIDPolicy> element (RECOMMENDED), or the element MUST contain an AllowCreate attribute of "true" and MUST NOT contain a Format attribute.
+[SDP-SP05]
+The message SHOULD contain an AssertionConsumerServiceURL attribute and MUST NOT contain an AssertionConsumerServiceIndex attribute (i.e., the desired endpoint MUST be the default, or identified via the AssertionConsumerServiceURL attribute).
+[SDP-SP06]
+The AssertionConsumerServiceURL value, if present, MUST match an endpoint location expressed in the SP’s metadata exactly, without requiring URL canonicalization/normalization.
+As an example, the SP cannot specify URLs that include a port number (e.g., https://sp.example.com:443/acs) in its requests unless it also includes that port number in the URLs specified in its metadata, and vice versa.
+Authentication Contexts
+[SDP-SP07]
+An SP that does not require a specific <saml:AuthnContextClassRef> value MUST NOT include a <samlp:RequestedAuthnContext> element in its requests.
+An SP that requires specific <saml:AuthnContextClassRef> values MUST specify the allowable values in a <samlp:RequestedAuthnContext> element in its requests, with the Comparison attribute set to exact.
+An SP should not request a <saml:AuthnContextClassRef> value in the absence of a shared understanding between itself and the IdP regarding its definition.
+3.1.2. Responses
+Binding
+[SDP-SP08]
+SPs MUST support the HTTP-POST binding for the receipt of <samlp:Response> messages. Support for other bindings is OPTIONAL.
+[SDP-SP09]
+The endpoint(s) at which an SP supports receipt of <samlp:Response> messages MUST be protected by TLS/SSL.
+XML Encryption
+[SDP-SP10]
+SPs MUST support decryption of <saml:EncryptedAssertion> elements. Support for other encrypted constructs is OPTIONAL.
+Error Handling
+[SDP-SP11]
+SPs MUST gracefully handle error responses containing <samlp:StatusCode> other than urn:oasis:names:tc:SAML:2.0:status:Success.
+[SDP-SP12]
+If a successful authentication response lacks sufficient or appropriate SAML Attributes (including subject identifiers) for successful SP operation, the SP MUST display a meaningful status message to the user. This message MUST direct the user to appropriate support resources offered by the SP or, alternatively, to the errorURL attribute in an IdP’s metadata.
+There are many reasons an SP may be unable or choose not to provide service to a user based on an given authentication response. IdPs failing to release the necessary SAML Attributes is the most prevalent interoperability issue encountered in larger, general purpose federations, which is why this scenario is singled out here.
+3.1.3. Subject Identification
+NameID Formats
+[SDP-SP13]
+SPs MUST NOT require the presence of a <saml:NameID> element.
+Use of <saml:NameID> elements in this profile is restricted to their role in the Single Logout profile, and not for long term identification of subjects. Standardized SAML Attributes are used instead, as described below.
+Subject Identifiers
+[SDP-SP14]
+If an SP requires persistent tracking/identification of its users (as most do), then it MUST support one or both of the SAML Attributes defined by [SAML2SubjId] for this purpose.
+SPs MAY support legacy or historical <saml:NameID> and <saml:Attribute> identifier content for compatibility reasons but MUST NOT require their use.
+If an SP requires coordination and/or correlation of user activity between itself and other SPs, then the SAML Attribute named urn:oasis:names:tc:SAML:attribute:subject-id is appropriate. Otherwise the SAML Attribute named urn:oasis:names:tc:SAML:attribute:pairwise-id can be used.
+Subject Identifier Requirements Signaling
+[SDP-SP15]
+An SP MUST represent its identifier requirements in its SAML metadata, consistent with the Requirements Signaling mechanism defined in [SAML2SubjId].
+Identifier Scoping
+[SDP-SP16]
+SPs MUST prevent unintended identifier collisions in the values asserted by different IdPs, and the required identifier types, per [SAML2SubjId], are "scoped" via a DNS-like syntax to help fulfill this requirement.
+[SDP-SP17]
+SPs MUST associate identifier scopes with IdPs such that only authorized IdPs may assert identifiers with particular scopes for particular purposes.
+It is RECOMMENDED that the <shibmd:Scope> metadata extension defined in [SAML2SubjId] be supported for this purpose. SPs MAY ignore any such extension elements whose regexp attribute is true or 1. SPs MUST NOT rely on this extension unless the metadata is verifiably obtained from a third party that is trusted to supply it.
+In the event that this extension cannot be used, then SPs MUST apply policy established in some other manner.
+Note that scopes and IdPs do not necessarily have a 1:1 relationship; it may well be legitimate for multiple IdPs to assert a given scope, or for an IdP to assert identifiers in multiple scopes, but the rules for this should be explicit and enforced.
+Displayable Identifiers
+The required identifier types above are opaque, unknown to users in most cases, and unsuitable for display.
+[SDP-SP18]
+SPs requiring the display of identifiers to users, the identification of other users via searching, selection, etc., and similar use cases SHOULD rely on additional suitable SAML Attributes such as:
+	•	urn:oid:0.9.2342.19200300.100.1.3 (mail)
+	•	urn:oid:2.16.840.1.113730.3.1.241 (displayName)
+	•	urn:oid:2.5.4.42 (givenName)
+	•	urn:oid:2.5.4.4 (sn)
+Note that most standardized SAML Attributes of this sort tend to be defined as multi-valued.
+3.1.4. Attribute Value Constraints
+[SDP-SP19]
+When consuming SAML Attributes with standardized definitions in external specifications, SPs MUST NOT impose constraints beyond the definitions of those attributes.
+For example, the definition of the mail attribute (in SAML, urn:oid:0.9.2342.19200300.100.1.3) explicitly allows for multiple values, so an SP that consumes it for some purpose must necessarily allow for that possibility.
+3.1.5. Usability
+Silo-oriented, multi-tenant approaches to federated application deployment create an inherent friction with the intended design of the web, user behavior and experience, and the needs of collaboration inherent in many applications. SSO, when integrated poorly, can negatively impact usability, and the following sections, while not strictly matters of SAML interoperability, have a significant effect on the perception of the system as a whole and on the successful adoption of SSO, regardless of the protocol.
+The web inherently operates on the basis of addressability of resources; that is, users expect to be able to access a piece of information or an application function directly, without regard for their identity, current level of access, or what is convenient for an application developer to support. This leads naturally to the ability to create bookmarks to what matters to them, and users will consistently route around attempts to force them through proxies, portals, and other artificial access paths.
+At a high level, these issues fall under the term deep linking.
+For a wide range of applications in the collaborative space, this notion is not merely convenient, but utterly essential, because such applications presume the sharing of resources with peers between organizations.
+For the purposes of the following requirements, we will refer to applications that rely on the exposure of resource URLs that may be shared between users from multiple organizations as "collaborative" applications, even if their purpose may not specifically align with that term.
+Support for Multiple IdPs
+[SDP-SP20]
+SPs MUST allow for the possibility that any given request requiring authentication may be potentially satisfied by more than one IdP. That is, any scenario in which a piece of content, policy, configuration, or decision on the part of an application is bound to an IdP MUST be constructed in a fashion such that more than one IdP may be so bound.
+This requirement flows from both the inherent requirements of collaborative applications described above, and from the simple reality that enterprises vary in their structure. Some organizations rely on more than one IdP due to administrative boundaries, but frequently contract for or access services as a single body. Thus, any presumed mapping between a contract or set of access policies and a single SAML IdP is too constraining. This constraint imposes a need for complex proxying of SSO by many organizations and SPs are cautioned to avoid it.
+Deep Linking
+[SDP-SP21]
+Applications SHOULD, and collaborative applications MUST, support deep linking. Deep linking implies maintaining support for such links across the boundary of a Web Browser SSO profile interaction involving any IdP necessary to complete the login process.
+It should be possible to request a resource and (authorization permitting) have it supplied as the result of a successful Web Browser SSO profile exchange.
+Deep linking implies support for SP-initiated SSO, i.e., the direct generation of authentication request messages in response to unauthenticated or insufficiently-authenticated access attempts to an application as a whole, or to specific protected content. Deep linking may co-exist with support for unsolicited responses (so-called IdP-initiated SSO), but precludes its requirement.
+[SDP-SP22]
+It is RECOMMENDED that SPs support the preservation of POST bodies across a successful Web Browser SSO profile exchange, subject to size limitations dictated by policy or implementation constraints.
+Discovery
+Deep linking also implies support for some form of IdP "discovery", the process by which an SP establishes which IdP to use on behalf of a subject. Use of IdP-initiated SSO is a common workaround for supporting discovery, but cannot be required when deep linking is supported, in addition to having other drawbacks.
+A common means of discovery is the mapping of resource/application URL (typically virtual host, sometimes path) to a specific IdP. This is strongly discouraged, and is disallowed for collaborative applications, since it makes the sharing of URLs between users from multiple organizations at best inconvenient, and in some cases, impossible.
+[SDP-SP23]
+SPs that support deep linking MUST support some form of Identity Provider discovery that accomodates all, or at least the vast majority, of their user base. Support for caching mechanisms such as cookies or other persistence solutions is encouraged.
+3.2. Single Logout
+[SDP-SP24]
+SPs MAY support the Single Logout profile [SAML2Prof], as updated by the Approved Errata [SAML2Err]. The following requirements apply in the case of such support.
+3.2.1. Requests
+Binding
+[SDP-SP25]
+The HTTP-Redirect binding [SAML2Bind] MUST be used for the transmission of <samlp:LogoutRequest> messages.
+[SDP-SP26]
+SPs MUST support the HTTP-Redirect [SAML2Bind] binding for the receipt of <samlp:LogoutRequest> messages, in the event that inbound <samlp:LogoutRequest> messages are supported.
+[SDP-SP27]
+Requests MUST NOT be issued inside an HTML frame or via any mechanism that would require the use of third-party cookies by the IdP to establish or recover a session with the User Agent. This will typically imply that requests must involve a full-frame redirect, in order that the top level window origin be associated with the IdP.
+The full-frame requirement is also necessary to ensure that full control of the user interface is released to the IdP.
+Request Content
+[SDP-SP28]
+Requests MUST be signed (via a signature created in accordance with the HTTP-Redirect binding [SAML2Bind]).
+[SDP-SP29]
+The <saml:NameID> element included in <samlp:LogoutRequest> messages MUST exactly match the corresponding element received from the IdP, including its element content and all XML attributes included therein.
+[SDP-SP30]
+The <saml:NameID> element in <samlp:LogoutRequest> messages MUST NOT be encrypted.
+The normative requirement for the use of transient identifiers is intended to obviate the need for XML Encryption.
+3.2.2. Responses
+Binding
+[SDP-SP31]
+The HTTP-Redirect binding [SAML2Bind] MUST be used for the transmission of <samlp:LogoutResponse> messages.
+[SDP-SP32]
+SPs MUST support the HTTP-Redirect [SAML2Bind] binding for the receipt of <samlp:LogoutResponse> messages, in the event that they do not include the <aslo:Asynchronous> extension [SAML2ASLO] in all of their requests.
+Response Content
+[SDP-SP33]
+Responses MUST be signed (via a signature created in accordance with the HTTP-Redirect binding [SAML2Bind]).
+3.2.3. Behavioral Requirements
+[SDP-SP34]
+SPs MUST terminate a subject’s local session before issuing a <samlp:LogoutRequest> message to the IdP.
+This ensures the safest possible result for subjects in the event that logout fails for some reason, as it often will.
+[SDP-SP35]
+SPs MUST NOT issue a <samlp:LogoutRequest> message as the result of an idle activity timeout.
+Timeout of a single application/service must not trigger logout of an SSO session because this imposes a single service’s requirements on an entire IdP deployment. Applications with sensitive requirements should consider other mechanisms, such as the ForceAuthn attribute, to achieve their goals.
+3.2.4. Logout and Virtual Hosting
+[SDP-SP36]
+An SP that maintains distinct sessions across multiple virtual hosts SHOULD identify itself by means of a distinct entityID (with associated metadata) for each virtual host.
+A single entity can have only one well-defined <SingleLogoutService> endpoint per binding. Cookies are typically host-based and logout cannot typically be implemented easily across virtual hosts. Unlike during SSO, a <samlp:LogoutRequest> message cannot specify a particular response endpoint, so this scenario is generally not viable.
+3.3. Metadata and Trust Management
+3.3.1. Support for Multiple Keys
+The ability to perform seamless key migration depends upon proper support for consuming and/or leveraging multiple keys at the same time.
+[SDP-SP37]
+SP deployments MUST support multiple signing certificates in IdP metadata and MUST support validation of XML signatures using a key from any of them.
+[SDP-SP38]
+SP deployments MUST be able to support multiple decryption keys and MUST be able to decrypt <saml:EncryptedAssertion> elements encrypted with any configured key.
+3.3.2. Metadata Content
+[SDP-SP39]
+By virtue of this profile’s requirements, an SP’s metadata MUST contain:
+	•	an <md:SPSSODescriptor> role element containing
+	◦	at least one <md:AssertionConsumerService> endpoint element
+	◦	at least one <md:KeyDescriptor> element whose use attribute is omitted or set to encryption
+	◦	an <md:Extensions> element at the role level containing
+	▪	an <mdui:UIInfo> extension element containing the child elements <mdui:DisplayName>, <mdui:Logo>, and <mdui:PrivacyStatementURL>
+	▪	an <mdattr:EntityAttributes> extension element for signaling Subject Identifier requirements with previously prescribed content
+	◦	
+	•	
+	•	an <md:ContactPerson> element with a contactType of technical and an <md:EmailAddress> element
+If the SP supports the Single Logout profile, then its metadata MUST contain (within its <md:SPSSODescriptor> role element):
+	•	at least one <md:KeyDescriptor> element whose use attribute is omitted or set to signing
+	•	at least one <md:SingleLogoutService> endpoint element (this MAY be omitted if the SP solely issues <samlp:LogoutRequest> messages containing the <aslo:Asynchronous> extension [SAML2ASLO])
+4. Identity Provider Requirements
+This section provides requirements specific to IdPs, in addition to the Common Requirements above.
+4.1. Web Browser SSO
+[SDP-IDP01]
+IdPs MUST support the Web Browser SSO profile [SAML2Prof], as updated by the Approved Errata [SAML2Err], with behavior, capabilities, and options consistent with the additional constraints specified in this section.
+4.1.1. Requests
+Binding
+[SDP-IDP02]
+IdPs MUST support the HTTP-Redirect binding [SAML2Bind] for the receipt of <samlp:AuthnRequest> messages.
+[SDP-IDP03]
+The endpoint(s) at which an IdP supports receipt of <samlp:AuthnRequest> messages MUST be protected by TLS/SSL.
+Signing
+[SDP-IDP04]
+IdPs MUST support unsigned requests generally but MUST reject unsigned requests in the event that an SP’s metadata includes an AuthnRequestsSigned attribute set to true or 1.
+[SDP-IDP05]
+If a request is signed, IdPs MUST successfully verify the signature or fail the request. An IdP MAY handle a signature verification failure locally rather than via an error response to the SP.
+Endpoint Selection/Verification
+[SDP-IDP06]
+IdPs MUST verify the AssertionConsumerServiceURL supplied in an SP’s <samlp:AuthnRequest> (if any) against the <md:AssertionConsumerService> elements in the SP’s metadata. In the absence of such a value, the default endpoint from the SP’s metadata MUST be used for the response.
+When verifying the AssertionConsumerServiceURL, it is RECOMMENDED that the IdP perform a case-sensitive string comparison between the requested value and the values found in the SP’s metadata. It is OPTIONAL to apply any form of URL canonicalization.
+The Web Browser SSO profile [SAML2Prof] notes that validation of the response endpoint is required but does not mandate a specific approach, primarily due to metadata being an optional portion of the original standard. The above is the most common and interoperable approach to meeting this requirement.
+Forced Re-Authentication
+[SDP-IDP07]
+IdPs MUST ensure that any response to a <samlp:AuthnRequest> that contains the attribute ForceAuthn set to true or 1 results in an authentication challenge that requires proof that the subject is present. If this condition is met, the IdP MUST also reflect this by setting the value of the AuthnInstant value in the assertion it returns to a fresh value.
+If an IdP cannot prove subject presence, then it MUST fail the request and SHOULD respond to the SP with a SAML error status.
+Due to the potential for confusion over more frequent authentication challenges, the IdP may wish to indicate when this feature is being used on the login user interface it presents to the user.
+4.1.2. Responses
+Binding
+[SDP-IDP08]
+IdPs MUST support the HTTP-POST binding [SAML2Bind] for the transmission of <samlp:Response> messages.
+Response Content
+[SDP-IDP09]
+Successful responses MUST be directly signed using a <ds:Signature> element within the <samlp:Response> element. Error responses MAY be unsigned.
+[SDP-IDP10]
+Successful responses MUST contain exactly one SAML assertion. The assertion MUST contain exactly one <saml:AuthnStatement> element and MUST contain zero or one <saml:AttributeStatement> elements. The assertion within the response MAY be directly signed.
+[SDP-IDP11]
+In the event the HTTP-POST binding [SAML2Bind] is used, assertions MUST be encrypted and transmitted via a <saml:EncryptedAssertion> element. Information intended for the consumption of the SP MUST NOT be further encrypted via <saml:EncryptedID> or <saml:EncryptedAttribute> constructs.
+While encryption is viewed in some quarters as onerous or unnecessary, interoperability is enhanced by uniformity. Moreover, a spate of recent vulnerabilities across the industry would have been almost entirely mitigated by its use, demonstrating that it is no longer acceptable to view it as an optional part of front-channel delivery of assertions, if it ever was.
+4.1.3. Subject Identifiers
+[SDP-IDP12]
+Assertions MUST contain a <saml:NameID> element with the urn:oasis:names:tc:SAML:2.0:nameid-format:transient Format, as defined in [SAML2Core], for the purposes of logout.
+[SDP-IDP13]
+IdPs MUST support one or both of the SAML Attributes defined by [SAML2SubjId] for non-transient identification of subjects. Support for both is RECOMMENDED.
+[SDP-IDP14]
+IdPs MUST enumerate the scope(s) of the subject identifiers they support in their metadata by means of the <shibmd:Scope> extension element, as defined in [SAML2SubjId]. They MUST NOT contain a regular expression (i.e., each element’s regexp attribute MUST be set to false or 0).
+The element(s) may be positioned as an extension of either the <md:EntityDescriptor> or <md:IDPSSODescriptor> as deemed appropriate.
+Note that while common, it is not a requirement for the scope(s) to be contained within the IdP’s entityID, nor for it to bear any relationship to other data asserted by the IdP, such as email addresses.
+Subject Identifier Requirements Signaling
+[SDP-IDP15]
+IdPs MUST support the metadata-based identifier requirement signaling mechanism defined in [SAML2SubjId].
+The purpose of this requirement is to provide a level of confidence to a signaling SP that a compliant IdP which fails to do as instructed is unwilling or unable to fulfill the requirements rather than merely oblivious to them.
+[SDP-IDP16]
+If an IdP cannot or will not satisfy the requirements of an SP in this respect, then it MAY return an assertion without the data it is unable to provide or return an error as it sees fit.
+[SDP-IDP17]
+In the absence of any signaling by an SP, an IdP MAY supply either, both, or neither of the SAML Attributes defined in [SAML2SubjId], or return an error as it sees fit.
+4.1.4. Attributes
+[SDP-IDP18]
+<saml:Attribute> elements MUST contain a NameFormat of urn:oasis:names:tc:SAML:2.0:attrname-format:uri.
+This requirement ensures unique, non-conflicting naming of SAML Attributes even in cases involving custom requirements for which no standard SAML Attributes may exist.
+[SDP-IDP19]
+It is RECOMMENDED that the content of each <saml:AttributeValue> element be limited to a single child text node (i.e., a simple string value).
+Note that this refers to <saml:AttributeValue> elements, not <saml:Attribute> elements, and refers to the form of each individual value. It discourages the use of complex XML content models within the value of a SAML Attribute.
+[SDP-IDP20]
+Multiple values of a <saml:Attribute> MUST be expressed as individual <saml:AttributeValue> elements rather than embedded in a delimited form within a single <saml:AttributeValue> element.
+4.2. Single Logout
+[SDP-IDP21]
+IdPs MUST support the Single Logout profile [SAML2Prof], as updated by the Approved Errata [SAML2Err], with behavior, capabilities, and options consistent with the additional constraints specified in this section.
+The term "IdP session" is used to refer to the ongoing state between the IdP and its clients allowing for SSO. Support for logout implies supporting termination of a subject’s IdP session in response to receiving a <samlp:LogoutRequest> or upon some administrative signal.
+[SDP-IDP22]
+IdPs MAY allow a subject the option to maintain their IdP session rather than unilaterally terminating it.
+[SDP-IDP23]
+IdPs MAY support the propagation of logout signaling to SPs.
+4.2.1. Requests
+Binding
+[SDP-IDP24]
+The HTTP-Redirect binding [SAML2Bind] MUST be used for the transmission of <samlp:LogoutRequest> messages, in the event that propagation is supported.
+[SDP-IDP25]
+IdPs MUST support the HTTP-Redirect [SAML2Bind] binding for the receipt of <samlp:LogoutRequest> messages.
+4.2.2. Request Content
+[SDP-IDP26]
+Requests MUST be signed (via a signature created in accordance with the HTTP-Redirect binding [SAML2Bind]).
+[SDP-IDP27]
+The <saml:NameID> element in <samlp:LogoutRequest> messages MUST NOT be encrypted.
+The normative requirement for the use of transient identifiers is intended to obviate the need for XML Encryption.
+4.2.3. Responses
+Binding
+[SDP-IDP28]
+The HTTP-Redirect binding [SAML2Bind] MUST be used for the transmission of <samlp:LogoutResponse> messages.
+[SDP-IDP29]
+IdPs MUST support the HTTP-Redirect [SAML2Bind] binding for the receipt of <samlp:LogoutResponse> messages, in the event that <samlp:LogoutRequest> propagation is supported.
+Response Content
+[SDP-IDP30]
+Responses MUST be signed (via a signature created in accordance with the HTTP-Redirect binding [SAML2Bind]).
+[SDP-IDP31]
+The <samlp:StatusCode> in the response issued by the IdP MUST reflect whether the IdP session was successfully terminated.
+4.3. Metadata and Trust Management
+4.3.1. Support for Multiple Keys
+The ability to perform seamless key migration depends upon proper support for consuming and/or leveraging multiple keys at the same time.
+[SDP-IDP32]
+IdP deployments MUST support multiple signing certificates in SP metadata and MUST support validation of signatures using a key from any of them.
+4.3.2. Metadata Content
+[SDP-IDP33]
+By virtue of this profile’s requirements, an IdP’s metadata MUST contain:
+	•	an <md:IDPSSODescriptor> role element containing
+	◦	at least one <md:SingleSignOnService> endpoint element
+	◦	at least one <md:SingleLogoutService> endpoint element
+	◦	at least one <md:KeyDescriptor> element whose use attribute is omitted or set to signing
+	◦	an errorURL attribute
+	◦	an <md:Extensions> element at the role level containing
+	▪	an <mdui:UIInfo> extension element containing the child elements <mdui:DisplayName> and <mdui:Logo>
+	▪	at least one <shibmd:Scope> element
+	▪	alternately, the <shibmd:Scope> element(s) MAY instead reside in an <md:Extensions> element at the root (<md:EntityDescriptor>) level
+	▪	
+	◦	
+	•	
+	•	an <md:ContactPerson> element with a contactType of technical and an <md:EmailAddress> element
+5. References
+5.1. Normative
+	•	[RFC2119] IETF RFC 2119, Key words for use in RFCs to Indicate Requirement Levels, March 1997. http://www.ietf.org/rfc/rfc2119.txt
+	•	[RFC8174] IETF RFC 8174, Ambiguity of Uppercase vs Lowercase in RFC 2119 Key Words, May 2017. http://www.ietf.org/rfc/rfc8174.txt
+	•	[RFC4051] IETF RFC 4051, Additional XML Security Uniform Resource Identifiers, April 2005. https://www.ietf.org/rfc/rfc4051.txt
+	•	[SAML2Core] OASIS Standard, Assertions and Protocols for the OASIS Security Assertion Markup Language (SAML) V2.0, March 2005. http://docs.oasis-open.org/security/saml/v2.0/saml-core-2.0-os.pdf
+	•	[SAML2Bind] OASIS Standard, Bindings for the OASIS Security Assertion Markup Language (SAML) V2.0, March 2005. http://docs.oasis-open.org/security/saml/v2.0/saml-bindings-2.0-os.pdf
+	•	[SAML2Prof] OASIS Standard, Profiles for the OASIS Security Assertion Markup Language (SAML) V2.0, March 2005. http://docs.oasis-open.org/security/saml/v2.0/saml-profiles-2.0-os.pdf
+	•	[SAML2Meta] OASIS Standard, Metadata for the OASIS Security Assertion Markup Language (SAML) V2.0, March 2005. http://docs.oasis-open.org/security/saml/v2.0/saml-metadata-2.0-os.pdf
+	•	[X500SAMLattr] OASIS Committee Specification, SAML V2.0 X.500/LDAP Attribute Profile, March 2008. http://docs.oasis-open.org/security/saml/Post2.0/sstc-saml-attribute-x500-cs-01.pdf
+	•	[SAML2MDIOP] OASIS Standard, SAML V2.0 Metadata Interoperability Profile Version 1.0, October 2019. http://docs.oasis-open.org/security/saml/Post2.0/sstc-metadata-iop-os.pdf
+	•	[SAML2Err] OASIS Approved Errata, SAML Version 2.0 Errata 05, May 2012. http://docs.oasis-open.org/security/saml/v2.0/sstc-saml-approved-errata-2.0.pdf
+	•	[XMLEnc] D. Eastlake et al. XML Encryption Syntax and Processing. W3C Recommendation, April 2013. https://www.w3.org/TR/xmlenc-core1/
+	•	[XMLSig] D. Eastlake et al. XML-Signature Syntax and Processing, Version 1.1. W3C Recommendation, April 2013. https://www.w3.org/TR/xmldsig-core1/
+	•	[SAML2SubjId] OASIS Committee Specification, SAMLV2.0 Subject Identifier Attributes Profile Version 1.0, January 2019. https://docs.oasis-open.org/security/saml-subject-id-attr/v1.0/cs01/saml-subject-id-attr-v1.0-cs01.pdf
+	•	[SAML2ASLO] OASIS Committee Specification, SAML V2.0 Asynchronous Single Logout Profile Extension Version 1.0, November 2012. http://docs.oasis-open.org/security/saml/Post2.0/saml-async-slo/v1.0/cs01/saml-async-slo-v1.0-cs01.pdf
+	•	[MetaUI] OASIS Standard, SAML V2.0 Metadata Extensions for Login and Discovery User Interface Version 1.0, October 2019. http://docs.oasis-open.org/security/saml/Post2.0/sstc-saml-metadata-ui/v1.0/os/sstc-saml-metadata-ui-v1.0-os.pdf
+	•	[MetaAttr] OASIS Committee Specification, SAML V2.0 Metadata Extension for Entity Attributes Version 1.0, August 2009. http://docs.oasis-open.org/security/saml/Post2.0/sstc-metadata-attr-cs-01.pdf
+	•	[SAML2Impl] Kantara Initiative Profile, SAML V2.0 Implementation Profile for Federation Interoperability Version 1.0, April 2018. https://kantarainitiative.github.io/SAMLprofiles/fedinterop.html
+5.2. Non-Normative
+	•	[XMLEncBreak] Jager and Somorovsky, How to Break XML Encryption, October 2011. http://www.nds.rub.de/media/nds/veroeffentlichungen/2011/10/22/HowToBreakXMLenc.pdf
