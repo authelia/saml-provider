@@ -74,7 +74,8 @@ func (s *Server) HandleGetService(w http.ResponseWriter, r *http.Request) {
 
 // HandlePutService handles the `PUT /services/:id` request. It accepts the XML-formatted
 // service metadata in the request body and stores it. The request is rejected if the
-// entity ID in the metadata is already registered by another service.
+// entity ID in the metadata is already registered by another service, or if the Server has a
+// ServiceProviderMetadataVerifier and the metadata isn't signed by one of its certificates.
 func (s *Server) HandlePutService(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	service := Service{}
@@ -84,6 +85,14 @@ func (s *Server) HandlePutService(w http.ResponseWriter, r *http.Request) {
 		s.logger.Printf("ERROR: %s", err)
 		writeBodyError(w, err)
 		return
+	}
+
+	if s.ServiceProviderMetadataVerifier != nil {
+		if data, err = s.ServiceProviderMetadataVerifier.Verify(data); err != nil {
+			s.logger.Printf("ERROR: %s", err)
+			http.Error(w, http.StatusText(http.StatusBadRequest), http.StatusBadRequest)
+			return
+		}
 	}
 
 	metadata, err := saml.ParseServiceProviderMetadata(data)

@@ -923,9 +923,16 @@ func (idp *IdentityProvider) nameIDServiceMetadata(descriptor *IDPSSODescriptor)
 	}
 }
 
-// ServeMetadata is an [http.HandlerFunc] that serves the IDP metadata.
+// ServeMetadata is an [http.HandlerFunc] that serves the IDP metadata, signed by the key of the identity provider
+// (see SignedMetadata).
 func (idp *IdentityProvider) ServeMetadata(w http.ResponseWriter, _ *http.Request) {
-	buf, _ := xml.MarshalIndent(idp.Metadata(), "", "  ")
+	buf, err := idp.SignedMetadata()
+	if err != nil {
+		idp.logger().Printf("ERROR: cannot sign the metadata: %s", err)
+		http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
+
+		return
+	}
 
 	w.Header().Set("Content-Type", "application/samlmetadata+xml")
 

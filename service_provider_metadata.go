@@ -62,39 +62,93 @@ func (idp *IdentityProvider) serviceProvider(r *http.Request, serviceProviderID 
 }
 
 // ParseServiceProviderMetadata parses the metadata of a service provider. If data is a group of
-// entities, it returns the first entity that has a service provider descriptor, which is no longer
-// valid after the group's validUntil, SAMLMeta §2.3.1.
+// entities, it returns the first entity that has a service provider descriptor, as
+// ParseServiceProvidersMetadata does. Metadata from a source that doesn't authenticate it must be verified with
+// a MetadataVerifier first, and the XML that it returns parsed.
 func ParseServiceProviderMetadata(data []byte) (*EntityDescriptor, error) {
+	entities, err := ParseServiceProvidersMetadata(data)
+	if err != nil {
+		return nil, err
+	}
+
+	return entities[0], nil
+}
+
+// ParseServiceProvidersMetadata parses metadata which is an EntityDescriptor, and returns it, or an
+// EntitiesDescriptor, such as the aggregate of a federation, and returns each entity in it, or in a group within
+// it, that has a service provider descriptor, the entities of a group before those of the groups within it. An entity in a group is no longer valid after the
+// earliest validUntil of the groups around it, SAMLMeta §2.3.1. Metadata from a source that doesn't authenticate it
+// must be verified with a MetadataVerifier first, and the XML that it returns parsed.
+func ParseServiceProvidersMetadata(data []byte) ([]*EntityDescriptor, error) {
 	if err := xrv.Validate(bytes.NewBuffer(data)); err != nil {
 		return nil, err
 	}
 
-	metadata := &EntityDescriptor{}
-	if err := xml.Unmarshal(data, &metadata); err != nil {
-		if err.Error() != "expected element type <EntityDescriptor> but have <EntitiesDescriptor>" {
-			return nil, err
-		}
-
-		entities := &EntitiesDescriptor{}
-		if err := xml.Unmarshal(data, &entities); err != nil {
-			return nil, err
-		}
-
-		for _, e := range entities.EntityDescriptors {
-			if len(e.SPSSODescriptors) > 0 {
-				// The expiry of the group covers the entities it contains, SAMLMeta §2.3.1.
-				if entities.ValidUntil != nil && !entities.ValidUntil.IsZero() && (e.ValidUntil.IsZero() || entities.ValidUntil.Before(e.ValidUntil)) {
-					e.ValidUntil = *entities.ValidUntil
-				}
-
-				return &e, nil
-			}
-		}
-
-		return nil, errors.New("metadata contained no service provider metadata")
+	var root struct {
+		XMLName xml.Name
 	}
 
-	return metadata, nil
+	if err := xml.Unmarshal(data, &root); err != nil {
+		return nil, err
+	}
+
+	switch root.XMLName {
+	case xml.Name{Space: metadataNamespace, Local: "EntityDescriptor"}:
+		metadata := &EntityDescriptor{}
+		if err := xml.Unmarshal(data, metadata); err != nil {
+			return nil, err
+		}
+
+		return []*EntityDescriptor{metadata}, nil
+	case xml.Name{Space: metadataNamespace, Local: "EntitiesDescriptor"}:
+		group := &EntitiesDescriptor{}
+		if err := xml.Unmarshal(data, group); err != nil {
+			return nil, err
+		}
+
+		entities := serviceProvidersOf(group, time.Time{}, nil)
+		if len(entities) == 0 {
+			return nil, errors.New("metadata contained no service provider metadata")
+		}
+
+		return entities, nil
+	default:
+		return nil, fmt.Errorf("expected element type <EntityDescriptor> or <EntitiesDescriptor> but have <%s>", root.XMLName.Local)
+	}
+}
+
+// serviceProvidersOf appends to entities each entity of group and of the groups within it that has a service
+// provider descriptor, with the earliest of its own validUntil, that of group and validUntil, the earliest of the
+// groups around group. The zero time counts as no validUntil.
+func serviceProvidersOf(group *EntitiesDescriptor, validUntil time.Time, entities []*EntityDescriptor) []*EntityDescriptor {
+	if group.ValidUntil != nil {
+		validUntil = earliestValidUntil(validUntil, *group.ValidUntil)
+	}
+
+	for i := range group.EntityDescriptors {
+		entity := group.EntityDescriptors[i]
+		if len(entity.SPSSODescriptors) == 0 {
+			continue
+		}
+
+		entity.ValidUntil = earliestValidUntil(entity.ValidUntil, validUntil)
+		entities = append(entities, &entity)
+	}
+
+	for i := range group.EntitiesDescriptors {
+		entities = serviceProvidersOf(&group.EntitiesDescriptors[i], validUntil, entities)
+	}
+
+	return entities
+}
+
+// earliestValidUntil returns the earlier of a and b, where the zero time counts as no validUntil.
+func earliestValidUntil(a, b time.Time) time.Time {
+	if a.IsZero() || (!b.IsZero() && b.Before(a)) {
+		return b
+	}
+
+	return a
 }
 
 // CheckServiceProviderMetadata returns an error if the metadata of a service provider can't be used

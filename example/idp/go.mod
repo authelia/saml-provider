@@ -4,12 +4,12 @@ go 1.27
 
 require (
 	authelia.com/provider/saml v0.0.0
+	github.com/beevik/etree v1.8.1
 	golang.org/x/crypto v0.59.0
 	gotest.tools v2.2.0+incompatible
 )
 
 require (
-	github.com/beevik/etree v1.8.1 // indirect
 	github.com/google/go-cmp v0.7.0 // indirect
 	github.com/jonboulle/clockwork v0.5.0 // indirect
 	github.com/mattermost/xml-roundtrip-validator v0.1.0 // indirect
