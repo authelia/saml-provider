@@ -71,7 +71,7 @@ least the subset of SAML known as [interoperable SAML](https://kantarainitiative
 | HTTP POST (`AuthnRequest`)     | ✅  | ✅ |
 | HTTP POST (`Response`)         | ✅  | ✅ |
 | HTTP Artifact (`Response`)     | ❌  | ✅ |
-| SOAP                           | ❌  | ⚠️ |
+| SOAP                           | ⚠️  | ⚠️ |
 | HTTP POST "SimpleSign"         | ❌  | ❌ |
 | Reverse SOAP (PAOS)            | ❌  | ❌ |
 
@@ -121,29 +121,33 @@ least the subset of SAML known as [interoperable SAML](https://kantarainitiative
 
 ### Identity Provider Limitations
 
-- **Single Logout:** only the front channel is supported. SOAP back-channel logout and the Asynchronous Single Logout
-  Profile Extension are not. `IdentityProvider.ServeSLO` handles a `LogoutRequest` from an SP on the HTTP Redirect or
-  HTTP POST binding at `IdentityProvider.LogoutURL`, and answers with a signed `LogoutResponse`. The request must be
-  signed. `IdentityProvider.StartLogout` starts a logout from the IdP (SAMLProfiles §4.4).
+- **Single Logout:** the front channel and the SOAP back channel are supported; the Asynchronous Single Logout Profile
+  Extension is not. `IdentityProvider.ServeSLO` handles a `LogoutRequest` from an SP on the HTTP Redirect or HTTP POST
+  binding at `IdentityProvider.LogoutURL`, and answers with a signed `LogoutResponse`. The request must be signed.
+  `IdentityProvider.StartLogout` starts a logout from the IdP (SAMLProfiles §4.4).
   - A `SessionProvider` that implements `SessionParticipantProvider` has every SP that receives an assertion recorded as
     a participant of the session, with the NameID and `SessionIndex` it was given. The participant is recorded each
     time the response is sent, just before it is, by `IdpAuthnRequest.PublishResponse`, which `WriteResponse` calls; a
     caller that sends the form of `PostBinding` itself must send it from `PublishResponse`.
   - `StartLogout`, and a `LogoutRequest` from an SP, send the browser to each participant in turn, with the SP that sent
     the request left out. A participant is sent a signed `LogoutRequest` at its `SingleLogoutService`, HTTP Redirect
-    preferred and else HTTP POST, and answers at `IdentityProvider.LogoutURL`. The logout state is saved between
-    requests by `LogoutStateProvider`, and expires after `IdentityProvider.LogoutStateLifetime` (5 minutes by default).
-    Each save carries the next `LogoutState.Revision`, and `SaveLogoutState` must store it only if it follows the stored
-    revision, atomically, so that concurrent copies of one response can't overwrite newer progress or recreate a
-    finished logout. The copy that loses gets `409 Conflict`.
+    preferred and else HTTP POST, and answers at `IdentityProvider.LogoutURL`. A participant whose only usable
+    `SingleLogoutService` is on the SOAP binding is sent its `LogoutRequest` over SOAP instead, during the same
+    request, without the browser. The logout state is saved between requests by `LogoutStateProvider`, and expires
+    after `IdentityProvider.LogoutStateLifetime` (5 minutes by default). Each save carries the next
+    `LogoutState.Revision`, and `SaveLogoutState` must store it only if it follows the stored revision, atomically, so
+    that concurrent copies of one response can't overwrite newer progress or recreate a finished logout. The copy that
+    loses gets `409 Conflict`.
     It finishes by redirecting to the return URL of `StartLogout`, or with `LogoutResultHandler` if the
     `SessionProvider` implements it, or by sending the SP that started it a `LogoutResponse`. If the state can't be
     saved, the logout still finishes, as partial, so that the browser isn't stranded. Without a working store
     duplicate responses can't be told apart, so the finish may happen more than once.
-  - A participant's `LogoutResponse` must be signed. One to the outstanding request that is invalid or unsigned, or
-    that has a status other than `Success`, or `Success` with a nested `PartialLogout` second-level status, counts as
-    not logged out. One that can't be read, or isn't to the outstanding request from that participant, such as a
-    replayed response of an earlier participant, is refused with `400 Bad Request` and changes nothing.
+  - A participant's `LogoutResponse` on the front channel must be signed. One to the outstanding request that is
+    invalid or unsigned, or that has a status other than `Success`, or `Success` with a nested `PartialLogout`
+    second-level status, counts as not logged out. One that can't be read, or isn't to the outstanding request from
+    that participant, such as a replayed response of an earlier participant, is refused with `400 Bad Request` and
+    changes nothing. A `LogoutResponse` over SOAP may be unsigned over TLS, and is verified when it is signed (see below); any
+    failure of it counts as not logged out.
   - The logout state is found by the `RelayState` alone, without a cookie, so a participant could answer for the
     browser and receive the next participant's `LogoutRequest`. This is an accepted risk of the front channel.
   - A logout begins with `SessionParticipantProvider.CloseSessionParticipants`, which must atomically return the
@@ -161,8 +165,8 @@ least the subset of SAML known as [interoperable SAML](https://kantarainitiative
     the sessions (`GetLogoutSessions` fails) or the session didn't end. Otherwise it is `Success`, with a
     `PartialLogout` second-level status (SAMLCore §3.2.2.2) if `TerminateSession` returned `ErrPartialLogout` or any
     participant didn't report success.
-  - A participant without a `SingleLogoutService` that is HTTP Redirect or HTTP POST and passes the check of insecure
-    endpoints is skipped, and counts as not logged out.
+  - A participant without a `SingleLogoutService` that is HTTP Redirect, HTTP POST or SOAP and passes the check of
+    insecure endpoints is skipped, and counts as not logged out.
   - `StartLogout` and an SP-started logout need a `SessionProvider` that implements all of `LogoutSessionProvider`,
     `SessionParticipantProvider` and `LogoutStateProvider`. Without them a request from an SP is only answered for the
     session at the IdP.
@@ -175,6 +179,31 @@ least the subset of SAML known as [interoperable SAML](https://kantarainitiative
     isn't sent with a cross-site POST, so SPs must use HTTP Redirect to end it. `POST /logout/start` calls
     `StartLogout` for the session of the cookie, and refuses with 403 a request that isn't from the same origin, so
     that another site can't log the user out.
+  - `IdentityProvider.ServeSOAPLogout` handles a `LogoutRequest` on the SOAP binding at
+    `IdentityProvider.SOAPLogoutURL`, which the metadata lists when it is set and the `SessionProvider` implements
+    `LogoutSessionProvider`. It may share its path with `LogoutURL`: `Handler` then sends a POST with a `text/xml` body
+    to `ServeSOAPLogout` and anything else to `ServeSLO`. The request must
+    carry an enveloped signature by its issuer; one that is unsigned or can't be verified is answered
+    `Requester/RequestDenied`, a message that isn't a `LogoutRequest` `Requester/RequestUnsupported`, and a request
+    that isn't a SOAP 1.1 envelope gets a SOAP fault. The signed `LogoutResponse` is answered on the same connection.
+    `TerminateSession` is called without the browser's cookies, and headers it sets are discarded.
+  - With a `SessionProvider` that also implements `SessionParticipantProvider`, a SOAP `LogoutRequest` ends the
+    session and then logs every other participant out over SOAP, in turn, before it is answered. `LogoutStateProvider`
+    is not needed, as nothing is saved. A participant with no SOAP `SingleLogoutService` can't be reached without the
+    browser, so it is skipped, and the answer is `Success` with a `PartialLogout` second-level status. The status is
+    otherwise as for the front channel.
+  - A `LogoutRequest` over SOAP is sent with `IdentityProvider.HTTPClient`, which defaults to a client with a 10 second
+    timeout. A client that is set is copied, and the copy never follows a redirect and has the 10 second timeout if
+    its `Timeout` is 0. The SP's `LogoutResponse` is verified if it is signed, and may be unsigned only when it comes
+    back over TLS on the connection the IdP opened; over plain http, with `AllowInsecureServiceProviderEndpoints`, it
+    must be signed. A client whose transport skips certificate verification removes that authentication. One that is a SOAP fault, not HTTP 200, or not `Success` counts as not logged out.
+  - Participants are contacted over SOAP one at a time, so a logout can take up to the number of SOAP participants
+    times the timeout of `HTTPClient`, and the client of an SP that sent its `LogoutRequest` over SOAP may time out
+    first. The outgoing requests are not cancelled when the incoming one is, so the remaining participants are still
+    logged out.
+  - A SOAP `SingleLogoutService` must be `https`: unlike an endpoint the browser is sent to, an `http` one on a
+    loopback host is refused, as the IdP itself would connect to it (`CheckServiceProviderBackChannelEndpoint`).
+    `AllowInsecureServiceProviderEndpoints` allows any `http` URL.
 - **Insecure endpoints:** assertions are bearer tokens, so responses are only sent to an SP endpoint that is `https`, or
   `http` on a loopback host (`localhost`, `*.localhost`, `127.0.0.0/8` or `::1`). This covers the
   `AssertionConsumerService` and the `SingleLogoutService` that receives a `LogoutResponse`. A request that names an
@@ -183,8 +212,8 @@ least the subset of SAML known as [interoperable SAML](https://kantarainitiative
   `samlidp.Options.AllowInsecureServiceProviderEndpoints`, to allow any `http` URL, only for testing. `samlidp` refuses
   to register an SP whose HTTP-POST ACS endpoints are all refused, using `CheckServiceProviderMetadata`, and the
   identity provider only uses metadata that `CurrentMetadata` finds unexpired.
-- **Artifact Resolution, HTTP Artifact and SOAP:** responses are only ever delivered via HTTP POST, and there is no
-  `ArtifactResolutionService`.
+- **Artifact Resolution and HTTP Artifact:** not supported, and there is no `ArtifactResolutionService`.
+  Authentication (SSO) responses are only ever delivered via HTTP POST; SOAP is supported only for single logout.
 - **Verify signed `AuthnRequest`:** any signature on the HTTP Redirect or HTTP POST bindings is verified, and one is
   required if the SP metadata sets `AuthnRequestsSigned` or `IdentityProvider.WantAuthnRequestsSigned` is set. SHA-1
   signatures are accepted. A custom login form must send `IdpAuthnRequest.RedirectQuery` in the `SAMLRedirectQuery`

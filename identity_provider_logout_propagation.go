@@ -8,6 +8,8 @@ import (
 	"net/http"
 
 	"github.com/beevik/etree"
+
+	"authelia.com/provider/saml/internal/dsig"
 )
 
 // IdpLogoutRequestForm is the data of LogoutRequestFormTemplate.
@@ -17,12 +19,22 @@ type IdpLogoutRequestForm struct {
 	RelayState  string
 }
 
-// logoutRequestEndpoint returns the SingleLogoutService to send a LogoutRequest to: HTTP-Redirect, else HTTP-POST,
-// whose Location passes CheckServiceProviderEndpoint.
-func (idp *IdentityProvider) logoutRequestEndpoint(metadata *EntityDescriptor) (*Endpoint, error) {
+var (
+	// frontChannelLogoutBindings are the bindings a LogoutRequest is sent on while the browser is at the identity
+	// provider, in order of preference. A request on the SOAP binding is still sent without the browser.
+	frontChannelLogoutBindings = []string{HTTPRedirectBinding, HTTPPostBinding, SOAPBinding}
+
+	// backChannelLogoutBindings are the bindings a LogoutRequest is sent on without the browser.
+	backChannelLogoutBindings = []string{SOAPBinding}
+)
+
+// logoutRequestEndpoint returns the SingleLogoutService to send a LogoutRequest to: the first of the bindings, in
+// order of preference, whose Location passes CheckServiceProviderEndpoint, or CheckServiceProviderBackChannelEndpoint
+// on the SOAP binding.
+func (idp *IdentityProvider) logoutRequestEndpoint(metadata *EntityDescriptor, bindings ...string) (*Endpoint, error) {
 	var lastErr error
 
-	for _, binding := range []string{HTTPRedirectBinding, HTTPPostBinding} {
+	for _, binding := range bindings {
 		for i := range metadata.SPSSODescriptors {
 			endpoints := metadata.SPSSODescriptors[i].SingleLogoutServices
 
@@ -31,7 +43,7 @@ func (idp *IdentityProvider) logoutRequestEndpoint(metadata *EntityDescriptor) (
 					continue
 				}
 
-				if err := idp.CheckServiceProviderEndpoint(endpoints[j].Location); err != nil {
+				if err := idp.checkServiceProviderBindingEndpoint(binding, endpoints[j].Location); err != nil {
 					lastErr = err
 
 					continue
@@ -71,7 +83,8 @@ func (idp *IdentityProvider) makeLogoutRequest(state *LogoutState, p *LogoutPart
 	return request
 }
 
-// continueLogout sends the browser to the next pending participant. It saves state before writing. When no
+// continueLogout sends the browser to the next pending participant. A participant reached only on the SOAP binding
+// is logged out during this request instead, without saving state. It saves state before writing. When no
 // participant is pending it calls finishLogout. If the LogoutRequest to the next participant can't be signed or
 // rendered, or the state can't be saved, that participant and every other pending one are marked Failed with the
 // error as Reason, and the logout is finished at once, so that the origin is still answered. It returns an error only
@@ -102,9 +115,15 @@ func (idp *IdentityProvider) continueLogout(w http.ResponseWriter, r *http.Reque
 			continue
 		}
 
-		endpoint, err := idp.logoutRequestEndpoint(metadata)
+		endpoint, err := idp.logoutRequestEndpoint(metadata, frontChannelLogoutBindings...)
 		if err != nil {
 			skipLogoutParticipant(participant, err)
+
+			continue
+		}
+
+		if endpoint.Binding == SOAPBinding {
+			idp.sendSOAPLogoutRequest(r, state, current, endpoint)
 
 			continue
 		}
@@ -200,14 +219,13 @@ func (idp *IdentityProvider) prepareLogoutRequest(w http.ResponseWriter, r *http
 			return nil
 		}, nil
 	case HTTPPostBinding:
-		signedEl, err := signingContext.SignEnveloped(request.Element())
+		el, err := signLogoutRequestEnveloped(signingContext, request)
 		if err != nil {
 			return nil, err
 		}
-		// SAMLCore requires the signature to follow the Issuer, rather than come last.
-		request.Signature = signedEl.ChildElements()[len(signedEl.ChildElements())-1]
+
 		doc := etree.NewDocument()
-		doc.SetRoot(request.Element())
+		doc.SetRoot(el)
 
 		buf, err := doc.WriteToBytes()
 		if err != nil {
@@ -240,6 +258,20 @@ func (idp *IdentityProvider) prepareLogoutRequest(w http.ResponseWriter, r *http
 	}
 }
 
+// signLogoutRequestEnveloped signs request with an enveloped signature and returns its element, for a binding which
+// carries the signature in the message.
+func signLogoutRequestEnveloped(signingContext *dsig.SigningContext, request *LogoutRequest) (*etree.Element, error) {
+	signedEl, err := signingContext.SignEnveloped(request.Element())
+	if err != nil {
+		return nil, err
+	}
+
+	// SAMLCore requires the signature to follow the Issuer, rather than come last.
+	request.Signature = signedEl.ChildElements()[len(signedEl.ChildElements())-1]
+
+	return request.Element(), nil
+}
+
 // ErrLogoutNotPropagated is wrapped by the error of StartLogout when the session at the identity provider was ended,
 // but the logout could not begin, so no service provider was sent a LogoutRequest and each may still be logged in
 // (SAMLProfiles §4.4). Nothing has been written to the response but headers, so the caller completes it.
@@ -250,9 +282,10 @@ var ErrLogoutNotPropagated = errors.New("the session was ended but the logout wa
 // implement LogoutSessionProvider, SessionParticipantProvider and LogoutStateProvider.
 //
 // This is the front-channel IdP-initiated logout of SAMLProfiles §4.4: each service provider is sent a LogoutRequest
-// in turn through the browser, and answers at IdentityProvider.LogoutURL, which ServeSLO handles. The caller must
-// protect whatever triggers StartLogout against cross-site request forgery, such as by accepting only a same-origin
-// POST, as it ends the session and sends the browser away.
+// in turn through the browser, and answers at IdentityProvider.LogoutURL, which ServeSLO handles. A service provider
+// whose only single logout service is on the SOAP binding is instead logged out over SOAP during the same request,
+// without the browser. The caller must protect whatever triggers StartLogout against cross-site request forgery,
+// such as by accepting only a same-origin POST, as it ends the session and sends the browser away.
 //
 // It returns nil once it has written to w, including when a later step fails. Otherwise it writes no status or body,
 // and returns an error:
@@ -324,15 +357,9 @@ func (idp *IdentityProvider) beginLogout(w http.ResponseWriter, r *http.Request,
 		return err
 	}
 
-	var participants []SessionParticipant
-
-	for _, session := range sessions {
-		found, err := participantProvider.CloseSessionParticipants(r, session)
-		if err != nil {
-			return fmt.Errorf("cannot find the service providers of the session: %w", err)
-		}
-
-		participants = append(participants, found...)
+	participants, err := closeSessionParticipants(r, participantProvider, sessions)
+	if err != nil {
+		return err
 	}
 
 	state := newLogoutState(idp, participants, excludeEntityID)
@@ -342,12 +369,41 @@ func (idp *IdentityProvider) beginLogout(w http.ResponseWriter, r *http.Request,
 		return fmt.Errorf("cannot save the logout state: %w", err)
 	}
 
-	// A failure to end a session doesn't stop the logout: the service providers are still logged out, and the
-	// result reports that the session was not ended.
+	idp.terminateLogoutSessions(w, r, sessionProvider, sessions, state)
+
+	// continueLogout saves the state again, with the result of the termination, before it writes.
+	if err = idp.continueLogout(w, r, stateProvider, state); err != nil {
+		idp.writeContinueLogoutError(w, err)
+	}
+
+	return nil
+}
+
+// closeSessionParticipants closes the participants of every one of the sessions and returns them, so that no service
+// provider is sent an assertion for them that the logout won't reach.
+func closeSessionParticipants(r *http.Request, provider SessionParticipantProvider, sessions []*Session) ([]SessionParticipant, error) {
+	var participants []SessionParticipant
+
+	for _, session := range sessions {
+		found, err := provider.CloseSessionParticipants(r, session)
+		if err != nil {
+			return nil, fmt.Errorf("cannot find the service providers of the session: %w", err)
+		}
+
+		participants = append(participants, found...)
+	}
+
+	return participants, nil
+}
+
+// terminateLogoutSessions ends the sessions and records SessionTerminated and PartialLogout on state, for beginLogout
+// and soapLogoutStatus. A failure to end a session doesn't stop the logout: the service providers are still logged
+// out, and the result reports that the session was not ended.
+func (idp *IdentityProvider) terminateLogoutSessions(w http.ResponseWriter, r *http.Request, provider LogoutSessionProvider, sessions []*Session, state *LogoutState) {
 	state.SessionTerminated = true
 
 	for _, session := range sessions {
-		err := sessionProvider.TerminateSession(w, r, session)
+		err := provider.TerminateSession(w, r, session)
 
 		switch {
 		case err == nil:
@@ -359,13 +415,6 @@ func (idp *IdentityProvider) beginLogout(w http.ResponseWriter, r *http.Request,
 			state.SessionTerminated = false
 		}
 	}
-
-	// continueLogout saves the state again, with the result of the termination, before it writes.
-	if err = idp.continueLogout(w, r, stateProvider, state); err != nil {
-		idp.writeContinueLogoutError(w, err)
-	}
-
-	return nil
 }
 
 // finishLogout deletes the state and ends the logout. A service provider that started it is sent its LogoutResponse;

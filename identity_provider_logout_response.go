@@ -25,6 +25,28 @@ type IdpLogoutResponse struct {
 	// RedirectQuery is the raw query string of a response on the HTTP-Redirect binding which is signed
 	// in the query.
 	RedirectQuery string
+
+	// binding is the binding the response arrived on. On SOAP it is the answer on the connection the identity
+	// provider opened to the service provider, so it has no Destination to check.
+	binding string
+
+	// overTLS is set when a SOAP response came back over TLS, which authenticates the service provider, so that it
+	// need not be signed.
+	overTLS bool
+}
+
+// newSOAPLogoutResponse returns the LogoutResponse in buf, which a service provider answered over SOAP to a
+// LogoutRequest sent during r.
+// overTLS reports whether it came back over TLS.
+func newSOAPLogoutResponse(idp *IdentityProvider, r *http.Request, buf []byte, overTLS bool) *IdpLogoutResponse {
+	return &IdpLogoutResponse{
+		overTLS:        overTLS,
+		IDP:            idp,
+		HTTPRequest:    r,
+		ResponseBuffer: buf,
+		Now:            TimeNow(),
+		binding:        SOAPBinding,
+	}
 }
 
 // NewIdpLogoutResponse reads SAMLResponse and RelayState from a GET query or POST form.
@@ -70,8 +92,9 @@ func NewIdpLogoutResponse(idp *IdentityProvider, r *http.Request) (*IdpLogoutRes
 var ErrLogoutResponseUncorrelated = errors.New("the response is not to the outstanding logout request")
 
 // Validate checks the response against the outstanding request of state and returns nil only if it is a valid,
-// signed answer from that participant. Its status is not checked here. An error that wraps
-// ErrLogoutResponseUncorrelated is not attributable to the current participant.
+// signed answer from that participant. A response on the SOAP binding may be unsigned when it comes back over TLS
+// on the connection to the service provider (see verifySignature). Its status is not checked here. On the front channel an
+// error that wraps ErrLogoutResponseUncorrelated is not attributable to the current participant.
 func (resp *IdpLogoutResponse) Validate(state *LogoutState) error {
 	if state.Current < 0 || state.Current >= len(state.Participants) {
 		return fmt.Errorf("%w: there is no outstanding logout request", ErrLogoutResponseUncorrelated)
@@ -123,7 +146,7 @@ func (resp *IdpLogoutResponse) checkResponse(state *LogoutState, entityID string
 		return fmt.Errorf("expected SAML response version 2.0 got %v", resp.Response.Version)
 	}
 
-	if resp.Response.Destination != "" && resp.Response.Destination != resp.IDP.LogoutURL.String() {
+	if resp.binding != SOAPBinding && resp.Response.Destination != "" && resp.Response.Destination != resp.IDP.LogoutURL.String() {
 		return fmt.Errorf("expected destination to be %q, not %q", resp.IDP.LogoutURL.String(), resp.Response.Destination)
 	}
 
@@ -138,9 +161,10 @@ func (resp *IdpLogoutResponse) checkResponse(state *LogoutState, entityID string
 	return nil
 }
 
-// verifySignature verifies the signature of the response, which is required. A signature embedded in
-// the message replaces Response with the content that it covers, for the reason given at
-// IdpAuthnRequest.useVerifiedRequest.
+// verifySignature verifies the signature of the response, which is required except on SOAP when the response comes
+// back over TLS on the connection to the service provider, which authenticates it (SAMLBind §3.2.4). Over plain http,
+// allowed by AllowInsecureServiceProviderEndpoints, nothing else authenticates it, so it must be signed. A signature embedded in the message replaces Response with
+// the content that it covers, for the reason given at IdpAuthnRequest.useVerifiedRequest.
 func (resp *IdpLogoutResponse) verifySignature(state *LogoutState, entityID string, metadata *EntityDescriptor) error {
 	doc := etree.NewDocument()
 	if err := doc.ReadFromBytes(resp.ResponseBuffer); err != nil {
@@ -157,7 +181,7 @@ func (resp *IdpLogoutResponse) verifySignature(state *LogoutState, entityID stri
 	}
 
 	if resp.RedirectQuery == "" && signatureEl == nil {
-		return errors.New("response is not signed")
+		return resp.checkUnsigned()
 	}
 
 	certificates, err := serviceProviderSigningCertificates(metadata)
@@ -209,4 +233,13 @@ func (resp *IdpLogoutResponse) outcome(state *LogoutState) {
 	default:
 		participant.Outcome, participant.Reason = LogoutOutcomeSuccess, ""
 	}
+}
+
+// checkUnsigned returns nil if the response may be unsigned, which is only on SOAP over TLS.
+func (resp *IdpLogoutResponse) checkUnsigned() error {
+	if resp.binding == SOAPBinding && resp.overTLS {
+		return nil
+	}
+
+	return errors.New("response is not signed")
 }

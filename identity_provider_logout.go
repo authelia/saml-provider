@@ -13,6 +13,8 @@ import (
 
 	"github.com/beevik/etree"
 	xrv "github.com/mattermost/xml-roundtrip-validator"
+
+	"authelia.com/provider/saml/internal/dsig"
 )
 
 // ErrPartialLogout is returned by LogoutSessionProvider.TerminateSession when the session at the
@@ -25,16 +27,19 @@ var ErrPartialLogout = errors.New("other session participants were not logged ou
 type LogoutSessionProvider interface {
 	// GetLogoutSessions returns every session that req names, using req.MatchesSession(r, session). Without session
 	// indexes in the request that is every session of the principal with that NameID (SAMLCore §3.7.3.2).
-	// It must not rely on the session cookie alone, which a browser doesn't send with a cross-site POST.
-	// It returns an empty slice and no error when no session matches. The request has been verified to
+	// It must not rely on the session cookie alone, which a browser doesn't send with a cross-site POST, and r
+	// may be a request from the service provider's server, as on the SOAP binding, with no browser cookies at
+	// all. It returns an empty slice and no error when no session matches. The request has been verified to
 	// come from the service provider in req.ServiceProviderMetadata.
 	//
 	// An error sends a Responder status, and is not sent to the service provider.
 	GetLogoutSessions(r *http.Request, req *IdpLogoutRequest) ([]*Session, error)
 
 	// TerminateSession ends the session at the identity provider. It may set headers on w, such as to
-	// remove a cookie, but must not write the status or body, which are the LogoutResponse. An error
-	// other than ErrPartialLogout sends a Responder status, and is not sent to the service provider.
+	// remove a cookie, but must not write the status or body, which are the LogoutResponse. On the SOAP
+	// binding r may be a request from the service provider's server, with no browser cookies, and headers
+	// set on w are discarded, so the session must be ended where it is stored. An error other than
+	// ErrPartialLogout sends a Responder status, and is not sent to the service provider.
 	TerminateSession(w http.ResponseWriter, r *http.Request, session *Session) error
 }
 
@@ -54,7 +59,8 @@ type IdpLogoutRequest struct {
 	// in the query.
 	RedirectQuery string
 
-	// binding is the binding that the request was received on.
+	// binding is the binding that the request was received on. On SOAP the response goes back on the same
+	// connection, so SLOEndpoint is not assigned and the response has no Destination.
 	binding string
 }
 
@@ -242,15 +248,21 @@ func (idp *IdentityProvider) ServeSLO(w http.ResponseWriter, r *http.Request) {
 		idp.logger().Printf("cannot begin logout: %s", err)
 
 		// The sessions are still ended, but the other participants were not told, so a Success is partial.
-		status = idp.terminateSessions(w, r, provider, sessions)
-		if status.StatusCode.Value == StatusSuccess && status.StatusCode.StatusCode == nil {
-			status.StatusCode.StatusCode = &StatusCode{Value: StatusPartialLogout}
-		}
+		status = withPartialLogout(idp.terminateSessions(w, r, provider, sessions))
 	} else {
 		return
 	}
 
 	idp.writeLogoutResponse(w, req, status)
+}
+
+// withPartialLogout returns status with a PartialLogout second-level status if it is a plain Success.
+func withPartialLogout(status Status) Status {
+	if status.StatusCode.Value == StatusSuccess && status.StatusCode.StatusCode == nil {
+		status.StatusCode.StatusCode = &StatusCode{Value: StatusPartialLogout}
+	}
+
+	return status
 }
 
 // writeLogoutResponse answers req with status, or with a StatusInternalServerError if that fails.
@@ -261,7 +273,8 @@ func (idp *IdentityProvider) writeLogoutResponse(w http.ResponseWriter, req *Idp
 	}
 }
 
-// logoutOrigin returns the LogoutOrigin which a propagated logout answers the request with.
+// logoutOrigin returns the LogoutOrigin which a propagated logout answers the request with. It is only for a
+// request on the front channel: one on the SOAP binding has no SLOEndpoint, and is answered on its own connection.
 func (req *IdpLogoutRequest) logoutOrigin() *LogoutOrigin {
 	return &LogoutOrigin{
 		ServiceProviderEntityID: req.ServiceProviderMetadata.EntityID,
@@ -433,7 +446,9 @@ func NewIdpLogoutRequest(idp *IdentityProvider, r *http.Request) (*IdpLogoutRequ
 }
 
 // Validate checks that the logout request is valid and signed by its service provider, and assigns
-// the Request, ServiceProviderMetadata and SLOEndpoint properties.
+// the Request, ServiceProviderMetadata and SLOEndpoint properties. On the SOAP binding the request must
+// carry an enveloped signature, and SLOEndpoint is not assigned, as the response goes back on the
+// connection of the request.
 func (req *IdpLogoutRequest) Validate() error {
 	// This code runs before any authentication, and the cost of the XML parsing below is
 	// proportional to the size of the request.
@@ -451,6 +466,10 @@ func (req *IdpLogoutRequest) Validate() error {
 
 	if err := req.checkTrust(); err != nil {
 		return err
+	}
+
+	if req.binding == SOAPBinding {
+		return req.validateSOAP()
 	}
 
 	serviceProviderID := req.Request.Issuer.Value
@@ -480,6 +499,36 @@ func (req *IdpLogoutRequest) Validate() error {
 	return req.checkRequestStage()
 }
 
+// validateSOAP is the rest of Validate on the SOAP binding, after checkTrust: the enveloped signature is verified
+// against the service provider of the Issuer, and the content that it covers is checked.
+func (req *IdpLogoutRequest) validateSOAP() error {
+	doc := etree.NewDocument()
+	if err := doc.ReadFromBytes(req.RequestBuffer); err != nil {
+		return err
+	}
+
+	if doc.Root() == nil {
+		return errors.New("request has no root element")
+	}
+
+	metadata, verified, err := req.IDP.verifySOAPRequester(req.HTTPRequest, doc.Root(), req.Request.Issuer.Value)
+	if err != nil {
+		return err
+	}
+
+	req.ServiceProviderMetadata = metadata
+
+	if err = req.useVerifiedRequest(verified); err != nil {
+		return err
+	}
+
+	if req.Request.NameID == nil || req.Request.NameID.Value == "" {
+		return errors.New("request has no NameID")
+	}
+
+	return req.checkRequestStage()
+}
+
 // checkTrust makes the checks on the identity of the request that are needed before the service
 // provider can be looked up. Nothing in the request is acted on before these pass, and no response is
 // sent for a request that fails them.
@@ -497,8 +546,9 @@ func (req *IdpLogoutRequest) checkTrust() error {
 }
 
 // checkRequestStage makes the checks on the content of the request that are reported to the service
-// provider as a SAML status. It must only run once the SLO endpoint has been resolved from metadata,
-// and on the content that the signature covers. The error is a *statusError.
+// provider as a SAML status. It must only run once the SLO endpoint has been resolved from metadata, or
+// on the SOAP binding the requester verified, and on the content that the signature covers. The error
+// is a *statusError.
 func (req *IdpLogoutRequest) checkRequestStage() error {
 	if statusErr := versionStatus(req.Request.Version); statusErr != nil {
 		return statusErr
@@ -520,10 +570,21 @@ func (req *IdpLogoutRequest) checkRequestStage() error {
 	}
 
 	// The request must be signed, so SAMLBind §3.4.5.2 and §3.5.5.2 require the destination, and
-	// verifySignature requires that it is present.
-	if req.Request.Destination != req.IDP.LogoutURL.String() {
+	// verifySignature requires that it is present. SAMLBind §3.2 has no such requirement on SOAP, but a
+	// Destination that is present must be this endpoint.
+	destination := req.IDP.LogoutURL.String()
+
+	if req.binding == SOAPBinding {
+		if req.Request.Destination == "" {
+			return nil
+		}
+
+		destination = req.IDP.SOAPLogoutURL.String()
+	}
+
+	if req.Request.Destination != destination {
 		return &statusError{StatusRequester, StatusRequestDenied,
-			fmt.Errorf("expected destination to be %q, not %q", req.IDP.LogoutURL.String(), req.Request.Destination)}
+			fmt.Errorf("expected destination to be %q, not %q", destination, req.Request.Destination)}
 	}
 
 	return nil
@@ -657,31 +718,51 @@ func endpointResponseLocation(endpoint Endpoint) string {
 	return endpoint.Location
 }
 
-// MakeResponse returns the unsigned LogoutResponse to the request with the given status.
+// MakeResponse returns the unsigned LogoutResponse to the request with the given status. It has no
+// Destination when there is no SLOEndpoint, as on the SOAP binding, and no InResponseTo when the ID of
+// the request is not valid.
 func (req *IdpLogoutRequest) MakeResponse(status Status) *LogoutResponse {
-	return &LogoutResponse{
+	response := &LogoutResponse{
 		ID:           fmt.Sprintf("id-%x", randomBytes(20)),
-		InResponseTo: req.Request.ID,
 		Version:      "2.0",
 		IssueInstant: req.Now,
-		Destination:  req.responseLocation(),
 		Issuer: &Issuer{
 			Format: "urn:oasis:names:tc:SAML:2.0:nameid-format:entity",
 			Value:  req.IDP.MetadataURL.String(),
 		},
 		Status: status,
 	}
+
+	if isValidAuthnRequestID(req.Request.ID) {
+		response.InResponseTo = req.Request.ID
+	}
+
+	if req.SLOEndpoint != nil {
+		response.Destination = req.responseLocation()
+	}
+
+	return response
 }
 
 // WriteResponse writes a signed LogoutResponse with the given status to the SLOEndpoint, which
 // Validate assigns. On the HTTP-Redirect binding the signature is in the query, as SAMLBind §3.4.4.1
-// requires, and on the HTTP-POST binding it is enveloped.
+// requires, and on the HTTP-POST binding it is enveloped. A request on the SOAP binding is answered on
+// w in a SOAP envelope, with an enveloped signature.
 func (req *IdpLogoutRequest) WriteResponse(w http.ResponseWriter, status Status) error {
 	response := req.MakeResponse(status)
 
 	signingContext, err := req.IDP.signingContext()
 	if err != nil {
 		return err
+	}
+
+	if req.binding == SOAPBinding {
+		el, err := signLogoutResponseEnveloped(signingContext, response)
+		if err != nil {
+			return err
+		}
+
+		return writeSOAPResponse(w, nil, el)
 	}
 
 	setNoCacheHeaders(w)
@@ -697,14 +778,13 @@ func (req *IdpLogoutRequest) WriteResponse(w http.ResponseWriter, status Status)
 
 		return nil
 	case HTTPPostBinding:
-		signedEl, err := signingContext.SignEnveloped(response.Element())
+		el, err := signLogoutResponseEnveloped(signingContext, response)
 		if err != nil {
 			return err
 		}
-		// SAMLCore requires the signature to follow the Issuer, rather than come last.
-		response.Signature = signedEl.ChildElements()[len(signedEl.ChildElements())-1]
+
 		doc := etree.NewDocument()
-		doc.SetRoot(response.Element())
+		doc.SetRoot(el)
 
 		buf, err := doc.WriteToBytes()
 		if err != nil {
@@ -733,4 +813,18 @@ func (req *IdpLogoutRequest) WriteResponse(w http.ResponseWriter, status Status)
 	default:
 		return fmt.Errorf("unsupported binding %s", req.SLOEndpoint.Binding)
 	}
+}
+
+// signLogoutResponseEnveloped signs response with an enveloped signature and returns its element, for a binding
+// which carries the signature in the message, as signLogoutRequestEnveloped does for a request.
+func signLogoutResponseEnveloped(signingContext *dsig.SigningContext, response *LogoutResponse) (*etree.Element, error) {
+	signedEl, err := signingContext.SignEnveloped(response.Element())
+	if err != nil {
+		return nil, err
+	}
+
+	// SAMLCore requires the signature to follow the Issuer, rather than come last.
+	response.Signature = signedEl.ChildElements()[len(signedEl.ChildElements())-1]
+
+	return response.Element(), nil
 }
