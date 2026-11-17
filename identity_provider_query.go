@@ -529,7 +529,10 @@ func (req *IdpQueryRequest) answerAttributeQuery() ([]*etree.Element, error) {
 	// A query is never answered with more than single sign-on states without an AttributeConsumingServiceIndex.
 	ceiling := defaultAttributeConsumingService(req.spSSODescriptor().AttributeConsumingServices)
 
-	candidates := append(requestedNameAttributes(ceiling, session), sessionAttributes(session)...)
+	candidates, err := req.IDP.principalAttributes(req.HTTPRequest, req.ServiceProviderMetadata, ceiling, session)
+	if err != nil {
+		return nil, fmt.Errorf("cannot collect attributes: %w", err)
+	}
 
 	released, err := req.IDP.attributeReleasePolicy().ReleaseAttributes(AttributeReleaseRequest{
 		HTTPRequest:             req.HTTPRequest,

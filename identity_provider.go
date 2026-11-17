@@ -60,7 +60,11 @@ type Session struct {
 
 	NameID       string
 	NameIDFormat string
-	SubjectID    string
+
+	// SubjectID is the value of the subject-id attribute of the principal, of the form uniqueID@scope,
+	// which must never change or be given to another principal. One that ValidateSubjectIdentifier
+	// refuses is not stated. PersistentNameIDProvider derives its identifiers from it when it is set.
+	SubjectID string
 
 	Groups                 []string
 	UserName               string
@@ -560,7 +564,9 @@ type IdentityProvider struct {
 	NameIDPolicyEnforcer NameIDPolicyEnforcer
 
 	// NameIDProvider issues the NameID of each assertion that DefaultAssertionMaker makes, and its
-	// formats are advertised in the metadata. Defaults to DefaultNameIDProvider.
+	// formats are advertised in the metadata. Defaults to DefaultNameIDProvider, which issues no
+	// persistent identifiers: PersistentNameIDProvider and ManagedPersistentNameIDProvider do. One that
+	// is a PairwiseIDProvider also supplies the pairwise-id attribute.
 	NameIDProvider NameIDProvider
 
 	// AttributeServiceURL is the attribute service on the SOAP binding, which ServeAttributeQuery handles.
@@ -1998,9 +2004,12 @@ func (DefaultAssertionMaker) MakeAssertion(req *IdpAuthnRequest, session *Sessio
 		req.IDP.logger().Printf("releasing no attributes: the AttributeConsumingServiceIndex of the request names no service")
 	}
 
-	attributes := append(requestedNameAttributes(service, session), sessionAttributes(session)...)
+	attributes, err := req.IDP.principalAttributes(req.HTTPRequest, req.ServiceProviderMetadata, service, session)
+	if err != nil {
+		return fmt.Errorf("cannot collect attributes: %w", err)
+	}
 
-	attributes, err := req.IDP.attributeReleasePolicy().ReleaseAttributes(AttributeReleaseRequest{
+	attributes, err = req.IDP.attributeReleasePolicy().ReleaseAttributes(AttributeReleaseRequest{
 		HTTPRequest:             req.HTTPRequest,
 		ServiceProviderMetadata: req.ServiceProviderMetadata,
 		Ceiling:                 service,
@@ -2100,10 +2109,10 @@ func (idp *IdentityProvider) attributeReleasePolicy() AttributeReleasePolicy {
 	return DefaultAttributeReleasePolicy{}
 }
 
-// sessionAttributes returns every attribute that can be stated about the principal of session under
-// the names the identity provider gives them, which DefaultAssertionMaker and ServeAttributeQuery offer
-// to the AttributeReleasePolicy. The custom attributes of the session are copies, as the policy may
-// change its candidates.
+// sessionAttributes returns the attributes of the fields of session, but for its SubjectID, under the
+// names the identity provider gives them. They are part of what principalAttributes offers to the
+// AttributeReleasePolicy. The custom attributes of the session are copies, as the policy may change
+// its candidates.
 func sessionAttributes(session *Session) []Attribute {
 	var attributes []Attribute
 
@@ -2219,19 +2228,6 @@ func sessionAttributes(session *Session) []Attribute {
 			Name:         "urn:oid:1.3.6.1.4.1.5923.1.1.1.1",
 			NameFormat:   "urn:oasis:names:tc:SAML:2.0:attrname-format:uri",
 			Values:       groupMemberAttributeValues,
-		})
-	}
-
-	if session.SubjectID != "" {
-		attributes = append(attributes, Attribute{
-			Name:       "urn:oasis:names:tc:SAML:attribute:subject-id",
-			NameFormat: "urn:oasis:names:tc:SAML:2.0:attrname-format:uri",
-			Values: []AttributeValue{
-				{
-					Type:  "xs:string",
-					Value: session.SubjectID,
-				},
-			},
 		})
 	}
 

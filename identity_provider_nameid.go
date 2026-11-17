@@ -18,6 +18,10 @@ type NameIDRequest struct {
 	// format, which asks for an EncryptedID of a format that is resolved as if it were left open.
 	Format string
 
+	// NameQualifier is the entity ID of the identity provider, which is the NameQualifier of the NameID
+	// (SAMLCore §8.3.7).
+	NameQualifier string
+
 	// SPNameQualifier is the SP entity ID, or an affiliation that it is a member of which the
 	// NameIDPolicy of the request named, as SAMLCore §3.4.1.1 allows.
 	SPNameQualifier string
@@ -29,7 +33,8 @@ type NameIDRequest struct {
 // NameIDProvider is an interface used by IdentityProvider to issue the NameID of an assertion for
 // a format that the NameIDPolicy of its request, the metadata of the service provider and the
 // session resolve. The default implementation is DefaultNameIDProvider, which is used if no
-// NameIDProvider is specified.
+// NameIDProvider is specified. PersistentNameIDProvider and ManagedPersistentNameIDProvider also issue
+// persistent identifiers.
 //
 // Applications that issue persistent identifiers must refuse to create one when AllowCreate is
 // false, as SAMLCore §3.4.1.1 requires, but may still return one that already exists. AllowCreate
@@ -59,8 +64,8 @@ type NameIDProvider interface {
 //
 // It never issues the persistent format, even when the session has it, as a persistent NameID must be an
 // opaque pseudonym of the principal for one service provider or affiliation, which it can't derive
-// (SAMLCore §8.3.7): an application that issues persistent identifiers needs its own NameIDProvider. A
-// transient NameID is always random, rather than the NameID of a transient session, which would be the
+// (SAMLCore §8.3.7): PersistentNameIDProvider and ManagedPersistentNameIDProvider issue them, and use
+// this provider for the other formats. A transient NameID is always random, rather than the NameID of a transient session, which would be the
 // same for every service provider (SAMLCore §8.3.8).
 //
 // The identity provider asserts a transient NameID again to a service provider that already received
@@ -90,7 +95,7 @@ func (DefaultNameIDProvider) NameID(_ *http.Request, req NameIDRequest, session 
 
 	switch {
 	case req.Format == string(PersistentNameIDFormat):
-		return nil, fmt.Errorf("%w: persistent NameIDs need a NameIDProvider that issues them", ErrInvalidNameIDPolicy)
+		return nil, fmt.Errorf("%w: persistent NameIDs need a NameIDProvider that issues them, such as PersistentNameIDProvider", ErrInvalidNameIDPolicy)
 	case req.Format == string(TransientNameIDFormat):
 		// 128 bits from RandReader, which is crypto/rand unless a test replaces it.
 		value = base64.RawURLEncoding.EncodeToString(randomBytes(16))
@@ -192,6 +197,7 @@ func (req *IdpAuthnRequest) resolveNameID(session *Session) (*NameID, error) {
 		nameID, err := req.issueNameID(provider, NameIDRequest{
 			ServiceProvider: req.ServiceProviderMetadata,
 			Format:          candidate,
+			NameQualifier:   req.IDP.entityID(),
 			SPNameQualifier: spNameQualifier,
 			AllowCreate:     policy.AllowCreate != nil && *policy.AllowCreate,
 		}, session)

@@ -50,6 +50,11 @@ type Options struct {
 	// none receives only the NameID.
 	AttributeReleasePolicy saml.AttributeReleasePolicy
 
+	// NameIDProvider issues the NameID of each assertion. If it is nil, saml.DefaultNameIDProvider is used,
+	// which issues no persistent NameIDs. A saml.PersistentNameIDProvider derives them from the name of the
+	// user, and with a Scope also the pairwise-id attribute.
+	NameIDProvider saml.NameIDProvider
+
 	// AllowInsecureServiceProviderEndpoints sets saml.IdentityProvider.AllowInsecureServiceProviderEndpoints,
 	// which allows assertions and logout responses to be sent to plain http endpoints of a service
 	// provider on a host which is not loopback. The assertions can then be read and used by anyone on
@@ -138,6 +143,7 @@ func New(opts Options) (*Server, error) {
 
 			MaxAuthnRequestAge:     maxLoginDuration,
 			AttributeReleasePolicy: opts.AttributeReleasePolicy,
+			NameIDProvider:         opts.NameIDProvider,
 
 			AllowInsecureServiceProviderEndpoints: opts.AllowInsecureServiceProviderEndpoints,
 		},
