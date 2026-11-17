@@ -46,6 +46,10 @@ type Options struct {
 	// provider on a host which is not loopback. The assertions can then be read and used by anyone on
 	// the network path, so it is only meant for testing.
 	AllowInsecureServiceProviderEndpoints bool
+
+	// ServiceProviderMetadataVerifier, when it is set, refuses the metadata of a service that isn't signed by one
+	// of its certificates, and registers only what the signature covers. See saml.MetadataVerifier.
+	ServiceProviderMetadataVerifier *saml.MetadataVerifier
 }
 
 // Server represents an IDP server. The server provides the following URLs:
@@ -77,6 +81,10 @@ type Server struct {
 	Store             Store                 // the data store
 	LoginFormTemplate *template.Template
 	AdminAuthorizer   func(r *http.Request) bool // approves requests to the RESTful interfaces
+
+	// ServiceProviderMetadataVerifier verifies the signature of the metadata of a service before it is registered,
+	// when it is set.
+	ServiceProviderMetadataVerifier *saml.MetadataVerifier
 }
 
 // maxAdminBodySize is the largest request body that the RESTful interfaces accept, which leaves room
@@ -126,6 +134,8 @@ func New(opts Options) (*Server, error) {
 		Store:             opts.Store,
 		LoginFormTemplate: opts.LoginFormTemplate,
 		AdminAuthorizer:   opts.AdminAuthorizer,
+
+		ServiceProviderMetadataVerifier: opts.ServiceProviderMetadataVerifier,
 	}
 
 	s.IDP.SessionProvider = s

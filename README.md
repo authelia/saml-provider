@@ -53,12 +53,12 @@ least the subset of SAML known as [interoperable SAML](https://kantarainitiative
 |:--------------------------------------------|:---:|:--:|
 | Web Browser SSO (SP-initiated)              | ✅  | ✅ |
 | Web Browser SSO (IdP-initiated/unsolicited) | ✅  | ✅ |
-| Single Logout                               | ⚠️  | ⚠️ |
+| Single Logout                               | ✅  | ⚠️ |
 | Artifact Resolution                         | ✅  | ✅ |
-| Enhanced Client or Proxy (ECP)              | ⚠️  | ❌ |
+| Enhanced Client or Proxy (ECP)[^ecp]        | ✅  | ❌ |
 | Holder-of-Key Web Browser SSO               | ❌  | ❌ |
 | Name Identifier Management                  | ⚠️  | ❌ |
-| Name Identifier Mapping                     | ⚠️  | ❌ |
+| Name Identifier Mapping                     | ✅  | ❌ |
 | Assertion Query/Request and Attribute Query | ⚠️  | ❌ |
 | Identity Provider Discovery                 | ❌  | ❌ |
 | SP Request Initiation                       | N/A | ❌ |
@@ -71,9 +71,9 @@ least the subset of SAML known as [interoperable SAML](https://kantarainitiative
 | HTTP POST (`AuthnRequest`)     | ✅  | ✅ |
 | HTTP POST (`Response`)         | ✅  | ✅ |
 | HTTP Artifact (`Response`)     | ✅  | ✅ |
-| SOAP                           | ⚠️  | ⚠️ |
+| SOAP                           | ✅  | ⚠️ |
 | HTTP POST "SimpleSign"         | ❌  | ❌ |
-| Reverse SOAP (PAOS)            | ❌  | ❌ |
+| Reverse SOAP (PAOS)            | N/A | ❌ |
 
 #### Protocol
 
@@ -83,8 +83,8 @@ least the subset of SAML known as [interoperable SAML](https://kantarainitiative
 | `RelayState`                                      | ✅  | ✅  |
 | `NameIDPolicy`                                    | ✅  | ✅  |
 | `ForceAuthn` / `IsPassive`                        | ✅  | ✅  |
-| `RequestedAuthnContext`                           | ⚠️  | ✅  |
-| `AttributeConsumingService` attribute release     | ⚠️  | ❌  |
+| `RequestedAuthnContext`                           | ✅  | ✅  |
+| `AttributeConsumingService` attribute release     | ✅  | ❌  |
 | `Scoping` (proxying)                              | ❌  | ❌  |
 | Error status responses                            | ✅  | ✅  |
 | Multiple assertions in a single `Response`        | N/A | ⚠️  |
@@ -99,15 +99,19 @@ least the subset of SAML known as [interoperable SAML](https://kantarainitiative
 | Sign `AuthnRequest`                          | N/A | ✅  |
 | Verify signed `AuthnRequest`                 | ✅  | N/A |
 | RSA signatures (SHA-1/256/384/512)           | ✅  | ✅  |
-| ECDSA signatures (SHA-1/256/384/512)[^ecdsa] | ⚠️  | ⚠️  |
+| ECDSA signatures (SHA-1/256/384/512)[^ecdsa] | ✅  | ✅  |
 | Encrypt `Assertion`                          | ⚠️  | N/A |
-| Decrypt `EncryptedAssertion`                 | N/A | ⚠️  |
-| `EncryptedID` and `EncryptedAttribute`       | ⚠️  | ⚠️  |
+| Decrypt `EncryptedAssertion`                 | N/A | ✅  |
+| `EncryptedID` and `EncryptedAttribute`       | ⚠️  | ✅  |
 
 [^ecdsa]: Signatures use the `r||s` encoding XML Signature requires, and DER signatures are rejected unless
     `SignatureVerifier` is set. ECDSA keys cannot be used for assertion encryption or decryption, which require RSA,
     so metadata does not advertise encryption for an ECDSA certificate. XML signatures are verified against `xmlsec1` 1.3.13
-    in both directions, on P-256, P-384 and P-521. Other implementations and HTTP-Redirect signatures have not been tested.
+    in both directions, on P-256, P-384 and P-521. HTTP-Redirect signatures are covered by unit tests only, and other
+    implementations have not been tested.
+
+[^ecp]: The base profile of SAMLProfiles §4.2. The channel bindings, holder-of-key confirmation and delegation of the
+    ECP v2.0 extension are not supported, see the notes below.
 
 #### Metadata
 
@@ -115,9 +119,9 @@ least the subset of SAML known as [interoperable SAML](https://kantarainitiative
 |:-----------------------------|:---:|:--:|
 | Publish own metadata         | ✅  | ✅ |
 | Consume `EntityDescriptor`   | ✅  | ✅ |
-| Consume `EntitiesDescriptor` | N/A | ⚠️ |
-| Sign published metadata      | ❌  | ❌ |
-| Verify metadata signatures   | ❌  | ❌ |
+| Consume `EntitiesDescriptor` | ✅  | ⚠️ |
+| Sign published metadata      | ✅  | ❌ |
+| Verify metadata signatures   | ✅  | ❌ |
 
 ### Identity Provider Limitations
 
@@ -219,9 +223,10 @@ least the subset of SAML known as [interoperable SAML](https://kantarainitiative
     request or the default. A request that fails before that endpoint is known, such as one from an unknown SP, with a
     missing or invalid signature, or naming an unlisted ACS, gets a SOAP `Client` fault; later failures are error
     statuses as for Web SSO, in the same envelope. A signed request needs no `Destination`.
-  - Only bearer confirmation is supported. Channel bindings are not verified: a request or client that sends
-    `cb:ChannelBindings` is answered `Requester/RequestUnsupported`. Holder-of-key confirmation, the delegation
-    audience and unsolicited responses with `ecp:RelayState` are not supported. PAOS is only used between the client
+  - Only bearer confirmation is supported, which is all the base profile needs. Channel bindings are not verified: a
+    request or client that sends `cb:ChannelBindings` is answered `Requester/RequestUnsupported`. Holder-of-key
+    confirmation, the delegation audience and unsolicited responses with `ecp:RelayState`, which the ECP v2.0
+    extension adds, are not supported. PAOS is only used between the client
     and the SP, so the IdP doesn't speak it.
 - **Insecure endpoints:** assertions are bearer tokens, so responses are only sent to an SP endpoint that is `https`, or
   `http` on a loopback host (`localhost`, `*.localhost`, `127.0.0.0/8` or `::1`). This covers the
@@ -248,8 +253,8 @@ least the subset of SAML known as [interoperable SAML](https://kantarainitiative
   - Only the SSO `Response` is sent by artifact. Logout messages are not, and the IdP does not receive artifacts.
     `samlidp` does not serve the endpoint.
 - **Assertion Query/Request and Attribute Query:** `AttributeQuery`, `AuthnQuery` and `AssertionIDRequest` are served
-  on the SOAP binding only (SAMLProf §6); the URI binding and `AuthzDecisionQuery` are not supported. Each has its own
-  handler and URL: `ServeAttributeQuery` at `IdentityProvider.AttributeServiceURL`, `ServeAuthnQuery` at
+  on the SOAP binding only (SAMLProf §6). The SAML URI binding, which SAMLConformance §2 requires of authentication and
+  attribute authorities, and `AuthzDecisionQuery` are not supported. Each has its own handler and URL: `ServeAttributeQuery` at `IdentityProvider.AttributeServiceURL`, `ServeAuthnQuery` at
   `AuthnQueryServiceURL` and `ServeAssertionIDRequest` at `AssertionIDRequestServiceURL`, and `Handler` serves those
   that are set.
   - The request must carry an enveloped signature by its issuer, as for a `LogoutRequest` over SOAP, and is answered
@@ -281,8 +286,9 @@ least the subset of SAML known as [interoperable SAML](https://kantarainitiative
     `Responder/RequestUnsupported` and the service isn't in the metadata. An assertion is only returned to the SP it
     was issued to, and at most 32 are returned for one request. `samlidp` implements neither interface.
 - **SOAP:** used for single logout, artifact resolution, the assertion query and request protocol, ECP, and name
-  identifier management and mapping only. The URLs of these services may share a path with each other, and with
-  `SSOURL`, `LogoutURL` or `ManageNameIDURL`: `Handler` sends a POST
+  identifier management and mapping, which is every profile on the SOAP binding but `AuthzDecisionQuery`. The URLs of
+  these services may share a path with each other, and with `SSOURL`, `LogoutURL` or `ManageNameIDURL`: `Handler`
+  sends a POST
   with a `text/xml` body to the SOAP service for the message in the `Body` of the envelope, which it reads within the
   64 KiB limit of a SOAP request, and anything else to the front-channel service of the path.
 - **Verify signed `AuthnRequest`:** any signature on the HTTP Redirect or HTTP POST bindings is verified, and one is
@@ -345,7 +351,7 @@ least the subset of SAML known as [interoperable SAML](https://kantarainitiative
   `AuthnContextEnforcer` is asked about the class of each `AuthnStatement` with `SatisfiesAuthnContext`.
   `DefaultAssertionMaker` asserts `Session.AuthnContextClassRef`, or `PasswordProtectedTransport` when the session sets
   none, and a custom `AssertionMaker` can set a different class. `minimum`, `maximum` and `better` need `DefaultAuthnContextEnforcer.Strength` to rank classes. Without it,
-  `minimum` and `maximum` only match a listed class, and `better` never matches. `AuthnContextDeclRef` is not supported and is always refused. Set
+  `minimum` and `maximum` only match a listed class, and `better` never matches. `DefaultAuthnContextEnforcer` refuses an `AuthnContextDeclRef`, and an assertion can't state one. Set
   `IdentityProvider.AuthnContextEnforcer` to decide differently.
 - **Request `Subject`:** the assertion must strongly match the subject the request names, or the request receives an
   `AuthnFailed` status. The request must name the principal with a `NameID` of the same value, and the same format,
@@ -386,7 +392,8 @@ least the subset of SAML known as [interoperable SAML](https://kantarainitiative
   receives the first the IdP allows, which is AES-128-CBC and RSA-OAEP-MGF1P with SHA-1 by default. Set
   `IdentityProvider.ContentEncryptionMethods`, `KeyTransportMethods` and `KeyTransportDigestMethods` to restrict or
   reorder them. 3DES, RSA PKCS#1 v1.5, key agreement and an OAEP label (`OAEPparams`) are never used, and
-  algorithms the IdP doesn't recognise as either type are ignored.
+  algorithms the IdP doesn't recognise as either type are ignored. SAMLConformance §4.2 lists 3DES and RSA PKCS#1 v1.5 as
+  mandatory to implement, so an SP that only lists them can't be sent an encrypted assertion.
 - **`EncryptedID` and `EncryptedAttribute`:** the `NameID` of an assertion is sent as an `EncryptedID` when the
   `NameIDPolicy` has the encrypted format, or when `IdentityProvider.ElementEncryptionPolicy` requires it for the SP,
   and that policy also chooses the attributes sent as `EncryptedAttribute`. `DefaultElementEncryptionPolicy` lists the
@@ -399,7 +406,8 @@ least the subset of SAML known as [interoperable SAML](https://kantarainitiative
   session, with `Success`, so that the answer says nothing about the ciphertext, and the reason is only logged
   (`IdpLogoutRequest.Unidentified`). An SP that was sent an `EncryptedID` is sent one again in the `LogoutRequest` of a
   propagated logout, and is skipped if it can no longer be encrypted to. `BaseID`, an `EncryptedID` that holds
-  anything but a `NameID`, and one in the `Subject` of an `AuthnRequest` or of a query are not supported. The answer to
+  anything but a `NameID`, and one in the `Subject` of an `AuthnRequest` or of a query are not supported, although
+  SAMLConformance §3.4 requires an `EncryptedID` to be accepted wherever a `NameID` is. The answer to
   a query is made like any other assertion, so its `NameID` and attributes are encrypted when the policy says so, and
   `AssertionStore` is given the assertion as it was signed, with those parts encrypted.
 - **Name Identifier Management:** `IdentityProvider.ServeManageNameID` handles a `ManageNameIDRequest` from an SP on the
@@ -422,10 +430,12 @@ least the subset of SAML known as [interoperable SAML](https://kantarainitiative
     established with, without the `SPProvidedID`.
   - A `NewEncryptedID` must be encrypted with a block cipher in GCM mode, which the IdP metadata lists first.
   - `IdentityProvider.SendManageNameIDRequest` tells an SP that the IdP changed or retired an identifier, over SOAP
-    only, with `HTTPClient`. It is for the application to call. The IdP doesn't send the request through the browser,
-    and accepts no `ManageNameIDResponse` there. HTTP Artifact is not supported.
+    only, with `HTTPClient`. SAMLConformance §2 also requires the IdP to send it over HTTP Redirect, which isn't
+    supported. It is for the application to call. The IdP doesn't send the request through the browser, and accepts
+    no `ManageNameIDResponse` there. HTTP Artifact is not supported.
 - **Name Identifier Mapping:** `IdentityProvider.ServeNameIDMapping` handles a signed `NameIDMappingRequest` on the SOAP
-  binding at `IdentityProvider.NameIDMappingURL` (SAMLProfiles §7). The metadata lists it when
+  binding at `IdentityProvider.NameIDMappingURL` (SAMLProfiles §7). The request may name the principal with a `NameID`
+  or an `EncryptedID`. The metadata lists it when
   `IdentityProvider.NameIDProvider` implements `NameIDMappingProvider` and `IdentityProvider.NameIDMappingPolicy` is
   set. Without a policy every request is refused: `DefaultNameIDMappingPolicy` lists, for each requester, the SPs
   whose identifiers it may obtain. A request that was already answered is a replay, and is answered
@@ -437,6 +447,23 @@ least the subset of SAML known as [interoperable SAML](https://kantarainitiative
     without telling which, and an unknown principal `Requester/UnknownPrincipal`. A response with an error status holds
     an empty `NameID`, as the schema requires an identifier.
   - A `BaseID`, and an affiliation as the target, are not supported.
+- **Metadata:** `IdentityProvider.ServeMetadata` serves the metadata from `SignedMetadata`, whose `EntityDescriptor`
+  has a random `ID` and an enveloped signature by `IdentityProvider.Key` or `Signer` that refers to it, as the first
+  child (SAMLMeta §3). It is signed for each request, and isn't cached. `Metadata` returns it unsigned.
+  - `MetadataVerifier.Verify` verifies the signature of an `EntityDescriptor` or `EntitiesDescriptor` before it is
+    parsed, for metadata from a source that doesn't authenticate it, such as the aggregate of a federation. The root
+    element must have an `ID` and a signature as its child with a single reference to it (SAMLMeta §3.1.2), by a key
+    of one of `MetadataVerifier.Certificates`. The certificate must be within its validity period, unlike the Metadata
+    Interoperability Profile §2.5.1, which treats it only as a container for the key. Signatures within the root are ignored. Only the XML
+    that `Verify` returns is authenticated, so it is what must be parsed.
+  - Metadata whose `validUntil` has passed is refused. `MetadataVerifier.MaxValidity` also refuses metadata with no
+    `validUntil`, or one further in the future, so that old metadata with a withdrawn key can't be replayed
+    (Metadata Interoperability Profile §2.7).
+  - `ParseServiceProvidersMetadata` returns every entity with an `SPSSODescriptor` in an `EntitiesDescriptor` and the
+    groups within it, each expiring with the earliest `validUntil` around it (SAMLMeta §2.3.1).
+    `ParseServiceProviderMetadata` returns the first. Neither fetches or refreshes metadata, which is for the
+    `ServiceProviderProvider`. `samlidp.Options.ServiceProviderMetadataVerifier` verifies the metadata of a service
+    before it is registered.
 - **Signature defaults:** `SignatureMethod` defaults to RSA-SHA256 for RSA keys, and SHA-1 is only used if set explicitly.
   For ECDSA keys it defaults to the hash matching the curve: SHA-256 for P-256, SHA-384 for P-384 and SHA-512 for P-521.
 - **SPs with ECDSA certificates:** a service provider whose metadata allows encryption with an ECDSA certificate is
@@ -455,8 +482,9 @@ least the subset of SAML known as [interoperable SAML](https://kantarainitiative
 
 ### Service Provider Limitations
 
-- **Single Logout:** `LogoutRequest` messages can be created and sent (HTTP Redirect or HTTP POST) and `LogoutResponse`
-  messages can be validated, however:
+- **Single Logout:** `LogoutRequest` messages can be created and sent (HTTP Redirect or HTTP POST), `LogoutResponse`
+  messages can be validated, and a `LogoutResponse` can be made with `MakeLogoutResponse`,
+  `MakeRedirectLogoutResponse` or `MakePostLogoutResponse`, however:
   - Incoming `LogoutRequest` messages (IdP-initiated logout) cannot be parsed or validated.
   - `samlsp.Middleware` does not serve the SLO endpoint.
   - The caller must track the IDs of the requests it sends, and pass them when validating a `LogoutResponse`.
