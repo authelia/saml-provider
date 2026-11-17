@@ -26,6 +26,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unsafe"
 
 	"github.com/beevik/etree"
 	xrv "github.com/mattermost/xml-roundtrip-validator"
@@ -299,7 +300,9 @@ type IdentityProvider struct {
 	Certificate   *x509.Certificate
 	Intermediates []*x509.Certificate
 	// MaxAuthnRequestAge is the oldest AuthnRequest that will be accepted, which must allow for a
-	// SessionProvider that re-presents the request after a login form. Defaults to MaxIssueDelay.
+	// SessionProvider that re-presents the request after a login form. Defaults to MaxIssueDelay. The ID
+	// of a request that was answered stays in the ReplayStore for this long after its IssueInstant, and
+	// MaxClockSkew longer.
 	MaxAuthnRequestAge      time.Duration
 	MetadataURL             url.URL
 	SSOURL                  url.URL
@@ -412,6 +415,17 @@ type IdentityProvider struct {
 	// LogoutStateLifetime is how long the state of a logout that is spread over several requests remains valid. It
 	// defaults to 5 minutes.
 	LogoutStateLifetime time.Duration
+
+	// ReplayStore records the ID of every request the identity provider acts on until the request expires, so
+	// that a request which is presented again is refused. Defaults to a MemoryReplayStore of
+	// DefaultMemoryReplayStoreCapacity, which is private to this process: identity providers that run as
+	// several instances must set a store that they share.
+	ReplayStore ReplayStore
+
+	// defaultReplayStore is the *MemoryReplayStore that replayStore makes when ReplayStore is not set. It is
+	// only read and written with sync/atomic, and is not an atomic.Pointer so that an IdentityProvider may
+	// still be copied: a copy shares the store if it was already made, and otherwise makes its own.
+	defaultReplayStore unsafe.Pointer
 }
 
 // ErrInsecureEndpoint is returned when the endpoint that a response would be sent to is not secure.
@@ -502,6 +516,15 @@ func isLoopbackHost(host string) bool {
 	addr, err := netip.ParseAddr(host)
 
 	return err == nil && addr.Unmap().IsLoopback()
+}
+
+// maxAuthnRequestAge returns MaxAuthnRequestAge, or MaxIssueDelay if it is not set.
+func (idp *IdentityProvider) maxAuthnRequestAge() time.Duration {
+	if idp.MaxAuthnRequestAge == 0 {
+		return MaxIssueDelay
+	}
+
+	return idp.MaxAuthnRequestAge
 }
 
 // logger returns the Logger of the identity provider, or logger.DefaultLogger if it has none, so an
@@ -703,6 +726,11 @@ func (idp *IdentityProvider) ServeMetadata(w http.ResponseWriter, _ *http.Reques
 // service provider, a request with an unsupported version, that is too old or new, or that
 // has the wrong destination is answered with a SAML error status instead.
 //
+// A request is used up once it is answered for a session: its ID is recorded in the ReplayStore until
+// the request expires, and the same request presented again is answered with Requester and
+// RequestDenied, without an assertion (SAMLSec §6.1.2). A request that a login form re-presents before
+// then is not a replay. If the store fails the request is answered with Responder.
+//
 // If the assertion cannot be created or encrypted, a Responder error status is sent, or
 // Requester with InvalidNameIDPolicy if the failure is ErrInvalidNameIDPolicy. A failure after
 // the body has started is only logged.
@@ -731,15 +759,23 @@ func (idp *IdentityProvider) ServeSSO(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// TODO(ross): we must check that the request ID has not been previously
-	//   issued.
-
 	session := req.getSession(w, r)
 	if session == nil {
 		return
 	}
 
 	req.Session = session
+
+	// The request is used up here, once it is about to be answered for a session, and not when it is
+	// validated: a SessionProvider that shows a login form re-presents the same request (SAMLSec §6.1.2).
+	if err := req.CheckReplay(); err != nil {
+		idp.logger().Printf("refused request: %s", err)
+
+		top, second, _ := requestStatus(err)
+		req.writeErrorStatus(w, top, second)
+
+		return
+	}
 
 	assertionMaker := idp.AssertionMaker
 	if assertionMaker == nil {
@@ -1137,10 +1173,7 @@ func (req *IdpAuthnRequest) checkRequestStage() error {
 		return statusErr
 	}
 
-	maxAge := req.IDP.MaxAuthnRequestAge
-	if maxAge == 0 {
-		maxAge = MaxIssueDelay
-	}
+	maxAge := req.IDP.maxAuthnRequestAge()
 
 	if req.Request.IssueInstant.Add(maxAge).Before(req.Now) {
 		return &statusError{StatusRequester, StatusRequestDenied,
