@@ -10,6 +10,7 @@ import (
 	"errors"
 	"fmt"
 	"regexp"
+	"slices"
 
 	"github.com/beevik/etree"
 
@@ -31,6 +32,15 @@ type ValidationContext struct {
 	CertificateStore X509CertificateStore
 	IdAttribute      string
 	Clock            *Clock
+
+	// SignatureMethods, when it isn't nil, lists the identifiers of the only signature algorithms that a
+	// signature may be made with. A signature made with any other is refused before it is verified.
+	SignatureMethods []string
+
+	// DigestMethods, when it isn't nil, lists the identifiers of the only digest algorithms that a Reference may
+	// name. A signature is refused if any Reference of its SignedInfo names another, including a Reference that
+	// isn't to the element being validated.
+	DigestMethods []string
 }
 
 func NewDefaultValidationContext(certificateStore X509CertificateStore) *ValidationContext {
@@ -239,6 +249,10 @@ func (ctx *ValidationContext) validateSignature(el *etree.Element, sig *types.Si
 		return nil, errors.New("Unknown signature method: " + signatureMethod)
 	}
 
+	if ctx.SignatureMethods != nil && !slices.Contains(ctx.SignatureMethods, signatureMethod) {
+		return nil, fmt.Errorf("signature method %s is not allowed", signatureMethod)
+	}
+
 	if sig.SignatureValue == nil {
 		return nil, errors.New("Signature could not be verified")
 	}
@@ -261,6 +275,16 @@ func (ctx *ValidationContext) validateSignature(el *etree.Element, sig *types.Si
 	err = xml.Unmarshal(canonicalSignedInfoBytes, signedInfo)
 	if err != nil {
 		return nil, err
+	}
+
+	// The verified SignedInfo is the one that is checked, as it is the one that is used. Every Reference is held
+	// to the list, so that nothing in a SignedInfo that is accepted names an algorithm that was refused.
+	if ctx.DigestMethods != nil {
+		for i := range signedInfo.References {
+			if digestMethod := signedInfo.References[i].DigestAlgo.Algorithm; !slices.Contains(ctx.DigestMethods, digestMethod) {
+				return nil, fmt.Errorf("digest method %s is not allowed", digestMethod)
+			}
+		}
 	}
 
 	idAttrEl := el.SelectAttr(ctx.IdAttribute)

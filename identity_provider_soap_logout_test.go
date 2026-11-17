@@ -116,7 +116,7 @@ func soapLogoutResponse(t *testing.T, w *httptest.ResponseRecorder) *LogoutRespo
 	message := detachSOAPBodyChild(body.ChildElements()[0])
 	assert.Check(t, is.Equal(message.Tag, "LogoutResponse"))
 
-	verified, err := verifyEnvelopedSignature(message, []*x509.Certificate{mustParseCertificate(golden.Get(t, "idp_cert.pem"))})
+	verified, err := verifyEnvelopedSignature(message, []*x509.Certificate{mustParseCertificate(golden.Get(t, "idp_cert.pem"))}, anySignaturePolicy)
 	assert.NilError(t, err)
 
 	response := &LogoutResponse{}

@@ -52,6 +52,13 @@ const (
 	ECDSASHA512SignatureMethod = "http://www.w3.org/2001/04/xmldsig-more#ecdsa-sha512"
 )
 
+const (
+	SHA1DigestMethod   = "http://www.w3.org/2000/09/xmldsig#sha1"
+	SHA256DigestMethod = "http://www.w3.org/2001/04/xmlenc#sha256"
+	SHA384DigestMethod = "http://www.w3.org/2001/04/xmldsig-more#sha384"
+	SHA512DigestMethod = "http://www.w3.org/2001/04/xmlenc#sha512"
+)
+
 // Well-known signature algorithms
 const (
 	// Supported canonicalization algorithms
@@ -68,10 +75,10 @@ const (
 )
 
 var digestAlgorithmIdentifiers = map[crypto.Hash]string{
-	crypto.SHA1:   "http://www.w3.org/2000/09/xmldsig#sha1",
-	crypto.SHA256: "http://www.w3.org/2001/04/xmlenc#sha256",
-	crypto.SHA384: "http://www.w3.org/2001/04/xmldsig-more#sha384",
-	crypto.SHA512: "http://www.w3.org/2001/04/xmlenc#sha512",
+	crypto.SHA1:   SHA1DigestMethod,
+	crypto.SHA256: SHA256DigestMethod,
+	crypto.SHA384: SHA384DigestMethod,
+	crypto.SHA512: SHA512DigestMethod,
 }
 
 type signatureMethodInfo struct {

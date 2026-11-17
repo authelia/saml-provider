@@ -243,7 +243,7 @@ func parseECPResponse(t *testing.T, w *httptest.ResponseRecorder) *ecpResponse {
 	assert.Assert(t, is.Equal(message.Tag, "Response"))
 	assert.Assert(t, is.Equal(message.NamespaceURI(), samlProtocolNS))
 
-	verified, err := verifyEnvelopedSignature(message, []*x509.Certificate{mustParseCertificate(golden.Get(t, "idp_cert.pem"))})
+	verified, err := verifyEnvelopedSignature(message, []*x509.Certificate{mustParseCertificate(golden.Get(t, "idp_cert.pem"))}, anySignaturePolicy)
 	assert.NilError(t, err)
 
 	response := &Response{}

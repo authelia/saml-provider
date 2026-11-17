@@ -665,6 +665,28 @@ type IdentityProvider struct {
 	// identifiers of SHA-256 and SHA-512 are accepted, and the standard ones are written.
 	KeyTransportDigestMethods []string
 
+	// SignatureMethods lists the identifiers of the signature algorithms that the identity provider accepts on what
+	// it receives: the SigAlg of a message signed on the HTTP-Redirect binding, and the SignatureMethod of the XML
+	// signature of an AuthnRequest, a LogoutRequest, a LogoutResponse, a ManageNameIDRequest or its response, and
+	// every message on the SOAP binding. A message signed with an algorithm that isn't listed is refused as one
+	// whose signature is invalid. The supported algorithms are RSA and ECDSA, each with SHA-1, SHA-256, SHA-384 or
+	// SHA-512, and empty means all of them but those with SHA-1, which is no longer collision resistant (RFC 6194)
+	// and which the SAML V2.0 Metadata Profile for Algorithm Support and SAML2Int no longer allow. To accept SHA-1
+	// from a service provider that can't sign with anything else, list every algorithm to accept, with
+	// "http://www.w3.org/2000/09/xmldsig#rsa-sha1" or "http://www.w3.org/2001/04/xmldsig-more#ecdsa-sha1" among
+	// them, and list the SHA-1 digest in DigestMethods. An identifier that isn't supported is an error, which
+	// refuses every signed message. It has no effect on SignatureMethod, which is what the identity provider signs
+	// with, or on a MetadataVerifier, which has lists of its own.
+	SignatureMethods []string
+
+	// DigestMethods lists the identifiers of the digest algorithms that the identity provider accepts in the XML
+	// signature of what it receives, and is used like SignatureMethods. Every Reference of a signature must name
+	// one of them. The supported digests are SHA-1, SHA-256, SHA-384 and SHA-512, and empty means all of them but
+	// SHA-1, which is "http://www.w3.org/2000/09/xmldsig#sha1". It doesn't apply to a signature on the
+	// HTTP-Redirect binding, which has no digest of its own, or to KeyTransportDigestMethods, which is for
+	// encryption.
+	DigestMethods []string
+
 	// LogoutNameIDValueOnly makes IdpLogoutRequest.MatchesSession compare only the NameID value and the session
 	// indexes of a LogoutRequest, as earlier versions did, for service providers that don't echo the Format and
 	// qualifiers of the NameID they were given. The value is compared with Session.NameID when

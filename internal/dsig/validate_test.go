@@ -459,3 +459,55 @@ UiRSB6Op716xk+9d0jlyrtFF77B3YlKgMThQG6rguXViSwmViywWx+UQD6F1OzES8hoL54hfriOn
 lIpzZeamtJCo/jcdeqYHi3ru+uHOBe91GFPtoDGCVuk7YvzlXKMdgyDx82+kRSnLWYMxaI2zleFY
 nXHhoQk3K5iSdQT/gFgKJk89</dsx:X509Certificate></dsx:X509Data></dsx:KeyInfo><dsx:SignedInfo xmlns:ds="" xmlns:dsx="http://www.w3.org/2000/09/xmldsig#"><dsx:CanonicalizationMethod Algorithm="http://www.w3.org/2001/10/xml-exc-c14n#"/><dsx:SignatureMethod Algorithm="http://www.w3.org/2001/04/xmldsig-more#rsa-sha256"/><dsx:Reference URI="#id149481635007855341483658231"><dsx:Transforms><dsx:Transform Algorithm="http://www.w3.org/2000/09/xmldsig#enveloped-signature"/><dsx:Transform Algorithm="http://www.w3.org/2001/10/xml-exc-c14n#"><ec:InclusiveNamespaces xmlns:ec="http://www.w3.org/2001/10/xml-exc-c14n#" PrefixList="xs"/></dsx:Transform></dsx:Transforms><dsx:DigestMethod Algorithm="http://www.w3.org/2001/04/xmlenc#sha256"/><dsx:DigestValue>JaSnCMsKnmGg4Ew3yXuUdRPCmlzJngSWW1RZYH15Exk=</dsx:DigestValue></dsx:Reference></dsx:SignedInfo><ds:SignedInfo xmlns:ds="http://www.w3.org/2000/09/xmldsig#"><ds:CanonicalizationMethod Algorithm="http://www.w3.org/2001/10/xml-exc-c14n#"/><ds:SignatureMethod Algorithm="http://www.w3.org/2001/04/xmldsig-more#rsa-sha256"/><ds:Reference URI="#id149481635007855341483658231"><ds:Transforms><ds:Transform Algorithm="http://www.w3.org/2000/09/xmldsig#enveloped-signature"/><ds:Transform Algorithm="http://www.w3.org/2001/10/xml-exc-c14n#"><ec:InclusiveNamespaces xmlns:ec="http://www.w3.org/2001/10/xml-exc-c14n#" PrefixList="xs"/></ds:Transform></ds:Transforms><ds:DigestMethod Algorithm="http://www.w3.org/2001/04/xmlenc#sha256"/><ds:DigestValue>nrIzAXSDsFwgvCm+ulbqfqZylzPxCBof6FYDcCEPdCQ=</ds:DigestValue></ds:Reference></ds:SignedInfo></dsx:Signature><saml2:Subject xmlns:saml2="urn:oasis:names:tc:SAML:2.0:assertion"><saml2:NameID Format="urn:oasis:names:tc:SAML:1.1:nameid-format:emailAddress">todd@okta.com</saml2:NameID><saml2:SubjectConfirmation Method="urn:oasis:names:tc:SAML:2.0:cm:bearer"><saml2:SubjectConfirmationData InResponseTo="_ffea96b1-44a2-4a86-9683-45807984ab5b" NotOnOrAfter="2020-09-01T17:56:12.176Z" Recipient="https://dev.sudo.wtf:8443/v1/_saml_callback"/></saml2:SubjectConfirmation></saml2:Subject><saml2:Conditions NotBefore="2020-09-01T17:46:12.176Z" NotOnOrAfter="2020-09-01T17:56:12.176Z" xmlns:saml2="urn:oasis:names:tc:SAML:2.0:assertion"><saml2:AudienceRestriction><saml2:Audience>https://dev.sudo.wtf:8443/v1/teams/asa</saml2:Audience></saml2:AudienceRestriction></saml2:Conditions><saml2:AuthnStatement AuthnInstant="2020-09-01T17:25:30.851Z" SessionIndex="_ffea96b1-44a2-4a86-9683-45807984ab5b" xmlns:saml2="urn:oasis:names:tc:SAML:2.0:assertion"><saml2:AuthnContext><saml2:AuthnContextClassRef>urn:oasis:names:tc:SAML:2.0:ac:classes:PasswordProtectedTransport</saml2:AuthnContextClassRef></saml2:AuthnContext></saml2:AuthnStatement><saml2:AttributeStatement xmlns:saml2="urn:oasis:names:tc:SAML:2.0:assertion"><saml2:Attribute Name="FirstName" NameFormat="urn:oasis:names:tc:SAML:2.0:attrname-format:unspecified"><saml2:AttributeValue xmlns:xs="http://www.w3.org/2001/XMLSchema" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:type="xs:string">Phoebe</saml2:AttributeValue></saml2:Attribute><saml2:Attribute Name="LastName" NameFormat="urn:oasis:names:tc:SAML:2.0:attrname-format:unspecified"><saml2:AttributeValue xmlns:xs="http://www.w3.org/2001/XMLSchema" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:type="xs:string">Yu</saml2:AttributeValue></saml2:Attribute><saml2:Attribute Name="Email" NameFormat="urn:oasis:names:tc:SAML:2.0:attrname-format:unspecified"><saml2:AttributeValue xmlns:xs="http://www.w3.org/2001/XMLSchema" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:type="xs:string">phoebe.yu@okta.com</saml2:AttributeValue></saml2:Attribute><saml2:Attribute Name="Login" NameFormat="urn:oasis:names:tc:SAML:2.0:attrname-format:unspecified"><saml2:AttributeValue xmlns:xs="http://www.w3.org/2001/XMLSchema" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:type="xs:string">phoebe.yu@okta.com</saml2:AttributeValue></saml2:Attribute><saml2:Attribute Name="SSHUserName" NameFormat="urn:oasis:names:tc:SAML:2.0:attrname-format:unspecified"><saml2:AttributeValue xmlns:xs="http://www.w3.org/2001/XMLSchema" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:type="xs:string"/></saml2:Attribute></saml2:AttributeStatement></saml2:Assertion></saml2p:Response>`
 )
+
+func TestValidateRefusesAlgorithmsThatAreNotListed(t *testing.T) {
+	keyStore := RandomKeyStoreForTest().(*MemoryX509KeyStore)
+
+	cert, err := x509.ParseCertificate(keyStore.cert)
+	require.NoError(t, err)
+
+	el := &etree.Element{Space: "samlp", Tag: "AuthnRequest"}
+	el.CreateAttr("xmlns:samlp", "urn:oasis:names:tc:SAML:2.0:protocol")
+	el.CreateAttr("ID", "_97e34c50-65ec-4132-8b39-02933960a96a")
+
+	sign := func(method string) *etree.Element {
+		signingContext, err := NewSigningContext(keyStore.privateKey, [][]byte{keyStore.cert})
+		require.NoError(t, err)
+		require.NoError(t, signingContext.SetSignatureMethod(method))
+
+		signed, err := signingContext.SignEnveloped(el)
+		require.NoError(t, err)
+
+		return signed
+	}
+
+	validate := func(signed *etree.Element, signatureMethods, digestMethods []string) error {
+		validationContext := NewDefaultValidationContext(&MemoryX509CertificateStore{Roots: []*x509.Certificate{cert}})
+		validationContext.SignatureMethods = signatureMethods
+		validationContext.DigestMethods = digestMethods
+
+		_, err := validationContext.Validate(signed)
+
+		return err
+	}
+
+	sha1, sha256 := sign(RSASHA1SignatureMethod), sign(RSASHA256SignatureMethod)
+
+	// Nil lists accept whatever can be verified.
+	require.NoError(t, validate(sha1, nil, nil))
+	require.NoError(t, validate(sha256, nil, nil))
+
+	require.NoError(t, validate(sha256, []string{RSASHA256SignatureMethod}, []string{SHA256DigestMethod}))
+	require.NoError(t, validate(sha1, []string{RSASHA1SignatureMethod}, []string{SHA1DigestMethod}))
+
+	require.EqualError(t, validate(sha1, []string{RSASHA256SignatureMethod}, nil),
+		"signature method "+RSASHA1SignatureMethod+" is not allowed")
+	require.EqualError(t, validate(sha1, nil, []string{SHA256DigestMethod}),
+		"digest method "+SHA1DigestMethod+" is not allowed")
+	require.EqualError(t, validate(sha1, []string{RSASHA1SignatureMethod}, []string{SHA256DigestMethod}),
+		"digest method "+SHA1DigestMethod+" is not allowed")
+
+	// An empty list is not a nil one, and accepts nothing.
+	require.Error(t, validate(sha256, []string{}, nil))
+	require.Error(t, validate(sha256, nil, []string{}))
+}

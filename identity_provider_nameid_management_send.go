@@ -105,6 +105,12 @@ func (idp *IdentityProvider) SendManageNameIDRequest(r *http.Request, servicePro
 		}
 	}
 
+	// Before the request is sent, so that the service provider doesn't act on one whose response can't be read.
+	policy, err := idp.signaturePolicy()
+	if err != nil {
+		return err
+	}
+
 	signingContext, err := idp.signingContext()
 	if err != nil {
 		return fmt.Errorf("cannot sign the name identifier management request: %w", err)
@@ -120,7 +126,7 @@ func (idp *IdentityProvider) SendManageNameIDRequest(r *http.Request, servicePro
 		return err
 	}
 
-	response, err := validateManageNameIDResponse(message, overTLS, request.ID, metadata, TimeNow())
+	response, err := validateManageNameIDResponse(message, overTLS, request.ID, metadata, policy, TimeNow())
 	if err != nil {
 		return fmt.Errorf("invalid name identifier management response: %w", err)
 	}
@@ -213,7 +219,7 @@ func (e *elementEncrypter) encryptNewID(newID string) (*etree.Element, error) {
 // provider to the request with the ID requestID. Its status is not checked. A signature is verified when it is
 // present, and is required unless the response came back over TLS on the connection to the service provider,
 // which authenticates it (SAMLProfiles §4.5.3.2, SAMLBind §3.2.4).
-func validateManageNameIDResponse(buf []byte, overTLS bool, requestID string, metadata *EntityDescriptor, now time.Time) (*ManageNameIDResponse, error) {
+func validateManageNameIDResponse(buf []byte, overTLS bool, requestID string, metadata *EntityDescriptor, policy *signaturePolicy, now time.Time) (*ManageNameIDResponse, error) {
 	if err := checkAuthnRequestSize(buf); err != nil {
 		return nil, err
 	}
@@ -238,7 +244,7 @@ func validateManageNameIDResponse(buf []byte, overTLS bool, requestID string, me
 		return nil, err
 	}
 
-	response, err := verifyManageNameIDResponseSignature(doc.Root(), response, overTLS, metadata)
+	response, err := verifyManageNameIDResponseSignature(doc.Root(), response, overTLS, metadata, policy)
 	if err != nil {
 		return nil, err
 	}
@@ -270,8 +276,8 @@ func validateManageNameIDResponse(buf []byte, overTLS bool, requestID string, me
 
 // verifyManageNameIDResponseSignature returns response, which was unmarshalled from root, if root is not signed
 // and came back over TLS, or the response that the signature of root covers if it is signed by the service
-// provider.
-func verifyManageNameIDResponseSignature(root *etree.Element, response *ManageNameIDResponse, overTLS bool, metadata *EntityDescriptor) (*ManageNameIDResponse, error) {
+// provider with the algorithms of the policy.
+func verifyManageNameIDResponseSignature(root *etree.Element, response *ManageNameIDResponse, overTLS bool, metadata *EntityDescriptor, policy *signaturePolicy) (*ManageNameIDResponse, error) {
 	signatureEl, err := findChild(root, "http://www.w3.org/2000/09/xmldsig#", "Signature")
 	if err != nil {
 		return nil, err
@@ -294,7 +300,7 @@ func verifyManageNameIDResponseSignature(root *etree.Element, response *ManageNa
 		return nil, errors.New("response is signed but the service provider has no signing certificate")
 	}
 
-	verified, err := verifyEnvelopedSignature(root, certificates)
+	verified, err := verifyEnvelopedSignature(root, certificates, policy)
 	if err != nil {
 		return nil, fmt.Errorf("invalid response signature: %w", err)
 	}

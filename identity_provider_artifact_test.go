@@ -201,7 +201,7 @@ func artifactResponse(t *testing.T, w *httptest.ResponseRecorder) (*ArtifactResp
 	assert.Assert(t, len(names) >= 3)
 	assert.Check(t, is.DeepEqual(names[:3], []string{"Issuer", "Signature", "Status"}))
 
-	verified, err := verifyEnvelopedSignature(el, []*x509.Certificate{mustParseCertificate(golden.Get(t, "idp_cert.pem"))})
+	verified, err := verifyEnvelopedSignature(el, []*x509.Certificate{mustParseCertificate(golden.Get(t, "idp_cert.pem"))}, anySignaturePolicy)
 	assert.NilError(t, err)
 
 	response := &ArtifactResponse{}
@@ -984,7 +984,7 @@ func TestServeArtifactResolution(t *testing.T) {
 	message := assertResolvedArtifactResponse(t, serveArtifactResolution(test, r), id, authnRequestID)
 
 	// The message is the signed Response that the POST binding would have delivered, unchanged.
-	_, err := verifyEnvelopedSignature(message, []*x509.Certificate{mustParseCertificate(golden.Get(t, "idp_cert.pem"))})
+	_, err := verifyEnvelopedSignature(message, []*x509.Certificate{mustParseCertificate(golden.Get(t, "idp_cert.pem"))}, anySignaturePolicy)
 	assert.NilError(t, err)
 	assert.Check(t, is.Equal(message.SelectAttrValue("Destination", ""), "https://sp.example.com/saml2/acs"))
 

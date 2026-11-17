@@ -274,7 +274,7 @@ func sentLogoutRequestElement(t *testing.T, sp *ServiceProvider, location *url.U
 	doc := etree.NewDocument()
 
 	if location.Query().Has("SigAlg") {
-		assert.NilError(t, verifyRedirectSignature(location.RawQuery, "SAMLRequest", certificates))
+		assert.NilError(t, verifyRedirectSignature(location.RawQuery, "SAMLRequest", certificates, anySignaturePolicy))
 
 		buf, err := io.ReadAll(flate.NewReader(bytes.NewReader(encoded)))
 		assert.NilError(t, err)
@@ -285,7 +285,7 @@ func sentLogoutRequestElement(t *testing.T, sp *ServiceProvider, location *url.U
 
 	assert.NilError(t, doc.ReadFromBytes(encoded))
 
-	verified, err := verifyEnvelopedSignature(doc.Root(), certificates)
+	verified, err := verifyEnvelopedSignature(doc.Root(), certificates, anySignaturePolicy)
 	assert.NilError(t, err)
 
 	return verified
