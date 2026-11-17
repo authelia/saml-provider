@@ -2361,7 +2361,7 @@ func TestParseBadXMLArtifactResponse(t *testing.T) {
 	sp.Key = mustParsePrivateKey(golden.Get(t, "key_2017.pem")).(*rsa.PrivateKey)
 	assertion, err = sp.ParseXMLArtifactResponse(samlResponse, possibleReqIDs, reqID, sp.AcsURL)
 	assert.Check(t, is.Error(err.(*InvalidResponseError).PrivateErr,
-		"failed to decrypt EncryptedAssertion: certificate does not match provided key"))
+		"failed to decrypt EncryptedAssertion: failed to decrypt key from response: certificate does not match provided key"))
 	assert.Check(t, is.Nil(assertion))
 
 	// no input.

@@ -111,7 +111,8 @@ least the subset of SAML known as [interoperable SAML](https://kantarainitiative
 
 [^ecdsa]: Signatures use the `r||s` encoding XML Signature requires, and DER signatures are rejected unless
     `SignatureVerifier` is set. ECDSA keys cannot be used for assertion encryption or decryption, which require RSA,
-    so metadata does not advertise encryption for an ECDSA certificate. XML signatures are verified against `xmlsec1` 1.3.13
+    so metadata does not advertise encryption for an ECDSA certificate. An IdP that signs with ECDSA can have an RSA
+    `EncryptionKey`. XML signatures are verified against `xmlsec1` 1.3.13
     in both directions, on P-256, P-384 and P-521. HTTP-Redirect signatures are covered by unit tests only, and other
     implementations have not been tested.
 
@@ -459,9 +460,9 @@ least the subset of SAML known as [interoperable SAML](https://kantarainitiative
   SPs for either, and encrypts nothing by default. They are encrypted before the assertion is signed (SAMLCore §6.2),
   to the key and with the algorithms that **Encrypt `Assertion`** describes, and the assertion is still encrypted as a
   whole afterwards. If one can't be encrypted, no assertion is sent. A `LogoutRequest` may identify the principal with
-  an `EncryptedID` on any binding, which is decrypted with `IdentityProvider.Key` after the signature is verified.
-  That needs an RSA private key, not only a `Signer`, and the metadata lists an encryption key only then, with the
-  algorithms the IdP allows and GCM first. One that can't be decrypted is answered like a `NameID` which names no
+  an `EncryptedID` on any binding, which is decrypted with the encryption key of the IdP after the signature is
+  verified (see **Encryption key and its rollover**). The metadata lists an encryption key only when the IdP has one,
+  with the algorithms the IdP allows and GCM first. One that can't be decrypted is answered like a `NameID` which names no
   session, with `Success`, so that the answer says nothing about the ciphertext, and the reason is only logged
   (`IdpLogoutRequest.Unidentified`). An SP that was sent an `EncryptedID` is sent one again in the `LogoutRequest` of a
   propagated logout, and is skipped if it can no longer be encrypted to. `BaseID`, an `EncryptedID` that holds
@@ -645,6 +646,44 @@ least the subset of SAML known as [interoperable SAML](https://kantarainitiative
   refreshed the metadata, then swap it into `Certificate` and keep the previous one there for a while. They are not
   published for encryption, and `Intermediates` are only sent with signatures, for `Certificate`. An SP that only
   reads the first signing key only trusts the next one once it is `Certificate` and the SP has refreshed the metadata.
+- **Encryption key and its rollover:** `IdentityProvider.EncryptionCertificate` and `EncryptionKey`
+  (`samlidp.Options` has both) are the key pair that SPs encrypt an `EncryptedID` or `NewEncryptedID` to. The metadata
+  publishes the certificate in the one `KeyDescriptor` with `use="encryption"`, and the signing keys with
+  `use="signing"` only. The key is a `crypto.Decrypter`, so it can be an `*rsa.PrivateKey` or a key in an HSM, and the
+  IdP can sign with an ECDSA key or a `Signer` and still be encrypted to. It must be an RSA key, as only RSA-OAEP key
+  transport is supported, and is given `*rsa.OAEPOptions` with the digest and MGF1 hash of the sender. A device that
+  can't do every combination needs `KeyTransportMethods` and `KeyTransportDigestMethods` set to those it can.
+  - **Fallback:** when they are not set, `Certificate` and `Key` are the encryption key, if `Key` is an RSA private key
+    and the certificate has no `KeyUsage` extension or one with `keyEncipherment`. Otherwise the metadata lists no
+    encryption key. A separate key is the better practice: with the fallback, changing the signing key also changes
+    the encryption key.
+  - **Rollover:** `IdentityProvider.DecryptionKeys` (`samlidp.Options.DecryptionKeys`) are key pairs which are
+    decrypted with but never published. To change the encryption key without downtime:
+    1. Add the next key pair to `DecryptionKeys`, on every instance of the IdP.
+    2. Make it `EncryptionCertificate` and `EncryptionKey`, and move the previous pair to `DecryptionKeys`. An SP with
+       either version of the metadata is understood.
+    3. Remove the previous pair once no SP can still hold the old metadata, which is `ValidDuration` after the switch
+       for an SP that refreshes it, and no message encrypted to the old key can still arrive. A compromised key must
+       be removed at once instead.
+
+    A previous signing key that was the encryption key by the fallback is kept in `DecryptionKeys` in the same way.
+    The next encryption certificate is not published ahead of the switch, unlike `RolloverCertificates`: an SP may
+    encrypt to any encryption key in the metadata as soon as it sees it (Metadata Interoperability Profile §2.6.1),
+    so the IdP must decrypt with a key before it publishes it, and only ever publishes one.
+  - **Key selection:** the keys tried for an `EncryptedKey` are those whose certificate its `KeyInfo` identifies, by
+    `X509Certificate`, `X509SKI`, `X509SubjectName`, `X509Digest`, `RSAKeyValue`, or a `KeyName` which is the subject
+    or its common name, and every key if it identifies none. `X509IssuerSerial` is not read. Every key that is tried
+    is used, also after one has decrypted, so the number of private key operations depends on the `KeyInfo` and the
+    configuration but not on which key decrypts or whether any does, and the answer is the same in every case: a
+    requester learns nothing about the keys or the ciphertext from the answer or from how many keys were tried. The
+    time within one private key operation, and of the content decryption that follows a key that was unwrapped, is
+    not equalised. There can be at most four `DecryptionKeys`.
+  - **Validation:** `IdentityProvider.CheckEncryptionKeys` requires each certificate to have its private key and the
+    other way round, an RSA key of at least 2048 bits (saml2int SDP-MD06), a private key that matches the
+    certificate, and `keyEncipherment` if the certificate has a `KeyUsage` extension. The validity period is not
+    checked, as a key that is being retired may have expired. `samlidp.New` returns its error. If it fails,
+    `ServeMetadata` responds with 500, `Metadata` lists no encryption key and nothing is decrypted; no other key is
+    used instead. The signing key of the fallback is only checked for its type and key usage.
 
 ### Service Provider Limitations
 

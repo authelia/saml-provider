@@ -3,9 +3,12 @@ package saml
 import (
 	"bytes"
 	"crypto"
+	"crypto/rsa"
 	"crypto/x509"
+	"encoding/base64"
 	"errors"
 	"fmt"
+	"math/big"
 	"slices"
 	"strings"
 
@@ -102,8 +105,8 @@ func (e *elementEncrypter) encryptAttribute(attribute *Attribute) (*etree.Elemen
 // this entity. It must only be given an element that is covered by a verified signature or was received from an
 // authenticated peer, as errata E93 asks, because the block ciphers in CBC mode don't protect their own integrity.
 type elementDecrypter struct {
-	// key is the private key of this entity, which must be an *rsa.PrivateKey.
-	key crypto.PrivateKey
+	// keys are the private keys of this entity, in the order to try them. See candidateKeys.
+	keys []decryptionKey
 
 	// recipient is the identifier of this entity, which selects among several EncryptedKey elements.
 	recipient string
@@ -131,29 +134,31 @@ func (d elementDecrypter) decrypt(encryptedEl *etree.Element) (*etree.Element, e
 		}
 	}
 
-	var key any = d.key
+	// The content encryption key is decrypted here, with each of the keys of this entity that may hold it, and
+	// xmlenc is given the EncryptedData without the EncryptedKey that it would decrypt with a single key.
+	dataEl := encryptedDataEl
+
+	var encryptedKeyEls []*etree.Element
 
 	if embeddedKeyEl := encryptedDataEl.FindElement("./KeyInfo/EncryptedKey"); embeddedKeyEl != nil {
-		// xmlenc decrypts a key inside the EncryptedData itself.
-		if d.policy != nil {
-			if err = d.policy.acceptsKeyTransport(embeddedKeyEl); err != nil {
-				return nil, err
-			}
-		}
-	} else {
-		encryptedKeyEls, err := d.encryptedKeys(encryptedEl, encryptedDataEl)
-		if err != nil {
-			return nil, err
-		}
+		encryptedKeyEls = []*etree.Element{embeddedKeyEl}
 
-		if len(encryptedKeyEls) != 0 {
-			if key, err = d.decryptKey(encryptedKeyEls); err != nil {
-				return nil, fmt.Errorf("failed to decrypt key from response: %s", err)
-			}
-		}
+		dataEl = encryptedDataEl.Copy()
+		dataEl.RemoveChild(dataEl.FindElement("./KeyInfo"))
+	} else if encryptedKeyEls, err = d.encryptedKeys(encryptedEl, encryptedDataEl); err != nil {
+		return nil, err
 	}
 
-	plaintext, err := xmlenc.Decrypt(key, encryptedDataEl)
+	if len(encryptedKeyEls) == 0 {
+		return nil, errors.New("the EncryptedData has no EncryptedKey")
+	}
+
+	key, err := d.decryptKey(encryptedKeyEls)
+	if err != nil {
+		return nil, fmt.Errorf("failed to decrypt key from response: %s", err)
+	}
+
+	plaintext, err := xmlenc.Decrypt(key, dataEl)
 	if err != nil {
 		return nil, err
 	}
@@ -239,7 +244,13 @@ func (d elementDecrypter) decryptKey(encryptedKeyEls []*etree.Element) ([]byte, 
 	return nil, firstErr
 }
 
-// decryptOneKey returns the content encryption key that encryptedKeyEl wraps.
+// decryptOneKey returns the content encryption key that encryptedKeyEl wraps, decrypted with the first of the
+// candidate keys of this entity which can, or the error of the first one.
+//
+// Every candidate is used, also after one has decrypted the key. The number of private key operations then only
+// depends on the keys of this entity and on the KeyInfo, which the sender wrote in the clear, and never on which
+// key decrypts or on whether one does. The time that an answer takes would otherwise tell a requester so, which is
+// more than errata E93 lets it learn about a ciphertext it may not have made.
 func (d elementDecrypter) decryptOneKey(encryptedKeyEl *etree.Element) ([]byte, error) {
 	if d.policy != nil {
 		if err := d.policy.acceptsKeyTransport(encryptedKeyEl); err != nil {
@@ -247,7 +258,167 @@ func (d elementDecrypter) decryptOneKey(encryptedKeyEl *etree.Element) ([]byte, 
 		}
 	}
 
-	return xmlenc.Decrypt(d.key, encryptedKeyEl)
+	if len(d.keys) == 0 {
+		return nil, errors.New("there is no private key to decrypt with")
+	}
+
+	var (
+		decrypted []byte
+		firstErr  error
+	)
+
+	for _, candidate := range d.candidateKeys(encryptedKeyEl) {
+		key, err := xmlenc.Decrypt(candidate.key, encryptedKeyEl)
+
+		switch {
+		case err != nil && firstErr == nil:
+			firstErr = err
+		case err == nil && decrypted == nil:
+			decrypted = key
+		}
+	}
+
+	if decrypted == nil {
+		return nil, firstErr
+	}
+
+	return decrypted, nil
+}
+
+// candidateKeys returns the keys of this entity to decrypt encryptedKeyEl with: those whose certificate its
+// KeyInfo identifies, or all of them if it identifies none. The KeyInfo is a hint, which the Metadata
+// Interoperability Profile §2.5.1 says of every form but the key itself, so several keys may be identified, such as
+// by a name that the certificates of one entity share. A hint for a key that this entity doesn't hold rules
+// nothing out, except that xmlenc refuses to decrypt with a key which is not that of an X509Certificate.
+func (d elementDecrypter) candidateKeys(encryptedKeyEl *etree.Element) []decryptionKey {
+	if len(d.keys) < 2 {
+		return d.keys
+	}
+
+	keyInfoEl, err := findChild(encryptedKeyEl, xmldsigNamespace, "KeyInfo")
+	if err != nil || keyInfoEl == nil {
+		return d.keys
+	}
+
+	var identified []decryptionKey
+
+	for _, key := range d.keys {
+		if key.certificate != nil && keyInfoIdentifies(keyInfoEl, key.certificate) {
+			identified = append(identified, key)
+		}
+	}
+
+	if len(identified) == 0 {
+		return d.keys
+	}
+
+	return identified
+}
+
+const (
+	xmldsigNamespace   = "http://www.w3.org/2000/09/xmldsig#"
+	xmldsig11Namespace = "http://www.w3.org/2009/xmldsig11#"
+)
+
+// x509DigestHashes are the hashes of the X509Digest of XML Signature 1.1 §4.5.4.1 that are compared, by the
+// identifier of the digest.
+var x509DigestHashes = map[string]crypto.Hash{
+	"http://www.w3.org/2000/09/xmldsig#sha1":        crypto.SHA1,
+	"http://www.w3.org/2001/04/xmlenc#sha256":       crypto.SHA256,
+	"http://www.w3.org/2001/04/xmldsig-more#sha384": crypto.SHA384,
+	"http://www.w3.org/2001/04/xmlenc#sha512":       crypto.SHA512,
+}
+
+// keyInfoIdentifies returns whether a child of keyInfoEl identifies cert (XML Signature §4.4): a KeyName which is
+// its subject or the common name of its subject, the RSAKeyValue of its key, or in an X509Data the certificate,
+// its subject key identifier, its subject or its digest. An X509IssuerSerial is not compared, as the forms in
+// which a distinguished name can be written differ.
+func keyInfoIdentifies(keyInfoEl *etree.Element, cert *x509.Certificate) bool {
+	for _, el := range keyInfoEl.ChildElements() {
+		if el.NamespaceURI() != xmldsigNamespace {
+			continue
+		}
+
+		switch el.Tag {
+		case "KeyName":
+			if name := strings.TrimSpace(el.Text()); name != "" && (name == cert.Subject.String() || name == cert.Subject.CommonName) {
+				return true
+			}
+		case "KeyValue":
+			if rsaKeyValueIs(el, cert) {
+				return true
+			}
+		case "X509Data":
+			if slices.ContainsFunc(el.ChildElements(), func(child *etree.Element) bool { return x509DataIdentifies(child, cert) }) {
+				return true
+			}
+		}
+	}
+
+	return false
+}
+
+// x509DataIdentifies returns whether el, a child of an X509Data, identifies cert.
+func x509DataIdentifies(el *etree.Element, cert *x509.Certificate) bool {
+	text := strings.TrimSpace(el.Text())
+
+	switch {
+	case el.NamespaceURI() == xmldsigNamespace && el.Tag == "X509Certificate":
+		return base64Equal(text, cert.Raw)
+	case el.NamespaceURI() == xmldsigNamespace && el.Tag == "X509SKI":
+		return base64Equal(text, cert.SubjectKeyId)
+	case el.NamespaceURI() == xmldsigNamespace && el.Tag == "X509SubjectName":
+		return text != "" && text == cert.Subject.String()
+	case el.NamespaceURI() == xmldsig11Namespace && el.Tag == "X509Digest":
+		hash, ok := x509DigestHashes[el.SelectAttrValue("Algorithm", "")]
+		if !ok || !hash.Available() {
+			return false
+		}
+
+		digest := hash.New()
+		digest.Write(cert.Raw)
+
+		return base64Equal(text, digest.Sum(nil))
+	}
+
+	return false
+}
+
+// rsaKeyValueIs returns whether keyValueEl, a KeyValue, holds the RSA key of cert (XML Signature §4.4.2.2).
+func rsaKeyValueIs(keyValueEl *etree.Element, cert *x509.Certificate) bool {
+	public, ok := cert.PublicKey.(*rsa.PublicKey)
+	if !ok {
+		return false
+	}
+
+	rsaKeyValueEl, err := findChild(keyValueEl, xmldsigNamespace, "RSAKeyValue")
+	if err != nil || rsaKeyValueEl == nil {
+		return false
+	}
+
+	modulusEl, err := findChild(rsaKeyValueEl, xmldsigNamespace, "Modulus")
+	if err != nil || modulusEl == nil {
+		return false
+	}
+
+	exponentEl, err := findChild(rsaKeyValueEl, xmldsigNamespace, "Exponent")
+	if err != nil || exponentEl == nil {
+		return false
+	}
+
+	return base64Equal(modulusEl.Text(), public.N.Bytes()) && base64Equal(exponentEl.Text(), big.NewInt(int64(public.E)).Bytes())
+}
+
+// base64Equal returns whether text is the base64 encoding of value, which is not empty. Whitespace in the text
+// is ignored, as the encoding of a long value is wrapped.
+func base64Equal(text string, value []byte) bool {
+	if len(value) == 0 {
+		return false
+	}
+
+	decoded, err := base64.StdEncoding.DecodeString(strings.Join(strings.Fields(text), ""))
+
+	return err == nil && bytes.Equal(decoded, value)
 }
 
 // decryptElement returns the element that encryptedEl holds, which must be the SAML assertion element named tag.

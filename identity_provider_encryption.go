@@ -4,6 +4,9 @@ import (
 	"context"
 	"crypto"
 	"crypto/rsa"
+	"crypto/x509"
+	"encoding/base64"
+	"errors"
 	"fmt"
 	"net/http"
 	"slices"
@@ -312,20 +315,197 @@ func (policy *encryptionPolicy) keyTransportFor(method EncryptionMethod) (xmlenc
 	return encrypter, true
 }
 
-// decryptionKey returns the key that the identity provider decrypts with, or nil if it has none: Key, when it is
-// an RSA private key and Certificate holds an RSA key. A Signer can't decrypt.
-func (idp *IdentityProvider) decryptionKey() *rsa.PrivateKey {
+// DecryptionKey is a key pair that the identity provider decrypts with: an RSA key of at least 2048 bits, and
+// the certificate that a service provider encrypted to. See IdentityProvider.DecryptionKeys.
+type DecryptionKey struct {
+	// Certificate is the certificate of Key. Nothing but its key and, if it has the extension, its key usage is
+	// looked at, so it may have expired.
+	Certificate *x509.Certificate
+
+	// Key is the private key, which is an *rsa.PrivateKey or a key held elsewhere, such as in a hardware security
+	// module. See IdentityProvider.EncryptionKey.
+	Key crypto.Decrypter
+}
+
+// decryptionKey is a key pair that an entity decrypts with.
+type decryptionKey struct {
+	// certificate is the certificate of key, which the KeyInfo of an EncryptedKey is compared with. It is nil
+	// when the entity has none for the key.
+	certificate *x509.Certificate
+
+	key crypto.Decrypter
+}
+
+const (
+	// minimumEncryptionKeySize is the size in bits of the smallest RSA key that the identity provider publishes
+	// or accepts as its own for encryption (SAML V2.0 Deployment Profile for Federation Interoperability
+	// SDP-MD06).
+	minimumEncryptionKeySize = 2048
+
+	// maxDecryptionKeys is the most IdentityProvider.DecryptionKeys there can be. Each of them may cost a private
+	// key operation for each EncryptedKey of a request, of which maxEncryptedKeys are tried.
+	maxDecryptionKeys = 4
+)
+
+// CheckEncryptionKeys returns an error unless EncryptionCertificate, EncryptionKey and DecryptionKeys are valid:
+// each certificate has its private key and the other way round, the key is an RSA key of at least 2048 bits, the
+// private key is that of the certificate, and the certificate allows key encipherment if it has a key usage
+// extension. The validity period of a certificate is not checked. There are no more than four DecryptionKeys.
+//
+// An identity provider with keys that are not valid publishes no encryption key, serves no metadata and decrypts
+// nothing, so an application should call this when it is configured.
+func (idp *IdentityProvider) CheckEncryptionKeys() error {
+	_, _, err := idp.encryptionKeys()
+
+	return err
+}
+
+// encryptionKeys returns the key that the metadata of the identity provider publishes for encryption, which is
+// nil if it has none, and every key that it decrypts with, the published one first.
+//
+// The published key is EncryptionCertificate and EncryptionKey, or else Certificate and Key when Key is an RSA
+// private key that the certificate does not rule out for key encipherment. A Signer can't decrypt.
+func (idp *IdentityProvider) encryptionKeys() (published *decryptionKey, keys []decryptionKey, err error) {
+	switch hasCertificate, hasKey := idp.EncryptionCertificate != nil, !isNilDecrypter(idp.EncryptionKey); {
+	case hasCertificate != hasKey:
+		return nil, nil, errors.New("IdentityProvider.EncryptionCertificate and EncryptionKey must be set together")
+	case hasCertificate:
+		if err = checkEncryptionKeyPair(idp.EncryptionCertificate, idp.EncryptionKey, "EncryptionCertificate", "EncryptionKey"); err != nil {
+			return nil, nil, err
+		}
+
+		keys = append(keys, decryptionKey{certificate: idp.EncryptionCertificate, key: idp.EncryptionKey})
+	default:
+		if key, ok := idp.signingKeyForDecryption(); ok {
+			keys = append(keys, key)
+		}
+	}
+
+	hasPublished := len(keys) != 0
+
+	if len(idp.DecryptionKeys) > maxDecryptionKeys {
+		// The keys that repeat count too, so that the limit doesn't depend on what the keys are.
+		return nil, nil, fmt.Errorf("IdentityProvider.DecryptionKeys: more than %d keys", maxDecryptionKeys)
+	}
+
+	for i, pair := range idp.DecryptionKeys {
+		field := fmt.Sprintf("DecryptionKeys[%d]", i)
+
+		if pair.Certificate == nil || isNilDecrypter(pair.Key) {
+			return nil, nil, fmt.Errorf("IdentityProvider.%s: the certificate and the key must both be set", field)
+		}
+
+		if err = checkEncryptionKeyPair(pair.Certificate, pair.Key, field, field); err != nil {
+			return nil, nil, err
+		}
+
+		// A key may be listed while it is also the published one, so that the two can be changed in any order.
+		if slices.ContainsFunc(keys, func(k decryptionKey) bool { return k.certificate.Equal(pair.Certificate) }) {
+			continue
+		}
+
+		keys = append(keys, decryptionKey{certificate: pair.Certificate, key: pair.Key})
+	}
+
+	if hasPublished {
+		published = &keys[0]
+	}
+
+	return published, keys, nil
+}
+
+// signingKeyForDecryption returns Certificate and Key as a key to decrypt with, which they are when Key is an
+// RSA private key and Certificate, which holds its public key, either has no key usage extension or allows key
+// encipherment with it. It is not checked further, as it is not when it signs.
+func (idp *IdentityProvider) signingKeyForDecryption() (decryptionKey, bool) {
 	if idp.Certificate == nil {
-		return nil
+		return decryptionKey{}, false
 	}
 
 	if _, ok := idp.Certificate.PublicKey.(*rsa.PublicKey); !ok {
-		return nil
+		return decryptionKey{}, false
 	}
 
-	key, _ := idp.Key.(*rsa.PrivateKey)
+	if !allowsKeyEncipherment(idp.Certificate) {
+		return decryptionKey{}, false
+	}
 
-	return key
+	// A nil *rsa.PrivateKey in the interface would not be recognised as no key.
+	key, _ := idp.Key.(*rsa.PrivateKey)
+	if key == nil {
+		return decryptionKey{}, false
+	}
+
+	return decryptionKey{certificate: idp.Certificate, key: key}, true
+}
+
+// isNilDecrypter returns whether key is nil, or a nil *[rsa.PrivateKey], which is not nil as an interface.
+func isNilDecrypter(key crypto.Decrypter) bool {
+	if key == nil {
+		return true
+	}
+
+	rsaKey, ok := key.(*rsa.PrivateKey)
+
+	return ok && rsaKey == nil
+}
+
+// allowsKeyEncipherment returns whether cert may be used to encrypt keys to: it has no key usage extension, or
+// one with keyEncipherment, the usage of RSA key transport (RFC 5280 §4.2.1.3).
+func allowsKeyEncipherment(cert *x509.Certificate) bool {
+	return cert.KeyUsage == 0 || cert.KeyUsage&x509.KeyUsageKeyEncipherment != 0
+}
+
+// checkEncryptionKeyPair returns an error unless cert and key are a key pair that the identity provider can be
+// encrypted to. The errors name the field of the IdentityProvider that the certificate or the key is in.
+func checkEncryptionKeyPair(cert *x509.Certificate, key crypto.Decrypter, certificateField, keyField string) error {
+	public, ok := cert.PublicKey.(*rsa.PublicKey)
+	if !ok {
+		return fmt.Errorf("IdentityProvider.%s: the certificate does not have an RSA key", certificateField)
+	}
+
+	if bits := public.N.BitLen(); bits < minimumEncryptionKeySize {
+		return fmt.Errorf("IdentityProvider.%s: the RSA key has %d bits, which is fewer than %d", certificateField, bits, minimumEncryptionKeySize)
+	}
+
+	if !allowsKeyEncipherment(cert) {
+		return fmt.Errorf("IdentityProvider.%s: the key usage of the certificate does not include key encipherment", certificateField)
+	}
+
+	if private, ok := key.Public().(*rsa.PublicKey); !ok || !private.Equal(public) {
+		return fmt.Errorf("IdentityProvider.%s: the private key is not that of the certificate", keyField)
+	}
+
+	return nil
+}
+
+// encryptionKeyDescriptor returns the KeyDescriptor which publishes the encryption key of the identity provider,
+// with the algorithms it accepts, if it has a key and its keys and algorithms are valid. Each key must be in its
+// own KeyDescriptor with a single certificate (Metadata Interoperability Profile §2.5.1), and a consumer may
+// encrypt to any encryption key it finds (§2.6.1), so only the one key is published, and never one of
+// DecryptionKeys.
+func (idp *IdentityProvider) encryptionKeyDescriptor() (KeyDescriptor, bool) {
+	published, _, err := idp.encryptionKeys()
+	if err != nil || published == nil {
+		return KeyDescriptor{}, false
+	}
+
+	methods := idp.encryptionMethods()
+	if methods == nil {
+		return KeyDescriptor{}, false
+	}
+
+	return KeyDescriptor{
+		Use: "encryption",
+		KeyInfo: KeyInfo{
+			X509Data: X509Data{
+				X509Certificates: []X509Certificate{
+					{Data: base64.StdEncoding.EncodeToString(published.certificate.Raw)},
+				},
+			},
+		},
+		EncryptionMethods: methods,
+	}, true
 }
 
 // encryptionMethods returns the EncryptionMethods of the encryption key in the metadata of the identity provider
@@ -336,7 +516,7 @@ func (idp *IdentityProvider) decryptionKey() *rsa.PrivateKey {
 // transport algorithm states its digest and mask generation function only when the default of SHA-1 isn't
 // accepted.
 func (idp *IdentityProvider) encryptionMethods() []EncryptionMethod {
-	if idp.decryptionKey() == nil {
+	if published, _, err := idp.encryptionKeys(); err != nil || published == nil {
 		return nil
 	}
 
@@ -377,22 +557,21 @@ func (idp *IdentityProvider) encryptionMethods() []EncryptionMethod {
 	return methods
 }
 
-// elementDecrypter returns the decrypter of the elements which are encrypted to the identity provider. It only
-// accepts the algorithms that the identity provider allows.
+// elementDecrypter returns the decrypter of the elements which are encrypted to the identity provider, with the
+// key that its metadata publishes and then its DecryptionKeys. It only accepts the algorithms that the identity
+// provider allows. If the keys are not valid it decrypts with none of them.
 func (idp *IdentityProvider) elementDecrypter() (elementDecrypter, error) {
 	policy, err := idp.encryptionPolicy()
 	if err != nil {
 		return elementDecrypter{}, err
 	}
 
-	decrypter := elementDecrypter{recipient: idp.entityID(), policy: policy}
-
-	// A nil *rsa.PrivateKey in the interface would not be recognised as no key.
-	if key := idp.decryptionKey(); key != nil {
-		decrypter.key = key
+	_, keys, err := idp.encryptionKeys()
+	if err != nil {
+		return elementDecrypter{}, err
 	}
 
-	return decrypter, nil
+	return elementDecrypter{keys: keys, recipient: idp.entityID(), policy: policy}, nil
 }
 
 // serviceProviderElementEncrypter returns the encrypter of elements to a service provider outside an

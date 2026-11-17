@@ -463,6 +463,52 @@ type IdentityProvider struct {
 	// KeyDescriptor.
 	RolloverCertificates []*x509.Certificate
 
+	// EncryptionCertificate and EncryptionKey are the key pair that service providers encrypt to, which the
+	// metadata publishes in the KeyDescriptor for encryption, with the algorithms that the identity provider
+	// accepts. What is encrypted to an identity provider is the EncryptedID of a LogoutRequest, ManageNameIDRequest
+	// or NameIDMappingRequest and the NewEncryptedID of a ManageNameIDRequest. The signing keys are published for
+	// signing only, whatever these are.
+	//
+	// The key must be an RSA key of at least 2048 bits, as the only key transport algorithms are those of
+	// RSA-OAEP. It may be an *rsa.PrivateKey or any other crypto.Decrypter, such as a key in a hardware security
+	// module, which is given *rsa.OAEPOptions with the digest and the hash of the MGF1 mask generation function
+	// that the sender chose, and no label. The two hashes differ for RSA-OAEP-MGF1P with a digest other than
+	// SHA-1. If the key can't decrypt with every combination, set KeyTransportMethods and
+	// KeyTransportDigestMethods to those it can, so that the metadata lists no other.
+	//
+	// If they are nil, Certificate and Key are used, when Key is an RSA private key and the certificate either
+	// has no key usage extension or allows key encipherment. Otherwise, such as with an ECDSA key or with only a
+	// Signer, the metadata lists no encryption key, and a service provider must identify the principal in
+	// plaintext. See CheckEncryptionKeys for what is required of them, and DecryptionKeys for how to change them.
+	EncryptionCertificate *x509.Certificate
+	EncryptionKey         crypto.Decrypter
+
+	// DecryptionKeys are further key pairs which the identity provider decrypts with, and which the metadata never
+	// publishes. They allow the encryption key to be changed without downtime, also when several instances serve
+	// one entity:
+	//
+	//  1. Add the next key pair here, on every instance. Nothing is encrypted to it yet.
+	//  2. Make it EncryptionCertificate and EncryptionKey, and move the previous pair here. What a service provider
+	//     encrypts to either key is decrypted, whichever metadata it holds.
+	//  3. Remove the previous pair once no service provider can still hold the metadata that published it, which
+	//     is ValidDuration after the switch for those that refresh it, and no message encrypted to it can still
+	//     arrive. A compromised key MUST be removed at once instead.
+	//
+	// The next certificate is not published ahead of the switch, as RolloverCertificates are for signing, because
+	// a service provider may encrypt to any encryption key that it finds in the metadata (Metadata
+	// Interoperability Profile §2.6.1), so a key must be decrypted with before it is published, not after.
+	//
+	// When the signing key is also the encryption key, because EncryptionCertificate is nil, and it is replaced,
+	// the previous certificate and its RSA key belong here in the same way, for as long as in step 3.
+	//
+	// The key of an EncryptedKey is chosen by its KeyInfo, when that identifies the certificate of one or more of
+	// these keys or of the encryption key: by the certificate, its subject key identifier, its digest, its
+	// subject, or its RSA key, or by a KeyName that is its subject or the common name of its subject. Otherwise
+	// each key is tried. Every key that is chosen is used, also after one has decrypted, so that the time taken
+	// doesn't depend on which key a message was encrypted to or on whether it was encrypted to any of them. There
+	// can be four of them at most. One whose certificate is EncryptionCertificate or repeats is left out.
+	DecryptionKeys []DecryptionKey
+
 	// MaxAuthnRequestAge is the oldest AuthnRequest that will be accepted, which must allow for a
 	// SessionProvider that re-presents the request after a login form. Defaults to MaxIssueDelay. The ID
 	// of a request that was answered stays in the ReplayStore for this long after its IssueInstant, and
@@ -911,21 +957,11 @@ func (idp *IdentityProvider) Metadata() *EntityDescriptor {
 	// encryption key.
 	signingKeyDescriptors := len(keyDescriptors)
 
-	// Encryption requires RSA, so a certificate with any other type of key must not be advertised for it. What
-	// is encrypted to the identity provider is the EncryptedID of a LogoutRequest (SAMLProfiles §4.4.5), which it
-	// can only decrypt with a private key it holds, so a key that is only a Signer isn't advertised either.
-	if methods := idp.encryptionMethods(); methods != nil {
-		keyDescriptors = append(keyDescriptors, KeyDescriptor{
-			Use: "encryption",
-			KeyInfo: KeyInfo{
-				X509Data: X509Data{
-					X509Certificates: []X509Certificate{
-						{Data: certStr},
-					},
-				},
-			},
-			EncryptionMethods: methods,
-		})
+	// What is encrypted to the identity provider is the EncryptedID or NewEncryptedID of a request (SAMLProfiles
+	// §4.4.5), which it can only decrypt with a private key it holds: EncryptionKey, or else an RSA Key. A key
+	// that is only a Signer, or of another type, is not advertised for encryption.
+	if keyDescriptor, ok := idp.encryptionKeyDescriptor(); ok {
+		keyDescriptors = append(keyDescriptors, keyDescriptor)
 	}
 
 	formats := idp.nameIDProvider().NameIDFormats()
@@ -1092,9 +1128,17 @@ func (idp *IdentityProvider) checkEntityID() error {
 }
 
 // ServeMetadata is an [http.HandlerFunc] that serves the IDP metadata, signed by the key of the identity provider
-// (see SignedMetadata). It responds with StatusInternalServerError if the entity ID is not valid.
+// (see SignedMetadata). It responds with StatusInternalServerError if the entity ID is not valid, or if the
+// encryption keys are not (see CheckEncryptionKeys).
 func (idp *IdentityProvider) ServeMetadata(w http.ResponseWriter, _ *http.Request) {
 	if err := idp.checkEntityID(); err != nil {
+		idp.logger().Printf("ERROR: %s", err)
+		http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
+
+		return
+	}
+
+	if err := idp.CheckEncryptionKeys(); err != nil {
 		idp.logger().Printf("ERROR: %s", err)
 		http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
 
