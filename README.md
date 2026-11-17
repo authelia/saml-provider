@@ -398,7 +398,8 @@ least the subset of SAML known as [interoperable SAML](https://kantarainitiative
   `IdentityProvider.SubjectEnforcer` to accept another identifier for the same principal, or the confirmations of a
   custom `AssertionMaker`.
 - **Attribute release:** `DefaultAssertionMaker` only states the attributes that the SP requests with the
-  `RequestedAttribute` elements of an `AttributeConsumingService` in its metadata, and states none if it requests none,
+  `RequestedAttribute` elements of an `AttributeConsumingService` in its metadata, and states none if it requests none
+  and signals nothing else (see the subject identifier requirement and release by entity category below),
   so the assertion only carries the `NameID`. The service is the one named by the `AttributeConsumingServiceIndex` of
   the request, or else the default by SAMLMeta §2.4.4 as changed by errata E87. An index that names no service releases
   nothing. A requested attribute matches by `Name`, compared exactly, and a compatible `NameFormat`, where a missing
@@ -408,21 +409,73 @@ least the subset of SAML known as [interoperable SAML](https://kantarainitiative
   or `unspecified` format, and these are omitted when the session has no value. Set
   `IdentityProvider.AttributeReleasePolicy`, or `samlidp.Options.AttributeReleasePolicy`, to decide differently for
   each SP, for example to release attributes to an SP whose metadata requests none. A custom `AssertionMaker` decides
-  for itself. `isRequired` is not enforced.
+  for itself.
+- **Required attributes:** `isRequired` is not acted on by default, as metadata often marks attributes as required
+  that the service works without, so the SP receives an assertion without what the user lacks. With
+  `DefaultAttributeReleasePolicy{EnforceIsRequired: true}` a request is refused unless every `RequestedAttribute` of
+  the selected service with `isRequired="true"` is released, with at least one of the values it lists if it lists
+  any. The request is answered with a `Responder` status, and the error wraps `ErrRequiredAttributeUnavailable` and
+  names the attributes. An `AttributeQuery` is refused when single sign-on would be, whichever attributes it names.
+- **Release by entity category:** `DefaultAttributeReleasePolicy.EntityCategoryAttributes` maps an entity category
+  of the SP metadata (`http://macedir.org/entity-category`) to the attributes that an SP in it receives, with those
+  it requests. No category releases anything unless it is listed. The bundles of the REFEDS categories are built in:
+
+    | Category                               | Bundle                             | Attributes                                                                                                         |
+    |----------------------------------------|------------------------------------|--------------------------------------------------------------------------------------------------------------------|
+    | `EntityCategoryResearchAndScholarship` | `ResearchAndScholarshipAttributes` | eduPersonPrincipalName, eduPersonTargetedID, mail, displayName, givenName, sn, eduPersonScopedAffiliation          |
+    | `EntityCategoryPersonalized`           | `PersonalizedAccessAttributes`     | subject-id, displayName, givenName, sn, mail, eduPersonScopedAffiliation, eduPersonAssurance, schacHomeOrganization |
+    | `EntityCategoryPseudonymous`           | `PseudonymousAccessAttributes`     | pairwise-id, eduPersonScopedAffiliation, eduPersonAssurance, schacHomeOrganization                                 |
+    | `EntityCategoryAnonymous`              | `AnonymousAccessAttributes`        | eduPersonScopedAffiliation, schacHomeOrganization                                                                  |
+
+    ```go
+    idp.AttributeReleasePolicy = saml.DefaultAttributeReleasePolicy{
+        EntityCategoryAttributes: map[string][]saml.Attribute{
+            saml.EntityCategoryResearchAndScholarship: saml.ResearchAndScholarshipAttributes(),
+            saml.EntityCategoryPseudonymous:           saml.PseudonymousAccessAttributes(),
+        },
+    }
+    ```
+
+    Each bundle is a slice of attribute names (`urn:oid:` names, and the two subject identifiers, in the `uri`
+    format) that selects among what the session can state, so an attribute the session lacks is left out. A bundle
+    can be changed, and any other category given one; an entry matches as a `RequestedAttribute` does, and releases
+    only the values it lists if it lists any. mail, givenName, sn, eduPersonPrincipalName and
+    eduPersonScopedAffiliation are the fields of the `Session`, displayName is `Session.UserDisplayName`, and
+    eduPersonAssurance, schacHomeOrganization and eduPersonTargetedID are stated when `Session.CustomAttributes` has
+    an attribute of that name (`EduPersonAssuranceAttributeName` and the others). A session with no
+    `EduPersonPrincipalName` is stated with its email address as the eduPersonPrincipalName, so set it before enabling
+    Research and Scholarship if an email address can pass to another user. An SP in several listed categories
+    receives the attributes of each. The Code of Conduct categories have no bundle: they ask for what the SP requests
+    and needs, which is the default. An entity category is only worth what the source of the metadata is, so list one
+    only when the metadata comes from a registrar that is trusted to assign it, such as a verified aggregate, or set
+    `EntityCategoryTrust`, which is asked for each SP whether its categories count. Claiming support for a category
+    in the IdP metadata is separate, see `MetadataInfo.EntityAttributes`.
 - **Subject identifier attributes:** the `subject-id` and `pairwise-id` attributes of the SAML V2.0 Subject Identifier
   Attributes Profile are candidates for release like any other, for single sign-on and an `AttributeQuery`, so with the
   default policy an SP receives one only if its metadata requests it by name
-  (`urn:oasis:names:tc:SAML:attribute:subject-id`, `urn:oasis:names:tc:SAML:attribute:pairwise-id`). `subject-id` is
+  (`urn:oasis:names:tc:SAML:attribute:subject-id`, `urn:oasis:names:tc:SAML:attribute:pairwise-id`), requires it
+  with `subject-id:req`, or puts it in an entity category whose bundle holds it, see below. `subject-id` is
   `Session.SubjectID`. `pairwise-id` comes from a `NameIDProvider` that is a `PairwiseIDProvider`:
   `PersistentNameIDProvider` with a `Scope` states the identifier it derives for the SP, which is the value of the
   persistent NameID it issues to that SP, followed by `@` and the scope. It is always derived, so it changes with
   `Secret` and not with `Terminate`. Both values must be `uniqueID@scope` with the characters and lengths of the
   profile (`ValidateSubjectIdentifier`): a `Session.SubjectID` that isn't is left out and logged, and an invalid
   `pairwise-id` or `Scope` fails the request. The IdP metadata lists that `Scope`, and those of
-  `IdentityProvider.MetadataInfo.Scopes`, as `shibmd:Scope`. The `subject-id:req` entity attribute of SP metadata is
-  read by `EntityDescriptor.SubjectIDRequirement`, for an `AttributeReleasePolicy` to honour:
-  `DefaultAttributeReleasePolicy` doesn't, so an SP that only signals its requirement there receives neither attribute
-  (SDP-IDP15 of SAML2Int is not met by default).
+  `IdentityProvider.MetadataInfo.Scopes`, as `shibmd:Scope`.
+- **Subject identifier requirement:** `DefaultAttributeReleasePolicy` honours the `subject-id:req` entity attribute
+  of SP metadata (`EntityDescriptor.SubjectIDRequirement`), as SDP-IDP15 of SAML2Int requires, for single sign-on and
+  an `AttributeQuery`. An SP that signals `subject-id` or `pairwise-id` receives that attribute, one that signals
+  `any` receives the `pairwise-id` if the IdP has one for the user and otherwise the `subject-id`, and one that
+  signals `none` receives neither. It needs no `RequestedAttribute` or `AttributeConsumingService` for this. The
+  requirement alone decides between the two attributes, so the other is withheld even if the SP requests it by name
+  or a category bundle holds it. An SP that signals nothing, more than one value, or a value the profile doesn't
+  define, receives the two attributes like any other: only if it requests them or a listed category releases them
+  (SDP-IDP17). If the identifier that is required can't be stated, because there is no `Session.SubjectID` or no
+  `PairwiseIDProvider`, the assertion is made without it and that is logged; with
+  `DefaultAttributeReleasePolicy{EnforceSubjectIDRequirement: true}` the request is refused with a `Responder` status
+  and an error that wraps `ErrRequiredAttributeUnavailable` (SDP-IDP16 allows either). An `AttributeReleasePolicy`
+  is now given every candidate for an `AttributeQuery`, not only those the query names, and what it returns is
+  narrowed to the query.
 - **Client address:** assertions state the IP address of the HTTP request. Behind a proxy that is the proxy's address,
   so the `SessionProvider` should set `Session.ClientAddress` to the address of the user.
 - **Assertion lifetime:** an assertion is valid from `MaxClockSkew` before it is made until
@@ -564,7 +617,8 @@ least the subset of SAML known as [interoperable SAML](https://kantarainitiative
     read the entity attributes of an SP, for an `AttributeReleasePolicy`, which has the metadata as
     `AttributeReleaseRequest.ServiceProviderMetadata`. `EntityDescriptor.UIInfo` and `DisplayName`, and
     `UIInfo.DisplayName`, `Description`, `InformationURL`, `PrivacyStatementURL` and `LocalizedLogos`, choose what to
-    show a user in their language, for a consent page. Nothing in the IdP acts on any of them. An entity category is
+    show a user in their language, for a consent page. `DefaultAttributeReleasePolicy` acts on `SubjectIDRequirement`,
+    and on the entity categories that it is configured with. An entity category is
     only worth what the source of the metadata is, so release on one only for metadata from a registrar that is
     trusted to assign it, such as a verified aggregate. The MDUI of an SP is its own description of itself: escape it,
     and don't let the browser load or render its logo unchecked.
@@ -572,7 +626,9 @@ least the subset of SAML known as [interoperable SAML](https://kantarainitiative
     REFEDS value as its `ContactType`; each is now read from its own namespace. `EntityDescriptor.ContactPerson`, which
     kept only the last contact, is now `ContactPeople`.
   - `ParseServiceProvidersMetadata` returns every entity with an `SPSSODescriptor` in an `EntitiesDescriptor` and the
-    groups within it, each expiring with the earliest `validUntil` around it (SAMLMeta §2.3.1).
+    groups within it, each expiring with the earliest `validUntil` around it (SAMLMeta §2.3.1), and each with the
+    entity attributes of the groups around it after its own, as those are bound to every entity within the group
+    (SAML V2.0 Metadata Extension for Entity Attributes §2.3).
     `ParseServiceProviderMetadata` returns the first. Neither fetches or refreshes metadata, which is for the
     `ServiceProviderProvider`. `samlidp.Options.ServiceProviderMetadataVerifier` verifies the metadata of a service
     before it is registered.

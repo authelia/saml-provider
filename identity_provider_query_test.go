@@ -968,9 +968,11 @@ func TestServeAttributeQueryAttributeReleasePolicy(t *testing.T) {
 		assert.Assert(t, is.Len(got.Requested, 1))
 		assert.Check(t, is.Equal(got.Requested[0].Name, affiliationAttributeName))
 
-		// The candidates are already narrowed to the query, and this policy releases beyond the ceiling.
-		assert.Assert(t, is.Len(candidates, 1))
-		assert.Check(t, is.DeepEqual(queryAttributeValues(candidates[0]), []string{"Users"}))
+		// The candidates are not narrowed to the query, so that the policy decides as for single sign-on. This
+		// policy releases beyond the ceiling, and the answer is narrowed to the query.
+		assert.Check(t, is.Contains(attributeNames(candidates), mailAttributeName))
+		assert.Check(t, is.Contains(attributeNames(candidates), SubjectIDAttributeName))
+		assert.Check(t, is.DeepEqual(queryAttributeValues(*attributeNamed(candidates, affiliationAttributeName)), []string{"Users", "Administrators"}))
 		assert.Assert(t, is.Len(response.Assertions, 1))
 		assert.Check(t, is.DeepEqual(queryAttributeValues(response.Assertions[0].AttributeStatements[0].Attributes[0]), []string{"Users"}))
 	})

@@ -126,10 +126,10 @@ type queryHeader struct {
 // §6, SAMLCore §3.3.2.3). The SessionProvider must implement QuerySessionProvider, which finds the principal that
 // the Subject of the query names.
 //
-// The attributes are those that single sign-on can state about the principal, narrowed to the ones the query
-// names, and then released by the AttributeReleasePolicy. DefaultAttributeReleasePolicy releases no more than the
-// default AttributeConsumingService of the metadata of the service provider requests, so a query is not answered
-// with anything that single sign-on would withhold, and with nothing if there is no such service. A query that
+// The attributes are those that single sign-on can state about the principal, released by the
+// AttributeReleasePolicy, and then narrowed to the ones the query names. DefaultAttributeReleasePolicy releases no
+// more than it does for single sign-on to the default AttributeConsumingService of the metadata of the service
+// provider, so a query is not answered with anything that single sign-on would withhold. A query that
 // names no attributes asks for all of them. The answer is one assertion with one AttributeStatement, whose Subject
 // is the NameID of the query with no SubjectConfirmation, signed, and encrypted as for single sign-on if the
 // service provider has an encryption key. If nothing is released the answer is Success with no assertion
@@ -540,13 +540,14 @@ func (req *IdpQueryRequest) answerAttributeQuery() ([]*etree.Element, error) {
 		Ceiling:                 ceiling,
 		Requested:               query.Attributes,
 		Query:                   req,
-	}, session, narrowToQueriedAttributes(query.Attributes, candidates))
+	}, session, candidates)
 	if err != nil {
 		return nil, fmt.Errorf("cannot release attributes: %w", err)
 	}
 
-	// SAMLCore §3.3.2.3: an attribute that is returned MUST NOT contain a value that the query doesn't list,
-	// whatever the policy decided.
+	// The policy decides among every candidate, as it does for single sign-on, so that what it requires or
+	// chooses doesn't depend on what the query names. SAMLCore §3.3.2.3: an attribute that is returned MUST NOT
+	// contain a value that the query doesn't list, whatever the policy decided.
 	released = narrowToQueriedAttributes(query.Attributes, released)
 
 	// SAMLCore §3.3.4: with nothing to state, the response has no assertion and is a Success.
