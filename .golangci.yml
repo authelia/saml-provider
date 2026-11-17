@@ -53,6 +53,11 @@ linters:
       - linters:
           - forbidigo
         path: example/
+      - linters:
+          - gosec
+        path: identity_provider_logout_propagation\.go$
+        text: G710
+        source: state\.ReturnURL
       - path: (.+)\.go$
         text: Error return value of .((os\.)?std(out|err)\..*|.*Close|.*Flush|os\.Remove(All)?|.*printf?|os\.(Un)?Setenv). is not checked  # yamllint disable-line rule:line-length
       - path: (.+)\.go$

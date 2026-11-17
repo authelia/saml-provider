@@ -459,7 +459,9 @@ func (idp *IdentityProvider) finishLogout(w http.ResponseWriter, r *http.Request
 	}
 
 	setNoCacheHeaders(w)
-	http.Redirect(w, r, state.ReturnURL, http.StatusFound) //nolint:gosec // G710: the return URL is chosen by the application, not the request.
+	// The return URL is chosen by the application, not the request. The gosec G710 finding here is excluded in
+	// .golangci.yml rather than by a directive, as its taint analysis does not report it on every run.
+	http.Redirect(w, r, state.ReturnURL, http.StatusFound)
 
 	return nil
 }
