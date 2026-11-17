@@ -71,3 +71,20 @@ func TestNewAcceptsUsersWithoutEmail(t *testing.T) {
 	_, err := New(Options{Certificate: test.Certificate, Key: test.Key, Store: &test.Store, URL: test.Server.IDP.MetadataURL})
 	assert.Check(t, err)
 }
+
+// A persistent NameID is issued by the NameIDProvider of the options, and advertised in the metadata.
+func TestNameIDProviderOption(t *testing.T) {
+	test := NewServerTest(t)
+
+	server, err := New(Options{
+		Certificate:    test.Certificate,
+		Key:            test.Key,
+		Store:          &test.Store,
+		URL:            test.Server.IDP.MetadataURL,
+		NameIDProvider: saml.PersistentNameIDProvider{Secret: []byte("0123456789abcdef0123456789abcdef")},
+	})
+	assert.NilError(t, err)
+
+	formats := server.IDP.Metadata().IDPSSODescriptors[0].NameIDFormats
+	assert.Check(t, is.DeepEqual(formats, []saml.NameIDFormat{saml.PersistentNameIDFormat, saml.TransientNameIDFormat}))
+}

@@ -313,9 +313,31 @@ least the subset of SAML known as [interoperable SAML](https://kantarainitiative
     value, which it doesn't store, for the transient format, even when the session is transient, as the session's NameID
     would be the same for every SP (SAMLCore §8.3.8). It refuses any other format, and never issues the persistent
     format, even for a persistent session: a persistent NameID must be an opaque pseudonym for one SP or affiliation
-    (SAMLCore §8.3.7), so an application that issues them needs its own `NameIDProvider`, which must keep them. A
-    request that leaves the format open then falls back to transient. A session only needs a `NameID` if its own is
-    asserted, and one with a `NameIDFormat` but no `NameID` is refused; no NameID is asserted without a value.
+    (SAMLCore §8.3.7), which `PersistentNameIDProvider` issues. With the default provider a request that leaves the
+    format open falls back to transient. A session only needs a `NameID` if its own is asserted, and one with a
+    `NameIDFormat` but no `NameID` is refused; no NameID is asserted without a value.
+  - `PersistentNameIDProvider` issues persistent NameIDs and leaves every other format to its `Fallback`, which is
+    `DefaultNameIDProvider` unless set, so it is the one provider to configure, and the metadata then advertises
+    persistent first. It stores nothing: the identifier is the HMAC-SHA256, under `Secret` (32 bytes or more), of the
+    IdP entity ID, the `SPNameQualifier` and a key of the principal, as 52 characters of lowercase base32, which
+    survives an SP that compares without case. It is the same in every session, differs for each SP, and is shared
+    by the members of an affiliation that name it in `SPNameQualifier`. `NameQualifier` is the IdP entity ID. The key
+    of the principal is `Session.SubjectID`, or `Session.UserName` if that is empty, unless `Principal` returns
+    another: it must never change or be reused, so set `Principal` if users can be renamed. A session without a key
+    is refused. This provider doesn't check `AllowCreate`, as a derived identifier is not created by being issued and
+    nothing records whether the SP has seen it. `Secret` can't be changed without changing every identifier at every
+    SP, so keep it as long as the user directory. Call `Validate` at startup. `samlidp.Options.NameIDProvider` sets
+    the provider of the example IdP.
+  - `ManagedPersistentNameIDProvider` adds a `PersistentNameIDStore` (`MemoryPersistentNameIDStore` is for tests).
+    The first identifier of a principal is the derived one, so a store can be added later, and a stored identifier is
+    issued as stored, so `Secret` can then be changed for identifiers created afterwards. It only creates an
+    identifier when the request has `AllowCreate` set (SAMLCore §3.4.1.1): otherwise a request for persistent is
+    answered `InvalidNameIDPolicy`, and one that leaves the format open falls back, unless `IgnoreAllowCreate` is
+    set. It implements `NameIDManagementProvider`: a `NewID` becomes the `SPProvidedID` that the SP is asserted from
+    then on, and after `Terminate` the identifier is unknown and the next one created is different (errata E12).
+    `Terminate` from a member of an affiliation only removes that member's `SPProvidedID`, as the identifier is
+    shared. It implements `NameIDMappingProvider` from one persistent identifier to another. Identifiers issued
+    before the store was added are recorded at the principal's next login, and can't be managed or mapped before.
   - Unless the session sets a `NameIDFormat` other than transient or persistent, the default configuration asserts a
     random transient NameID rather than `Session.NameID`, as earlier versions did. If the `SessionProvider` is a
     `SessionParticipantProvider`, the transient NameID last asserted to an SP in the session (with the same
@@ -327,9 +349,8 @@ least the subset of SAML known as [interoperable SAML](https://kantarainitiative
   - `SPNameQualifier` may name an affiliation, which `ServiceProviderProvider` must return with an
     `AffiliationDescriptor` that is unexpired and lists the SP as a member. Otherwise the request is refused. If the
     lookup fails for another reason than that the entity doesn't exist, the status is `Responder`.
-  - `AllowCreate` is passed to the provider and isn't checked by default: a provider that issues persistent
-    identifiers must check it, and `IdentityProvider.NameIDPolicyEnforcer` can check it, or decide differently for
-    each SP.
+  - `AllowCreate` is passed to the provider. `ManagedPersistentNameIDProvider` checks it, the other shipped
+    providers don't, and `IdentityProvider.NameIDPolicyEnforcer` can check it, or decide differently for each SP.
   - The encrypted format asks for an `EncryptedID` and for no particular identifier (errata E6), so the format is
     chosen as if it were left open, and the request is refused if the SP has no encryption key.
   - A NameID of the entity format is asserted without `NameQualifier`, `SPNameQualifier` or `SPProvidedID`, which
@@ -379,6 +400,17 @@ least the subset of SAML known as [interoperable SAML](https://kantarainitiative
   `IdentityProvider.AttributeReleasePolicy`, or `samlidp.Options.AttributeReleasePolicy`, to decide differently for
   each SP, for example to release attributes to an SP whose metadata requests none. A custom `AssertionMaker` decides
   for itself. `isRequired` is not enforced.
+- **Subject identifier attributes:** the `subject-id` and `pairwise-id` attributes of the SAML V2.0 Subject Identifier
+  Attributes Profile are candidates for release like any other, for single sign-on and an `AttributeQuery`, so with the
+  default policy an SP receives one only if its metadata requests it by name
+  (`urn:oasis:names:tc:SAML:attribute:subject-id`, `urn:oasis:names:tc:SAML:attribute:pairwise-id`). `subject-id` is
+  `Session.SubjectID`. `pairwise-id` comes from a `NameIDProvider` that is a `PairwiseIDProvider`:
+  `PersistentNameIDProvider` with a `Scope` states the identifier it derives for the SP, which is the value of the
+  persistent NameID it issues to that SP, followed by `@` and the scope. It is always derived, so it changes with
+  `Secret` and not with `Terminate`. Both values must be `uniqueID@scope` with the characters and lengths of the
+  profile (`ValidateSubjectIdentifier`): a `Session.SubjectID` that isn't is left out and logged, and an invalid
+  `pairwise-id` or `Scope` fails the request. The `subject-id:req` entity attribute of SP metadata is not read, and
+  the IdP metadata has no `shibmd:Scope`.
 - **Client address:** assertions state the IP address of the HTTP request. Behind a proxy that is the proxy's address,
   so the `SessionProvider` should set `Session.ClientAddress` to the address of the user.
 - **Assertion lifetime:** an assertion is valid from `MaxClockSkew` before it is made until
