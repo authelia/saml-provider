@@ -29,7 +29,7 @@ func encryptedAssertionFor(t *testing.T, test *IdentityProviderTest, descriptors
 
 	req, err := hardeningValidate(test, hardeningRequest(`ID="id-1"`, TimeNow(), hardeningIssuer))
 	assert.NilError(t, err)
-	assert.NilError(t, DefaultAssertionMaker{}.MakeAssertion(req, &Session{ID: "f00d", NameID: sessionFor}))
+	assert.NilError(t, DefaultAssertionMaker{}.MakeAssertion(req, &Session{ID: "f00d", NameID: sessionFor, NameIDFormat: string(EmailAddressNameIDFormat)}))
 	req.SPSSODescriptor.KeyDescriptors = descriptors
 	assert.NilError(t, req.MakeAssertionEl())
 

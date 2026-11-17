@@ -16,7 +16,6 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
-	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -254,8 +253,12 @@ func TestIDPServeSSORefusesRejectedEncryptionCertificate(t *testing.T) {
 	w := httptest.NewRecorder()
 	test.IDP.ServeSSO(w, r)
 
-	assert.Check(t, is.Equal(http.StatusInternalServerError, w.Code))
-	assert.Check(t, !strings.Contains(w.Body.String(), "SAMLResponse"), w.Body.String())
+	assert.Check(t, is.Equal(http.StatusOK, w.Code))
+
+	_, refused := postedResponse(t, w.Body.String())
+	assert.Check(t, is.Equal(refused.Status.StatusCode.Value, StatusResponder))
+	assert.Check(t, refused.Assertion == nil)
+	assert.Check(t, refused.EncryptedAssertion == nil)
 	assert.Check(t, is.Contains(logs.String(), "encryption certificate"))
 	assert.Check(t, is.Contains(logs.String(), "expired"))
 

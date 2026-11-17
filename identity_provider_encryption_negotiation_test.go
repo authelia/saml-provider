@@ -95,7 +95,7 @@ func negotiatedAssertion(t *testing.T, configure func(*IdentityProvider), method
 
 	req, err := hardeningValidate(test, hardeningRequest(`ID="id-1"`, TimeNow(), hardeningIssuer))
 	assert.NilError(t, err)
-	assert.NilError(t, DefaultAssertionMaker{}.MakeAssertion(req, &Session{ID: "f00d", NameID: sessionFor}))
+	assert.NilError(t, DefaultAssertionMaker{}.MakeAssertion(req, &Session{ID: "f00d", NameID: sessionFor, NameIDFormat: string(EmailAddressNameIDFormat)}))
 
 	descriptor := KeyDescriptor{Use: "encryption", EncryptionMethods: methods}
 	descriptor.KeyInfo.X509Data.X509Certificates = []X509Certificate{{Data: base64.StdEncoding.EncodeToString(cert.Raw)}}
@@ -369,7 +369,7 @@ func TestIDPEncryptionNegotiationLeavesPlaintextServiceProvidersAlone(t *testing
 	test.IDP.ContentEncryptionMethods = []string{tripleDES}
 	req, err := hardeningValidate(test, hardeningRequest(`ID="id-1"`, TimeNow(), hardeningIssuer))
 	assert.NilError(t, err)
-	assert.NilError(t, DefaultAssertionMaker{}.MakeAssertion(req, &Session{ID: "f00d", NameID: sessionFor}))
+	assert.NilError(t, DefaultAssertionMaker{}.MakeAssertion(req, &Session{ID: "f00d", NameID: sessionFor, NameIDFormat: string(EmailAddressNameIDFormat)}))
 	req.SPSSODescriptor.KeyDescriptors = nil
 	req.ServiceProviderMetadata = &EntityDescriptor{
 		EntityID:         req.ServiceProviderMetadata.EntityID,

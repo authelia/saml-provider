@@ -38,6 +38,10 @@ type SessionParticipantProvider interface {
 	// participants are closed must no longer be returned by the SessionProvider, even if ending it fails, so that the
 	// user authenticates again to a new session rather than being refused every assertion.
 	CloseSessionParticipants(r *http.Request, session *Session) ([]SessionParticipant, error)
+
+	// SessionParticipants returns the participants of session without closing them. It is used to find the NameID
+	// that was asserted to a service provider, when an assertion is made and when a LogoutRequest is matched.
+	SessionParticipants(r *http.Request, session *Session) ([]SessionParticipant, error)
 }
 
 // sessionParticipant returns the participant that the assertion of the request makes of its service provider, or

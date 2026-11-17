@@ -1,19 +1,19 @@
-<samlp:Response xmlns:saml="urn:oasis:names:tc:SAML:2.0:assertion" xmlns:samlp="urn:oasis:names:tc:SAML:2.0:protocol" xmlns:xs="http://www.w3.org/2001/XMLSchema" ID="id-282a2c2e30323436383a3c3e40424446484a4c4e" InResponseTo="id-00020406080a0c0e10121416181a1c1e" Version="2.0" IssueInstant="2015-12-01T01:57:09Z" Destination="https://gitlab.example.com/users/auth/saml/callback">
+<samlp:Response xmlns:saml="urn:oasis:names:tc:SAML:2.0:assertion" xmlns:samlp="urn:oasis:names:tc:SAML:2.0:protocol" xmlns:xs="http://www.w3.org/2001/XMLSchema" ID="id-484a4c4e50525456585a5c5e60626466686a6c6e" InResponseTo="id-00020406080a0c0e10121416181a1c1e" Version="2.0" IssueInstant="2015-12-01T01:57:09Z" Destination="https://gitlab.example.com/users/auth/saml/callback">
   <saml:Issuer Format="urn:oasis:names:tc:SAML:2.0:nameid-format:entity">https://idp.example.com/saml/metadata</saml:Issuer>
   <ds:Signature xmlns:ds="http://www.w3.org/2000/09/xmldsig#">
     <ds:SignedInfo>
       <ds:CanonicalizationMethod Algorithm="http://www.w3.org/2001/10/xml-exc-c14n#"/>
       <ds:SignatureMethod Algorithm="http://www.w3.org/2001/04/xmldsig-more#rsa-sha256"/>
-      <ds:Reference URI="#id-282a2c2e30323436383a3c3e40424446484a4c4e">
+      <ds:Reference URI="#id-484a4c4e50525456585a5c5e60626466686a6c6e">
         <ds:Transforms>
           <ds:Transform Algorithm="http://www.w3.org/2000/09/xmldsig#enveloped-signature"/>
           <ds:Transform Algorithm="http://www.w3.org/2001/10/xml-exc-c14n#"/>
         </ds:Transforms>
         <ds:DigestMethod Algorithm="http://www.w3.org/2001/04/xmlenc#sha256"/>
-        <ds:DigestValue>BIDxUTQ29pMukxcE6WIRsOiRVp2Gvl74ASXF8Lb2e4E=</ds:DigestValue>
+        <ds:DigestValue>YS4IqbhZdq98pZ7gocwm60EPCAZK0VsQc4vBC0A8iKk=</ds:DigestValue>
       </ds:Reference>
     </ds:SignedInfo>
-    <ds:SignatureValue>ldfLEic9+GVgXkS5h17bkVwE5a/7OR4CNGE61NL5O2e35FUQuEQU1SRz9W5XUwcvspBFi6sQADJ2nRkLQyFYLUbzA5Nyd0qgqmbXxETfMhVFNj4uaXm2cMDCdMai4Bns6HXY7qDGnCC35EzkezEdFzF+LYXLvqshqo2SLNcsNRk=</ds:SignatureValue>
+    <ds:SignatureValue>BMvr1sP7lqdf67mUXfQ7PuGUMp968zS6HIndwKz4DHIZ9uSdxj0mHpOYclTFunRHHVC3+MLmavJTgoaSUc0lussiVWfZBTmKRkqjv1F1geL6a2fOPAfThMn7maKI7S9UtQ70PNytpOuPF6Py7MvGubtVeqx02mDJ7oPqQT4kT5I=</ds:SignatureValue>
     <ds:KeyInfo>
       <ds:X509Data>
         <ds:X509Certificate>MIIB7zCCAVgCCQDFzbKIp7b3MTANBgkqhkiG9w0BAQUFADA8MQswCQYDVQQGEwJVUzELMAkGA1UECAwCR0ExDDAKBgNVBAoMA2ZvbzESMBAGA1UEAwwJbG9jYWxob3N0MB4XDTEzMTAwMjAwMDg1MVoXDTE0MTAwMjAwMDg1MVowPDELMAkGA1UEBhMCVVMxCzAJBgNVBAgMAkdBMQwwCgYDVQQKDANmb28xEjAQBgNVBAMMCWxvY2FsaG9zdDCBnzANBgkqhkiG9w0BAQEFAAOBjQAwgYkCgYEA1PMHYmhZj308kWLhZVT4vOulqx/9ibm5B86fPWwUKKQ2i12MYtz07tzukPymisTDhQaqyJ8Kqb/6JjhmeMnEOdTvSPmHO8m1ZVveJU6NoKRn/mP/BD7FW52WhbrUXLSeHVSKfWkNk6S4hk9MV9TswTvyRIKvRsw0X/gfnqkroJcCAwEAATANBgkqhkiG9w0BAQUFAAOBgQCMMlIO+GNcGekevKgkakpMdAqJfs24maGb90DvTLbRZRD7Xvn1MnVBBS9hzlXiFLYOInXACMW5gcoRFfeTQLSouMM8o57h0uKjfTmuoWHLQLi6hnF+cvCsEFiJZ4AbF+DgmO6TarJ8O05t8zvnOwJlNCASPZRH/JmF8tX0hoHuAQ==</ds:X509Certificate>
@@ -35,10 +35,10 @@
             <ds:Transform Algorithm="http://www.w3.org/2001/10/xml-exc-c14n#"/>
           </ds:Transforms>
           <ds:DigestMethod Algorithm="http://www.w3.org/2001/04/xmlenc#sha256"/>
-          <ds:DigestValue>xnhiPOTKl2At8XVAacdFefM+SU/A6is79Omw+qh9WDQ=</ds:DigestValue>
+          <ds:DigestValue>QN9+88pYyeCaS0AnOGT/xcyDHVoA68NxpmKtKYT6mbk=</ds:DigestValue>
         </ds:Reference>
       </ds:SignedInfo>
-      <ds:SignatureValue>ExhDqGEB8diuAglZitCvtHCiMnKq2369S61UzH4VkYsq8Tc93q4u98ULl87txVdj/afK/Iwzd45/vUnAOk/quubtILlzwrddCbA2c7/YIkXg69oE+FURb/y719tLFsFgfGodYXOar7Y3DmCzgarz6UU/nM+UHjBlMImi5p2KkUY=</ds:SignatureValue>
+      <ds:SignatureValue>goGEruebKIzTttwdspyJ17yKHUbBightcQ2qQOINILLqEYXJX+LvP2Hkdf9U1/9s7Dsrx9TqnzEMxpPHKt3IkeZ39jsLkNHVenvDFZl2ru/XSQcMqjm5hcJ+bjPbiN8KpdQaaHKO64De8YV30bIIfqnIvtGifJEbwI3Oc5i6g2o=</ds:SignatureValue>
       <ds:KeyInfo>
         <ds:X509Data>
           <ds:X509Certificate>MIIB7zCCAVgCCQDFzbKIp7b3MTANBgkqhkiG9w0BAQUFADA8MQswCQYDVQQGEwJVUzELMAkGA1UECAwCR0ExDDAKBgNVBAoMA2ZvbzESMBAGA1UEAwwJbG9jYWxob3N0MB4XDTEzMTAwMjAwMDg1MVoXDTE0MTAwMjAwMDg1MVowPDELMAkGA1UEBhMCVVMxCzAJBgNVBAgMAkdBMQwwCgYDVQQKDANmb28xEjAQBgNVBAMMCWxvY2FsaG9zdDCBnzANBgkqhkiG9w0BAQEFAAOBjQAwgYkCgYEA1PMHYmhZj308kWLhZVT4vOulqx/9ibm5B86fPWwUKKQ2i12MYtz07tzukPymisTDhQaqyJ8Kqb/6JjhmeMnEOdTvSPmHO8m1ZVveJU6NoKRn/mP/BD7FW52WhbrUXLSeHVSKfWkNk6S4hk9MV9TswTvyRIKvRsw0X/gfnqkroJcCAwEAATANBgkqhkiG9w0BAQUFAAOBgQCMMlIO+GNcGekevKgkakpMdAqJfs24maGb90DvTLbRZRD7Xvn1MnVBBS9hzlXiFLYOInXACMW5gcoRFfeTQLSouMM8o57h0uKjfTmuoWHLQLi6hnF+cvCsEFiJZ4AbF+DgmO6TarJ8O05t8zvnOwJlNCASPZRH/JmF8tX0hoHuAQ==</ds:X509Certificate>
@@ -46,7 +46,7 @@
       </ds:KeyInfo>
     </ds:Signature>
     <saml:Subject>
-      <saml:NameID Format="urn:oasis:names:tc:SAML:2.0:nameid-format:transient" NameQualifier="https://idp.example.com/saml/metadata" SPNameQualifier="https://gitlab.example.com/users/auth/saml/metadata">alice</saml:NameID>
+      <saml:NameID Format="urn:oasis:names:tc:SAML:2.0:nameid-format:transient" NameQualifier="https://idp.example.com/saml/metadata" SPNameQualifier="https://gitlab.example.com/users/auth/saml/metadata">KCosLjAyNDY4Ojw-QEJERg</saml:NameID>
       <saml:SubjectConfirmation Method="urn:oasis:names:tc:SAML:2.0:cm:bearer">
         <saml:SubjectConfirmationData InResponseTo="id-00020406080a0c0e10121416181a1c1e" NotOnOrAfter="2015-12-01T01:58:39Z" Recipient="https://gitlab.example.com/users/auth/saml/callback"/>
       </saml:SubjectConfirmation>

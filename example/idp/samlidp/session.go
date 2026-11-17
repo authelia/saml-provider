@@ -379,7 +379,7 @@ func (s *Server) GetLogoutSessions(r *http.Request, req *saml.IdpLogoutRequest) 
 
 	// A request that doesn't name the session is refused, as it is for the cross-site POST, rather than
 	// reported as a success.
-	if err := req.MatchesSession(session); err != nil {
+	if err := req.MatchesSession(r, session); err != nil {
 		return nil, err
 	}
 
@@ -452,6 +452,19 @@ func (s *Server) CloseSessionParticipants(_ *http.Request, session *saml.Session
 		return nil, err
 	}
 
+	return s.sessionParticipants(session)
+}
+
+// SessionParticipants implements saml.SessionParticipantProvider.
+func (s *Server) SessionParticipants(_ *http.Request, session *saml.Session) ([]saml.SessionParticipant, error) {
+	s.participantsMu.Lock()
+	defer s.participantsMu.Unlock()
+
+	return s.sessionParticipants(session)
+}
+
+// sessionParticipants returns the participants of session. The caller holds participantsMu.
+func (s *Server) sessionParticipants(session *saml.Session) ([]saml.SessionParticipant, error) {
 	var participants []saml.SessionParticipant
 	if err := s.Store.Get(fmt.Sprintf("/session-participants/%s", session.ID), &participants); err != nil && !errors.Is(err, ErrNotFound) {
 		return nil, err

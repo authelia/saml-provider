@@ -24,6 +24,8 @@ import (
 	"github.com/beevik/etree"
 	"gotest.tools/assert"
 	is "gotest.tools/assert/cmp"
+
+	"authelia.com/provider/saml/xmlenc"
 )
 
 const propagationReturnURL = "https://idp.example.com/logged-out"
@@ -99,6 +101,10 @@ func (p *propagationSessionProvider) CloseSessionParticipants(_ *http.Request, s
 
 	p.closed[session.ID] = true
 
+	return p.participants[session.ID], nil
+}
+
+func (p *propagationSessionProvider) SessionParticipants(_ *http.Request, session *Session) ([]SessionParticipant, error) {
 	return p.participants[session.ID], nil
 }
 
@@ -282,6 +288,13 @@ func respondAsSPWithStatus(t *testing.T, sp *ServiceProvider, location *url.URL,
 func respondAsSPWithStatusCode(t *testing.T, sp *ServiceProvider, location *url.URL, code StatusCode) *http.Request {
 	t.Helper()
 
+	return respondAsSPForNameID(t, sp, location, code, "alice")
+}
+
+// respondAsSPForNameID is respondAsSPWithStatusCode for a LogoutRequest that names the NameID value.
+func respondAsSPForNameID(t *testing.T, sp *ServiceProvider, location *url.URL, code StatusCode, value string) *http.Request {
+	t.Helper()
+
 	assert.Check(t, is.Equal(location.Scheme+"://"+location.Host+location.Path, sp.SloURL.String()))
 
 	certificates, err := sp.getIDPSigningCerts()
@@ -307,7 +320,7 @@ func respondAsSPWithStatusCode(t *testing.T, sp *ServiceProvider, location *url.
 	}
 
 	assert.Assert(t, request.NameID != nil)
-	assert.Check(t, is.Equal(request.NameID.Value, "alice"))
+	assert.Check(t, is.Equal(request.NameID.Value, value))
 	assert.Check(t, is.Equal(request.NameID.SPNameQualifier, sp.MetadataURL.String()))
 	assert.Check(t, is.DeepEqual(request.SessionIndexes, []SessionIndex{{Value: "index-one"}}))
 	assert.Check(t, is.Equal(request.Destination, sp.SloURL.String()))
@@ -823,4 +836,140 @@ func TestServeSLOResponderWhenPropagationCannotBeginAndTerminationFails(t *testi
 	assert.Check(t, is.Equal(response.Status.StatusCode.Value, StatusResponder))
 	assert.Check(t, response.Status.StatusCode.StatusCode == nil)
 	assert.Check(t, is.DeepEqual(f.provider.terminated, []*Session{f.session}))
+}
+
+// matchingLogoutSessionProvider returns only the sessions that the request matches through MatchesSession, as a
+// real LogoutSessionProvider does.
+type matchingLogoutSessionProvider struct {
+	*propagationSessionProvider
+}
+
+func (p matchingLogoutSessionProvider) GetLogoutSessions(r *http.Request, req *IdpLogoutRequest) ([]*Session, error) {
+	var matched []*Session
+
+	for _, session := range p.sessions {
+		if err := req.MatchesSession(r, session); err != nil {
+			return nil, err
+		}
+
+		matched = append(matched, session)
+	}
+
+	return matched, nil
+}
+
+// sso sends sp's AuthnRequest to the identity provider, for the session of the fixture, and returns the NameID of
+// the assertion. The request has policy if it is not nil, and otherwise the default of the service provider.
+func (f *propagationFixture) sso(t *testing.T, sp *ServiceProvider, policy *NameIDPolicy) NameID {
+	t.Helper()
+
+	f.provider.GetSessionFunc = func(http.ResponseWriter, *http.Request, *IdpAuthnRequest) *Session { return f.session }
+
+	request, err := sp.MakeAuthenticationRequest("https://idp.example.com/saml/sso", HTTPPostBinding, HTTPPostBinding)
+	assert.NilError(t, err)
+
+	if policy != nil {
+		request.NameIDPolicy = policy
+		request.Signature = nil
+
+		if sp.SignatureMethod != "" {
+			assert.NilError(t, sp.SignAuthnRequest(request))
+		}
+	}
+
+	doc := etree.NewDocument()
+	doc.SetRoot(request.Element())
+	body, err := doc.WriteToBytes()
+	assert.NilError(t, err)
+
+	form := url.Values{"SAMLRequest": {base64.StdEncoding.EncodeToString(body)}}
+	r := httptest.NewRequest(http.MethodPost, "https://idp.example.com/saml/sso", strings.NewReader(form.Encode()))
+	r.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+
+	w := httptest.NewRecorder()
+	f.test.IDP.ServeSSO(w, r)
+	assert.Assert(t, is.Equal(w.Code, http.StatusOK), "body: %s", w.Body.String())
+
+	// The assertion is encrypted to the service provider.
+	posted, response := postedResponse(t, w.Body.String())
+	assert.Assert(t, is.Equal(response.Status.StatusCode.Value, StatusSuccess))
+
+	plaintext, err := xmlenc.Decrypt(sp.Key, posted.FindElement("//EncryptedAssertion/EncryptedData"))
+	assert.NilError(t, err)
+
+	var assertion Assertion
+	assert.NilError(t, xml.Unmarshal(plaintext, &assertion))
+	assert.Assert(t, assertion.Subject != nil && assertion.Subject.NameID != nil)
+
+	return *assertion.Subject.NameID
+}
+
+// sloWithNameID sends sp's signed LogoutRequest for nameID to the identity provider, and checks that it is
+// answered with Success.
+func (f *propagationFixture) sloWithNameID(t *testing.T, sp *ServiceProvider, nameID NameID) {
+	t.Helper()
+
+	r, id := redirectLogoutRequest(t, sp, func(req *LogoutRequest) {
+		req.NameID = &nameID
+	})
+
+	w := serveSLO(f.test, r)
+
+	location, logoutResponse := redirectedLogoutResponse(t, w)
+	assert.Check(t, is.Equal(logoutResponse.InResponseTo, id))
+	assert.Check(t, is.Equal(logoutResponse.Status.StatusCode.Value, StatusSuccess))
+	assert.Check(t, sp.ValidateLogoutResponseRedirect(location, []string{id}))
+	assert.Check(t, is.DeepEqual(f.provider.terminated, []*Session{f.session}))
+}
+
+func TestServeSLOMatchesTransientNameIDThroughParticipant(t *testing.T) {
+	f := newPropagationFixture(t)
+	f.test.IDP.SessionProvider = matchingLogoutSessionProvider{f.provider}
+	f.provider.participants = map[string][]SessionParticipant{}
+
+	// The session leaves the format open, so ServeSSO issues a random transient NameID.
+	issued := f.sso(t, f.a, nil)
+	assert.Assert(t, issued.Value != f.session.NameID, "the fallback is only exercised when the NameID is not that of the session")
+	assert.Assert(t, is.Len(f.provider.participants[f.session.ID], 1))
+
+	f.sloWithNameID(t, f.a, issued)
+}
+
+// A NameID qualified by an affiliation that the request named is found through the participant, and ends the
+// session (SAMLCore §3.4.1.1, §3.7.3.2).
+func TestServeSLOMatchesAffiliationNameIDThroughParticipant(t *testing.T) {
+	f := newPropagationFixture(t)
+	withAffiliation(f.test, nil)
+	f.test.IDP.SessionProvider = matchingLogoutSessionProvider{f.provider}
+	f.provider.participants = map[string][]SessionParticipant{}
+
+	affiliation := testAffiliationID
+	issued := f.sso(t, f.a, &NameIDPolicy{SPNameQualifier: &affiliation})
+	assert.Assert(t, is.Equal(issued.SPNameQualifier, testAffiliationID))
+
+	f.sloWithNameID(t, f.a, issued)
+}
+
+// A service provider that receives several assertions in a session receives one transient NameID, so a logout
+// sends it one LogoutRequest rather than one for each assertion.
+func TestStartLogoutSendsOneRequestForRepeatedTransientSSO(t *testing.T) {
+	f := newPropagationFixture(t)
+	f.provider.participants = map[string][]SessionParticipant{}
+
+	first := f.sso(t, f.a, nil)
+	second := f.sso(t, f.a, nil)
+	assert.Check(t, is.Equal(first.Format, string(TransientNameIDFormat)))
+	assert.Check(t, first.Value != f.session.NameID)
+	assert.Check(t, is.DeepEqual(first, second))
+	assert.Assert(t, is.Len(f.provider.participants[f.session.ID], 2))
+
+	w := f.startLogout(t)
+	w = serveSLO(f.test, respondAsSPForNameID(t, f.a, sentLogoutRequest(t, w), StatusCode{Value: StatusSuccess}, first.Value))
+	assert.Check(t, is.Equal(w.Code, http.StatusNoContent), "body: %s", w.Body.String())
+
+	assert.Assert(t, f.provider.result != nil)
+	assert.Check(t, is.Len(f.provider.result.Participants, 1))
+	assert.Check(t, is.DeepEqual(participantOutcomes(f.provider.result.Participants), map[string]LogoutOutcome{
+		f.a.MetadataURL.String(): LogoutOutcomeSuccess,
+	}))
 }

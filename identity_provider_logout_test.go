@@ -322,17 +322,86 @@ func TestServeSLORejectsUnauthenticatedRequests(t *testing.T) {
 	}
 }
 
+// requestStageLogoutStatus serves a signed request on both bindings, and asserts that the response
+// at the SLO endpoint of the service provider has the given status and that no session was ended.
+func requestStageLogoutStatus(t *testing.T, mutate func(*LogoutRequest), top, second string) {
+	t.Helper()
+
+	for binding, request := range map[string]func(*testing.T, *ServiceProvider, func(*LogoutRequest)) (*http.Request, string){
+		"redirect": redirectLogoutRequest,
+		"post":     postLogoutRequest,
+	} {
+		t.Run(binding, func(t *testing.T) {
+			test, provider := logoutTestIDP(t)
+			r, id := request(t, &test.SP, mutate)
+			w := serveSLO(test, r)
+
+			var response LogoutResponse
+
+			if binding == "redirect" {
+				_, response = redirectedLogoutResponse(t, w)
+			} else {
+				_, _, response = postedLogoutResponse(t, w)
+			}
+
+			assert.Check(t, is.Equal(response.InResponseTo, id))
+			assert.Check(t, is.Equal(response.Status.StatusCode.Value, top))
+
+			if second == "" {
+				assert.Check(t, response.Status.StatusCode.StatusCode == nil)
+			} else if assert.Check(t, response.Status.StatusCode.StatusCode != nil) {
+				assert.Check(t, is.Equal(response.Status.StatusCode.StatusCode.Value, second))
+			}
+
+			assert.Check(t, is.Len(provider.lookups, 0))
+			assert.Check(t, is.Len(provider.terminated, 0))
+		})
+	}
+}
+
+func TestServeSLOVersionMismatch(t *testing.T) {
+	requestStageLogoutStatus(t, func(r *LogoutRequest) { r.Version = "3.0" }, StatusVersionMismatch, StatusRequestVersionTooHigh)
+}
+
+func TestServeSLOVersionTooLow(t *testing.T) {
+	requestStageLogoutStatus(t, func(r *LogoutRequest) { r.Version = "1.1" }, StatusVersionMismatch, StatusRequestVersionTooLow)
+}
+
+func TestServeSLOExpiredDenied(t *testing.T) {
+	requestStageLogoutStatus(t, func(r *LogoutRequest) { r.IssueInstant = r.IssueInstant.Add(-time.Hour) }, StatusRequester, StatusRequestDenied)
+}
+
+func TestServeSLOFutureDenied(t *testing.T) {
+	requestStageLogoutStatus(t, func(r *LogoutRequest) { r.IssueInstant = r.IssueInstant.Add(time.Hour) }, StatusRequester, StatusRequestDenied)
+}
+
+func TestServeSLONotOnOrAfterDenied(t *testing.T) {
+	// The request is no longer valid at the instant of NotOnOrAfter itself (SAMLCore §3.7.1).
+	for name, offset := range map[string]time.Duration{"past": -time.Minute, "now": 0} {
+		t.Run(name, func(t *testing.T) {
+			requestStageLogoutStatus(t, func(r *LogoutRequest) {
+				notOnOrAfter := TimeNow().Add(offset)
+				r.NotOnOrAfter = &notOnOrAfter
+			}, StatusRequester, StatusRequestDenied)
+		})
+	}
+}
+
+func TestServeSLOWrongDestinationDenied(t *testing.T) {
+	requestStageLogoutStatus(t, func(r *LogoutRequest) { r.Destination = "https://idp.example.com/saml/sso" }, StatusRequester, StatusRequestDenied)
+}
+
+func TestServeSLONoSLOEndpointStays400(t *testing.T) {
+	test, provider := logoutTestIDP(t)
+	test.SP.LogoutBindings = nil
+	r, _ := redirectLogoutRequest(t, &test.SP, func(r *LogoutRequest) { r.Version = "3.0" })
+	assert.Check(t, is.Equal(serveSLO(test, r).Code, http.StatusBadRequest))
+	assert.Check(t, is.Len(provider.terminated, 0))
+}
+
 func TestServeSLORejectsInvalidRequests(t *testing.T) {
 	for name, mutate := range map[string]func(*LogoutRequest){
-		"other destination": func(r *LogoutRequest) { r.Destination = "https://idp.example.com/saml/sso" },
-		"no destination":    func(r *LogoutRequest) { r.Destination = "" },
-		"expired":           func(r *LogoutRequest) { r.IssueInstant = r.IssueInstant.Add(-time.Hour) },
-		"future":            func(r *LogoutRequest) { r.IssueInstant = r.IssueInstant.Add(time.Hour) },
-		"not on or after": func(r *LogoutRequest) {
-			now := TimeNow()
-			r.NotOnOrAfter = &now
-		},
-		"version":        func(r *LogoutRequest) { r.Version = "1.1" },
+		"no destination": func(r *LogoutRequest) { r.Destination = "" },
 		"invalid id":     func(r *LogoutRequest) { r.ID = "a b" },
 		"no issuer":      func(r *LogoutRequest) { r.Issuer = nil },
 		"unknown issuer": func(r *LogoutRequest) { r.Issuer.Value = "https://other.example.com/metadata" },
@@ -367,7 +436,7 @@ func TestServeSLORejectsInvalidRequests(t *testing.T) {
 // reads it as the IssueInstant.
 func TestServeSLOUsesSignedContent(t *testing.T) {
 	test, provider := logoutTestIDP(t)
-	r, _ := postLogoutRequest(t, &test.SP, func(request *LogoutRequest) {
+	r, id := postLogoutRequest(t, &test.SP, func(request *LogoutRequest) {
 		request.IssueInstant = request.IssueInstant.Add(-time.Hour)
 	})
 	assert.NilError(t, r.ParseForm())
@@ -381,7 +450,14 @@ func TestServeSLOUsesSignedContent(t *testing.T) {
 	assert.Assert(t, !bytes.Equal(body, smuggled))
 
 	w := serveSLO(test, postLogoutBody(smuggled))
-	assert.Check(t, is.Equal(w.Code, http.StatusBadRequest))
+	_, _, response := postedLogoutResponse(t, w)
+	assert.Check(t, is.Equal(response.InResponseTo, id))
+	assert.Check(t, is.Equal(response.Status.StatusCode.Value, StatusRequester))
+
+	if assert.Check(t, response.Status.StatusCode.StatusCode != nil) {
+		assert.Check(t, is.Equal(response.Status.StatusCode.StatusCode.Value, StatusRequestDenied))
+	}
+
 	assert.Check(t, is.Len(provider.terminated, 0))
 }
 

@@ -55,12 +55,24 @@ func (p *participantSessionProvider) CloseSessionParticipants(*http.Request, *Se
 
 	p.closed = true
 
+	return p.participants(), nil
+}
+
+func (p *participantSessionProvider) SessionParticipants(*http.Request, *Session) ([]SessionParticipant, error) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
+	return p.participants(), nil
+}
+
+// participants returns the recorded participants. The caller holds mu.
+func (p *participantSessionProvider) participants() []SessionParticipant {
 	participants := make([]SessionParticipant, 0, len(p.added))
 	for _, call := range p.added {
 		participants = append(participants, call.participant)
 	}
 
-	return participants, nil
+	return participants
 }
 
 // assertionCapture is an AssertionMaker which keeps the assertion that the default one made.
@@ -174,8 +186,12 @@ func TestMakeResponseFailsWhenParticipantCannotBeRecorded(t *testing.T) {
 		provider.err = errors.New("storage unavailable")
 
 		w := serveParticipantSSO(t, test, nil)
-		assert.Check(t, is.Equal(w.Code, http.StatusInternalServerError))
-		assert.Check(t, !strings.Contains(w.Body.String(), "SAMLResponse"))
+		assert.Check(t, is.Equal(w.Code, http.StatusOK))
+
+		_, response := postedResponse(t, w.Body.String())
+		assert.Check(t, is.Equal(response.Status.StatusCode.Value, StatusResponder))
+		assert.Check(t, response.Assertion == nil)
+		assert.Check(t, response.EncryptedAssertion == nil)
 	})
 
 	t.Run("no session", func(t *testing.T) {

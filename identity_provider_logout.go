@@ -23,7 +23,7 @@ var ErrPartialLogout = errors.New("other session participants were not logged ou
 // LogoutSessionProvider is an optional interface of a SessionProvider, which is required to serve a
 // LogoutRequest. Without it those requests receive a Responder status.
 type LogoutSessionProvider interface {
-	// GetLogoutSessions returns every session that req names, using req.MatchesSession. Without session
+	// GetLogoutSessions returns every session that req names, using req.MatchesSession(r, session). Without session
 	// indexes in the request that is every session of the principal with that NameID (SAMLCore §3.7.3.2).
 	// It must not rely on the session cookie alone, which a browser doesn't send with a cross-site POST.
 	// It returns an empty slice and no error when no session matches. The request has been verified to
@@ -60,12 +60,21 @@ type IdpLogoutRequest struct {
 
 // MatchesSession returns an error unless the request is for the session. The NameID of the request must be
 // the complete identifier the identity provider asserted for the session (SAMLCore §3.7.3.2, §8.3): the
-// same value, Format, NameQualifier and SPNameQualifier, and no SPProvidedID. An omitted or unspecified
+// same value, Format, NameQualifier and SPNameQualifier, and the same SPProvidedID, which is none unless
+// one was asserted and recorded in a SessionParticipant. An omitted or unspecified
 // Format, or an omitted qualifier, doesn't match. This is compared with what DefaultAssertionMaker
 // asserts, so an identity provider with a custom AssertionMaker that asserts another identifier needs
 // IdentityProvider.LogoutNameIDValueOnly, which compares only the value, or its own check. If the request
 // lists session indexes, the index of the session must be one of them.
-func (req *IdpLogoutRequest) MatchesSession(session *Session) error {
+//
+// Session.NameID is only compared when Session.NameIDFormat is set, because a session without a format
+// has no NameID of its own that the identity provider asserts. The NameID asserted to a service provider
+// can also differ from that of the session, such as a transient identifier or one that carries an
+// affiliation. So if the SessionProvider is a SessionParticipantProvider, the request also matches when it
+// carries the NameID that was asserted to the requesting service provider for the session, as recorded in
+// its SessionParticipant: exactly, or only its value with LogoutNameIDValueOnly. An error loading the
+// participants is returned.
+func (req *IdpLogoutRequest) MatchesSession(r *http.Request, session *Session) error {
 	if session == nil {
 		return errors.New("there is no session")
 	}
@@ -75,6 +84,57 @@ func (req *IdpLogoutRequest) MatchesSession(session *Session) error {
 		return errors.New("the request has no NameID")
 	}
 
+	if err := req.matchesSessionNameID(r, session, nameID); err != nil {
+		return err
+	}
+
+	if len(req.Request.SessionIndexes) != 0 && !slices.ContainsFunc(req.Request.SessionIndexes, func(i SessionIndex) bool { return i.Value == session.Index }) {
+		return errors.New("the session index is not one the request lists")
+	}
+
+	return nil
+}
+
+// matchesSessionNameID returns an error unless nameID is that of the session or that asserted to the requesting
+// service provider for it.
+func (req *IdpLogoutRequest) matchesSessionNameID(r *http.Request, session *Session, nameID *NameID) error {
+	err := errors.New("the session has no NameIDFormat, so only a NameID asserted to a session participant matches")
+	if session.NameIDFormat != "" {
+		err = req.matchesSessionNameIDValue(session, nameID)
+	}
+
+	if err == nil || req.ServiceProviderMetadata == nil {
+		return err
+	}
+
+	provider, ok := req.IDP.SessionProvider.(SessionParticipantProvider)
+	if !ok {
+		return err
+	}
+
+	participants, perr := provider.SessionParticipants(r, session)
+	if perr != nil {
+		return fmt.Errorf("cannot load the participants of the session: %w", perr)
+	}
+
+	valueOnly := req.IDP.LogoutNameIDValueOnly
+
+	if slices.ContainsFunc(participants, func(p SessionParticipant) bool {
+		if p.ServiceProviderEntityID != req.ServiceProviderMetadata.EntityID || p.NameID.Value != nameID.Value {
+			return false
+		}
+
+		return valueOnly || (p.NameID.SPProvidedID == nameID.SPProvidedID && p.NameID.Format == nameID.Format &&
+			p.NameID.NameQualifier == nameID.NameQualifier && p.NameID.SPNameQualifier == nameID.SPNameQualifier)
+	}) {
+		return nil
+	}
+
+	return err
+}
+
+// matchesSessionNameIDValue compares nameID with the NameID of the session, whose NameIDFormat is set.
+func (req *IdpLogoutRequest) matchesSessionNameIDValue(session *Session, nameID *NameID) error {
 	if nameID.Value != session.NameID {
 		return errors.New("the NameID value is not that of the session")
 	}
@@ -84,33 +144,30 @@ func (req *IdpLogoutRequest) MatchesSession(session *Session) error {
 			return errors.New("the request has no service provider metadata")
 		}
 
-		format := session.NameIDFormat
-		if format == "" {
-			format = string(TransientNameIDFormat)
-		}
-
 		// An omitted Format is unspecified (SAMLCore §2.2.2), which is not the format that was asserted, and the
 		// qualifiers may only be omitted where they can be derived from the message, which they can't be in a
 		// request the service provider sends to the identity provider (SAMLCore §8.3.7).
-		if nameID.Format != format {
-			return fmt.Errorf("the NameID format is %q and the session has %q", nameID.Format, format)
+		if nameID.Format != session.NameIDFormat {
+			return fmt.Errorf("the NameID format is %q and the session has %q", nameID.Format, session.NameIDFormat)
 		}
 
-		if nameID.NameQualifier != req.IDP.Metadata().EntityID {
+		// A NameID of the entity format is asserted without qualifiers (SAMLCore §8.3.6).
+		nameQualifier, spNameQualifier := req.IDP.Metadata().EntityID, req.ServiceProviderMetadata.EntityID
+		if !nameIDFormatHasQualifiers(nameID.Format) {
+			nameQualifier, spNameQualifier = "", ""
+		}
+
+		if nameID.NameQualifier != nameQualifier {
 			return fmt.Errorf("the NameID NameQualifier %q is not that of the identity provider", nameID.NameQualifier)
 		}
 
-		if nameID.SPNameQualifier != req.ServiceProviderMetadata.EntityID {
+		if nameID.SPNameQualifier != spNameQualifier {
 			return fmt.Errorf("the NameID SPNameQualifier %q is not that of the service provider", nameID.SPNameQualifier)
 		}
 
 		if nameID.SPProvidedID != "" {
 			return errors.New("the NameID has a SPProvidedID, which the identity provider does not assert")
 		}
-	}
-
-	if len(req.Request.SessionIndexes) != 0 && !slices.ContainsFunc(req.Request.SessionIndexes, func(i SessionIndex) bool { return i.Value == session.Index }) {
-		return errors.New("the session index is not one the request lists")
 	}
 
 	return nil
@@ -127,7 +184,9 @@ func (req *IdpLogoutRequest) MatchesSession(session *Session) error {
 // LogoutResponse for a logout that can't be found or has expired gets a StatusBadRequest response.
 //
 // A request that is invalid, can't be verified, or comes from a service provider with no
-// SingleLogoutService for a supported binding gets a StatusBadRequest response.
+// SingleLogoutService for a supported binding gets a StatusBadRequest response. A verified request
+// from a service provider with such an endpoint that is expired, for another destination or of
+// another version is answered there with an error status, and its session is not ended.
 func (idp *IdentityProvider) ServeSLO(w http.ResponseWriter, r *http.Request) {
 	isResponse, err := isLogoutResponse(r)
 	if err != nil {
@@ -153,6 +212,13 @@ func (idp *IdentityProvider) ServeSLO(w http.ResponseWriter, r *http.Request) {
 
 	if err := req.Validate(); err != nil {
 		idp.logger().Printf("failed to validate logout request: %s", err)
+
+		if status, ok := RequestStatus(err); ok {
+			idp.writeLogoutResponse(w, req, status)
+
+			return
+		}
+
 		http.Error(w, http.StatusText(http.StatusBadRequest), http.StatusBadRequest)
 
 		return
@@ -184,6 +250,11 @@ func (idp *IdentityProvider) ServeSLO(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	idp.writeLogoutResponse(w, req, status)
+}
+
+// writeLogoutResponse answers req with status, or with a StatusInternalServerError if that fails.
+func (idp *IdentityProvider) writeLogoutResponse(w http.ResponseWriter, req *IdpLogoutRequest, status Status) {
 	if err := req.WriteResponse(w, status); err != nil {
 		idp.logger().Printf("failed to write logout response: %s", err)
 		http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
@@ -378,7 +449,7 @@ func (req *IdpLogoutRequest) Validate() error {
 		return err
 	}
 
-	if err := req.checkRequest(); err != nil {
+	if err := req.checkTrust(); err != nil {
 		return err
 	}
 
@@ -402,32 +473,17 @@ func (req *IdpLogoutRequest) Validate() error {
 		return errors.New("request has no NameID")
 	}
 
-	return req.getSLOEndpoint()
+	if err := req.getSLOEndpoint(); err != nil {
+		return err
+	}
+
+	return req.checkRequestStage()
 }
 
-// checkRequest makes the checks that depend only on the content of Request and the identity provider.
-func (req *IdpLogoutRequest) checkRequest() error {
-	// The request must be signed, so SAMLBind §3.4.5.2 and §3.5.5.2 require the destination.
-	if req.Request.Destination != req.IDP.LogoutURL.String() {
-		return fmt.Errorf("expected destination to be %q, not %q", req.IDP.LogoutURL.String(), req.Request.Destination)
-	}
-
-	if req.Request.IssueInstant.Add(MaxIssueDelay).Before(req.Now) {
-		return fmt.Errorf("request expired at %s", req.Request.IssueInstant.Add(MaxIssueDelay))
-	}
-
-	if req.Request.IssueInstant.After(req.Now.Add(MaxClockSkew)) {
-		return fmt.Errorf("request issued in the future at %s", req.Request.IssueInstant)
-	}
-
-	if req.Request.NotOnOrAfter != nil && !req.Now.Before(*req.Request.NotOnOrAfter) {
-		return fmt.Errorf("request expired at %s", *req.Request.NotOnOrAfter)
-	}
-
-	if req.Request.Version != "2.0" {
-		return fmt.Errorf("expected SAML request version 2.0 got %v", req.Request.Version)
-	}
-
+// checkTrust makes the checks on the identity of the request that are needed before the service
+// provider can be looked up. Nothing in the request is acted on before these pass, and no response is
+// sent for a request that fails them.
+func (req *IdpLogoutRequest) checkTrust() error {
 	if !isValidAuthnRequestID(req.Request.ID) {
 		// The value is not included because this error is logged without authentication.
 		return fmt.Errorf("invalid request ID")
@@ -435,6 +491,39 @@ func (req *IdpLogoutRequest) checkRequest() error {
 
 	if req.Request.Issuer == nil || req.Request.Issuer.Value == "" {
 		return fmt.Errorf("request has no issuer")
+	}
+
+	return nil
+}
+
+// checkRequestStage makes the checks on the content of the request that are reported to the service
+// provider as a SAML status. It must only run once the SLO endpoint has been resolved from metadata,
+// and on the content that the signature covers. The error is a *statusError.
+func (req *IdpLogoutRequest) checkRequestStage() error {
+	if statusErr := versionStatus(req.Request.Version); statusErr != nil {
+		return statusErr
+	}
+
+	if req.Request.IssueInstant.Add(MaxIssueDelay).Before(req.Now) {
+		return &statusError{StatusRequester, StatusRequestDenied,
+			fmt.Errorf("request expired at %s", req.Request.IssueInstant.Add(MaxIssueDelay))}
+	}
+
+	if req.Request.IssueInstant.After(req.Now.Add(MaxClockSkew)) {
+		return &statusError{StatusRequester, StatusRequestDenied,
+			fmt.Errorf("request issued in the future at %s", req.Request.IssueInstant)}
+	}
+
+	if req.Request.NotOnOrAfter != nil && !req.Now.Before(*req.Request.NotOnOrAfter) {
+		return &statusError{StatusRequester, StatusRequestDenied,
+			fmt.Errorf("request expired at %s", *req.Request.NotOnOrAfter)}
+	}
+
+	// The request must be signed, so SAMLBind §3.4.5.2 and §3.5.5.2 require the destination, and
+	// verifySignature requires that it is present.
+	if req.Request.Destination != req.IDP.LogoutURL.String() {
+		return &statusError{StatusRequester, StatusRequestDenied,
+			fmt.Errorf("expected destination to be %q, not %q", req.IDP.LogoutURL.String(), req.Request.Destination)}
 	}
 
 	return nil
@@ -483,20 +572,36 @@ func (req *IdpLogoutRequest) verifySignature() error {
 			return fmt.Errorf("invalid request signature: %w", err)
 		}
 
-		serviceProviderID := req.Request.Issuer.Value
-
-		req.Request = LogoutRequest{}
-		if err := unmarshalElement(verified, &req.Request); err != nil {
+		if err := req.useVerifiedRequest(verified); err != nil {
 			return err
 		}
+	}
 
-		if err := req.checkRequest(); err != nil {
-			return err
-		}
+	// SAMLBind §3.4.5.2 and §3.5.5.2 require this of a signed message. The value is checked against
+	// the logout URL later, by checkRequestStage.
+	if req.Request.Destination == "" {
+		return errors.New("signed request has no destination")
+	}
 
-		if req.Request.Issuer.Value != serviceProviderID {
-			return errors.New("signed request has a different issuer")
-		}
+	return nil
+}
+
+// useVerifiedRequest replaces Request with the content that the signature covers, and repeats the
+// trust checks that were made on the original, as IdpAuthnRequest.useVerifiedRequest does.
+func (req *IdpLogoutRequest) useVerifiedRequest(verified *etree.Element) error {
+	serviceProviderID := req.Request.Issuer.Value
+
+	req.Request = LogoutRequest{}
+	if err := unmarshalElement(verified, &req.Request); err != nil {
+		return err
+	}
+
+	if err := req.checkTrust(); err != nil {
+		return err
+	}
+
+	if req.Request.Issuer.Value != serviceProviderID {
+		return errors.New("signed request has a different issuer")
 	}
 
 	return nil

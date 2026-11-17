@@ -55,6 +55,21 @@ func logoutRedirect(t *testing.T, test *ServerTest, nameID string, cookie *http.
 	return serveWithCookie(test, u.String(), cookie), request.ID
 }
 
+// issuedNameID returns the value of the NameID that was asserted to the service provider for the session
+// of cookie, which is a random transient identifier because the session has no NameIDFormat.
+func issuedNameID(t *testing.T, test *ServerTest, cookie *http.Cookie) string {
+	t.Helper()
+
+	session := saml.Session{}
+	assert.NilError(t, test.Store.Get("/sessions/"+cookie.Value, &session))
+
+	participants, err := test.Server.SessionParticipants(nil, &session)
+	assert.NilError(t, err)
+	assert.Assert(t, is.Len(participants, 1))
+
+	return participants[0].NameID.Value
+}
+
 func sessionStored(t *testing.T, test *ServerTest, cookie *http.Cookie) bool {
 	t.Helper()
 	err := test.Store.Get("/sessions/"+cookie.Value, &saml.Session{})
@@ -87,7 +102,7 @@ func TestLogoutEndsSession(t *testing.T) {
 	cookie := loggedInCookie(t, test)
 	assert.Assert(t, sessionStored(t, test, cookie))
 
-	w, id := logoutRedirect(t, test, "alice@example.com", cookie, nil)
+	w, id := logoutRedirect(t, test, issuedNameID(t, test, cookie), cookie, nil)
 	assert.Check(t, is.Equal(logoutStatus(t, test, w, id), saml.StatusSuccess))
 	assert.Check(t, !sessionStored(t, test, cookie))
 
@@ -114,7 +129,7 @@ func TestLogoutWithMatchingSessionIndex(t *testing.T) {
 	session := saml.Session{}
 	assert.NilError(t, test.Store.Get("/sessions/"+cookie.Value, &session))
 
-	w, id := logoutRedirect(t, test, "alice@example.com", cookie, func(r *saml.LogoutRequest) {
+	w, id := logoutRedirect(t, test, issuedNameID(t, test, cookie), cookie, func(r *saml.LogoutRequest) {
 		r.SessionIndexes = []saml.SessionIndex{{Value: "other"}, {Value: session.Index}}
 	})
 	assert.Check(t, is.Equal(logoutStatus(t, test, w, id), saml.StatusSuccess))
@@ -125,18 +140,26 @@ func TestLogoutWithMatchingSessionIndex(t *testing.T) {
 // another session leaves the session of this browser in place.
 func TestLogoutKeepsOtherSessions(t *testing.T) {
 	for name, tc := range map[string]struct {
+		// nameID is the value of the NameID, or the one asserted to the service provider if empty.
 		nameID string
 		mutate func(*saml.LogoutRequest)
 	}{
-		"other principal": {nameID: "bob@example.com"},
-		"other session index": {nameID: "alice@example.com", mutate: func(r *saml.LogoutRequest) {
+		"other principal":      {nameID: "bob@example.com"},
+		"email of the session": {nameID: "alice@example.com"},
+		"other session index": {mutate: func(r *saml.LogoutRequest) {
 			r.SessionIndexes = []saml.SessionIndex{{Value: "other"}}
 		}},
 	} {
 		t.Run(name, func(t *testing.T) {
 			test := logoutTest(t)
 			cookie := loggedInCookie(t, test)
-			w, id := logoutRedirect(t, test, tc.nameID, cookie, tc.mutate)
+
+			nameID := tc.nameID
+			if nameID == "" {
+				nameID = issuedNameID(t, test, cookie)
+			}
+
+			w, id := logoutRedirect(t, test, nameID, cookie, tc.mutate)
 			assert.Check(t, is.ErrorContains(errorString(logoutStatus(t, test, w, id)), "status code"))
 			assert.Check(t, sessionStored(t, test, cookie))
 			for _, c := range w.Result().Cookies() {
@@ -152,7 +175,7 @@ func TestLogoutRefusesNameIDOfAnotherServiceProvider(t *testing.T) {
 	test := logoutTest(t)
 	cookie := loggedInCookie(t, test)
 
-	w, id := logoutRedirect(t, test, "alice@example.com", cookie, func(r *saml.LogoutRequest) {
+	w, id := logoutRedirect(t, test, issuedNameID(t, test, cookie), cookie, func(r *saml.LogoutRequest) {
 		r.NameID.SPNameQualifier = "https://other.example.com/saml2/metadata"
 	})
 	assert.Check(t, is.ErrorContains(errorString(logoutStatus(t, test, w, id)), "status code"))
@@ -165,7 +188,7 @@ func TestLogoutValueOnlyOption(t *testing.T) {
 	test.Server.IDP.LogoutNameIDValueOnly = true
 	cookie := loggedInCookie(t, test)
 
-	w, id := logoutRedirect(t, test, "alice@example.com", cookie, func(r *saml.LogoutRequest) {
+	w, id := logoutRedirect(t, test, issuedNameID(t, test, cookie), cookie, func(r *saml.LogoutRequest) {
 		r.NameID.SPNameQualifier = "https://other.example.com/saml2/metadata"
 	})
 	assert.Check(t, is.Equal(logoutStatus(t, test, w, id), saml.StatusSuccess))

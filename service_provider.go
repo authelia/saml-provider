@@ -49,6 +49,7 @@ const (
 	TransientNameIDFormat    NameIDFormat = "urn:oasis:names:tc:SAML:2.0:nameid-format:transient"
 	EmailAddressNameIDFormat NameIDFormat = "urn:oasis:names:tc:SAML:1.1:nameid-format:emailAddress"
 	PersistentNameIDFormat   NameIDFormat = "urn:oasis:names:tc:SAML:2.0:nameid-format:persistent"
+	EntityNameIDFormat       NameIDFormat = "urn:oasis:names:tc:SAML:2.0:nameid-format:entity"
 )
 
 // ValidationContext is the signature validation context given to a SignatureVerifier. It is exported

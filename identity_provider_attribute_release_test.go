@@ -41,6 +41,7 @@ func attributeReleaseSession() *Session {
 	return &Session{
 		ID:                     "f00df00df00d",
 		NameID:                 "alice",
+		NameIDFormat:           string(EmailAddressNameIDFormat),
 		UserName:               "alice",
 		UserEmail:              "alice@example.com",
 		UserCommonName:         "Alice Smith",
