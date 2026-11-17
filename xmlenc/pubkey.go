@@ -57,7 +57,7 @@ type RSA struct {
 
 	algorithm    string
 	keyEncrypter func(e RSA, pubKey *rsa.PublicKey, plaintext []byte) ([]byte, error)
-	keyDecrypter func(e RSA, privKey *rsa.PrivateKey, ciphertext []byte) ([]byte, error)
+	keyDecrypter func(e RSA, privKey crypto.Decrypter, ciphertext []byte) ([]byte, error)
 }
 
 // Algorithm returns the name of the algorithm.
@@ -130,7 +130,7 @@ func encryptOAEP(e RSA, pubKey *rsa.PublicKey, plaintext []byte) ([]byte, error)
 	return rsa.EncryptOAEPWithOptions(RandReader, pubKey, plaintext, opts)
 }
 
-func decryptOAEP(e RSA, privKey *rsa.PrivateKey, ciphertext []byte) ([]byte, error) {
+func decryptOAEP(e RSA, privKey crypto.Decrypter, ciphertext []byte) ([]byte, error) {
 	opts, err := e.oaepOptions()
 	if err != nil {
 		return nil, err
@@ -224,7 +224,8 @@ func (e RSA) Encrypt(certificate interface{}, plaintext []byte, nonce []byte) (*
 	return encryptedDataEl, nil
 }
 
-// Decrypt implements Decryptor. `key` must be an *[rsa.PrivateKey].
+// Decrypt implements Decryptor. `key` must be an *[rsa.PrivateKey], or another [crypto.Decrypter] whose public
+// key is an *[rsa.PublicKey].
 func (e RSA) Decrypt(key interface{}, ciphertextEl *etree.Element) ([]byte, error) {
 	rsaKey, err := validateRSAKeyIfPresent(key, ciphertextEl)
 	if err != nil {
@@ -337,8 +338,9 @@ func PKCS1v15() RSA {
 		keyEncrypter: func(_ RSA, pubKey *rsa.PublicKey, plaintext []byte) ([]byte, error) {
 			return rsa.EncryptPKCS1v15(RandReader, pubKey, plaintext) //nolint:staticcheck // PKCS #1 v1.5 is an explicit legacy opt-in.
 		},
-		keyDecrypter: func(_ RSA, privKey *rsa.PrivateKey, ciphertext []byte) ([]byte, error) {
-			return rsa.DecryptPKCS1v15(RandReader, privKey, ciphertext) //nolint:staticcheck // PKCS #1 v1.5 is an explicit legacy opt-in.
+		keyDecrypter: func(_ RSA, privKey crypto.Decrypter, ciphertext []byte) ([]byte, error) {
+			// Nil options are PKCS #1 v1.5 for an RSA key, which is an explicit legacy opt-in.
+			return privKey.Decrypt(RandReader, ciphertext, nil)
 		},
 	}
 }

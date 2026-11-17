@@ -1255,7 +1255,14 @@ func (sp *ServiceProvider) parseEncryptedAssertion(encryptedAssertionEl *etree.E
 
 // elementDecrypter returns the decrypter of the elements which are encrypted to the service provider.
 func (sp *ServiceProvider) elementDecrypter() elementDecrypter {
-	return elementDecrypter{key: sp.Key, recipient: firstSet(sp.EntityID, sp.MetadataURL.String())}
+	decrypter := elementDecrypter{recipient: firstSet(sp.EntityID, sp.MetadataURL.String())}
+
+	// xmlenc refuses a key that is not an RSA key.
+	if key, ok := sp.Key.(crypto.Decrypter); ok {
+		decrypter.keys = []decryptionKey{{certificate: sp.Certificate, key: key}}
+	}
+
+	return decrypter
 }
 
 func (sp *ServiceProvider) decryptElement(encryptedEl *etree.Element) (*etree.Element, error) {

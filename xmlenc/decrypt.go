@@ -1,6 +1,7 @@
 package xmlenc
 
 import (
+	"crypto"
 	"crypto/rsa"
 	"crypto/x509"
 	"encoding/base64"
@@ -54,7 +55,9 @@ func (e ErrIncorrectKeyType) Error() string {
 // Decrypt decrypts the encrypted data using the provided key. If the
 // data are encrypted using AES or 3DEC, then the key should be a []byte.
 // If the data are encrypted with PKCS1v15, RSA-OAEP-MGF1P or RSA-OAEP then key should
-// be a *[rsa.PrivateKey]. PKCS1v15 is only supported after opting in, see PKCS1v15.
+// be a *[rsa.PrivateKey], or another [crypto.Decrypter] with an RSA public key, which is given
+// *[rsa.OAEPOptions] with the digest and the hash of the mask generation function, or nil options for
+// PKCS1v15. PKCS1v15 is only supported after opting in, see PKCS1v15.
 func Decrypt(key interface{}, ciphertextEl *etree.Element) ([]byte, error) {
 	encryptionMethodEl := ciphertextEl.FindElement("./EncryptionMethod")
 	if encryptionMethodEl == nil {
@@ -85,8 +88,21 @@ func getCiphertext(encryptedKey *etree.Element) ([]byte, error) {
 	return ciphertext, nil
 }
 
-func validateRSAKeyIfPresent(key interface{}, encryptedKey *etree.Element) (*rsa.PrivateKey, error) {
-	rsaKey, ok := key.(*rsa.PrivateKey)
+// validateRSAKeyIfPresent returns key as the RSA private key to decrypt encryptedKey with, and its public key. The
+// key is an *[rsa.PrivateKey], or any other [crypto.Decrypter] whose public key is an *[rsa.PublicKey], such as a
+// key in a hardware security module.
+func validateRSAKeyIfPresent(key interface{}, encryptedKey *etree.Element) (crypto.Decrypter, error) {
+	// A nil *rsa.PrivateKey in the interface has no public key to ask for.
+	if nilKey, ok := key.(*rsa.PrivateKey); ok && nilKey == nil {
+		return nil, errors.New("expected key to be a *rsa.PrivateKey")
+	}
+
+	rsaKey, ok := key.(crypto.Decrypter)
+	if !ok {
+		return nil, errors.New("expected key to be a *rsa.PrivateKey")
+	}
+
+	rsaPubKey, ok := rsaKey.Public().(*rsa.PublicKey)
 	if !ok {
 		return nil, errors.New("expected key to be a *rsa.PrivateKey")
 	}
@@ -116,7 +132,7 @@ func validateRSAKeyIfPresent(key interface{}, encryptedKey *etree.Element) (*rsa
 			return nil, fmt.Errorf("expected certificate to be an *rsa.PublicKey")
 		}
 
-		if rsaKey.N.Cmp(pubKey.N) != 0 || rsaKey.E != pubKey.E {
+		if rsaPubKey.N.Cmp(pubKey.N) != 0 || rsaPubKey.E != pubKey.E {
 			return nil, fmt.Errorf("certificate does not match provided key")
 		}
 	} else if el = encryptedKey.FindElement("./KeyInfo/X509Data/X509IssuerSerial"); el != nil {

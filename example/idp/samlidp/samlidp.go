@@ -38,6 +38,15 @@ type Options struct {
 	// saml.IdentityProvider.RolloverCertificates.
 	RolloverCertificates []*x509.Certificate
 
+	// EncryptionCertificate and EncryptionKey are the key pair that service providers encrypt to, in place of
+	// Certificate and Key. See saml.IdentityProvider.EncryptionCertificate.
+	EncryptionCertificate *x509.Certificate
+	EncryptionKey         crypto.Decrypter
+
+	// DecryptionKeys are further key pairs which are decrypted with but which the metadata doesn't publish, so
+	// that the encryption key can be changed without downtime. See saml.IdentityProvider.DecryptionKeys.
+	DecryptionKeys []saml.DecryptionKey
+
 	// LoginFormTemplate replaces the login form. It must post to {{.URL}} and include the
 	// SAMLRequest and RelayState hidden fields, which resume the flow once the user has logged in. It
 	// must also include {{.RedirectQuery}} in a SAMLRedirectQuery hidden field when that is not empty,
@@ -139,12 +148,17 @@ func New(opts Options) (*Server, error) {
 			Logger:               logr,
 			Certificate:          opts.Certificate,
 			RolloverCertificates: opts.RolloverCertificates,
-			EntityID:             opts.EntityID,
-			MetadataInfo:         opts.MetadataInfo,
-			MetadataURL:          metadataURL,
-			SSOURL:               ssoURL,
-			LoginURL:             loginURL,
-			LogoutURL:            logoutURL,
+
+			EncryptionCertificate: opts.EncryptionCertificate,
+			EncryptionKey:         opts.EncryptionKey,
+			DecryptionKeys:        opts.DecryptionKeys,
+
+			EntityID:     opts.EntityID,
+			MetadataInfo: opts.MetadataInfo,
+			MetadataURL:  metadataURL,
+			SSOURL:       ssoURL,
+			LoginURL:     loginURL,
+			LogoutURL:    logoutURL,
 
 			MaxAuthnRequestAge:     maxLoginDuration,
 			AttributeReleasePolicy: opts.AttributeReleasePolicy,
@@ -162,6 +176,10 @@ func New(opts Options) (*Server, error) {
 
 	s.IDP.SessionProvider = s
 	s.IDP.ServiceProviderProvider = s
+
+	if err := s.IDP.CheckEncryptionKeys(); err != nil {
+		return nil, err
+	}
 
 	if err := s.initializeServices(); err != nil {
 		return nil, err

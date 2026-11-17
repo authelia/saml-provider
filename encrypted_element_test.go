@@ -30,9 +30,9 @@ func testElementEncrypter(t *testing.T, methods ...EncryptionMethod) *elementEnc
 }
 
 func testElementDecrypter() elementDecrypter {
-	key, _ := negotiationKey()
+	key, cert := negotiationKey()
 
-	return elementDecrypter{key: key, recipient: encryptedElementRecipient}
+	return elementDecrypter{keys: []decryptionKey{{certificate: cert, key: key}}, recipient: encryptedElementRecipient}
 }
 
 // reparse serializes el and parses it again, as a receiver would see it.
@@ -178,8 +178,8 @@ func TestElementDecrypterRejects(t *testing.T) {
 		plaintext *etree.Element
 		err       string
 	}{
-		{name: "wrong key", content: aes128GCM, decrypter: func(d *elementDecrypter) { d.key = otherKey }, err: "certificate does not match provided key"},
-		{name: "no key", content: aes128GCM, decrypter: func(d *elementDecrypter) { d.key = nil }, err: "expected key to be a *rsa.PrivateKey"},
+		{name: "wrong key", content: aes128GCM, decrypter: func(d *elementDecrypter) { d.keys = []decryptionKey{{key: otherKey}} }, err: "certificate does not match provided key"},
+		{name: "no key", content: aes128GCM, decrypter: func(d *elementDecrypter) { d.keys = nil }, err: "there is no private key to decrypt with"},
 		{name: "tampered gcm ciphertext", content: aes128GCM, mutate: flip("./EncryptedData/CipherData/CipherValue"), err: "message authentication failed"},
 		{name: "tampered cbc ciphertext", content: aes128CBC, mutate: flip("./EncryptedData/CipherData/CipherValue"), err: ""},
 		{name: "tampered key", content: aes128GCM, mutate: flip("./EncryptedData/KeyInfo/EncryptedKey/CipherData/CipherValue"), err: "decryption error"},
