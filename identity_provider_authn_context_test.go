@@ -22,10 +22,10 @@ const (
 	unrankedClass  = "urn:example:unranked"
 )
 
-type authnContextEnforcerFunc func(*IdpAuthnRequest, *Session) error
+type authnContextEnforcerFunc func(*RequestedAuthnContext, *Session) error
 
-func (f authnContextEnforcerFunc) EnforceAuthnContext(req *IdpAuthnRequest, session *Session) error {
-	return f(req, session)
+func (f authnContextEnforcerFunc) SatisfiesAuthnContext(requested *RequestedAuthnContext, session *Session) error {
+	return f(requested, session)
 }
 
 // serveSSOWithAuthnContext posts a request with the given requested context, and returns the
@@ -144,7 +144,7 @@ func TestServeSSOAcceptsSessionAuthnContext(t *testing.T) {
 func TestServeSSOUsesConfiguredAuthnContextEnforcer(t *testing.T) {
 	t.Run("accepts what the default would not", func(t *testing.T) {
 		test := NewIdentityProviderTest(t, applyKey)
-		test.IDP.AuthnContextEnforcer = authnContextEnforcerFunc(func(*IdpAuthnRequest, *Session) error { return nil })
+		test.IDP.AuthnContextEnforcer = authnContextEnforcerFunc(func(*RequestedAuthnContext, *Session) error { return nil })
 		response := serveSSOWithAuthnContext(t, test, &RequestedAuthnContext{AuthnContextClassRefs: []string{strongClass}})
 		assert.Check(t, is.Equal(response.Status.StatusCode.Value, StatusSuccess))
 	})
@@ -157,8 +157,8 @@ func TestServeSSOUsesConfiguredAuthnContextEnforcer(t *testing.T) {
 			nameID  string
 		)
 
-		test.IDP.AuthnContextEnforcer = authnContextEnforcerFunc(func(req *IdpAuthnRequest, session *Session) error {
-			classes = req.Request.RequestedAuthnContext.AuthnContextClassRefs
+		test.IDP.AuthnContextEnforcer = authnContextEnforcerFunc(func(requested *RequestedAuthnContext, session *Session) error {
+			classes = requested.AuthnContextClassRefs
 			nameID = session.NameID
 
 			return errors.New("alice has not used a second factor")
@@ -172,7 +172,7 @@ func TestServeSSOUsesConfiguredAuthnContextEnforcer(t *testing.T) {
 
 	t.Run("not called without a requested context", func(t *testing.T) {
 		test := NewIdentityProviderTest(t, applyKey)
-		test.IDP.AuthnContextEnforcer = authnContextEnforcerFunc(func(*IdpAuthnRequest, *Session) error {
+		test.IDP.AuthnContextEnforcer = authnContextEnforcerFunc(func(*RequestedAuthnContext, *Session) error {
 			t.Error("the enforcer must not run")
 			return nil
 		})
@@ -184,7 +184,7 @@ func TestServeSSOUsesConfiguredAuthnContextEnforcer(t *testing.T) {
 // An IdP-initiated response isn't answering a request, so there is no context to enforce.
 func TestServeIDPInitiatedSkipsAuthnContextEnforcer(t *testing.T) {
 	test := NewIdentityProviderTest(t, applyKey)
-	test.IDP.AuthnContextEnforcer = authnContextEnforcerFunc(func(*IdpAuthnRequest, *Session) error {
+	test.IDP.AuthnContextEnforcer = authnContextEnforcerFunc(func(*RequestedAuthnContext, *Session) error {
 		t.Error("the enforcer must not run")
 		return nil
 	})
@@ -194,7 +194,7 @@ func TestServeIDPInitiatedSkipsAuthnContextEnforcer(t *testing.T) {
 }
 
 // enforceAssertedClasses runs the default enforcer against an assertion with one authentication
-// statement per class.
+// statement per class, as ServeSSO does.
 func enforceAssertedClasses(enforcer DefaultAuthnContextEnforcer, requested *RequestedAuthnContext, asserted ...string) error {
 	assertion := &Assertion{}
 	for _, class := range asserted {
@@ -203,9 +203,9 @@ func enforceAssertedClasses(enforcer DefaultAuthnContextEnforcer, requested *Req
 		})
 	}
 
-	req := &IdpAuthnRequest{Request: AuthnRequest{RequestedAuthnContext: requested}, Assertion: assertion}
+	idp := &IdentityProvider{AuthnContextEnforcer: enforcer}
 
-	return enforcer.EnforceAuthnContext(req, &Session{})
+	return idp.satisfiesAuthnContext(requested, assertion, &Session{})
 }
 
 func TestDefaultAuthnContextEnforcerComparisons(t *testing.T) {
@@ -256,18 +256,50 @@ func TestDefaultAuthnContextEnforcerComparisons(t *testing.T) {
 		})
 	}
 
+	idp := &IdentityProvider{AuthnContextEnforcer: ranked}
+
 	t.Run("statement without a class", func(t *testing.T) {
-		req := &IdpAuthnRequest{
-			Request:   AuthnRequest{RequestedAuthnContext: request("", weakClass)},
-			Assertion: &Assertion{AuthnStatements: []AuthnStatement{{}}},
-		}
-		assert.Check(t, ranked.EnforceAuthnContext(req, &Session{}) != nil)
+		assertion := &Assertion{AuthnStatements: []AuthnStatement{{}}}
+		assert.Check(t, idp.satisfiesAuthnContext(request("", weakClass), assertion, &Session{}) != nil)
 	})
 
 	t.Run("no assertion", func(t *testing.T) {
-		req := &IdpAuthnRequest{Request: AuthnRequest{RequestedAuthnContext: request("", weakClass)}}
-		assert.Check(t, ranked.EnforceAuthnContext(req, &Session{}) != nil)
+		assert.Check(t, idp.satisfiesAuthnContext(request("", weakClass), nil, &Session{}) != nil)
 	})
+
+	t.Run("the class of the session", func(t *testing.T) {
+		assert.Check(t, ranked.SatisfiesAuthnContext(request("", strongClass), &Session{AuthnContextClassRef: strongClass}))
+		assert.Check(t, ranked.SatisfiesAuthnContext(request("", strongClass), &Session{AuthnContextClassRef: weakClass}) != nil)
+		assert.Check(t, ranked.SatisfiesAuthnContext(request(AuthnContextComparisonMinimum, weakClass), &Session{AuthnContextClassRef: strongClass}))
+	})
+
+	t.Run("a session without a class is PasswordProtectedTransport", func(t *testing.T) {
+		assert.Check(t, ranked.SatisfiesAuthnContext(request("", transportClass), &Session{}))
+		assert.Check(t, ranked.SatisfiesAuthnContext(request("", strongClass), &Session{}) != nil)
+	})
+}
+
+// A custom AssertionMaker is held to the class it asserts, not the class of the session.
+func TestServeSSOEnforcesTheAssertedAuthnContext(t *testing.T) {
+	test := NewIdentityProviderTest(t, applyKey)
+	test.IDP.AssertionMaker = assertionMakerFunc(func(req *IdpAuthnRequest, session *Session) error {
+		if err := (DefaultAssertionMaker{}).MakeAssertion(req, session); err != nil {
+			return err
+		}
+
+		req.Assertion.AuthnStatements[0].AuthnContext.AuthnContextClassRef.Value = weakClass
+
+		return nil
+	})
+
+	session := &Session{ID: "s", NameID: "alice", AuthnContextClassRef: strongClass}
+
+	response := serveSSOWithSession(t, test, session, &RequestedAuthnContext{AuthnContextClassRefs: []string{strongClass}})
+	assertNoAuthnContext(t, response)
+
+	response = serveSSOWithSession(t, test, session, &RequestedAuthnContext{AuthnContextClassRefs: []string{weakClass}})
+	assert.Check(t, is.Equal(response.Status.StatusCode.Value, StatusSuccess))
+	assert.Check(t, is.Equal(session.AuthnContextClassRef, strongClass), "the session is not changed")
 }
 
 // BUG-39: only the last class ref survived parsing.

@@ -238,7 +238,7 @@ func TestIDPOmitsEmptyAttributeStatement(t *testing.T) {
 	assert.NilError(t, DefaultAssertionMaker{}.MakeAssertion(req, &Session{ID: "f00d", NameID: "alice", UserName: "alice"}))
 	assert.Check(t, is.Len(req.Assertion.AttributeStatements, 1))
 
-	test.IDP.AttributeReleasePolicy = attributeReleasePolicyFunc(func(*IdpAuthnRequest, *Session, []Attribute) ([]Attribute, error) {
+	test.IDP.AttributeReleasePolicy = attributeReleasePolicyFunc(func(AttributeReleaseRequest, *Session, []Attribute) ([]Attribute, error) {
 		return []Attribute{}, nil
 	})
 

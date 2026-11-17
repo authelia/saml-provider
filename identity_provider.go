@@ -157,14 +157,21 @@ type NameIDPolicyEnforcer interface {
 	EnforceNameIDPolicy(req *IdpAuthnRequest, session *Session) error
 }
 
-// AuthnContextEnforcer is an interface used by IdentityProvider to decide whether an assertion
-// satisfies the RequestedAuthnContext of its request. The default implementation is
-// DefaultAuthnContextEnforcer, which is used if no AuthnContextEnforcer is specified.
+// AuthnContextEnforcer is an interface used by IdentityProvider to decide whether the authentication of
+// a session satisfies a RequestedAuthnContext, for single sign-on and for an AuthnQuery alike. The
+// default implementation is DefaultAuthnContextEnforcer, which is used if no AuthnContextEnforcer is
+// specified.
 type AuthnContextEnforcer interface {
-	// EnforceAuthnContext returns an error if req.Assertion doesn't satisfy
-	// req.Request.RequestedAuthnContext, which is not nil. The service provider receives a
-	// NoAuthnContext status, not the error.
-	EnforceAuthnContext(req *IdpAuthnRequest, session *Session) error
+	// SatisfiesAuthnContext returns an error if the authentication of session, whose class is
+	// session.AuthnContextClassRef or PasswordProtectedTransport when that is empty, doesn't satisfy
+	// requested, which is not nil.
+	//
+	// ServeSSO calls it once for each AuthnStatement of the assertion, with a copy of the session whose
+	// AuthnContextClassRef is the class that the statement asserts, so that a custom AssertionMaker is
+	// held to what it asserts. The service provider receives a NoAuthnContext status, not the error.
+	// ServeAuthnQuery calls it for each session of the principal, and leaves out those that return an
+	// error.
+	SatisfiesAuthnContext(requested *RequestedAuthnContext, session *Session) error
 }
 
 // SubjectEnforcer is an interface used by IdentityProvider to decide whether an assertion is about
@@ -190,28 +197,62 @@ type EncryptionCertificateEnforcer interface {
 	// SPSSODescriptor of req.ServiceProviderMetadata, must not be used to encrypt the assertion. The
 	// login then fails without a response: the assertion is never sent in plaintext, and no other key
 	// of the service provider is tried in its place.
+	//
+	// It is also asked before an assertion is encrypted in answer to a request of the assertion query
+	// and request protocol. There is then no AuthnRequest, and req holds only the IDP, HTTPRequest,
+	// ServiceProviderMetadata, SPSSODescriptor and Now. A refusal there is a Responder status.
 	EnforceEncryptionCertificate(req *IdpAuthnRequest, cert *x509.Certificate) error
 }
 
-// AttributeReleasePolicy is an interface used by DefaultAssertionMaker to decide which attributes of
-// the principal are stated to a service provider, which allows the decision to differ for each
-// service provider. The default implementation is DefaultAttributeReleasePolicy, which is used if no
-// AttributeReleasePolicy is specified.
+// AttributeReleaseRequest describes what an AttributeReleasePolicy is asked to release attributes for:
+// an assertion of single sign-on, or the answer to an AttributeQuery.
+type AttributeReleaseRequest struct {
+	// HTTPRequest is the request being served. For an AttributeQuery it comes from the server of the
+	// service provider, not the browser of the principal.
+	HTTPRequest *http.Request
+
+	// ServiceProviderMetadata is the metadata of the service provider that receives the attributes.
+	ServiceProviderMetadata *EntityDescriptor
+
+	// Ceiling is the AttributeConsumingService of the metadata of the service provider that describes
+	// the attributes it wants, or nil if there is none. For single sign-on it is the service that
+	// IdpAuthnRequest.AttributeConsumingService returns. For an AttributeQuery it is the default
+	// service, which single sign-on uses for a request without an index, so that a query is never
+	// answered with more than single sign-on would state.
+	Ceiling *AttributeConsumingService
+
+	// Requested lists the attributes that an AttributeQuery names (SAMLCore §3.3.2.3). It is empty for
+	// single sign-on and for a query that names none, which asks for every attribute that policy
+	// allows. The candidates have already been narrowed to these, and what the policy returns is
+	// narrowed to them again.
+	Requested []Attribute
+
+	// AuthnRequest is the request, for single sign-on, and nil for an AttributeQuery.
+	AuthnRequest *IdpAuthnRequest
+
+	// Query is the query, for an AttributeQuery, and nil for single sign-on.
+	Query *IdpQueryRequest
+}
+
+// AttributeReleasePolicy is an interface used by DefaultAssertionMaker and ServeAttributeQuery to decide
+// which attributes of the principal are stated to a service provider, which allows the decision to
+// differ for each service provider. The default implementation is DefaultAttributeReleasePolicy, which
+// is used if no AttributeReleasePolicy is specified.
 type AttributeReleasePolicy interface {
-	// ReleaseAttributes returns the attributes of candidates that the assertion for req states.
-	// candidates holds every attribute that DefaultAssertionMaker can state about the principal of
-	// session, and may be modified or returned. req.AttributeConsumingService returns the service
-	// that describes the attributes the service provider wants, if any.
+	// ReleaseAttributes returns the attributes of candidates that are stated to the service provider of
+	// req. candidates holds every attribute that can be stated about the principal of session, and may
+	// be modified or returned. req.Ceiling is the service that describes the attributes the service
+	// provider wants, if any.
 	//
 	// If no attributes are returned the assertion has no AttributeStatement, because SAMLCore
-	// §2.7.3 requires every AttributeStatement to hold at least one attribute. If an error is
-	// returned no assertion is made, and the user agent receives an HTTP error rather than a SAML
-	// response.
-	ReleaseAttributes(req *IdpAuthnRequest, session *Session, candidates []Attribute) ([]Attribute, error)
+	// §2.7.3 requires every AttributeStatement to hold at least one attribute, and an AttributeQuery is
+	// answered with no assertion. If an error is returned no assertion is made, and the request
+	// receives a Responder status.
+	ReleaseAttributes(req AttributeReleaseRequest, session *Session, candidates []Attribute) ([]Attribute, error)
 }
 
 // DefaultAuthnContextEnforcer applies the comparison rules of SAMLCore §3.3.2.2.1 to the class
-// reference of every AuthnStatement in the assertion.
+// reference of the authentication of a session.
 type DefaultAuthnContextEnforcer struct {
 	// Strength ranks authentication context classes, where a greater value is stronger. It is
 	// needed for the minimum, maximum and better comparisons, as the specification leaves the
@@ -220,12 +261,11 @@ type DefaultAuthnContextEnforcer struct {
 	Strength map[string]int
 }
 
-// EnforceAuthnContext implements AuthnContextEnforcer.
+// SatisfiesAuthnContext implements AuthnContextEnforcer.
 // Declaration references are always refused, because the assertions made here only state a class.
-// With minimum and maximum the asserted class must be at least as strong as, or no stronger than,
-// one of the requested classes, and with better it must be stronger than one of them.
-func (e DefaultAuthnContextEnforcer) EnforceAuthnContext(req *IdpAuthnRequest, _ *Session) error {
-	requested := req.Request.RequestedAuthnContext
+// With minimum and maximum the class of the session must be at least as strong as, or no stronger
+// than, one of the requested classes, and with better it must be stronger than one of them.
+func (e DefaultAuthnContextEnforcer) SatisfiesAuthnContext(requested *RequestedAuthnContext, session *Session) error {
 	if len(requested.AuthnContextDeclRefs) != 0 {
 		return fmt.Errorf("the request requires an AuthnContextDeclRef, which is not supported")
 	}
@@ -245,22 +285,53 @@ func (e DefaultAuthnContextEnforcer) EnforceAuthnContext(req *IdpAuthnRequest, _
 		return fmt.Errorf("unknown comparison %q", requested.Comparison)
 	}
 
-	if req.Assertion == nil || len(req.Assertion.AuthnStatements) == 0 {
+	asserted := sessionAuthnContextClassRef(session)
+	if !slices.ContainsFunc(requested.AuthnContextClassRefs, func(class string) bool { return satisfies(asserted, class) }) {
+		return fmt.Errorf("the class %q doesn't satisfy the %q comparison", asserted, requested.Comparison)
+	}
+
+	return nil
+}
+
+// sessionAuthnContextClassRef returns the authentication context class of session, which is
+// PasswordProtectedTransport when it sets none.
+func sessionAuthnContextClassRef(session *Session) string {
+	return cmp.Or(session.AuthnContextClassRef, defaultAuthnContextClassRef)
+}
+
+// satisfiesAuthnContext returns an error unless every AuthnStatement of assertion satisfies requested,
+// by asking the AuthnContextEnforcer about a copy of session with the class that the statement asserts.
+func (idp *IdentityProvider) satisfiesAuthnContext(requested *RequestedAuthnContext, assertion *Assertion, session *Session) error {
+	if assertion == nil || len(assertion.AuthnStatements) == 0 {
 		return fmt.Errorf("assertion has no AuthnStatement")
 	}
 
-	for _, statement := range req.Assertion.AuthnStatements {
+	enforcer := idp.authnContextEnforcer()
+
+	for _, statement := range assertion.AuthnStatements {
 		if statement.AuthnContext.AuthnContextClassRef == nil {
 			return fmt.Errorf("an AuthnStatement has no AuthnContextClassRef")
 		}
 
-		asserted := statement.AuthnContext.AuthnContextClassRef.Value
-		if !slices.ContainsFunc(requested.AuthnContextClassRefs, func(class string) bool { return satisfies(asserted, class) }) {
-			return fmt.Errorf("the asserted class %q doesn't satisfy the %q comparison", asserted, requested.Comparison)
+		asserted := *session
+		asserted.AuthnContextClassRef = statement.AuthnContext.AuthnContextClassRef.Value
+
+		if err := enforcer.SatisfiesAuthnContext(requested, &asserted); err != nil {
+			return err
 		}
 	}
 
 	return nil
+}
+
+// authnContextEnforcer returns the AuthnContextEnforcer of idp, or DefaultAuthnContextEnforcer if there
+// is none.
+func (idp *IdentityProvider) authnContextEnforcer() AuthnContextEnforcer {
+	if idp.AuthnContextEnforcer != nil {
+		return idp.AuthnContextEnforcer
+	}
+
+	return DefaultAuthnContextEnforcer{}
 }
 
 // compare returns a positive number if a is stronger than b, a negative number if it is weaker, and
@@ -342,9 +413,28 @@ type IdentityProvider struct {
 	// formats are advertised in the metadata. Defaults to DefaultNameIDProvider.
 	NameIDProvider NameIDProvider
 
-	// AuthnContextEnforcer decides whether an assertion satisfies the RequestedAuthnContext of its
-	// request. Defaults to a DefaultAuthnContextEnforcer with no Strength, which only accepts a
-	// class that the request lists, and never satisfies the better comparison.
+	// AttributeServiceURL is the attribute service on the SOAP binding, which ServeAttributeQuery handles.
+	// When it is set and the SessionProvider implements QuerySessionProvider, the metadata has an
+	// AttributeAuthorityDescriptor that lists it.
+	AttributeServiceURL url.URL
+
+	// AuthnQueryServiceURL is the authentication query service on the SOAP binding, which ServeAuthnQuery
+	// handles. When it is set and the SessionProvider implements QuerySessionProvider, the metadata has
+	// an AuthnAuthorityDescriptor that lists it.
+	AuthnQueryServiceURL url.URL
+
+	// AssertionIDRequestServiceURL is the assertion ID request service on the SOAP binding, which
+	// ServeAssertionIDRequest handles. When it and AssertionStore are set, the metadata lists it.
+	AssertionIDRequestServiceURL url.URL
+
+	// AssertionStore keeps every assertion that is issued, so that ServeAssertionIDRequest can return
+	// it to the service provider it was issued to. Nothing is kept by default, and every
+	// AssertionIDRequest is then refused.
+	AssertionStore AssertionStore
+
+	// AuthnContextEnforcer decides whether the authentication of a session satisfies a
+	// RequestedAuthnContext. Defaults to a DefaultAuthnContextEnforcer with no Strength, which only
+	// accepts a class that the request lists, and never satisfies the better comparison.
 	AuthnContextEnforcer AuthnContextEnforcer
 
 	// SubjectEnforcer decides whether an assertion matches the Subject of its request. Defaults to
@@ -357,10 +447,10 @@ type IdentityProvider struct {
 	// or has a KeyUsage extension without keyEncipherment.
 	EncryptionCertificateEnforcer EncryptionCertificateEnforcer
 
-	// AttributeReleasePolicy decides which attributes DefaultAssertionMaker states to each service
-	// provider. Defaults to DefaultAttributeReleasePolicy, which only releases the attributes that
-	// the AttributeConsumingService of the request lists, and none if there is no such service. It
-	// is not used by any other AssertionMaker.
+	// AttributeReleasePolicy decides which attributes DefaultAssertionMaker and ServeAttributeQuery
+	// state to each service provider. Defaults to DefaultAttributeReleasePolicy, which only releases
+	// the attributes that the AttributeConsumingService of the request lists, and none if there is no
+	// such service. It is not used by any other AssertionMaker.
 	AttributeReleasePolicy AttributeReleasePolicy
 
 	// AllowInsecureServiceProviderEndpoints allows responses to be sent to an endpoint of a service
@@ -686,6 +776,8 @@ func (idp *IdentityProvider) Metadata() *EntityDescriptor {
 		}
 	}
 
+	idp.addQueryMetadata(ed, keyDescriptors[:1], nameIDFormats)
+
 	return ed
 }
 
@@ -693,6 +785,10 @@ func (idp *IdentityProvider) Metadata() *EntityDescriptor {
 // and artifact resolution URL if they are set. A URL with an empty path is served at "/". When LogoutURL and
 // SOAPLogoutURL share a path, a POST with a text/xml body there goes to ServeSOAPLogout and anything else to
 // ServeSLO.
+//
+// It also serves AttributeServiceURL, AuthnQueryServiceURL and AssertionIDRequestServiceURL if they are set. Each
+// accepts one kind of message, so each needs a path of its own, and Handler panics, as [http.ServeMux] does, if one
+// of them shares its path with another URL.
 func (idp *IdentityProvider) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc(handlerPath(idp.MetadataURL), idp.ServeMetadata)
@@ -723,6 +819,19 @@ func (idp *IdentityProvider) Handler() http.Handler {
 
 	if idp.artifactEnabled() {
 		mux.HandleFunc(handlerPath(idp.ArtifactResolutionURL), idp.ServeArtifactResolution)
+	}
+
+	for _, service := range []struct {
+		url   url.URL
+		serve http.HandlerFunc
+	}{
+		{idp.AttributeServiceURL, idp.ServeAttributeQuery},
+		{idp.AuthnQueryServiceURL, idp.ServeAuthnQuery},
+		{idp.AssertionIDRequestServiceURL, idp.ServeAssertionIDRequest},
+	} {
+		if service.url.String() != "" {
+			mux.HandleFunc(handlerPath(service.url), service.serve)
+		}
 	}
 
 	return mux
@@ -880,12 +989,7 @@ func (idp *IdentityProvider) ServeSSO(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if req.Request.RequestedAuthnContext != nil {
-		authnContextEnforcer := idp.AuthnContextEnforcer
-		if authnContextEnforcer == nil {
-			authnContextEnforcer = DefaultAuthnContextEnforcer{}
-		}
-
-		if err := authnContextEnforcer.EnforceAuthnContext(req, session); err != nil {
+		if err := idp.satisfiesAuthnContext(req.Request.RequestedAuthnContext, req.Assertion, session); err != nil {
 			idp.logger().Printf("cannot satisfy requested authn context: %s", err)
 
 			req.writeErrorStatus(w, StatusResponder, StatusNoAuthnContext)
@@ -1626,10 +1730,112 @@ type DefaultAssertionMaker struct {
 
 // MakeAssertion implements AssertionMaker. It produces a SAML assertion from the
 // given request and assigns it to req.Assertion.
-//
-//nolint:gocyclo // Complexity is inherent to the specification being implemented.
 func (DefaultAssertionMaker) MakeAssertion(req *IdpAuthnRequest, session *Session) error {
-	attributes := requestedNameAttributes(req.AttributeConsumingService(), session)
+	service := req.AttributeConsumingService()
+
+	// The index is not included because the request may not be authenticated.
+	if service == nil && req.Request.AttributeConsumingServiceIndex != "" && req.IDP != nil {
+		req.IDP.logger().Printf("releasing no attributes: the AttributeConsumingServiceIndex of the request names no service")
+	}
+
+	attributes := append(requestedNameAttributes(service, session), sessionAttributes(session)...)
+
+	attributes, err := req.IDP.attributeReleasePolicy().ReleaseAttributes(AttributeReleaseRequest{
+		HTTPRequest:             req.HTTPRequest,
+		ServiceProviderMetadata: req.ServiceProviderMetadata,
+		Ceiling:                 service,
+		AuthnRequest:            req,
+	}, session, attributes)
+	if err != nil {
+		return fmt.Errorf("cannot release attributes: %w", err)
+	}
+
+	// allow for some clock skew in the validity period. This uses our own clock, because the
+	// request and therefore its IssueInstant are not authenticated.
+	notBefore := req.Now.Add(-1 * MaxClockSkew)
+	notOnOrAfterAfter := req.Now.Add(MaxIssueDelay)
+
+	// The ID is taken first so that a transient NameID doesn't change it.
+	assertionID := fmt.Sprintf("id-%x", randomBytes(20))
+
+	nameID, err := req.resolveNameID(session)
+	if err != nil {
+		return fmt.Errorf("cannot issue a NameID: %w", err)
+	}
+
+	address := clientAddress(req.HTTPRequest, session)
+
+	req.Assertion = &Assertion{
+		ID:           assertionID,
+		IssueInstant: TimeNow(),
+		Version:      "2.0",
+		Issuer: Issuer{
+			Format: "urn:oasis:names:tc:SAML:2.0:nameid-format:entity",
+			Value:  req.IDP.Metadata().EntityID,
+		},
+		Subject: &Subject{
+			NameID: nameID,
+			SubjectConfirmations: []SubjectConfirmation{
+				{
+					Method: bearerSubjectConfirmationMethod,
+					SubjectConfirmationData: &SubjectConfirmationData{
+						Address:      address,
+						InResponseTo: req.Request.ID,
+						NotOnOrAfter: req.Now.Add(MaxIssueDelay),
+						Recipient:    req.ACSEndpoint.Location,
+					},
+				},
+			},
+		},
+		Conditions: &Conditions{
+			NotBefore:    notBefore,
+			NotOnOrAfter: notOnOrAfterAfter,
+			AudienceRestrictions: []AudienceRestriction{
+				{
+					Audiences: []Audience{{Value: req.ServiceProviderMetadata.EntityID}},
+				},
+			},
+		},
+		AuthnStatements: []AuthnStatement{
+			{
+				AuthnInstant: session.CreateTime,
+				SessionIndex: session.Index,
+				SubjectLocality: &SubjectLocality{
+					Address: address,
+				},
+				AuthnContext: AuthnContext{
+					AuthnContextClassRef: &AuthnContextClassRef{
+						Value: sessionAuthnContextClassRef(session),
+					},
+				},
+			},
+		},
+	}
+
+	// SAMLCore §2.7.3 requires an AttributeStatement to contain at least one attribute.
+	if len(attributes) != 0 {
+		req.Assertion.AttributeStatements = []AttributeStatement{{Attributes: attributes}}
+	}
+
+	return nil
+}
+
+// attributeReleasePolicy returns the AttributeReleasePolicy of idp, or DefaultAttributeReleasePolicy if
+// there is none.
+func (idp *IdentityProvider) attributeReleasePolicy() AttributeReleasePolicy {
+	if idp != nil && idp.AttributeReleasePolicy != nil {
+		return idp.AttributeReleasePolicy
+	}
+
+	return DefaultAttributeReleasePolicy{}
+}
+
+// sessionAttributes returns every attribute that can be stated about the principal of session under
+// the names the identity provider gives them, which DefaultAssertionMaker and ServeAttributeQuery offer
+// to the AttributeReleasePolicy. The custom attributes of the session are copies, as the policy may
+// change its candidates.
+func sessionAttributes(session *Session) []Attribute {
+	var attributes []Attribute
 
 	if session.UserName != "" {
 		attributes = append(attributes, Attribute{
@@ -1759,84 +1965,7 @@ func (DefaultAssertionMaker) MakeAssertion(req *IdpAuthnRequest, session *Sessio
 		})
 	}
 
-	policy := req.IDP.AttributeReleasePolicy
-	if policy == nil {
-		policy = DefaultAttributeReleasePolicy{}
-	}
-
-	attributes, err := policy.ReleaseAttributes(req, session, attributes)
-	if err != nil {
-		return fmt.Errorf("cannot release attributes: %w", err)
-	}
-
-	// allow for some clock skew in the validity period. This uses our own clock, because the
-	// request and therefore its IssueInstant are not authenticated.
-	notBefore := req.Now.Add(-1 * MaxClockSkew)
-	notOnOrAfterAfter := req.Now.Add(MaxIssueDelay)
-
-	// The ID is taken first so that a transient NameID doesn't change it.
-	assertionID := fmt.Sprintf("id-%x", randomBytes(20))
-
-	nameID, err := req.resolveNameID(session)
-	if err != nil {
-		return fmt.Errorf("cannot issue a NameID: %w", err)
-	}
-
-	address := clientAddress(req.HTTPRequest, session)
-
-	req.Assertion = &Assertion{
-		ID:           assertionID,
-		IssueInstant: TimeNow(),
-		Version:      "2.0",
-		Issuer: Issuer{
-			Format: "urn:oasis:names:tc:SAML:2.0:nameid-format:entity",
-			Value:  req.IDP.Metadata().EntityID,
-		},
-		Subject: &Subject{
-			NameID: nameID,
-			SubjectConfirmations: []SubjectConfirmation{
-				{
-					Method: bearerSubjectConfirmationMethod,
-					SubjectConfirmationData: &SubjectConfirmationData{
-						Address:      address,
-						InResponseTo: req.Request.ID,
-						NotOnOrAfter: req.Now.Add(MaxIssueDelay),
-						Recipient:    req.ACSEndpoint.Location,
-					},
-				},
-			},
-		},
-		Conditions: &Conditions{
-			NotBefore:    notBefore,
-			NotOnOrAfter: notOnOrAfterAfter,
-			AudienceRestrictions: []AudienceRestriction{
-				{
-					Audiences: []Audience{{Value: req.ServiceProviderMetadata.EntityID}},
-				},
-			},
-		},
-		AuthnStatements: []AuthnStatement{
-			{
-				AuthnInstant: session.CreateTime,
-				SessionIndex: session.Index,
-				SubjectLocality: &SubjectLocality{
-					Address: address,
-				},
-				AuthnContext: AuthnContext{
-					AuthnContextClassRef: &AuthnContextClassRef{
-						Value: cmp.Or(session.AuthnContextClassRef, defaultAuthnContextClassRef),
-					},
-				},
-			},
-		},
-	}
-
-	// SAMLCore §2.7.3 requires an AttributeStatement to contain at least one attribute.
-	if len(attributes) != 0 {
-		req.Assertion.AttributeStatements = []AttributeStatement{{Attributes: attributes}}
-	}
-
-	return nil
+	return attributes
 }
 
 // requestedNameAttributes returns the attributes of the user which service requests under a name of
@@ -1940,6 +2069,12 @@ func (req *IdpAuthnRequest) AttributeConsumingService() *AttributeConsumingServi
 		return nil
 	}
 
+	return defaultAttributeConsumingService(services)
+}
+
+// defaultAttributeConsumingService returns a copy of the default service of services by SAMLMeta §2.4.4,
+// as changed by errata E87, or nil if there are none.
+func defaultAttributeConsumingService(services []AttributeConsumingService) *AttributeConsumingService {
 	preference := func(service AttributeConsumingService) int {
 		switch {
 		case service.IsDefault == nil:
@@ -1962,8 +2097,9 @@ func (req *IdpAuthnRequest) AttributeConsumingService() *AttributeConsumingServi
 }
 
 // DefaultAttributeReleasePolicy releases only the attributes that the service provider requests in
-// the RequestedAttribute elements of its AttributeConsumingService, as selected by
-// IdpAuthnRequest.AttributeConsumingService. If there is no such service, no attributes are released,
+// the RequestedAttribute elements of its AttributeConsumingService, which is the Ceiling of the
+// AttributeReleaseRequest: the one IdpAuthnRequest.AttributeConsumingService selects for single sign-on,
+// and the default one for an AttributeQuery. If there is no such service, no attributes are released,
 // and the assertion only identifies the principal by its NameID.
 //
 // A candidate is released if a RequestedAttribute has the same Name and a compatible NameFormat. The
@@ -1977,40 +2113,49 @@ func (req *IdpAuthnRequest) AttributeConsumingService() *AttributeConsumingServi
 // released, as SAMLMeta §2.4.4.2 says that only matching values are relevant to the service, and the
 // candidate is withheld if it has none of them. Values are compared exactly, and a NameID value by its
 // content and qualifiers.
+//
+// The attributes that an AttributeQuery names only narrow this further, in the same way, so that a query
+// is never answered with an attribute or a value that single sign-on would not state.
 type DefaultAttributeReleasePolicy struct {
 }
 
 // ReleaseAttributes implements AttributeReleasePolicy.
-func (DefaultAttributeReleasePolicy) ReleaseAttributes(req *IdpAuthnRequest, _ *Session, candidates []Attribute) ([]Attribute, error) {
-	service := req.AttributeConsumingService()
-	if service == nil {
-		// The index is not included because the request may not be authenticated.
-		if req.Request.AttributeConsumingServiceIndex != "" && req.IDP != nil {
-			req.IDP.logger().Printf("releasing no attributes: the AttributeConsumingServiceIndex of the request names no service")
-		}
-
+func (DefaultAttributeReleasePolicy) ReleaseAttributes(req AttributeReleaseRequest, _ *Session, candidates []Attribute) ([]Attribute, error) {
+	if req.Ceiling == nil {
 		return nil, nil
 	}
 
 	var released []Attribute
 
 	for _, candidate := range candidates {
-		if attribute, ok := releaseRequestedAttribute(service.RequestedAttributes, candidate); ok {
+		if attribute, ok := releaseRequestedAttribute(req.Ceiling.RequestedAttributes, candidate); ok {
 			released = append(released, attribute)
 		}
 	}
 
-	return released, nil
+	return narrowToQueriedAttributes(req.Requested, released), nil
 }
 
 // releaseRequestedAttribute returns the part of candidate which requested asks for, and false if it
 // asks for none of it.
 func releaseRequestedAttribute(requested []RequestedAttribute, candidate Attribute) (Attribute, bool) {
+	attributes := make([]Attribute, 0, len(requested))
+	for _, r := range requested {
+		attributes = append(attributes, r.Attribute)
+	}
+
+	return narrowAttribute(attributes, candidate)
+}
+
+// narrowAttribute returns the part of candidate which wanted asks for, and false if it asks for none of
+// it. An entry of wanted asks for the candidate if it has the same Name and a compatible NameFormat. If
+// every entry that does lists values, only those values of the candidate are kept.
+func narrowAttribute(wanted []Attribute, candidate Attribute) (Attribute, bool) {
 	matched, anyValue := false, false
 
 	var values []AttributeValue
 
-	for _, r := range requested {
+	for _, r := range wanted {
 		if r.Name != candidate.Name || !compatibleAttrNameFormats(r.NameFormat, candidate.NameFormat) {
 			continue
 		}
@@ -2101,7 +2246,9 @@ func clientAddress(r *http.Request, session *Session) string {
 // (maybe ours?) do not appear to support non-empty prefix lists in XML C14N.
 const canonicalizerPrefixList = ""
 
-// MakeAssertionEl sets `AssertionEl` to a signed, possibly encrypted, version of `Assertion`.
+// MakeAssertionEl sets `AssertionEl` to a signed, possibly encrypted, version of `Assertion`. The signed
+// assertion is saved in the AssertionStore of the identity provider, if it has one, before it is
+// encrypted.
 func (req *IdpAuthnRequest) MakeAssertionEl() error {
 	signingContext, err := req.signingContext()
 	if err != nil {
@@ -2119,12 +2266,21 @@ func (req *IdpAuthnRequest) MakeAssertionEl() error {
 	req.Assertion.Signature = sigEl.(*etree.Element)
 	signedAssertionEl = req.Assertion.Element()
 
+	req.saveAssertion(signedAssertionEl)
+
+	req.AssertionEl, err = req.encryptAssertionEl(signedAssertionEl)
+
+	return err
+}
+
+// encryptAssertionEl returns the EncryptedAssertion element of the signed assertion, or the signed
+// assertion itself when the service provider has no encryption certificate.
+func (req *IdpAuthnRequest) encryptAssertionEl(signedAssertionEl *etree.Element) (*etree.Element, error) {
 	certBuf, err := req.getSPEncryptionCert()
 	if err == os.ErrNotExist {
-		req.AssertionEl = signedAssertionEl
-		return nil
+		return signedAssertionEl, nil
 	} else if err != nil {
-		return err
+		return nil, err
 	}
 
 	var signedAssertionBuf []byte
@@ -2134,27 +2290,26 @@ func (req *IdpAuthnRequest) MakeAssertionEl() error {
 
 		signedAssertionBuf, err = doc.WriteToBytes()
 		if err != nil {
-			return err
+			return nil, err
 		}
 	}
 
 	encryptor, err := req.assertionEncrypter()
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	encryptedDataEl, err := encryptor.Encrypt(certBuf, signedAssertionBuf, nil)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	encryptedDataEl.CreateAttr("Type", "http://www.w3.org/2001/04/xmlenc#Element")
 
 	encryptedAssertionEl := etree.NewElement("saml:EncryptedAssertion")
 	encryptedAssertionEl.AddChild(encryptedDataEl)
-	req.AssertionEl = encryptedAssertionEl
 
-	return nil
+	return encryptedAssertionEl, nil
 }
 
 // IdpAuthnRequestForm contans HTML form information to be submitted to the

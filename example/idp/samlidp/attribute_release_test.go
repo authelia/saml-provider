@@ -10,9 +10,9 @@ import (
 	"authelia.com/provider/saml"
 )
 
-type attributeReleasePolicyFunc func(*saml.IdpAuthnRequest, *saml.Session, []saml.Attribute) ([]saml.Attribute, error)
+type attributeReleasePolicyFunc func(saml.AttributeReleaseRequest, *saml.Session, []saml.Attribute) ([]saml.Attribute, error)
 
-func (f attributeReleasePolicyFunc) ReleaseAttributes(req *saml.IdpAuthnRequest, session *saml.Session, candidates []saml.Attribute) ([]saml.Attribute, error) {
+func (f attributeReleasePolicyFunc) ReleaseAttributes(req saml.AttributeReleaseRequest, session *saml.Session, candidates []saml.Attribute) ([]saml.Attribute, error) {
 	return f(req, session, candidates)
 }
 
@@ -26,7 +26,7 @@ func TestNewUsesAttributeReleasePolicy(t *testing.T) {
 		Key:         test.Key,
 		Store:       &test.Store,
 		URL:         url.URL{Scheme: "https", Host: "idp.example.com"},
-		AttributeReleasePolicy: attributeReleasePolicyFunc(func(req *saml.IdpAuthnRequest, session *saml.Session, candidates []saml.Attribute) ([]saml.Attribute, error) {
+		AttributeReleasePolicy: attributeReleasePolicyFunc(func(req saml.AttributeReleaseRequest, session *saml.Session, candidates []saml.Attribute) ([]saml.Attribute, error) {
 			serviceProvider, user = req.ServiceProviderMetadata.EntityID, session.UserName
 			return candidates, nil
 		}),
