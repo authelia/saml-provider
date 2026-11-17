@@ -57,8 +57,8 @@ least the subset of SAML known as [interoperable SAML](https://kantarainitiative
 | Artifact Resolution                         | ✅  | ✅ |
 | Enhanced Client or Proxy (ECP)              | ⚠️  | ❌ |
 | Holder-of-Key Web Browser SSO               | ❌  | ❌ |
-| Name Identifier Management                  | ❌  | ❌ |
-| Name Identifier Mapping                     | ❌  | ❌ |
+| Name Identifier Management                  | ⚠️  | ❌ |
+| Name Identifier Mapping                     | ⚠️  | ❌ |
 | Assertion Query/Request and Attribute Query | ⚠️  | ❌ |
 | Identity Provider Discovery                 | ❌  | ❌ |
 | SP Request Initiation                       | N/A | ❌ |
@@ -280,8 +280,9 @@ least the subset of SAML known as [interoperable SAML](https://kantarainitiative
     sign-on or a query issues, signed and before encryption. Without it the request is answered
     `Responder/RequestUnsupported` and the service isn't in the metadata. An assertion is only returned to the SP it
     was issued to, and at most 32 are returned for one request. `samlidp` implements neither interface.
-- **SOAP:** used for single logout, artifact resolution, the assertion query and request protocol and ECP only. The
-  URLs of these services may share a path with each other, and with `SSOURL` or `LogoutURL`: `Handler` sends a POST
+- **SOAP:** used for single logout, artifact resolution, the assertion query and request protocol, ECP, and name
+  identifier management and mapping only. The URLs of these services may share a path with each other, and with
+  `SSOURL`, `LogoutURL` or `ManageNameIDURL`: `Handler` sends a POST
   with a `text/xml` body to the SOAP service for the message in the `Body` of the envelope, which it reads within the
   64 KiB limit of a SOAP request, and anything else to the front-channel service of the path.
 - **Verify signed `AuthnRequest`:** any signature on the HTTP Redirect or HTTP POST bindings is verified, and one is
@@ -371,7 +372,8 @@ least the subset of SAML known as [interoperable SAML](https://kantarainitiative
   refusals use it.
   Other failures produce an HTTP error.
 - **Replay detection:** the ID of every `AuthnRequest` that is answered for a session, and of every verified
-  `LogoutRequest` on any binding, `AttributeQuery`, `AuthnQuery` and `AssertionIDRequest`, is recorded in `IdentityProvider.ReplayStore` until the request expires, and a
+  `LogoutRequest` and `ManageNameIDRequest` on any binding, `AttributeQuery`, `AuthnQuery`, `AssertionIDRequest` and
+  `NameIDMappingRequest`, is recorded in `IdentityProvider.ReplayStore` until the request expires, and a
   request presented again is answered with `Requester` and `RequestDenied`. A request that a login form re-presents
   is not a replay. The default store is a bounded `MemoryReplayStore` that is private to the process, so an IdP which
   runs as several instances must set a `ReplayStore` they share. If the store fails or is full the request is refused.
@@ -400,6 +402,41 @@ least the subset of SAML known as [interoperable SAML](https://kantarainitiative
   anything but a `NameID`, and one in the `Subject` of an `AuthnRequest` or of a query are not supported. The answer to
   a query is made like any other assertion, so its `NameID` and attributes are encrypted when the policy says so, and
   `AssertionStore` is given the assertion as it was signed, with those parts encrypted.
+- **Name Identifier Management:** `IdentityProvider.ServeManageNameID` handles a `ManageNameIDRequest` from an SP on the
+  HTTP Redirect or HTTP POST binding at `IdentityProvider.ManageNameIDURL`, and `ServeSOAPManageNameID` on the SOAP
+  binding at `SOAPManageNameIDURL`, and answer with a signed `ManageNameIDResponse` (SAMLProfiles §4.5). The request
+  must be signed on every binding. The metadata lists the services, and they are served, only when
+  `IdentityProvider.NameIDProvider` implements `NameIDManagementProvider`, which stores the `SPProvidedID` of a
+  `NewID` or `NewEncryptedID` and ends the use of an identifier on `Terminate`; otherwise a request is answered
+  `Responder/RequestUnsupported`. No session is ended (errata E8). A request that was already answered is a replay,
+  and is answered `Requester/RequestDenied`, so that an older request can't undo a later change.
+  - An identifier that the provider doesn't recognize is answered `Requester/UnknownPrincipal`, and so are a transient
+    identifier (errata E12), one of another SP, and an `EncryptedID` that can't be decrypted, which is not told apart.
+    For those the provider is not called at all: `SetSPProvidedID` and `TerminateNameID` are only ever given an
+    identifier that the SP sent and may use.
+  - Once an SP has registered a `NewID`, it is the `SPProvidedID` of the identifier (SAMLCore §3.6.3, §8.3.7). The IdP
+    asks `NameIDManagementProvider.SPProvidedID` for it when it handles a logout, so sessions that were established
+    before follow the change without their `SessionParticipant` records being rewritten: a `LogoutRequest` from the SP
+    which carries the registered `SPProvidedID` finds them, and a `LogoutRequest` that is propagated to the SP carries
+    it. After `Terminate` the sessions remain (errata E8) and are matched and propagated with the identifier they were
+    established with, without the `SPProvidedID`.
+  - A `NewEncryptedID` must be encrypted with a block cipher in GCM mode, which the IdP metadata lists first.
+  - `IdentityProvider.SendManageNameIDRequest` tells an SP that the IdP changed or retired an identifier, over SOAP
+    only, with `HTTPClient`. It is for the application to call. The IdP doesn't send the request through the browser,
+    and accepts no `ManageNameIDResponse` there. HTTP Artifact is not supported.
+- **Name Identifier Mapping:** `IdentityProvider.ServeNameIDMapping` handles a signed `NameIDMappingRequest` on the SOAP
+  binding at `IdentityProvider.NameIDMappingURL` (SAMLProfiles §7). The metadata lists it when
+  `IdentityProvider.NameIDProvider` implements `NameIDMappingProvider` and `IdentityProvider.NameIDMappingPolicy` is
+  set. Without a policy every request is refused: `DefaultNameIDMappingPolicy` lists, for each requester, the SPs
+  whose identifiers it may obtain. A request that was already answered is a replay, and is answered
+  `Requester/RequestDenied`.
+  - The mapped identifier is always an `EncryptedID` that is encrypted to the SP it is for, the one that the
+    `SPNameQualifier` of the `NameIDPolicy` names, so a requester can pass it on and can't read it. There is no option
+    to return it in plaintext, or inside an assertion (SAMLProfiles §7.4.2.1).
+  - A target that is unknown, not allowed, or has no usable encryption key is answered `Requester/InvalidNameIDPolicy`
+    without telling which, and an unknown principal `Requester/UnknownPrincipal`. A response with an error status holds
+    an empty `NameID`, as the schema requires an identifier.
+  - A `BaseID`, and an affiliation as the target, are not supported.
 - **Signature defaults:** `SignatureMethod` defaults to RSA-SHA256 for RSA keys, and SHA-1 is only used if set explicitly.
   For ECDSA keys it defaults to the hash matching the curve: SHA-256 for P-256, SHA-384 for P-384 and SHA-512 for P-521.
 - **SPs with ECDSA certificates:** a service provider whose metadata allows encryption with an ECDSA certificate is

@@ -469,6 +469,28 @@ type IdentityProvider struct {
 	// services on the SOAP binding, which Handler tells apart by the message in the envelope.
 	ECPURL url.URL
 
+	// ManageNameIDURL is the name identifier management service on the HTTP-Redirect and HTTP-POST bindings,
+	// which ServeManageNameID handles. When it is set and the NameIDProvider implements
+	// NameIDManagementProvider, the metadata lists it.
+	ManageNameIDURL url.URL
+
+	// SOAPManageNameIDURL is the name identifier management service on the SOAP binding, which
+	// ServeSOAPManageNameID handles. When it is set and the NameIDProvider implements
+	// NameIDManagementProvider, the metadata lists it. It may share its path with ManageNameIDURL, as Handler
+	// tells the two apart by the Content-Type, and with the other services on the SOAP binding, which Handler
+	// tells apart by the message in the envelope.
+	SOAPManageNameIDURL url.URL
+
+	// NameIDMappingURL is the name identifier mapping service, on the SOAP binding, which ServeNameIDMapping
+	// handles. When it is set, the NameIDProvider implements NameIDMappingProvider and there is a
+	// NameIDMappingPolicy, the metadata lists it. It may share its path with the other services on the SOAP
+	// binding, which Handler tells apart by the message in the envelope.
+	NameIDMappingURL url.URL
+
+	// NameIDMappingPolicy decides which requester may obtain the identifiers that a principal has at which
+	// service provider, with a NameIDMappingRequest. Without one every such request is refused.
+	NameIDMappingPolicy NameIDMappingPolicy
+
 	// HTTPClient sends back-channel messages, such as a LogoutRequest over SOAP. Defaults to a client with a
 	// 10 second timeout. A client that is set is copied, and the copy never follows a redirect, whatever its
 	// CheckRedirect, and has the 10 second timeout if its Timeout is 0; its Transport is kept.
@@ -868,7 +890,37 @@ func (idp *IdentityProvider) Metadata() *EntityDescriptor {
 
 	idp.addQueryMetadata(ed, keyDescriptors[:1], nameIDFormats)
 
+	idp.nameIDServiceMetadata(&ed.IDPSSODescriptors[0])
+
 	return ed
+}
+
+// nameIDServiceMetadata lists the name identifier management and mapping services in descriptor: each one
+// whose URL is set and which the NameIDProvider can serve (SAMLMeta §2.4.2, §2.4.3). The mapping service is
+// only listed with a NameIDMappingPolicy, as without one it refuses every request, and has no
+// ResponseLocation, which SAMLMeta §2.4.3 requires to be omitted.
+func (idp *IdentityProvider) nameIDServiceMetadata(descriptor *IDPSSODescriptor) {
+	provider := idp.nameIDProvider()
+
+	if _, ok := provider.(NameIDManagementProvider); ok {
+		if location := idp.ManageNameIDURL.String(); location != "" {
+			descriptor.ManageNameIDServices = append(descriptor.ManageNameIDServices,
+				Endpoint{Binding: HTTPRedirectBinding, Location: location},
+				Endpoint{Binding: HTTPPostBinding, Location: location})
+		}
+
+		if location := idp.SOAPManageNameIDURL.String(); location != "" {
+			descriptor.ManageNameIDServices = append(descriptor.ManageNameIDServices,
+				Endpoint{Binding: SOAPBinding, Location: location})
+		}
+	}
+
+	if _, ok := provider.(NameIDMappingProvider); ok && idp.NameIDMappingPolicy != nil {
+		if location := idp.NameIDMappingURL.String(); location != "" {
+			descriptor.NameIDMappingServices = append(descriptor.NameIDMappingServices,
+				Endpoint{Binding: SOAPBinding, Location: location})
+		}
+	}
 }
 
 // ServeMetadata is an [http.HandlerFunc] that serves the IDP metadata.
