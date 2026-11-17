@@ -23,18 +23,19 @@ var ErrPartialLogout = errors.New("other session participants were not logged ou
 // LogoutSessionProvider is an optional interface of a SessionProvider, which is required to serve a
 // LogoutRequest. Without it those requests receive a Responder status.
 type LogoutSessionProvider interface {
-	// TerminateSession ends the session at the identity provider of the principal that
-	// req.Request.NameID identifies, and of the sessions that req.Request.SessionIndexes lists, if
-	// there are any. The request has been verified to come from the service provider in
-	// req.ServiceProviderMetadata. Other service providers are not told of the logout.
+	// GetLogoutSessions returns every session that req names, using req.MatchesSession. Without session
+	// indexes in the request that is every session of the principal with that NameID (SAMLCore §3.7.3.2).
+	// It must not rely on the session cookie alone, which a browser doesn't send with a cross-site POST.
+	// It returns an empty slice and no error when no session matches. The request has been verified to
+	// come from the service provider in req.ServiceProviderMetadata.
 	//
-	// Implementations should use req.MatchesSession to decide whether a session is the one the request
-	// names, as a service provider may only end the sessions it was told of (SAMLCore §3.7.3.2).
-	//
-	// It may set headers on w, such as to remove a cookie, but must not write the status or body,
-	// which are the LogoutResponse. An error other than ErrPartialLogout sends a Responder status, and
-	// is not sent to the service provider.
-	TerminateSession(w http.ResponseWriter, r *http.Request, req *IdpLogoutRequest) error
+	// An error sends a Responder status, and is not sent to the service provider.
+	GetLogoutSessions(r *http.Request, req *IdpLogoutRequest) ([]*Session, error)
+
+	// TerminateSession ends the session at the identity provider. It may set headers on w, such as to
+	// remove a cookie, but must not write the status or body, which are the LogoutResponse. An error
+	// other than ErrPartialLogout sends a Responder status, and is not sent to the service provider.
+	TerminateSession(w http.ResponseWriter, r *http.Request, session *Session) error
 }
 
 // IdpLogoutRequest is used by IdentityProvider to handle a single logout request from a service
@@ -118,12 +119,30 @@ func (req *IdpLogoutRequest) MatchesSession(session *Session) error {
 // ServeSLO handles a SAML LogoutRequest from a service provider, on the HTTP-Redirect or HTTP-POST
 // binding, and responds with a signed LogoutResponse. The request must be signed, as SAMLProfiles
 // §4.4.4.1 requires it to be authenticated. The session at the identity provider is ended by the
-// SessionProvider, which must implement LogoutSessionProvider. Other session participants are not
-// told of the logout.
+// SessionProvider, which must implement LogoutSessionProvider.
+//
+// If the SessionProvider also implements SessionParticipantProvider and LogoutStateProvider, the
+// other session participants are sent a LogoutRequest in turn through the browser before the
+// requester is answered (SAMLProfiles §4.4.3.2), and ServeSLO also handles their LogoutResponse. A
+// LogoutResponse for a logout that can't be found or has expired gets a StatusBadRequest response.
 //
 // A request that is invalid, can't be verified, or comes from a service provider with no
 // SingleLogoutService for a supported binding gets a StatusBadRequest response.
 func (idp *IdentityProvider) ServeSLO(w http.ResponseWriter, r *http.Request) {
+	isResponse, err := isLogoutResponse(r)
+	if err != nil {
+		idp.logger().Printf("failed to parse logout message: %s", err)
+		http.Error(w, http.StatusText(http.StatusBadRequest), http.StatusBadRequest)
+
+		return
+	}
+
+	if isResponse {
+		idp.serveLogoutResponse(w, r)
+
+		return
+	}
+
 	req, err := NewIdpLogoutRequest(idp, r)
 	if err != nil {
 		idp.logger().Printf("failed to parse logout request: %s", err)
@@ -145,17 +164,158 @@ func (idp *IdentityProvider) ServeSLO(w http.ResponseWriter, r *http.Request) {
 		idp.logger().Printf("cannot terminate session: the session provider does not implement LogoutSessionProvider")
 
 		status.StatusCode.Value = StatusResponder
-	} else if err := provider.TerminateSession(w, r, req); errors.Is(err, ErrPartialLogout) {
-		status.StatusCode.StatusCode = &StatusCode{Value: StatusPartialLogout}
-	} else if err != nil {
-		idp.logger().Printf("cannot terminate session: %s", err)
+	} else if sessions, err := provider.GetLogoutSessions(r, req); err != nil {
+		idp.logger().Printf("cannot find sessions to terminate: %s", err)
 
 		status.StatusCode.Value = StatusResponder
+	} else if _, _, _, err := idp.logoutProviders(); err != nil || len(sessions) == 0 {
+		// Without the interfaces of a propagated logout, or without a session to propagate, the sessions
+		// are ended and the requester is answered at once.
+		status = idp.terminateSessions(w, r, provider, sessions)
+	} else if err := idp.beginLogout(w, r, sessions, req.ServiceProviderMetadata.EntityID, "", req.logoutOrigin()); err != nil {
+		idp.logger().Printf("cannot begin logout: %s", err)
+
+		// The sessions are still ended, but the other participants were not told, so a Success is partial.
+		status = idp.terminateSessions(w, r, provider, sessions)
+		if status.StatusCode.Value == StatusSuccess && status.StatusCode.StatusCode == nil {
+			status.StatusCode.StatusCode = &StatusCode{Value: StatusPartialLogout}
+		}
+	} else {
+		return
 	}
 
 	if err := req.WriteResponse(w, status); err != nil {
 		idp.logger().Printf("failed to write logout response: %s", err)
 		http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
+	}
+}
+
+// logoutOrigin returns the LogoutOrigin which a propagated logout answers the request with.
+func (req *IdpLogoutRequest) logoutOrigin() *LogoutOrigin {
+	return &LogoutOrigin{
+		ServiceProviderEntityID: req.ServiceProviderMetadata.EntityID,
+		RequestID:               req.Request.ID,
+		SLOEndpoint:             *req.SLOEndpoint,
+		RelayState:              req.RelayState,
+	}
+}
+
+// isLogoutResponse reports whether the message to the single logout service is a SAMLResponse, in the query of a
+// GET or the form of a POST. The form is parsed with the limit that NewIdpLogoutRequest applies, and stays parsed
+// for it or NewIdpLogoutResponse.
+func isLogoutResponse(r *http.Request) (bool, error) {
+	switch r.Method {
+	case http.MethodGet:
+		return r.URL.Query().Has("SAMLResponse"), nil
+	case http.MethodPost:
+		if r.Body != nil {
+			r.Body = http.MaxBytesReader(nil, r.Body, maxAuthnRequestBodySize)
+		}
+
+		if err := r.ParseForm(); err != nil {
+			return false, err
+		}
+
+		return r.PostForm.Has("SAMLResponse"), nil
+	default:
+		return false, nil
+	}
+}
+
+// serveLogoutResponse handles a LogoutResponse from a participant of a logout, records its outcome and continues the
+// logout. A response to the outstanding request that can't be verified marks the participant failed, as it may still
+// be logged in. A response that can't be read, or is not to the outstanding request, is refused and changes nothing.
+func (idp *IdentityProvider) serveLogoutResponse(w http.ResponseWriter, r *http.Request) {
+	provider, ok := idp.SessionProvider.(LogoutStateProvider)
+	if !ok {
+		idp.logger().Printf("cannot handle logout response: the session provider does not implement LogoutStateProvider")
+		http.Error(w, http.StatusText(http.StatusBadRequest), http.StatusBadRequest)
+
+		return
+	}
+
+	resp, err := NewIdpLogoutResponse(idp, r)
+	if err != nil {
+		idp.logger().Printf("failed to parse logout response: %s", err)
+		http.Error(w, http.StatusText(http.StatusBadRequest), http.StatusBadRequest)
+
+		return
+	}
+
+	state, err := provider.LoadLogoutState(r, resp.RelayState)
+
+	switch {
+	case errors.Is(err, os.ErrNotExist):
+		idp.logger().Printf("cannot handle logout response: the logout is unknown")
+		http.Error(w, http.StatusText(http.StatusBadRequest), http.StatusBadRequest)
+
+		return
+	case err != nil:
+		idp.logger().Printf("cannot load logout state: %s", err)
+		http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
+
+		return
+	case !resp.Now.Before(state.ExpireTime):
+		idp.logger().Printf("cannot handle logout response: the logout expired at %s", state.ExpireTime)
+		http.Error(w, http.StatusText(http.StatusBadRequest), http.StatusBadRequest)
+
+		return
+	case state.Current < 0 || state.Current >= len(state.Participants):
+		idp.logger().Printf("cannot handle logout response: the logout has no outstanding request")
+		http.Error(w, http.StatusText(http.StatusBadRequest), http.StatusBadRequest)
+
+		return
+	}
+
+	if err = resp.Validate(state); errors.Is(err, ErrLogoutResponseUncorrelated) {
+		// A stale or replayed response, such as one from an earlier participant, says nothing of the current one,
+		// which is left outstanding.
+		idp.logger().Printf("cannot handle logout response: %s", err)
+		http.Error(w, http.StatusText(http.StatusBadRequest), http.StatusBadRequest)
+
+		return
+	} else if err != nil {
+		idp.logger().Printf("failed to validate logout response: %s", err)
+
+		participant := &state.Participants[state.Current]
+		participant.Outcome, participant.Reason = LogoutOutcomeFailed, err.Error()
+	} else {
+		resp.outcome(state)
+	}
+
+	state.PendingRequestID = ""
+
+	if err = idp.continueLogout(w, r, provider, state); err != nil {
+		idp.writeContinueLogoutError(w, err)
+	}
+}
+
+// terminateSessions ends each of the sessions, and returns the status of the LogoutResponse. A failure
+// of one session doesn't stop the others from being ended.
+func (idp *IdentityProvider) terminateSessions(w http.ResponseWriter, r *http.Request, provider LogoutSessionProvider, sessions []*Session) Status {
+	var failed, partial bool
+
+	for _, session := range sessions {
+		err := provider.TerminateSession(w, r, session)
+
+		switch {
+		case err == nil:
+		case errors.Is(err, ErrPartialLogout):
+			partial = true
+		default:
+			idp.logger().Printf("cannot terminate session: %s", err)
+
+			failed = true
+		}
+	}
+
+	switch {
+	case failed:
+		return Status{StatusCode: StatusCode{Value: StatusResponder}}
+	case partial:
+		return Status{StatusCode: StatusCode{Value: StatusSuccess, StatusCode: &StatusCode{Value: StatusPartialLogout}}}
+	default:
+		return Status{StatusCode: StatusCode{Value: StatusSuccess}}
 	}
 }
 

@@ -9,6 +9,7 @@ import (
 	"html/template"
 	"net/http"
 	"net/url"
+	"os"
 	"strings"
 	"time"
 
@@ -192,6 +193,15 @@ func (s *Server) existingSession(r *http.Request) (*saml.Session, error) {
 	if user.Revision != stored.UserRevision {
 		return nil, nil
 	}
+
+	// A session whose participants are closed is being logged out, or failed to end, and can't be sent an
+	// assertion, so the user authenticates again to a new session.
+	var closed bool
+	if err := s.Store.Get(fmt.Sprintf("/session-participants-closed/%s", stored.ID), &closed); err == nil {
+		return nil, nil
+	} else if !errors.Is(err, ErrNotFound) {
+		return nil, err
+	}
 	return &stored.Session, nil
 }
 
@@ -346,33 +356,194 @@ func (s *Server) sessionCookie(r *http.Request, value string, maxAge int) *http.
 	}
 }
 
-// TerminateSession implements saml.LogoutSessionProvider. It ends the session of the cookie in the
-// request, if the request names its principal and, when it lists any, its session index. Sessions in
-// other browsers are not ended.
+// GetLogoutSessions implements saml.LogoutSessionProvider. It returns the session of the cookie in the
+// request, if the request names its principal and, when it lists any, its session index, and an error
+// if it doesn't. Sessions in other browsers are not found.
 //
 // The cookie is SameSite=Lax, so a browser doesn't send it with the cross-site POST of the HTTP-POST
 // binding. That request gets an error rather than a success that would leave the session in place,
 // and service providers must use the HTTP-Redirect binding to end the session.
-func (s *Server) TerminateSession(w http.ResponseWriter, r *http.Request, req *saml.IdpLogoutRequest) error {
+func (s *Server) GetLogoutSessions(r *http.Request, req *saml.IdpLogoutRequest) ([]*saml.Session, error) {
 	if _, err := r.Cookie("session"); err != nil && r.Method == http.MethodPost {
-		return errors.New("the session cookie is not sent with a cross-site POST")
+		return nil, errors.New("the session cookie is not sent with a cross-site POST")
 	}
 
 	session, err := s.existingSession(r)
 	if err != nil {
-		return err
+		return nil, err
 	}
+
 	if session == nil {
-		return nil
+		return nil, nil
 	}
 
+	// A request that doesn't name the session is refused, as it is for the cross-site POST, rather than
+	// reported as a success.
 	if err := req.MatchesSession(session); err != nil {
+		return nil, err
+	}
+
+	return []*saml.Session{session}, nil
+}
+
+// TerminateSession implements saml.LogoutSessionProvider. It deletes the session and its participants and clears the cookie.
+func (s *Server) TerminateSession(w http.ResponseWriter, r *http.Request, session *saml.Session) error {
+	// The session is deleted under the lock of AddSessionParticipant, which refuses a session that no longer exists.
+	s.participantsMu.Lock()
+
+	err := s.Store.Delete(fmt.Sprintf("/sessions/%s", session.ID))
+	if err == nil {
+		err = s.Store.Delete(fmt.Sprintf("/session-participants/%s", session.ID))
+	}
+
+	if err == nil {
+		err = s.Store.Delete(fmt.Sprintf("/session-participants-closed/%s", session.ID))
+	}
+
+	s.participantsMu.Unlock()
+
+	if err != nil {
 		return err
 	}
 
-	if err := s.Store.Delete(fmt.Sprintf("/sessions/%s", session.ID)); err != nil {
-		return err
-	}
 	http.SetCookie(w, s.sessionCookie(r, "", -1))
+
 	return nil
 }
+
+// AddSessionParticipant implements saml.SessionParticipantProvider. Under the lock of CloseSessionParticipants it
+// appends the participant to those stored for the session, unless the session has ended or its participants are
+// closed.
+func (s *Server) AddSessionParticipant(_ *http.Request, session *saml.Session, participant saml.SessionParticipant) error {
+	s.participantsMu.Lock()
+	defer s.participantsMu.Unlock()
+
+	if err := s.Store.Get(fmt.Sprintf("/sessions/%s", session.ID), &saml.Session{}); errors.Is(err, ErrNotFound) {
+		return errors.New("the session has ended")
+	} else if err != nil {
+		return err
+	}
+
+	var closed bool
+	if err := s.Store.Get(fmt.Sprintf("/session-participants-closed/%s", session.ID), &closed); err == nil {
+		return saml.ErrSessionParticipantsClosed
+	} else if !errors.Is(err, ErrNotFound) {
+		return err
+	}
+
+	key := fmt.Sprintf("/session-participants/%s", session.ID)
+
+	participants := make([]saml.SessionParticipant, 0, 1)
+	if err := s.Store.Get(key, &participants); err != nil && !errors.Is(err, ErrNotFound) {
+		return err
+	}
+
+	return s.Store.Put(key, append(participants, participant))
+}
+
+// CloseSessionParticipants implements saml.SessionParticipantProvider. Under the lock of AddSessionParticipant it
+// marks the participants of the session closed and returns them. A closed session is no longer used for a login,
+// and TerminateSession removes the mark with the session.
+func (s *Server) CloseSessionParticipants(_ *http.Request, session *saml.Session) ([]saml.SessionParticipant, error) {
+	s.participantsMu.Lock()
+	defer s.participantsMu.Unlock()
+
+	if err := s.Store.Put(fmt.Sprintf("/session-participants-closed/%s", session.ID), true); err != nil {
+		return nil, err
+	}
+
+	var participants []saml.SessionParticipant
+	if err := s.Store.Get(fmt.Sprintf("/session-participants/%s", session.ID), &participants); err != nil && !errors.Is(err, ErrNotFound) {
+		return nil, err
+	}
+
+	return participants, nil
+}
+
+// SaveLogoutState implements saml.LogoutStateProvider. Under a lock it stores the state only if it follows the
+// stored revision, as the Store has no conditional write.
+func (s *Server) SaveLogoutState(_ *http.Request, state *saml.LogoutState) error {
+	s.logoutStatesMu.Lock()
+	defer s.logoutStatesMu.Unlock()
+
+	key := fmt.Sprintf("/logout-states/%s", state.ID)
+
+	stored := &saml.LogoutState{}
+
+	switch err := s.Store.Get(key, stored); {
+	case errors.Is(err, ErrNotFound):
+		if state.Revision != 1 {
+			return saml.ErrLogoutStateConflict
+		}
+	case err != nil:
+		return err
+	case stored.Revision+1 != state.Revision:
+		return saml.ErrLogoutStateConflict
+	}
+
+	return s.Store.Put(key, state)
+}
+
+// LoadLogoutState implements saml.LogoutStateProvider. It returns [os.ErrNotExist] if there is no such state.
+func (s *Server) LoadLogoutState(_ *http.Request, id string) (*saml.LogoutState, error) {
+	state := &saml.LogoutState{}
+	if err := s.Store.Get(fmt.Sprintf("/logout-states/%s", id), state); err != nil {
+		if errors.Is(err, ErrNotFound) {
+			return nil, os.ErrNotExist
+		}
+
+		return nil, err
+	}
+
+	return state, nil
+}
+
+// DeleteLogoutState implements saml.LogoutStateProvider.
+func (s *Server) DeleteLogoutState(_ *http.Request, id string) error {
+	s.logoutStatesMu.Lock()
+	defer s.logoutStatesMu.Unlock()
+
+	return s.Store.Delete(fmt.Sprintf("/logout-states/%s", id))
+}
+
+// HandleLogout handles `POST /logout/start`. It logs out the browser of the cookie's session, and of every
+// service provider it signed into, and returns to `/`. It is a POST that must come from the same origin, so
+// that another site can't log the user out with a link or a redirect.
+func (s *Server) HandleLogout(w http.ResponseWriter, r *http.Request) {
+	if err := s.checkLoginOrigin(r); err != nil {
+		s.logger.Printf("ERROR: refused logout from another origin: %s", err)
+		http.Error(w, http.StatusText(http.StatusForbidden), http.StatusForbidden)
+
+		return
+	}
+
+	session, err := s.existingSession(r)
+	if err != nil {
+		http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
+		return
+	}
+
+	if session == nil {
+		http.Redirect(w, r, "/", http.StatusFound)
+		return
+	}
+
+	if err := s.IDP.StartLogout(w, r, session, "/"); err != nil {
+		s.logger.Printf("ERROR: cannot start logout: %s", err)
+
+		// The session was ended, so the browser is logged out here even though no service provider was told.
+		if errors.Is(err, saml.ErrLogoutNotPropagated) {
+			http.Redirect(w, r, "/", http.StatusFound)
+
+			return
+		}
+
+		http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
+	}
+}
+
+var (
+	_ saml.LogoutSessionProvider      = (*Server)(nil)
+	_ saml.SessionParticipantProvider = (*Server)(nil)
+	_ saml.LogoutStateProvider        = (*Server)(nil)
+)

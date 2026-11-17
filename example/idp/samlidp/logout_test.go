@@ -2,6 +2,7 @@ package samlidp
 
 import (
 	"encoding/base64"
+	"errors"
 	stdhtml "html"
 	"net/http"
 	"net/http/httptest"
@@ -223,4 +224,128 @@ func signingServiceProvider(test *ServerTest) saml.ServiceProvider {
 	signer := test.SP
 	signer.SignatureMethod = rsaSHA256SignatureMethod
 	return signer
+}
+
+func TestServerStartLogoutVisitsServiceProvider(t *testing.T) {
+	test := logoutTest(t)
+	cookie := loggedInCookie(t, test)
+
+	w := postWithCookie(test, "/logout/start", cookie, nil)
+	assert.Assert(t, is.Equal(w.Code, http.StatusFound), "body: %s", w.Body.String())
+
+	location, err := url.Parse(w.Header().Get("Location"))
+	assert.NilError(t, err)
+	assert.Check(t, is.Equal(location.Scheme+"://"+location.Host+location.Path, "https://sp.example.com/saml2/slo"))
+	assert.Check(t, location.Query().Get("SAMLRequest") != "")
+	assert.Check(t, location.Query().Get("RelayState") != "")
+	assert.Check(t, location.Query().Get("Signature") != "")
+	assert.Check(t, is.Equal(location.Query().Get("SigAlg"), rsaSHA256SignatureMethod))
+
+	// The session of the IdP ends before the service provider is visited.
+	assert.Check(t, !sessionStored(t, test, cookie))
+}
+
+func TestServerStartLogoutWithoutSessionDoesNothing(t *testing.T) {
+	test := logoutTest(t)
+
+	w := postWithCookie(test, "/logout/start", nil, nil)
+	assert.Check(t, is.Equal(w.Code, http.StatusFound))
+	assert.Check(t, is.Equal(w.Header().Get("Location"), "/"))
+}
+
+func TestServerStartLogoutRefusesCrossSite(t *testing.T) {
+	test := logoutTest(t)
+	cookie := loggedInCookie(t, test)
+
+	w := postWithCookie(test, "/logout/start", cookie, map[string]string{"Sec-Fetch-Site": "cross-site"})
+	assert.Check(t, is.Equal(w.Code, http.StatusForbidden))
+	assert.Check(t, sessionStored(t, test, cookie))
+}
+
+func TestLogoutGetWithoutSAMLMessageDoesNotLogOut(t *testing.T) {
+	test := logoutTest(t)
+	cookie := loggedInCookie(t, test)
+
+	w := serveWithCookie(test, "https://idp.example.com/logout", cookie)
+	assert.Check(t, w.Code != http.StatusFound || !strings.Contains(w.Header().Get("Location"), "sp.example.com"))
+	assert.Check(t, sessionStored(t, test, cookie))
+}
+
+// postWithCookie sends a POST with the cookie and headers.
+func postWithCookie(test *ServerTest, target string, cookie *http.Cookie, headers map[string]string) *httptest.ResponseRecorder {
+	r := httptest.NewRequest("POST", target, nil)
+	if cookie != nil {
+		r.AddCookie(cookie)
+	}
+
+	for k, v := range headers {
+		r.Header.Set(k, v)
+	}
+
+	w := httptest.NewRecorder()
+	test.Server.ServeHTTP(w, r)
+
+	return w
+}
+
+func TestServerClosedSessionTakesNoParticipants(t *testing.T) {
+	test := logoutTest(t)
+	cookie := loggedInCookie(t, test)
+
+	session := &saml.Session{ID: cookie.Value}
+	participant := saml.SessionParticipant{ServiceProviderEntityID: "https://sp-two.example.com"}
+
+	before, err := test.Server.CloseSessionParticipants(nil, session)
+	assert.NilError(t, err)
+
+	err = test.Server.AddSessionParticipant(nil, session, participant)
+	assert.Check(t, errors.Is(err, saml.ErrSessionParticipantsClosed))
+
+	after, err := test.Server.CloseSessionParticipants(nil, session)
+	assert.NilError(t, err)
+	assert.Check(t, is.DeepEqual(after, before))
+
+	// A session that has ended takes no participants either, though the mark of closing went with it.
+	assert.NilError(t, test.Server.TerminateSession(httptest.NewRecorder(), httptest.NewRequest(http.MethodPost, "/logout/start", nil), session))
+	assert.Check(t, test.Server.AddSessionParticipant(nil, session, participant) != nil)
+}
+
+// A session whose participants are closed, such as because it failed to end, isn't used again, so that the user
+// logs in to a new session rather than being refused every assertion.
+func TestServerClosedSessionIsNotUsed(t *testing.T) {
+	test := logoutTest(t)
+	cookie := loggedInCookie(t, test)
+
+	r := httptest.NewRequest(http.MethodGet, "/sso", nil)
+	r.AddCookie(cookie)
+
+	session, err := test.Server.existingSession(r)
+	assert.NilError(t, err)
+	assert.Assert(t, session != nil)
+
+	_, err = test.Server.CloseSessionParticipants(nil, session)
+	assert.NilError(t, err)
+
+	session, err = test.Server.existingSession(r)
+	assert.NilError(t, err)
+	assert.Check(t, session == nil)
+}
+
+func TestServerSaveLogoutStateIsConditional(t *testing.T) {
+	test := logoutTest(t)
+
+	state := &saml.LogoutState{ID: "state", Revision: 1}
+	assert.NilError(t, test.Server.SaveLogoutState(nil, state))
+
+	stale := *state
+	state.Revision = 2
+	assert.NilError(t, test.Server.SaveLogoutState(nil, state))
+
+	stale.Revision = 2
+	assert.Check(t, errors.Is(test.Server.SaveLogoutState(nil, &stale), saml.ErrLogoutStateConflict))
+
+	// A deleted state can't be saved again by a request that loaded it earlier.
+	assert.NilError(t, test.Server.DeleteLogoutState(nil, state.ID))
+	state.Revision = 3
+	assert.Check(t, errors.Is(test.Server.SaveLogoutState(nil, state), saml.ErrLogoutStateConflict))
 }

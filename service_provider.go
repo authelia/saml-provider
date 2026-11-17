@@ -2066,6 +2066,8 @@ func findOneChild(parentEl *etree.Element, childNS string, childTag string) (*et
 }
 
 // findChild finds the specified child element. Returns (nil, nil) of the element doesn't exist.
+//
+//nolint:unparam // The namespace is a parameter of the lookup, and is the XML signature namespace at every call.
 func findChild(parentEl *etree.Element, childNS string, childTag string) (*etree.Element, error) {
 	children, err := findChildren(parentEl, childNS, childTag)
 	if err != nil {

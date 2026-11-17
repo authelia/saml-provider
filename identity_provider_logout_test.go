@@ -30,15 +30,25 @@ import (
 
 const logoutTestSLOURL = "https://idp.example.com/saml/slo"
 
-// logoutSessionProvider is a SessionProvider which records the logout requests it terminates.
+// logoutSessionProvider is a SessionProvider which returns the sessions it is given for a logout
+// request, and records the requests it looks up and the sessions it terminates.
 type logoutSessionProvider struct {
 	mockSessionProvider
-	terminated []*IdpLogoutRequest
-	err        error
+	sessions    []*Session
+	lookups     []*IdpLogoutRequest
+	terminated  []*Session
+	lookupError error
+	err         error
 }
 
-func (p *logoutSessionProvider) TerminateSession(w http.ResponseWriter, _ *http.Request, req *IdpLogoutRequest) error {
-	p.terminated = append(p.terminated, req)
+func (p *logoutSessionProvider) GetLogoutSessions(_ *http.Request, req *IdpLogoutRequest) ([]*Session, error) {
+	p.lookups = append(p.lookups, req)
+
+	return p.sessions, p.lookupError
+}
+
+func (p *logoutSessionProvider) TerminateSession(w http.ResponseWriter, _ *http.Request, session *Session) error {
+	p.terminated = append(p.terminated, session)
 
 	http.SetCookie(w, &http.Cookie{Name: "session", MaxAge: -1, Secure: true, HttpOnly: true, SameSite: http.SameSiteLaxMode})
 
@@ -55,7 +65,7 @@ func logoutTestIDP(t *testing.T) (*IdentityProviderTest, *logoutSessionProvider)
 	test.SP.LogoutBindings = []string{HTTPRedirectBinding, HTTPPostBinding}
 	test.SP.IDPMetadata = test.IDP.Metadata()
 
-	provider := &logoutSessionProvider{}
+	provider := &logoutSessionProvider{sessions: []*Session{{ID: "session-one", NameID: "alice", Index: "index-one"}}}
 	test.IDP.SessionProvider = provider
 
 	return test, provider
@@ -178,12 +188,13 @@ func TestServeSLORedirect(t *testing.T) {
 	assert.Check(t, test.SP.ValidateLogoutResponseRedirect(location, []string{id}))
 	assert.Check(t, strings.Contains(w.Header().Get("Set-Cookie"), "session="))
 
-	assert.Assert(t, is.Len(provider.terminated, 1))
-	terminated := provider.terminated[0]
-	assert.Check(t, is.Equal(terminated.Request.NameID.Value, "alice"))
-	assert.Check(t, is.DeepEqual(terminated.Request.SessionIndexes, []SessionIndex{{Value: "one"}, {Value: "two"}}))
-	assert.Check(t, is.Equal(terminated.ServiceProviderMetadata.EntityID, test.SP.MetadataURL.String()))
-	assert.Check(t, is.Equal(terminated.RelayState, "relay"))
+	assert.Assert(t, is.Len(provider.lookups, 1))
+	lookup := provider.lookups[0]
+	assert.Check(t, is.Equal(lookup.Request.NameID.Value, "alice"))
+	assert.Check(t, is.DeepEqual(lookup.Request.SessionIndexes, []SessionIndex{{Value: "one"}, {Value: "two"}}))
+	assert.Check(t, is.Equal(lookup.ServiceProviderMetadata.EntityID, test.SP.MetadataURL.String()))
+	assert.Check(t, is.Equal(lookup.RelayState, "relay"))
+	assert.Check(t, is.Len(provider.terminated, 1))
 }
 
 func TestServeSLOPost(t *testing.T) {
@@ -371,6 +382,38 @@ func TestServeSLOUsesSignedContent(t *testing.T) {
 
 	w := serveSLO(test, postLogoutBody(smuggled))
 	assert.Check(t, is.Equal(w.Code, http.StatusBadRequest))
+	assert.Check(t, is.Len(provider.terminated, 0))
+}
+
+func TestServeSLOTerminatesEverySession(t *testing.T) {
+	test, provider := logoutTestIDP(t)
+	provider.sessions = []*Session{{ID: "session-one", NameID: "alice"}, {ID: "session-two", NameID: "alice"}}
+	r, id := redirectLogoutRequest(t, &test.SP, nil)
+	location, response := redirectedLogoutResponse(t, serveSLO(test, r))
+	assert.Check(t, is.Equal(response.Status.StatusCode.Value, StatusSuccess))
+	assert.Check(t, response.Status.StatusCode.StatusCode == nil)
+	assert.Check(t, test.SP.ValidateLogoutResponseRedirect(location, []string{id}))
+	assert.Check(t, is.DeepEqual(provider.terminated, provider.sessions))
+}
+
+func TestServeSLONoSessionIsSuccess(t *testing.T) {
+	test, provider := logoutTestIDP(t)
+	provider.sessions = nil
+	r, id := redirectLogoutRequest(t, &test.SP, nil)
+	location, response := redirectedLogoutResponse(t, serveSLO(test, r))
+	assert.Check(t, is.Equal(response.Status.StatusCode.Value, StatusSuccess))
+	assert.Check(t, test.SP.ValidateLogoutResponseRedirect(location, []string{id}))
+	assert.Check(t, is.Len(provider.lookups, 1))
+	assert.Check(t, is.Len(provider.terminated, 0))
+}
+
+func TestServeSLOLookupFailure(t *testing.T) {
+	test, provider := logoutTestIDP(t)
+	provider.lookupError = errors.New("storage unavailable")
+	r, _ := redirectLogoutRequest(t, &test.SP, nil)
+	_, response := redirectedLogoutResponse(t, serveSLO(test, r))
+	assert.Check(t, is.Equal(response.Status.StatusCode.Value, StatusResponder))
+	assert.Check(t, response.Status.StatusMessage == nil)
 	assert.Check(t, is.Len(provider.terminated, 0))
 }
 

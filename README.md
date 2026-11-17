@@ -121,13 +121,57 @@ least the subset of SAML known as [interoperable SAML](https://kantarainitiative
 
 ### Identity Provider Limitations
 
-- **Single Logout:** `IdentityProvider.ServeSLO` handles a `LogoutRequest` from an SP on the HTTP Redirect or HTTP POST
-  binding at `IdentityProvider.LogoutURL`, and answers with a signed `LogoutResponse`. The request must be signed. Only
-  the session at the IdP ends, by a `SessionProvider` that implements `LogoutSessionProvider`, and other SPs are not
-  told. The IdP can't start a logout. `samlidp` ends the session of the browser if the request matches it with
-  `IdpLogoutRequest.MatchesSession`: the whole NameID (value, Format and qualifiers, none of them omitted) and any
-  session indexes must match, unless `IdentityProvider.LogoutNameIDValueOnly` is set to compare only the value. Its
-  `SameSite=Lax` cookie isn't sent with a cross-site POST, so SPs must use HTTP Redirect to end it.
+- **Single Logout:** only the front channel is supported. SOAP back-channel logout and the Asynchronous Single Logout
+  Profile Extension are not. `IdentityProvider.ServeSLO` handles a `LogoutRequest` from an SP on the HTTP Redirect or
+  HTTP POST binding at `IdentityProvider.LogoutURL`, and answers with a signed `LogoutResponse`. The request must be
+  signed. `IdentityProvider.StartLogout` starts a logout from the IdP (SAMLProfiles §4.4).
+  - A `SessionProvider` that implements `SessionParticipantProvider` has every SP that receives an assertion recorded as
+    a participant of the session, with the NameID and `SessionIndex` it was given. The participant is recorded each
+    time the response is sent, just before it is, by `IdpAuthnRequest.PublishResponse`, which `WriteResponse` calls; a
+    caller that sends the form of `PostBinding` itself must send it from `PublishResponse`.
+  - `StartLogout`, and a `LogoutRequest` from an SP, send the browser to each participant in turn, with the SP that sent
+    the request left out. A participant is sent a signed `LogoutRequest` at its `SingleLogoutService`, HTTP Redirect
+    preferred and else HTTP POST, and answers at `IdentityProvider.LogoutURL`. The logout state is saved between
+    requests by `LogoutStateProvider`, and expires after `IdentityProvider.LogoutStateLifetime` (5 minutes by default).
+    Each save carries the next `LogoutState.Revision`, and `SaveLogoutState` must store it only if it follows the stored
+    revision, atomically, so that concurrent copies of one response can't overwrite newer progress or recreate a
+    finished logout. The copy that loses gets `409 Conflict`.
+    It finishes by redirecting to the return URL of `StartLogout`, or with `LogoutResultHandler` if the
+    `SessionProvider` implements it, or by sending the SP that started it a `LogoutResponse`. If the state can't be
+    saved, the logout still finishes, as partial, so that the browser isn't stranded. Without a working store
+    duplicate responses can't be told apart, so the finish may happen more than once.
+  - A participant's `LogoutResponse` must be signed. One to the outstanding request that is invalid or unsigned, or
+    that has a status other than `Success`, or `Success` with a nested `PartialLogout` second-level status, counts as
+    not logged out. One that can't be read, or isn't to the outstanding request from that participant, such as a
+    replayed response of an earlier participant, is refused with `400 Bad Request` and changes nothing.
+  - The logout state is found by the `RelayState` alone, without a cookie, so a participant could answer for the
+    browser and receive the next participant's `LogoutRequest`. This is an accepted risk of the front channel.
+  - A logout begins with `SessionParticipantProvider.CloseSessionParticipants`, which must atomically return the
+    participants and stop `AddSessionParticipant` from recording more. A response is only sent once its participant is
+    recorded, so no assertion is sent once the logout has begun, and no SP is sent an assertion that the logout won't
+    reach. An assertion that was sent before the logout began, but which the browser delivers only after the logout
+    has visited its SP, can't be recalled, and is only bounded by its `NotOnOrAfter`. This is inherent to the front
+    channel.
+  - A session whose participants are closed must no longer be returned by the `SessionProvider`, even if ending it
+    fails, so that the user logs in to a new session rather than being refused every assertion.
+  - The session at the IdP ends first, by `LogoutSessionProvider.TerminateSession`, before any participant is visited
+    (SAMLProfiles §4.4.3.2 leaves the timing to the IdP). An SP that never returns the browser can't be detected, and
+    can't leave the user logged in at the IdP.
+  - The `LogoutResponse` to an SP that started the logout has a `Responder` status if the session provider can't find
+    the sessions (`GetLogoutSessions` fails) or the session didn't end. Otherwise it is `Success`, with a
+    `PartialLogout` second-level status (SAMLCore §3.2.2.2) if `TerminateSession` returned `ErrPartialLogout` or any
+    participant didn't report success.
+  - A participant without a `SingleLogoutService` that is HTTP Redirect or HTTP POST and passes the check of insecure
+    endpoints is skipped, and counts as not logged out.
+  - `StartLogout` and an SP-started logout need a `SessionProvider` that implements all of `LogoutSessionProvider`,
+    `SessionParticipantProvider` and `LogoutStateProvider`. Without them a request from an SP is only answered for the
+    session at the IdP.
+  - `samlidp` ends the session of the browser if the request matches it with `IdpLogoutRequest.MatchesSession`: the
+    whole NameID (value, Format and qualifiers, none of them omitted) and any session indexes must match, unless
+    `IdentityProvider.LogoutNameIDValueOnly` is set to compare only the value. Its `SameSite=Lax` cookie isn't sent
+    with a cross-site POST, so SPs must use HTTP Redirect to end it. `POST /logout/start` calls
+    `StartLogout` for the session of the cookie, and refuses with 403 a request that isn't from the same origin, so
+    that another site can't log the user out.
 - **Insecure endpoints:** assertions are bearer tokens, so responses are only sent to an SP endpoint that is `https`, or
   `http` on a loopback host (`localhost`, `*.localhost`, `127.0.0.0/8` or `::1`). This covers the
   `AssertionConsumerService` and the `SingleLogoutService` that receives a `LogoutResponse`. A request that names an
