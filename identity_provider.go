@@ -572,6 +572,16 @@ type IdentityProvider struct {
 	// DefaultSubjectEnforcer.
 	SubjectEnforcer SubjectEnforcer
 
+	// IncludeSessionNotOnOrAfter makes DefaultAssertionMaker state Session.ExpireTime as the SessionNotOnOrAfter of
+	// the AuthnStatement, unless it is zero. SAMLCore §2.7.2 defines it as "a time instant at which the session
+	// between the principal identified by the subject and the SAML authority issuing this statement MUST be
+	// considered ended", and SAMLProf §4.1.4.3 requires that a service provider's security context "SHOULD be
+	// discarded once this time is reached", so a service provider that honours it ends its own session when this
+	// one ends. It is off by default because that is not what every deployment wants. When it is on, a session
+	// that has already expired is refused rather than asserted, because the service provider would discard it at
+	// once.
+	IncludeSessionNotOnOrAfter bool
+
 	// EncryptionCertificateEnforcer decides whether the encryption certificate of a service provider
 	// may be used. Defaults to a DefaultEncryptionCertificateEnforcer with no options set, which
 	// refuses a certificate that is expired or not yet valid, has an RSA key shorter than 2048 bits,
@@ -1928,6 +1938,18 @@ type DefaultAssertionMaker struct {
 // MakeAssertion implements AssertionMaker. It produces a SAML assertion from the
 // given request and assigns it to req.Assertion.
 func (DefaultAssertionMaker) MakeAssertion(req *IdpAuthnRequest, session *Session) error {
+	// SAMLCore §2.7.2 requires SessionNotOnOrAfter to be encoded in UTC.
+	var sessionNotOnOrAfter *time.Time
+
+	if req.IDP.IncludeSessionNotOnOrAfter && !session.ExpireTime.IsZero() {
+		if !req.Now.Before(session.ExpireTime) {
+			return fmt.Errorf("the session expired at %s", session.ExpireTime)
+		}
+
+		expire := session.ExpireTime.UTC()
+		sessionNotOnOrAfter = &expire
+	}
+
 	service := req.AttributeConsumingService()
 
 	// The index is not included because the request may not be authenticated.
@@ -2004,8 +2026,9 @@ func (DefaultAssertionMaker) MakeAssertion(req *IdpAuthnRequest, session *Sessio
 		},
 		AuthnStatements: []AuthnStatement{
 			{
-				AuthnInstant: session.CreateTime,
-				SessionIndex: session.Index,
+				AuthnInstant:        session.CreateTime,
+				SessionIndex:        session.Index,
+				SessionNotOnOrAfter: sessionNotOnOrAfter,
 				SubjectLocality: &SubjectLocality{
 					Address: address,
 				},
