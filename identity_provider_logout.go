@@ -82,7 +82,10 @@ type IdpLogoutRequest struct {
 // MatchesSession returns an error unless the request is for the session. The NameID of the request must be
 // the complete identifier the identity provider asserted for the session (SAMLCore §3.7.3.2, §8.3): the
 // same value, Format, NameQualifier and SPNameQualifier, and the same SPProvidedID, which is none unless
-// one was asserted and recorded in a SessionParticipant. An omitted or unspecified
+// one was asserted and recorded in a SessionParticipant, or the service provider has since registered it with
+// a ManageNameIDRequest: the alias that NameIDManagementProvider.SPProvidedID returns is then part of the
+// identifier (SAMLCore §3.6.3, §8.3.7), so a request which carries it matches the sessions that were
+// established before it was registered. An omitted or unspecified
 // Format, or an omitted qualifier, doesn't match. This is compared with what DefaultAssertionMaker
 // asserts, so an identity provider with a custom AssertionMaker that asserts another identifier needs
 // IdentityProvider.LogoutNameIDValueOnly, which compares only the value, or its own check. If the request
@@ -126,7 +129,7 @@ func (req *IdpLogoutRequest) MatchesSession(r *http.Request, session *Session) e
 func (req *IdpLogoutRequest) matchesSessionNameID(r *http.Request, session *Session, nameID *NameID) error {
 	err := errors.New("the session has no NameIDFormat, so only a NameID asserted to a session participant matches")
 	if session.NameIDFormat != "" {
-		err = req.matchesSessionNameIDValue(session, nameID)
+		err = req.matchesSessionNameIDValue(r, session, nameID)
 	}
 
 	if err == nil || req.ServiceProviderMetadata == nil {
@@ -143,24 +146,67 @@ func (req *IdpLogoutRequest) matchesSessionNameID(r *http.Request, session *Sess
 		return fmt.Errorf("cannot load the participants of the session: %w", perr)
 	}
 
-	valueOnly := req.IDP.LogoutNameIDValueOnly
+	matches, perr := req.matchesParticipantNameID(r, participants, nameID)
+	if perr != nil {
+		return perr
+	}
 
-	if slices.ContainsFunc(participants, func(p SessionParticipant) bool {
-		if p.ServiceProviderEntityID != req.ServiceProviderMetadata.EntityID || p.NameID.Value != nameID.Value {
-			return false
-		}
-
-		return valueOnly || (p.NameID.SPProvidedID == nameID.SPProvidedID && p.NameID.Format == nameID.Format &&
-			p.NameID.NameQualifier == nameID.NameQualifier && p.NameID.SPNameQualifier == nameID.SPNameQualifier)
-	}) {
+	if matches {
 		return nil
 	}
 
 	return err
 }
 
+// matchesParticipantNameID reports whether nameID is the identifier that one of participants records for the
+// requesting service provider: exactly, or only its value with LogoutNameIDValueOnly. The SPProvidedID may also
+// be the one that the service provider has registered since the participant was recorded.
+func (req *IdpLogoutRequest) matchesParticipantNameID(r *http.Request, participants []SessionParticipant, nameID *NameID) (bool, error) {
+	for _, p := range participants {
+		if p.ServiceProviderEntityID != req.ServiceProviderMetadata.EntityID || p.NameID.Value != nameID.Value {
+			continue
+		}
+
+		if req.IDP.LogoutNameIDValueOnly {
+			return true, nil
+		}
+
+		if p.NameID.Format != nameID.Format || p.NameID.NameQualifier != nameID.NameQualifier || p.NameID.SPNameQualifier != nameID.SPNameQualifier {
+			continue
+		}
+
+		if p.NameID.SPProvidedID == nameID.SPProvidedID {
+			return true, nil
+		}
+
+		// The participant was recorded with the identifier as it was asserted, and the service provider may
+		// have registered another SPProvidedID since.
+		if registered, err := req.registeredSPProvidedID(r, nameID); err != nil || registered {
+			return registered, err
+		}
+	}
+
+	return false, nil
+}
+
+// registeredSPProvidedID reports whether the SPProvidedID of nameID, which is the identifier of the request, is
+// the alias that the requesting service provider most recently registered for the principal with a
+// ManageNameIDRequest (SAMLCore §3.6.3). An identifier without one is not asked about.
+func (req *IdpLogoutRequest) registeredSPProvidedID(r *http.Request, nameID *NameID) (bool, error) {
+	if nameID.SPProvidedID == "" || req.ServiceProviderMetadata == nil {
+		return false, nil
+	}
+
+	alias, err := req.IDP.spProvidedID(r, req.ServiceProviderMetadata.EntityID, nameID)
+	if err != nil {
+		return false, fmt.Errorf("cannot find the SPProvidedID of the NameID: %w", err)
+	}
+
+	return alias != "" && alias == nameID.SPProvidedID, nil
+}
+
 // matchesSessionNameIDValue compares nameID with the NameID of the session, whose NameIDFormat is set.
-func (req *IdpLogoutRequest) matchesSessionNameIDValue(session *Session, nameID *NameID) error {
+func (req *IdpLogoutRequest) matchesSessionNameIDValue(r *http.Request, session *Session, nameID *NameID) error {
 	if nameID.Value != session.NameID {
 		return errors.New("the NameID value is not that of the session")
 	}
@@ -192,7 +238,14 @@ func (req *IdpLogoutRequest) matchesSessionNameIDValue(session *Session, nameID 
 		}
 
 		if nameID.SPProvidedID != "" {
-			return errors.New("the NameID has a SPProvidedID, which the identity provider does not assert")
+			registered, err := req.registeredSPProvidedID(r, nameID)
+			if err != nil {
+				return err
+			}
+
+			if !registered {
+				return errors.New("the NameID has a SPProvidedID, which is not one the service provider registered")
+			}
 		}
 	}
 

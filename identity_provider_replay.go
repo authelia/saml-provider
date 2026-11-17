@@ -56,6 +56,9 @@ const (
 	replayKindAttributeQuery     = "attributequery"
 	replayKindAuthnQuery         = "authnquery"
 	replayKindAssertionIDRequest = "assertionidrequest"
+
+	replayKindManageNameIDRequest  = "managenameidrequest"
+	replayKindNameIDMappingRequest = "nameidmappingrequest"
 )
 
 // replayKey returns the key of a ReplayStore for a value of the kind, which parts identify. The parts are
@@ -100,7 +103,8 @@ func (idp *IdentityProvider) replayStore() ReplayStore {
 // for an authenticated user, and has passed every other check, so that nobody else can fill the store. That is
 // after the signature is verified and after the checks of the request stage, so the endpoint for the response is
 // already resolved from metadata. Every handler of a request calls it: ServeSSO and ServeECP through
-// IdpAuthnRequest.CheckReplay, IdpLogoutRequest.Validate, and the assertion query and request services.
+// IdpAuthnRequest.CheckReplay, IdpLogoutRequest.Validate, the assertion query and request services, and the
+// Validate of the name identifier management and mapping requests.
 //
 // The error is a *statusError. A replay is Requester with RequestDenied and wraps ErrReplayed. A failure of the
 // store is Responder, as the message is refused although nothing is known to be wrong with it.

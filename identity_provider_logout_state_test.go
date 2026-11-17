@@ -63,7 +63,7 @@ func TestNewLogoutStateGroupKeyIgnoresSPProvidedIDAndEmptyIndexes(t *testing.T) 
 	endpoint := &Endpoint{Location: "https://sp.example.com/slo"}
 
 	indexes := func(i int) []SessionIndex {
-		request, err := idp.makeLogoutRequest(state, &state.Participants[i], nil, endpoint)
+		request, err := idp.makeLogoutRequest(nil, state, &state.Participants[i], nil, endpoint)
 		assert.NilError(t, err)
 
 		return request.SessionIndexes

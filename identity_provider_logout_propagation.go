@@ -65,7 +65,21 @@ func (idp *IdentityProvider) logoutRequestEndpoint(metadata *EntityDescriptor, b
 // asserted its NameID as an EncryptedID is identified with an EncryptedID again (SAMLCore §3.7.1), encrypted to
 // its encryption key before the request is signed (SAMLCore §6.2). If that fails an error is returned, rather than
 // a request which shows the NameID.
-func (idp *IdentityProvider) makeLogoutRequest(state *LogoutState, p *LogoutParticipant, metadata *EntityDescriptor, endpoint *Endpoint) (*LogoutRequest, error) {
+//
+// The NameID is the one that was asserted to the participant, with the SPProvidedID that it has registered
+// since with a ManageNameIDRequest, if any, which SAMLCore §3.6.3 requires the identity provider to include from
+// then on (see NameIDManagementProvider.SPProvidedID). If that can't be found, the failure is logged and the
+// NameID is sent as it was asserted, rather than the participant being left logged in.
+func (idp *IdentityProvider) makeLogoutRequest(r *http.Request, state *LogoutState, p *LogoutParticipant, metadata *EntityDescriptor, endpoint *Endpoint) (*LogoutRequest, error) {
+	nameID := p.NameID
+
+	switch alias, err := idp.spProvidedID(r, p.ServiceProviderEntityID, &nameID); {
+	case err != nil:
+		idp.logger().Printf("cannot find the SPProvidedID of the NameID of %s: %s", p.ServiceProviderEntityID, err)
+	case alias != "":
+		nameID.SPProvidedID = alias
+	}
+
 	request := &LogoutRequest{
 		ID:           fmt.Sprintf("id-%x", randomBytes(20)),
 		Version:      "2.0",
@@ -76,7 +90,7 @@ func (idp *IdentityProvider) makeLogoutRequest(state *LogoutState, p *LogoutPart
 			Format: "urn:oasis:names:tc:SAML:2.0:nameid-format:entity",
 			Value:  idp.MetadataURL.String(),
 		},
-		NameID: &p.NameID,
+		NameID: &nameID,
 	}
 
 	for _, index := range p.SessionIndexes {
@@ -92,7 +106,7 @@ func (idp *IdentityProvider) makeLogoutRequest(state *LogoutState, p *LogoutPart
 		return nil, fmt.Errorf("cannot encrypt the NameID of the logout request: %w", err)
 	}
 
-	if request.EncryptedID, err = encrypter.encryptNameID(&p.NameID); err != nil {
+	if request.EncryptedID, err = encrypter.encryptNameID(&nameID); err != nil {
 		return nil, fmt.Errorf("cannot encrypt the NameID of the logout request: %w", err)
 	}
 
@@ -146,7 +160,7 @@ func (idp *IdentityProvider) continueLogout(w http.ResponseWriter, r *http.Reque
 			continue
 		}
 
-		request, err := idp.makeLogoutRequest(state, participant, metadata, endpoint)
+		request, err := idp.makeLogoutRequest(r, state, participant, metadata, endpoint)
 		if err != nil {
 			skipLogoutParticipant(participant, err)
 

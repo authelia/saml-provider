@@ -48,7 +48,7 @@ func (idp *IdentityProvider) sendSOAPLogoutRequest(r *http.Request, state *Logou
 
 	participant := &state.Participants[i]
 
-	request, err := idp.makeLogoutRequest(state, participant, metadata, endpoint)
+	request, err := idp.makeLogoutRequest(r, state, participant, metadata, endpoint)
 	if err != nil {
 		skipLogoutParticipant(participant, err)
 
@@ -81,49 +81,12 @@ func (idp *IdentityProvider) exchangeSOAPLogoutRequest(r *http.Request, state *L
 		return fmt.Errorf("cannot sign the logout request: %w", err)
 	}
 
-	doc, envelope := newSOAPEnvelope()
-	envelope.CreateElement("soapenv:Body").AddChild(el)
-
-	buf, err := doc.WriteToBytes()
-	if err != nil {
-		return fmt.Errorf("cannot serialize the logout request: %w", err)
-	}
-
-	req, err := http.NewRequestWithContext(r.Context(), http.MethodPost, endpoint.Location, bytes.NewReader(buf)) //nolint:gosec // G704: the URL is from the service provider metadata and passed CheckServiceProviderBackChannelEndpoint.
-	if err != nil {
-		return fmt.Errorf("cannot make the logout request: %w", err)
-	}
-
-	req.Header.Set("Content-Type", "text/xml; charset=utf-8")
-	// SOAP 1.1 §6.1.1 makes the value a quoted string.
-	req.Header.Set("SOAPAction", `"`+soapActionSAML+`"`)
-
-	res, err := idp.httpClient().Do(req) //nolint:gosec // G704: as above.
-	if err != nil {
-		return fmt.Errorf("cannot send the logout request: %w", err)
-	}
-
-	defer res.Body.Close()
-
-	if res.StatusCode != http.StatusOK {
-		return fmt.Errorf("the service provider answered with HTTP status %d", res.StatusCode)
-	}
-
-	body, err := io.ReadAll(io.LimitReader(res.Body, soapMaxMessageSize+1))
-	if err != nil {
-		return fmt.Errorf("cannot read the logout response: %w", err)
-	}
-
-	if len(body) > soapMaxMessageSize {
-		return fmt.Errorf("the logout response is larger than %d bytes", soapMaxMessageSize)
-	}
-
-	message, err := soapResponseMessage(body)
+	message, overTLS, err := idp.postSOAPMessage(r, endpoint.Location, el, "logout")
 	if err != nil {
 		return err
 	}
 
-	resp := newSOAPLogoutResponse(idp, r, message, res.TLS != nil)
+	resp := newSOAPLogoutResponse(idp, r, message, overTLS)
 
 	if err = resp.Validate(state); err != nil {
 		return fmt.Errorf("invalid logout response: %w", err)
@@ -134,12 +97,62 @@ func (idp *IdentityProvider) exchangeSOAPLogoutRequest(r *http.Request, state *L
 	return nil
 }
 
+// postSOAPMessage posts the signed message el to location in a SOAP envelope with HTTPClient, and returns the
+// message of the answer, serialized standalone, and whether it came back over TLS. The location must be an
+// endpoint from metadata which passed CheckServiceProviderBackChannelEndpoint. kind names the protocol in the
+// errors, such as logout.
+func (idp *IdentityProvider) postSOAPMessage(r *http.Request, location string, el *etree.Element, kind string) ([]byte, bool, error) {
+	doc, envelope := newSOAPEnvelope()
+	envelope.CreateElement("soapenv:Body").AddChild(el)
+
+	buf, err := doc.WriteToBytes()
+	if err != nil {
+		return nil, false, fmt.Errorf("cannot serialize the %s request: %w", kind, err)
+	}
+
+	req, err := http.NewRequestWithContext(r.Context(), http.MethodPost, location, bytes.NewReader(buf)) //nolint:gosec // G704: the URL is from the service provider metadata and passed CheckServiceProviderBackChannelEndpoint.
+	if err != nil {
+		return nil, false, fmt.Errorf("cannot make the %s request: %w", kind, err)
+	}
+
+	req.Header.Set("Content-Type", "text/xml; charset=utf-8")
+	// SOAP 1.1 §6.1.1 makes the value a quoted string.
+	req.Header.Set("SOAPAction", `"`+soapActionSAML+`"`)
+
+	res, err := idp.httpClient().Do(req) //nolint:gosec // G704: as above.
+	if err != nil {
+		return nil, false, fmt.Errorf("cannot send the %s request: %w", kind, err)
+	}
+
+	defer res.Body.Close()
+
+	if res.StatusCode != http.StatusOK {
+		return nil, false, fmt.Errorf("the service provider answered with HTTP status %d", res.StatusCode)
+	}
+
+	body, err := io.ReadAll(io.LimitReader(res.Body, soapMaxMessageSize+1))
+	if err != nil {
+		return nil, false, fmt.Errorf("cannot read the %s response: %w", kind, err)
+	}
+
+	if len(body) > soapMaxMessageSize {
+		return nil, false, fmt.Errorf("the %s response is larger than %d bytes", kind, soapMaxMessageSize)
+	}
+
+	message, err := soapResponseMessage(body, kind)
+	if err != nil {
+		return nil, false, err
+	}
+
+	return message, res.TLS != nil, nil
+}
+
 // soapResponseMessage returns the message in the SOAP envelope of a response, serialized standalone, or an error if
-// the envelope is invalid or carries a Fault.
-func soapResponseMessage(body []byte) ([]byte, error) {
+// the envelope is invalid or carries a Fault. kind names the protocol in the errors.
+func soapResponseMessage(body []byte, kind string) ([]byte, error) {
 	_, _, message, err := parseSOAPEnvelope(body)
 	if err != nil {
-		return nil, fmt.Errorf("invalid logout response envelope: %w", err)
+		return nil, fmt.Errorf("invalid %s response envelope: %w", kind, err)
 	}
 
 	if message.Tag == "Fault" && message.NamespaceURI() == soapEnvelopeNS {
@@ -151,7 +164,7 @@ func soapResponseMessage(body []byte) ([]byte, error) {
 
 	buf, err := doc.WriteToBytes()
 	if err != nil {
-		return nil, fmt.Errorf("cannot serialize the logout response: %w", err)
+		return nil, fmt.Errorf("cannot serialize the %s response: %w", kind, err)
 	}
 
 	return buf, nil
