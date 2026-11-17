@@ -197,7 +197,7 @@ func TestArtifactResponseElement(t *testing.T) {
 		Version:      "version",
 		IssueInstant: issueInstant,
 		Status:       status,
-		Response: Response{
+		Response: &Response{
 			ID:           "index",
 			InResponseTo: "ID",
 			Version:      "version",
@@ -224,7 +224,7 @@ func TestArtifactResponseElement(t *testing.T) {
 
 	x, err = xml.Marshal(expected)
 	assert.Check(t, err)
-	assert.Check(t, is.Equal(`<ArtifactResponse xmlns="urn:oasis:names:tc:SAML:2.0:protocol" ID="index" InResponseTo="ID" Version="version" IssueInstant="2020-07-21T12:30:45Z"><Status xmlns="urn:oasis:names:tc:SAML:2.0:protocol"><StatusCode xmlns="urn:oasis:names:tc:SAML:2.0:protocol" Value="value"></StatusCode></Status><Response xmlns="urn:oasis:names:tc:SAML:2.0:protocol" ID="index" InResponseTo="ID" Version="version" IssueInstant="2020-07-21T12:30:45Z" Destination="destination" Consent="consent"><Status xmlns="urn:oasis:names:tc:SAML:2.0:protocol"><StatusCode xmlns="urn:oasis:names:tc:SAML:2.0:protocol" Value="value"></StatusCode></Status></Response></ArtifactResponse>`,
+	assert.Check(t, is.Equal(`<ArtifactResponse xmlns="urn:oasis:names:tc:SAML:2.0:protocol" ID="index" InResponseTo="ID" Version="version" IssueInstant="2020-07-21T12:30:45Z"><Status xmlns="urn:oasis:names:tc:SAML:2.0:protocol"><StatusCode xmlns="urn:oasis:names:tc:SAML:2.0:protocol" Value="value"></StatusCode></Status><Response xmlns="urn:oasis:names:tc:SAML:2.0:protocol" IssueInstant="2020-07-21T12:30:45Z" ID="index" InResponseTo="ID" Version="version" Destination="destination" Consent="consent"><Status xmlns="urn:oasis:names:tc:SAML:2.0:protocol"><StatusCode xmlns="urn:oasis:names:tc:SAML:2.0:protocol" Value="value"></StatusCode></Status></Response></ArtifactResponse>`,
 		string(x)))
 }
 

@@ -427,7 +427,6 @@ type IDPSSODescriptor struct {
 	WantAuthnRequestsSigned *bool `xml:",attr"`
 
 	SingleSignOnServices       []Endpoint  `xml:"SingleSignOnService"`
-	ArtifactResolutionServices []Endpoint  `xml:"ArtifactResolutionService"`
 	NameIDMappingServices      []Endpoint  `xml:"NameIDMappingService"`
 	AssertionIDRequestServices []Endpoint  `xml:"AssertionIDRequestService"`
 	AttributeProfiles          []string    `xml:"AttributeProfile"`

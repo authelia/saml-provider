@@ -392,6 +392,7 @@ type ArtifactResolve struct {
 	ID           string    `xml:",attr"`
 	Version      string    `xml:",attr"`
 	IssueInstant time.Time `xml:",attr"`
+	Destination  string    `xml:",attr,omitempty"`
 	Issuer       *Issuer   `xml:"urn:oasis:names:tc:SAML:2.0:assertion Issuer"`
 	Signature    *etree.Element
 	Artifact     string `xml:"urn:oasis:names:tc:SAML:2.0:protocol Artifact"`
@@ -415,6 +416,10 @@ func (r *ArtifactResolve) Element() *etree.Element {
 	el.CreateAttr("ID", r.ID)
 	el.CreateAttr("Version", r.Version)
 	el.CreateAttr("IssueInstant", r.IssueInstant.Format(timeFormat))
+
+	if r.Destination != "" {
+		el.CreateAttr("Destination", r.Destination)
+	}
 
 	if r.Issuer != nil {
 		el.AddChild(r.Issuer.Element())
@@ -481,7 +486,8 @@ func (r *ArtifactResolve) UnmarshalXML(d *xml.Decoder, start xml.StartElement) e
 	return nil
 }
 
-// ArtifactResponse represents the SAML object of the same name.
+// ArtifactResponse represents the SAML object of the same name. The message that it returns is optional (SAMLCore
+// §3.5.2): Response is nil for an empty response, or when the message is not a Response.
 type ArtifactResponse struct {
 	XMLName      xml.Name  `xml:"urn:oasis:names:tc:SAML:2.0:protocol ArtifactResponse"`
 	ID           string    `xml:",attr"`
@@ -490,8 +496,8 @@ type ArtifactResponse struct {
 	IssueInstant time.Time `xml:",attr"`
 	Issuer       *Issuer   `xml:"urn:oasis:names:tc:SAML:2.0:assertion Issuer"`
 	Signature    *etree.Element
-	Status       Status   `xml:"urn:oasis:names:tc:SAML:2.0:protocol Status"`
-	Response     Response `xml:"urn:oasis:names:tc:SAML:2.0:protocol Response"`
+	Status       Status    `xml:"urn:oasis:names:tc:SAML:2.0:protocol Status"`
+	Response     *Response `xml:"urn:oasis:names:tc:SAML:2.0:protocol Response"`
 }
 
 // Element returns an etree.Element representing the object in XML form.
@@ -527,7 +533,10 @@ func (r *ArtifactResponse) Element() *etree.Element {
 	}
 
 	el.AddChild(r.Status.Element())
-	el.AddChild(r.Response.Element())
+
+	if r.Response != nil {
+		el.AddChild(r.Response.Element())
+	}
 
 	return el
 }
