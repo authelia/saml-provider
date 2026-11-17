@@ -183,6 +183,21 @@ func TestIDPCanProduceMetadata(t *testing.T) {
 		ValidUntil:    TimeNow().Add(DefaultValidDuration),
 		CacheDuration: DefaultValidDuration,
 		EntityID:      "https://idp.example.com/saml/metadata",
+		Extensions: &Extensions{
+			DigestMethods: []DigestMethod{
+				{Algorithm: "http://www.w3.org/2001/04/xmlenc#sha256"},
+				{Algorithm: "http://www.w3.org/2001/04/xmldsig-more#sha384"},
+				{Algorithm: "http://www.w3.org/2001/04/xmlenc#sha512"},
+			},
+			SigningMethods: []SigningMethod{
+				{Algorithm: "http://www.w3.org/2001/04/xmldsig-more#rsa-sha256"},
+				{Algorithm: "http://www.w3.org/2001/04/xmldsig-more#rsa-sha384"},
+				{Algorithm: "http://www.w3.org/2001/04/xmldsig-more#rsa-sha512"},
+				{Algorithm: "http://www.w3.org/2001/04/xmldsig-more#ecdsa-sha256"},
+				{Algorithm: "http://www.w3.org/2001/04/xmldsig-more#ecdsa-sha384"},
+				{Algorithm: "http://www.w3.org/2001/04/xmldsig-more#ecdsa-sha512"},
+			},
+		},
 		IDPSSODescriptors: []IDPSSODescriptor{
 			{
 				SSODescriptor: SSODescriptor{

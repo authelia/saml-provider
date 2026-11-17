@@ -97,6 +97,7 @@ least the subset of SAML known as [interoperable SAML](https://kantarainitiative
 | Sign `Response` and `Assertion`              | ✅  | N/A |
 | Sign only the `Response` or the `Assertion`, for each SP | ✅  | N/A |
 | Signature and digest algorithm for each SP   | ✅  | N/A |
+| Negotiate signature and digest algorithms from metadata[^algsupport] | ✅  | ❌  |
 | Verify signed `Response` and `Assertion`     | N/A | ✅  |
 | Sign `AuthnRequest`                          | N/A | ✅  |
 | Verify signed `AuthnRequest`                 | ✅  | N/A |
@@ -108,6 +109,11 @@ least the subset of SAML known as [interoperable SAML](https://kantarainitiative
 
 [^sha1]: The IdP refuses a signature that it receives if its signature or digest algorithm is SHA-1, unless
     `IdentityProvider.SignatureMethods` and `DigestMethods` list it. The SP accepts SHA-1.
+
+[^algsupport]: The Metadata Profile for Algorithm Support. The IdP publishes the algorithms it accepts as
+    `alg:SigningMethod` and `alg:DigestMethod`, and signs for each SP with the first algorithms its metadata lists
+    that the IdP can use. The SP publishes none and signs with its `SignatureMethod`. Encryption algorithms are
+    negotiated from the `EncryptionMethod` elements of a key, see **Encrypt `Assertion`**.
 
 [^ecdsa]: Signatures use the `r||s` encoding XML Signature requires, and DER signatures are rejected unless
     `SignatureVerifier` is set. ECDSA keys cannot be used for assertion encryption or decryption, which require RSA,
@@ -132,7 +138,7 @@ least the subset of SAML known as [interoperable SAML](https://kantarainitiative
 | Consume metadata extensions[^mdext] | ✅  | ⚠️ |
 
 [^mdext]: `mdui:UIInfo` and `mdui:DiscoHints`, `mdattr:EntityAttributes`, `shibmd:Scope`, `mdrpi:RegistrationInfo`
-    and `mdrpi:PublicationInfo` are typed, and every other extension is kept as it was parsed. The SP parses them
+    and `mdrpi:PublicationInfo`, `alg:DigestMethod` and `alg:SigningMethod` are typed, and every other extension is kept as it was parsed. The SP parses them
     with the metadata of an IdP but doesn't act on them, see the notes below.
 
 ### Identity Provider Limitations
@@ -587,11 +593,27 @@ least the subset of SAML known as [interoperable SAML](https://kantarainitiative
   An identifier that isn't supported is a configuration error, which refuses every signed message.
   `MetadataVerifier` has the same two fields, with the same default, for the signature of metadata. The lists don't
   restrict `SignatureMethod`, which is what the IdP signs with, and the SP of this package still accepts SHA-1.
+- **Published signature algorithms:** the metadata of the IdP lists what **Accepted signature algorithms** describes,
+  as the Metadata Profile for Algorithm Support defines: an `alg:DigestMethod` for each of `DigestMethods` and an
+  `alg:SigningMethod` for each of `SignatureMethods`, or for the defaults, in the `Extensions` of the
+  `EntityDescriptor`. They are at the entity because the lists hold for every signature the IdP verifies, whichever
+  role the message is for, and what an entity lists applies to each role that lists nothing of its own (§2.5). The
+  order of the two settings is the order published, which an SP takes as the order of preference, so list SHA-1 last
+  if it must be accepted; it is never published unless it is listed. Nothing is published that the IdP would refuse
+  (SAML2Int SDP-MD04), and nothing at all while a list names an algorithm that isn't supported. No `MinKeySize` is
+  stated, as the IdP doesn't hold the signing key of an SP to a size. There is no setting to turn it off: remove the
+  elements in `MetadataHook` (`metadata.Extensions.SigningMethods, metadata.Extensions.DigestMethods = nil, nil`),
+  and a hook that added them through `Extensions.Other` should stop, as they would be listed twice.
+  - In metadata that is parsed the two elements are `Extensions.DigestMethods` and `Extensions.SigningMethods`
+    (with `MinKeySize`, `MaxKeySize` and whatever else the element holds), and no longer in `Extensions.Other`.
+    `EntityDescriptor.SigningMethods(role)` and `DigestMethods(role)` return those that apply to a role, such as
+    `&metadata.SPSSODescriptors[0].RoleDescriptor`: those of the role if it lists any, and otherwise those of the
+    entity, each of the two types on its own. None means the entity says nothing, not that it supports nothing.
 - **Signature defaults:** `SignatureMethod` defaults to RSA-SHA256 for RSA keys, and SHA-1 is only used if set explicitly.
   For ECDSA keys it defaults to the hash matching the curve: SHA-256 for P-256, SHA-384 for P-384 and SHA-512 for P-521.
 - **Issuance for each service provider:** `IdentityProvider.IssuancePolicy` decides, for each SP, what is signed, with
   which algorithms, and how its assertions are issued. Without one, every SP gets the settings of the IdP and both
-  signatures. `DefaultIssuancePolicy.ServiceProviders` maps an entity ID to what differs for it, and a field that is
+  signatures, with the algorithms its metadata lists if it lists any (see **Negotiated from metadata** below). `DefaultIssuancePolicy.ServiceProviders` maps an entity ID to what differs for it, and a field that is
   zero leaves the setting of the IdP as it is:
 
   ```go
@@ -605,7 +627,7 @@ least the subset of SAML known as [interoperable SAML](https://kantarainitiative
   ```
 
   A policy of your own implements `Issuance(req IssuanceRequest) (Issuance, error)` and returns `req.Defaults`, which
-  holds the settings of the IdP, changed as it wants. It is given the metadata of the SP, the assertion consumer
+  holds the settings of the IdP and the algorithms negotiated with the SP, changed as it wants. It is given the metadata of the SP, the assertion consumer
   service and the session.
   - `Sign` is `SignResponseAndAssertion` (the default), `SignAssertion` or `SignResponse`. One of the two is always
     signed, on every binding, and a `Response` that reports an error is always signed, as it has no assertion.
@@ -620,6 +642,20 @@ least the subset of SAML known as [interoperable SAML](https://kantarainitiative
     `DigestMethod` names SHA-1, SHA-256, SHA-384 or SHA-512, so naming RSA-SHA1 for an SP is all it takes to sign
     with SHA-1 for it, and for no other. A method for another type of key than the IdP has, or one that isn't
     supported, sends nothing to that SP.
+  - **Negotiated from metadata:** for an SP that the policy names no algorithm for, the IdP reads the
+    `alg:SigningMethod` and `alg:DigestMethod` elements of its metadata (those of its `SPSSODescriptor` before those
+    of its `EntityDescriptor`) and signs with the first of each, in the order of the SP, that it can use: a method
+    for the type of its key with SHA-256, SHA-384 or SHA-512, whose `MinKeySize` and `MaxKeySize` hold the size of
+    its key (the modulus of an RSA key, the curve of an ECDSA key), and one of those three digests. `req.Defaults`
+    holds the result, so a policy of your own sees it and replaces it by setting another. An SP that lists none of a
+    type gets `IdentityProvider.SignatureMethod` and its digest, as before. SHA-1 is never chosen this way, whatever
+    the SP lists first, unless it is the `SignatureMethod` of the IdP itself. If the SP lists algorithms and the IdP
+    can use none of them (only ECDSA methods and an RSA key, only RSASSA-PSS, only SHA-1), the message is signed
+    with the settings of the IdP anyway and the reason is logged, once for a response: the profile doesn't make the
+    list a policy, the signature is no weaker than the one every other SP gets, and it is what that SP was sent
+    before its metadata was read for this. Return an error from an `IssuancePolicy` to refuse instead. The two
+    types are negotiated separately, so naming only a `SignatureMethod` for an SP whose metadata lists digests
+    still uses the first of those digests; name the `DigestMethod` as well to fix both.
   - `AssertionLifetime` and `IncludeSessionNotOnOrAfter` replace those of the IdP for the assertions of single
     sign-on, and `AdditionalAudiences` adds audiences to their `AudienceRestriction` after the entity ID of the SP.
     They are applied by `DefaultAssertionMaker`; another `AssertionMaker` reads them from

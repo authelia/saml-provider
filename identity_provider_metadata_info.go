@@ -264,10 +264,13 @@ func (idp *IdentityProvider) checkMetadataInfo() error {
 	return nil
 }
 
-// describeMetadata adds what MetadataInfo holds, and the scopes, to the metadata, and then calls MetadataHook. The
-// metadata receives copies, so changing it doesn't change the MetadataInfo.
+// describeMetadata adds what MetadataInfo holds, the scopes, and the algorithms that are accepted on a signature
+// to the metadata, and then calls MetadataHook. The metadata receives copies, so changing it doesn't change the
+// MetadataInfo.
 func (idp *IdentityProvider) describeMetadata(ed *EntityDescriptor) {
 	info := idp.MetadataInfo
+
+	idp.describeAlgorithmSupport(ed)
 
 	if len(info.EntityAttributes) != 0 {
 		ed.extensions().EntityAttributes = &EntityAttributes{Attributes: cloneAttributes(info.EntityAttributes)}
