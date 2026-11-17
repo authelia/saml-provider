@@ -238,9 +238,10 @@ func (idp *IdentityProvider) manageNameIDResponseEndpoint(metadata *EntityDescri
 // writeFrontChannelResponse sends the signed message to destination through the browser, as a SAMLResponse on
 // binding. On the HTTP-Redirect binding the signature is in the query, as SAMLBind §3.4.4.1 requires, and on
 // the HTTP-POST binding it is enveloped. The destination must be an endpoint from metadata which passed
-// CheckServiceProviderEndpoint.
-func (idp *IdentityProvider) writeFrontChannelResponse(w http.ResponseWriter, r *http.Request, binding, destination, relayState string, message signableMessage) error {
-	signingContext, err := idp.signingContext()
+// CheckServiceProviderEndpoint. It is signed with the algorithms that the IssuancePolicy gives for the service
+// provider with that metadata.
+func (idp *IdentityProvider) writeFrontChannelResponse(w http.ResponseWriter, r *http.Request, metadata *EntityDescriptor, binding, destination, relayState string, message signableMessage) error {
+	signingContext, err := idp.signingContextFor(r, metadata)
 	if err != nil {
 		return err
 	}
@@ -296,9 +297,11 @@ func (idp *IdentityProvider) writeFrontChannelResponse(w http.ResponseWriter, r 
 	}
 }
 
-// writeSOAPMessage answers a SOAP request on w with the signed message in a SOAP envelope.
-func (idp *IdentityProvider) writeSOAPMessage(w http.ResponseWriter, message signableMessage) error {
-	signingContext, err := idp.signingContext()
+// writeSOAPMessage answers the SOAP request r on w with the signed message in a SOAP envelope. It is signed with
+// the algorithms that the IssuancePolicy gives for the service provider with that metadata, which is nil if the
+// requester isn't known.
+func (idp *IdentityProvider) writeSOAPMessage(w http.ResponseWriter, r *http.Request, metadata *EntityDescriptor, message signableMessage) error {
+	signingContext, err := idp.signingContextFor(r, metadata)
 	if err != nil {
 		return err
 	}

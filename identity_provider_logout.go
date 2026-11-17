@@ -924,7 +924,7 @@ func (req *IdpLogoutRequest) MakeResponse(status Status) *LogoutResponse {
 func (req *IdpLogoutRequest) WriteResponse(w http.ResponseWriter, status Status) error {
 	response := req.MakeResponse(status)
 
-	signingContext, err := req.IDP.signingContext()
+	signingContext, err := req.IDP.signingContextFor(req.HTTPRequest, req.ServiceProviderMetadata)
 	if err != nil {
 		return err
 	}

@@ -61,7 +61,7 @@ func (idp *IdentityProvider) sendSOAPLogoutRequest(r *http.Request, state *Logou
 		state.Current, state.PendingRequestID = -1, ""
 	}()
 
-	if err := idp.exchangeSOAPLogoutRequest(r, state, request, endpoint); err != nil {
+	if err := idp.exchangeSOAPLogoutRequest(r, state, request, metadata, endpoint); err != nil {
 		idp.logger().Printf("failed to log %s out over SOAP: %s", participant.ServiceProviderEntityID, err)
 
 		participant.Outcome, participant.Reason = LogoutOutcomeFailed, err.Error()
@@ -70,8 +70,8 @@ func (idp *IdentityProvider) sendSOAPLogoutRequest(r *http.Request, state *Logou
 
 // exchangeSOAPLogoutRequest signs request, posts it to endpoint in a SOAP envelope, validates the LogoutResponse
 // that comes back against the outstanding request of state, and records its outcome.
-func (idp *IdentityProvider) exchangeSOAPLogoutRequest(r *http.Request, state *LogoutState, request *LogoutRequest, endpoint *Endpoint) error {
-	signingContext, err := idp.signingContext()
+func (idp *IdentityProvider) exchangeSOAPLogoutRequest(r *http.Request, state *LogoutState, request *LogoutRequest, metadata *EntityDescriptor, endpoint *Endpoint) error {
+	signingContext, err := idp.signingContextFor(r, metadata)
 	if err != nil {
 		return fmt.Errorf("cannot sign the logout request: %w", err)
 	}

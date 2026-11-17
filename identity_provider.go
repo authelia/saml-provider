@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"cmp"
 	"crypto"
-	"crypto/ecdsa"
 	"crypto/rsa"
 	"crypto/x509"
 	"crypto/x509/pkix"
@@ -623,6 +622,14 @@ type IdentityProvider struct {
 	// that has already expired is refused rather than asserted, because the service provider would discard it at
 	// once.
 	IncludeSessionNotOnOrAfter bool
+
+	// IssuancePolicy decides, for each service provider, which of the Response and the Assertion are signed, with
+	// which signature and digest algorithms every message for it is signed, how long its assertions are valid,
+	// whether they state SessionNotOnOrAfter, and which further audiences they name. Defaults to a
+	// DefaultIssuancePolicy with no options set, which signs both with SignatureMethod and issues every assertion
+	// with AssertionLifetime and IncludeSessionNotOnOrAfter. Whatever it decides, an assertion is signed for a
+	// service provider whose metadata sets WantAssertionsSigned.
+	IssuancePolicy IssuancePolicy
 
 	// EncryptionCertificateEnforcer decides whether the encryption certificate of a service provider
 	// may be used. Defaults to a DefaultEncryptionCertificateEnforcer with no options set, which
@@ -2024,10 +2031,15 @@ type DefaultAssertionMaker struct {
 // MakeAssertion implements AssertionMaker. It produces a SAML assertion from the
 // given request and assigns it to req.Assertion.
 func (DefaultAssertionMaker) MakeAssertion(req *IdpAuthnRequest, session *Session) error {
+	issuance, err := req.Issuance(session)
+	if err != nil {
+		return err
+	}
+
 	// SAMLCore §2.7.2 requires SessionNotOnOrAfter to be encoded in UTC.
 	var sessionNotOnOrAfter *time.Time
 
-	if req.IDP.IncludeSessionNotOnOrAfter && !session.ExpireTime.IsZero() {
+	if issuance.IncludeSessionNotOnOrAfter && !session.ExpireTime.IsZero() {
 		if !req.Now.Before(session.ExpireTime) {
 			return fmt.Errorf("the session expired at %s", session.ExpireTime)
 		}
@@ -2058,19 +2070,15 @@ func (DefaultAssertionMaker) MakeAssertion(req *IdpAuthnRequest, session *Sessio
 		return fmt.Errorf("cannot release attributes: %w", err)
 	}
 
-	lifetime := req.IDP.AssertionLifetime
-	if lifetime < 0 {
-		return errors.New("AssertionLifetime must not be negative")
-	}
-
-	if lifetime == 0 {
-		lifetime = MaxIssueDelay
+	audiences := []Audience{{Value: req.ServiceProviderMetadata.EntityID}}
+	for _, audience := range issuance.AdditionalAudiences {
+		audiences = append(audiences, Audience{Value: audience})
 	}
 
 	// allow for some clock skew in the validity period. This uses our own clock, because the
 	// request and therefore its IssueInstant are not authenticated.
 	notBefore := req.Now.Add(-1 * MaxClockSkew)
-	notOnOrAfter := req.Now.Add(lifetime)
+	notOnOrAfter := req.Now.Add(issuance.AssertionLifetime)
 
 	// The ID is taken first so that a transient NameID doesn't change it.
 	assertionID := fmt.Sprintf("id-%x", randomBytes(20))
@@ -2109,7 +2117,7 @@ func (DefaultAssertionMaker) MakeAssertion(req *IdpAuthnRequest, session *Sessio
 			NotOnOrAfter: notOnOrAfter,
 			AudienceRestrictions: []AudienceRestriction{
 				{
-					Audiences: []Audience{{Value: req.ServiceProviderMetadata.EntityID}},
+					Audiences: audiences,
 				},
 			},
 		},
@@ -2551,7 +2559,9 @@ func clientAddress(r *http.Request, session *Session) string {
 // (maybe ours?) do not appear to support non-empty prefix lists in XML C14N.
 const canonicalizerPrefixList = ""
 
-// MakeAssertionEl sets `AssertionEl` to a signed, possibly encrypted, version of `Assertion`.
+// MakeAssertionEl sets `AssertionEl` to a signed, possibly encrypted, version of `Assertion`. The assertion is
+// signed unless the IssuancePolicy of the identity provider has only the Response signed for this service
+// provider and its metadata doesn't set WantAssertionsSigned; the Signature of Assertion is then nil.
 //
 // The NameID of the Subject is sent as an EncryptedID when the NameIDPolicy of the request has the encrypted
 // format (SAMLCore §3.4.1.1) or the ElementEncryptionPolicy requires it, and the attributes which that policy
@@ -2561,10 +2571,11 @@ const canonicalizerPrefixList = ""
 // provider has no key to encrypt it to, an error is returned, which wraps ErrInvalidNameIDPolicy when it is the
 // request that asked.
 //
-// The signed assertion is saved in the AssertionStore of the identity provider, if it has one, before it is
-// encrypted as a whole: as it is sent, so with any EncryptedID and EncryptedAttribute in place of their plaintext.
+// The assertion is saved in the AssertionStore of the identity provider, if it has one, before it is encrypted as
+// a whole: as it is sent, so signed if it is, and with any EncryptedID and EncryptedAttribute in place of their
+// plaintext.
 func (req *IdpAuthnRequest) MakeAssertionEl() error {
-	signingContext, err := req.signingContext()
+	issuance, err := req.Issuance(req.Session)
 	if err != nil {
 		return err
 	}
@@ -2579,15 +2590,26 @@ func (req *IdpAuthnRequest) MakeAssertionEl() error {
 		return err
 	}
 
-	signedAssertionEl, err := signingContext.SignEnveloped(sent.Element())
-	if err != nil {
-		return err
+	// A signature that an AssertionMaker left is never sent.
+	req.Assertion.Signature, sent.Signature = nil, nil
+
+	if issuance.Sign != SignResponse {
+		signingContext, err := req.IDP.signingContextWith(issuance.SignatureMethod, issuance.DigestMethod)
+		if err != nil {
+			return err
+		}
+
+		signedEl, err := signingContext.SignEnveloped(sent.Element())
+		if err != nil {
+			return err
+		}
+
+		sigEl := signedEl.Child[len(signedEl.Child)-1]
+		req.Assertion.Signature = sigEl.(*etree.Element)
+		sent.Signature = req.Assertion.Signature
 	}
 
-	sigEl := signedAssertionEl.Child[len(signedAssertionEl.Child)-1]
-	req.Assertion.Signature = sigEl.(*etree.Element)
-	sent.Signature = req.Assertion.Signature
-	signedAssertionEl = sent.Element()
+	signedAssertionEl := sent.Element()
 
 	req.nameIDEncrypted = sent.Subject != nil && sent.Subject.EncryptedID != nil
 
@@ -3155,15 +3177,33 @@ func (req *IdpAuthnRequest) newResponse(status Status) *Response {
 	}
 }
 
-// signResponse returns the signed element for response, which contains assertionEl if it is not nil.
-// The assertionEl is either an EncryptedAssertion or an already signed Assertion element.
+// signResponse returns the element for response, which contains assertionEl if it is not nil. The assertionEl is
+// either an EncryptedAssertion or an Assertion element, which MakeAssertionEl has signed if it is to be.
+//
+// The response is signed unless the IssuancePolicy of the identity provider has only the Assertion signed for
+// this service provider. A response without an assertion is always signed, as nothing else in it is: it reports
+// an error, which the service provider could otherwise be sent by anyone.
 func (req *IdpAuthnRequest) signResponse(response *Response, assertionEl *etree.Element) (*etree.Element, error) {
 	responseEl := response.Element()
 	if assertionEl != nil {
 		responseEl.AddChild(assertionEl)
 	}
 
-	signingContext, err := req.signingContext()
+	issuance, err := req.Issuance(req.Session)
+	if err != nil {
+		return nil, err
+	}
+
+	// The entity ID is the Issuer, and an invalid one is refused where the response is signed.
+	if assertionEl != nil && issuance.Sign == SignAssertion {
+		if err = req.IDP.checkEntityID(); err != nil {
+			return nil, err
+		}
+
+		return responseEl, nil
+	}
+
+	signingContext, err := req.IDP.signingContextWith(issuance.SignatureMethod, issuance.DigestMethod)
 	if err != nil {
 		return nil, err
 	}
@@ -3183,15 +3223,18 @@ func (req *IdpAuthnRequest) signResponse(response *Response, assertionEl *etree.
 	return responseEl, nil
 }
 
-// signingContext will create a signing context for the request.
-func (req *IdpAuthnRequest) signingContext() (*dsig.SigningContext, error) {
-	return req.IDP.signingContext()
+// signingContext returns a context which signs with the key of the identity provider and its SignatureMethod, or
+// the default for the key if that is empty. It signs what is for no service provider in particular, which is the
+// metadata, and what is for one that isn't known. Every other message is signed with signingContextFor, or with
+// the Issuance of its request.
+func (idp *IdentityProvider) signingContext() (*dsig.SigningContext, error) {
+	return idp.signingContextWith(idp.defaultSignatureMethod(), "")
 }
 
-// signingContext returns a context which signs with the key of the identity provider. Every message that the
-// identity provider sends is signed and has its entity ID as the Issuer, so this is also where an invalid entity ID
-// is refused.
-func (idp *IdentityProvider) signingContext() (*dsig.SigningContext, error) {
+// signingContextWith returns a context which signs with the key of the identity provider, the signature method,
+// and the digest method, which is that of the signature method if it is empty. Every message that the identity
+// provider signs has its entity ID as the Issuer, so this is also where an invalid entity ID is refused.
+func (idp *IdentityProvider) signingContextWith(signatureMethod, digestMethod string) (*dsig.SigningContext, error) {
 	if err := idp.checkEntityID(); err != nil {
 		return nil, err
 	}
@@ -3205,12 +3248,9 @@ func (idp *IdentityProvider) signingContext() (*dsig.SigningContext, error) {
 	}
 
 	// If signer is set, use it instead of the private key.
-	signer := idp.Signer
-	if signer == nil {
-		var ok bool
-		if signer, ok = idp.Key.(crypto.Signer); !ok {
-			return nil, fmt.Errorf("identity provider key of type %T does not implement crypto.Signer", idp.Key)
-		}
+	signer, err := idp.signer()
+	if err != nil {
+		return nil, err
 	}
 
 	signingContext, err := dsig.NewSigningContext(signer, certificates)
@@ -3218,18 +3258,15 @@ func (idp *IdentityProvider) signingContext() (*dsig.SigningContext, error) {
 		return nil, err
 	}
 
-	// Default to RSA with SHA-256, or ECDSA with the hash matching the curve of the key.
-	signatureMethod := idp.SignatureMethod
-	if signatureMethod == "" {
-		signatureMethod = dsig.RSASHA256SignatureMethod
-		if public, ok := signer.Public().(*ecdsa.PublicKey); ok {
-			signatureMethod = dsig.DefaultECDSASignatureMethod(public)
-		}
-	}
-
 	signingContext.Canonicalizer = dsig.MakeC14N10ExclusiveCanonicalizerWithPrefixList(canonicalizerPrefixList)
 	if err := signingContext.SetSignatureMethod(signatureMethod); err != nil {
 		return nil, err
+	}
+
+	if digestMethod != "" {
+		if err := signingContext.SetDigestMethod(digestMethod); err != nil {
+			return nil, err
+		}
 	}
 
 	return signingContext, nil

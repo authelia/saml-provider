@@ -484,8 +484,10 @@ type artifactResolveRequest struct {
 	Request       ArtifactResolve
 	Now           time.Time
 
-	// requester is the entity ID of the service provider that sent the request, once its signature is verified.
+	// requester is the entity ID of the service provider that sent the request, once its signature is verified,
+	// and metadata is its metadata.
 	requester string
+	metadata  *EntityDescriptor
 }
 
 // ServeArtifactResolution handles a SAML ArtifactResolve from a service provider on the SOAP binding, at
@@ -656,7 +658,7 @@ func (req *artifactResolveRequest) validate() error {
 	// SAMLBind §3.6.5.2 and SAMLProf §4.1.4.4: the sender must be authenticated, which on this binding means a
 	// valid signature by a key in its metadata. SAMLCore §3.5.3: a requester that can't authenticate itself as
 	// the intended recipient gets an empty response.
-	_, verified, err := req.IDP.verifySOAPRequester(req.HTTPRequest, doc.Root(), issuer)
+	metadata, verified, err := req.IDP.verifySOAPRequester(req.HTTPRequest, doc.Root(), issuer)
 	if err != nil {
 		if top, _, _ := requestStatus(err); top == StatusResponder {
 			return err
@@ -678,7 +680,7 @@ func (req *artifactResolveRequest) validate() error {
 		return errors.New("signed request has a different issuer")
 	}
 
-	req.requester = issuer
+	req.requester, req.metadata = issuer, metadata
 
 	return req.checkRequestStage()
 }
@@ -725,7 +727,8 @@ func (req *artifactResolveRequest) checkTrust() error {
 
 // writeResponse answers the request on w with a signed ArtifactResponse of the status in a SOAP envelope, which
 // contains message if it is not nil. The response names the identity provider as its Issuer and is signed, which
-// is how it authenticates itself to the requester (SAMLProf §5.3.2, §5.4.2). It has no InResponseTo when the ID
+// is how it authenticates itself to the requester (SAMLProf §5.3.2, §5.4.2), so it is signed whatever the
+// IssuancePolicy has signed in the message, with the algorithms that the policy gives for the requester. It has no InResponseTo when the ID
 // of the request is not valid.
 func (req *artifactResolveRequest) writeResponse(w http.ResponseWriter, status Status, message *etree.Element) error {
 	response := &ArtifactResponse{
@@ -752,7 +755,7 @@ func (req *artifactResolveRequest) writeResponse(w http.ResponseWriter, status S
 		return el
 	}
 
-	signingContext, err := req.IDP.signingContext()
+	signingContext, err := req.IDP.signingContextFor(req.HTTPRequest, req.metadata)
 	if err != nil {
 		return err
 	}

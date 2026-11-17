@@ -167,7 +167,7 @@ func (idp *IdentityProvider) continueLogout(w http.ResponseWriter, r *http.Reque
 			continue
 		}
 
-		write, err := idp.prepareLogoutRequest(w, r, state, request, endpoint)
+		write, err := idp.prepareLogoutRequest(w, r, state, request, metadata, endpoint)
 		if err != nil {
 			idp.abandonLogout(state, fmt.Errorf("cannot make the logout request: %w", err))
 
@@ -234,10 +234,11 @@ func skipLogoutParticipant(participant *LogoutParticipant, err error) {
 	participant.Reason = err.Error()
 }
 
-// prepareLogoutRequest signs the request and returns the function which writes it to w, so that nothing is written
+// prepareLogoutRequest signs the request, with the algorithms that the IssuancePolicy gives for the service
+// provider with that metadata, and returns the function which writes it to w, so that nothing is written
 // before the state is saved.
-func (idp *IdentityProvider) prepareLogoutRequest(w http.ResponseWriter, r *http.Request, state *LogoutState, request *LogoutRequest, endpoint *Endpoint) (func() error, error) {
-	signingContext, err := idp.signingContext()
+func (idp *IdentityProvider) prepareLogoutRequest(w http.ResponseWriter, r *http.Request, state *LogoutState, request *LogoutRequest, metadata *EntityDescriptor, endpoint *Endpoint) (func() error, error) {
+	signingContext, err := idp.signingContextFor(r, metadata)
 	if err != nil {
 		return nil, err
 	}

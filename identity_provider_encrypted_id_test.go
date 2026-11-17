@@ -390,7 +390,7 @@ func plaintextAssertionResponse(t *testing.T, req *IdpAuthnRequest, mutate func(
 		mutate(sent)
 	}
 
-	signingContext, err := req.signingContext()
+	signingContext, err := req.IDP.signingContext()
 	assert.NilError(t, err)
 
 	signed, err := signingContext.SignEnveloped(sent.Element())

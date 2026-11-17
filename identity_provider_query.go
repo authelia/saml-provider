@@ -824,7 +824,7 @@ func (req *IdpQueryRequest) writeResponse(w http.ResponseWriter, status Status, 
 		return el
 	}
 
-	signingContext, err := req.IDP.signingContext()
+	signingContext, err := req.IDP.signingContextFor(req.HTTPRequest, req.ServiceProviderMetadata)
 	if err != nil {
 		return err
 	}
