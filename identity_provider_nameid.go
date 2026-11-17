@@ -14,7 +14,8 @@ type NameIDRequest struct {
 	// ServiceProvider is the metadata of the service provider the assertion is for.
 	ServiceProvider *EntityDescriptor
 
-	// Format is the format of the NameID, which is resolved, never empty or unspecified.
+	// Format is the format of the NameID, which is resolved: never empty, unspecified or the encrypted
+	// format, which asks for an EncryptedID of a format that is resolved as if it were left open.
 	Format string
 
 	// SPNameQualifier is the SP entity ID, or an affiliation that it is a member of which the
@@ -138,7 +139,8 @@ func isUnspecifiedNameIDFormat(format string) bool {
 }
 
 // resolveNameID returns the NameID of the assertion for session, following the NameIDPolicy of the
-// request (SAMLCore §3.4.1.1). A format the policy names is the only candidate. A format left open
+// request (SAMLCore §3.4.1.1). A format the policy names is the only candidate. A format left open,
+// or the encrypted format, which asks for an EncryptedID of any format,
 // is chosen from the format of the NameID in the Subject of the request, then those in the metadata
 // of the service provider that the NameIDProvider supports, then the format of the session, then
 // transient. A transient NameID already asserted to the service provider in the session is asserted
@@ -172,7 +174,14 @@ func (req *IdpAuthnRequest) resolveNameID(session *Session) (*NameID, error) {
 
 	switch {
 	case format == encryptedNameIDFormat:
-		return nil, fmt.Errorf("%w: the request requires an EncryptedID, which is not supported", ErrInvalidNameIDPolicy)
+		// The identifier that is encrypted can be of any type, and the service provider can't ask for a
+		// particular one, so the format is chosen as if it were left open, which prefers the formats of its
+		// metadata, as errata E6 suggests. MakeAssertionEl sends the NameID as an EncryptedID.
+		if req.spEncryptionKeyDescriptor() == nil {
+			return nil, fmt.Errorf("%w: the request requires an EncryptedID, and the service provider has no encryption key", ErrInvalidNameIDPolicy)
+		}
+
+		candidates = req.openNameIDFormats(provider, session)
 	case !isUnspecifiedNameIDFormat(format):
 		candidates = []string{format}
 	default:
@@ -214,6 +223,10 @@ func (req *IdpAuthnRequest) issueNameID(provider NameIDProvider, nameIDReq NameI
 
 	if nameID == nil || nameID.Value == "" {
 		return nil, fmt.Errorf("the NameIDProvider returned no NameID for the format %q", nameIDReq.Format)
+	}
+
+	if nameID.Format == encryptedNameIDFormat {
+		return nil, errors.New("the NameIDProvider returned a NameID of the encrypted format, which is not a format of an identifier")
 	}
 
 	return req.completeNameID(nameID, nameIDReq.Format, nameIDReq.SPNameQualifier), nil
@@ -290,14 +303,16 @@ func (req *IdpAuthnRequest) completeNameID(nameID *NameID, format, spNameQualifi
 // openNameIDFormats returns the candidate formats when the request leaves the format open: the format
 // of the NameID in the Subject of the request, which the assertion must have (SAMLCore §3.4.1), then
 // those the metadata of the service provider lists that provider supports, in order, then the format
-// of the session, then transient. An unspecified format is never a candidate.
+// of the session, then transient. An unspecified format is never a candidate, and neither is the
+// encrypted format.
 func (req *IdpAuthnRequest) openNameIDFormats(provider NameIDProvider, session *Session) []string {
 	supported := provider.NameIDFormats()
 
 	var candidates []string
 
 	add := func(format string) {
-		if !isUnspecifiedNameIDFormat(format) && !slices.Contains(candidates, format) {
+		// The encrypted format is a request for an EncryptedID, never the format of an identifier.
+		if !isUnspecifiedNameIDFormat(format) && format != encryptedNameIDFormat && !slices.Contains(candidates, format) {
 			candidates = append(candidates, format)
 		}
 	}

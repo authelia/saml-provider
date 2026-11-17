@@ -1,9 +1,13 @@
 package saml
 
 import (
+	"context"
 	"crypto"
+	"crypto/rsa"
 	"fmt"
+	"net/http"
 	"slices"
+	"strings"
 
 	"authelia.com/provider/saml/xmlenc"
 )
@@ -181,17 +185,10 @@ func (req *IdpAuthnRequest) assertionEncrypter() (xmlenc.RSA, error) {
 		methods = keyDescriptor.EncryptionMethods
 	}
 
-	content, err := policy.contentEncryption(methods)
+	encrypter, err := policy.encrypter(methods)
 	if err != nil {
 		return xmlenc.RSA{}, fmt.Errorf("%s: %w", req.ServiceProviderMetadata.EntityID, err)
 	}
-
-	encrypter, err := policy.keyTransport(methods)
-	if err != nil {
-		return xmlenc.RSA{}, fmt.Errorf("%s: %w", req.ServiceProviderMetadata.EntityID, err)
-	}
-
-	encrypter.BlockCipher = content
 
 	return encrypter, nil
 }
@@ -313,4 +310,117 @@ func (policy *encryptionPolicy) keyTransportFor(method EncryptionMethod) (xmlenc
 	encrypter.DigestMethod = digest.method
 
 	return encrypter, true
+}
+
+// decryptionKey returns the key that the identity provider decrypts with, or nil if it has none: Key, when it is
+// an RSA private key and Certificate holds an RSA key. A Signer can't decrypt.
+func (idp *IdentityProvider) decryptionKey() *rsa.PrivateKey {
+	if idp.Certificate == nil {
+		return nil
+	}
+
+	if _, ok := idp.Certificate.PublicKey.(*rsa.PublicKey); !ok {
+		return nil
+	}
+
+	key, _ := idp.Key.(*rsa.PrivateKey)
+
+	return key
+}
+
+// encryptionMethods returns the EncryptionMethods of the encryption key in the metadata of the identity provider
+// (SAMLMeta §2.4.1.1), which are the algorithms it accepts an EncryptedID to be encrypted with, or nil if it has
+// no key to decrypt with or its algorithms are misconfigured. A peer that follows the Metadata Profile for
+// Algorithm Support §2.5 uses the first of each type that it supports, so the block ciphers in GCM mode, which
+// protect the integrity of what they encrypt, come before those in CBC mode, which don't (errata E93). A key
+// transport algorithm states its digest and mask generation function only when the default of SHA-1 isn't
+// accepted.
+func (idp *IdentityProvider) encryptionMethods() []EncryptionMethod {
+	if idp.decryptionKey() == nil {
+		return nil
+	}
+
+	policy, err := idp.encryptionPolicy()
+	if err != nil {
+		return nil
+	}
+
+	var gcm, cbc []EncryptionMethod
+
+	for _, cipher := range policy.content {
+		method := EncryptionMethod{Algorithm: cipher.Algorithm()}
+		if strings.HasSuffix(method.Algorithm, "-gcm") {
+			gcm = append(gcm, method)
+		} else {
+			cbc = append(cbc, method)
+		}
+	}
+
+	methods := slices.Concat(gcm, cbc)
+
+	_, sha1 := lookupKeyTransportDigest(policy.digests, keyTransportDigests[0].method.Algorithm())
+
+	for _, algorithm := range policy.keyTransports {
+		method := EncryptionMethod{Algorithm: algorithm}
+
+		if !sha1 {
+			method.DigestMethod = &DigestMethod{Algorithm: policy.digests[0].method.Algorithm()}
+
+			if algorithm == algorithmRSAOAEP2009 {
+				method.MGF = &MGF{Algorithm: policy.digests[0].mgf}
+			}
+		}
+
+		methods = append(methods, method)
+	}
+
+	return methods
+}
+
+// elementDecrypter returns the decrypter of the elements which are encrypted to the identity provider. It only
+// accepts the algorithms that the identity provider allows.
+func (idp *IdentityProvider) elementDecrypter() (elementDecrypter, error) {
+	policy, err := idp.encryptionPolicy()
+	if err != nil {
+		return elementDecrypter{}, err
+	}
+
+	decrypter := elementDecrypter{recipient: idp.MetadataURL.String(), policy: policy}
+
+	// A nil *rsa.PrivateKey in the interface would not be recognised as no key.
+	if key := idp.decryptionKey(); key != nil {
+		decrypter.key = key
+	}
+
+	return decrypter, nil
+}
+
+// serviceProviderElementEncrypter returns the encrypter of elements to a service provider outside an
+// AuthnRequest, such as of the NameID of a LogoutRequest: to the encryption key of the first of its
+// SPSSODescriptors that has one, which the EncryptionCertificateEnforcer accepts as for an assertion. The enforcer
+// is given a request of the identity provider's own making, to its logout URL, as the HTTP request in which a
+// logout continues is not one from the service provider that is encrypted to.
+func (idp *IdentityProvider) serviceProviderElementEncrypter(metadata *EntityDescriptor) (*elementEncrypter, error) {
+	r, err := http.NewRequestWithContext(context.Background(), http.MethodGet, idp.LogoutURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	for i := range metadata.SPSSODescriptors {
+		req := &IdpAuthnRequest{
+			IDP:                     idp,
+			HTTPRequest:             r,
+			ServiceProviderMetadata: metadata,
+			SPSSODescriptor:         &metadata.SPSSODescriptors[i],
+			Now:                     TimeNow(),
+		}
+
+		if req.spEncryptionKeyDescriptor() == nil {
+			continue
+		}
+
+		return req.elementEncrypter()
+	}
+
+	return nil, fmt.Errorf("the service provider %q has no encryption key", metadata.EntityID)
 }

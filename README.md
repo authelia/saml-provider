@@ -102,7 +102,7 @@ least the subset of SAML known as [interoperable SAML](https://kantarainitiative
 | ECDSA signatures (SHA-1/256/384/512)[^ecdsa] | ⚠️  | ⚠️  |
 | Encrypt `Assertion`                          | ⚠️  | N/A |
 | Decrypt `EncryptedAssertion`                 | N/A | ⚠️  |
-| `EncryptedID` and `EncryptedAttribute`       | ❌  | ❌  |
+| `EncryptedID` and `EncryptedAttribute`       | ⚠️  | ⚠️  |
 
 [^ecdsa]: Signatures use the `r||s` encoding XML Signature requires, and DER signatures are rejected unless
     `SignatureVerifier` is set. ECDSA keys cannot be used for assertion encryption or decryption, which require RSA,
@@ -314,14 +314,16 @@ least the subset of SAML known as [interoperable SAML](https://kantarainitiative
     lookup fails for another reason than that the entity doesn't exist, the status is `Responder`.
   - `AllowCreate` is passed to the provider and isn't checked by default: a provider that issues persistent
     identifiers must check it, and `IdentityProvider.NameIDPolicyEnforcer` can check it, or decide differently for
-    each SP. `EncryptedID` is not supported, so the encrypted format is always refused.
+    each SP.
+  - The encrypted format asks for an `EncryptedID` and for no particular identifier (errata E6), so the format is
+    chosen as if it were left open, and the request is refused if the SP has no encryption key.
   - A NameID of the entity format is asserted without `NameQualifier`, `SPNameQualifier` or `SPProvidedID`, which
     SAMLCore §8.3.6 requires to be omitted, even if the provider sets them. Logout matches it without them.
 - **Error statuses:** `AuthnRequest` and `LogoutRequest` validation has two stages. The first establishes the request is
   from a known SP, and a failure is an HTTP 400 and never an error status, because the response has nowhere trusted to
   go: size, XML, issuer and ID, the SP lookup, the signature (including a signed request with no `Destination`), the ACS
   or SLO endpoint, an `AssertionConsumerServiceIndex` with an `AssertionConsumerServiceURL` or `ProtocolBinding`
-  (SAMLCore §3.4.1 makes them mutually exclusive), and for a `LogoutRequest` a missing `NameID`. The second is answered
+  (SAMLCore §3.4.1 makes them mutually exclusive), and for a `LogoutRequest` a missing `NameID` or `EncryptedID`. The second is answered
   to the SP at its endpoint from metadata. A `Version` other than 2.0 is `VersionMismatch`, with `RequestVersionTooHigh`
   or `RequestVersionTooLow` if it is a version number whose major version is above or below 2, and none otherwise (such
   as 2.1 or a version that isn't a number). A request that is expired, issued in the future, past its `NotOnOrAfter` (a
@@ -361,7 +363,7 @@ least the subset of SAML known as [interoperable SAML](https://kantarainitiative
   or `unspecified` format, and these are omitted when the session has no value. Set
   `IdentityProvider.AttributeReleasePolicy`, or `samlidp.Options.AttributeReleasePolicy`, to decide differently for
   each SP, for example to release attributes to an SP whose metadata requests none. A custom `AssertionMaker` decides
-  for itself. `isRequired` is not enforced, and `EncryptedAttribute` is not supported.
+  for itself. `isRequired` is not enforced.
 - **Client address:** assertions state the IP address of the HTTP request. Behind a proxy that is the proxy's address,
   so the `SessionProvider` should set `Session.ClientAddress` to the address of the user.
 - **Error status responses:** `IdpAuthnRequest.WriteErrorResponse` sends a SAML `Response` with a non-success status once
@@ -383,6 +385,21 @@ least the subset of SAML known as [interoperable SAML](https://kantarainitiative
   `IdentityProvider.ContentEncryptionMethods`, `KeyTransportMethods` and `KeyTransportDigestMethods` to restrict or
   reorder them. 3DES, RSA PKCS#1 v1.5, key agreement and an OAEP label (`OAEPparams`) are never used, and
   algorithms the IdP doesn't recognise as either type are ignored.
+- **`EncryptedID` and `EncryptedAttribute`:** the `NameID` of an assertion is sent as an `EncryptedID` when the
+  `NameIDPolicy` has the encrypted format, or when `IdentityProvider.ElementEncryptionPolicy` requires it for the SP,
+  and that policy also chooses the attributes sent as `EncryptedAttribute`. `DefaultElementEncryptionPolicy` lists the
+  SPs for either, and encrypts nothing by default. They are encrypted before the assertion is signed (SAMLCore §6.2),
+  to the key and with the algorithms that **Encrypt `Assertion`** describes, and the assertion is still encrypted as a
+  whole afterwards. If one can't be encrypted, no assertion is sent. A `LogoutRequest` may identify the principal with
+  an `EncryptedID` on any binding, which is decrypted with `IdentityProvider.Key` after the signature is verified.
+  That needs an RSA private key, not only a `Signer`, and the metadata lists an encryption key only then, with the
+  algorithms the IdP allows and GCM first. One that can't be decrypted is answered like a `NameID` which names no
+  session, with `Success`, so that the answer says nothing about the ciphertext, and the reason is only logged
+  (`IdpLogoutRequest.Unidentified`). An SP that was sent an `EncryptedID` is sent one again in the `LogoutRequest` of a
+  propagated logout, and is skipped if it can no longer be encrypted to. `BaseID`, an `EncryptedID` that holds
+  anything but a `NameID`, and one in the `Subject` of an `AuthnRequest` or of a query are not supported. The answer to
+  a query is made like any other assertion, so its `NameID` and attributes are encrypted when the policy says so, and
+  `AssertionStore` is given the assertion as it was signed, with those parts encrypted.
 - **Signature defaults:** `SignatureMethod` defaults to RSA-SHA256 for RSA keys, and SHA-1 is only used if set explicitly.
   For ECDSA keys it defaults to the hash matching the curve: SHA-256 for P-256, SHA-384 for P-384 and SHA-512 for P-521.
 - **SPs with ECDSA certificates:** a service provider whose metadata allows encryption with an ECDSA certificate is
@@ -420,6 +437,14 @@ least the subset of SAML known as [interoperable SAML](https://kantarainitiative
   and RSA-OAEP-MGF1P.
   RSA PKCS#1 v1.5 key transport is disabled by default and can be enabled with
   `xmlenc.RegisterDecrypter(xmlenc.PKCS1v15())`.
+- **`EncryptedID` and `EncryptedAttribute`:** an `EncryptedID` in the `Subject` or a `SubjectConfirmation` and every
+  `EncryptedAttribute` of an assertion are decrypted after its signature is verified, with the algorithms of
+  **Decrypt `EncryptedAssertion`**, so the `Assertion` returned is the same as for plaintext. The `EncryptedKey` may be
+  inside the `EncryptedData` or beside it (errata E43). An `EncryptedID` must hold a `NameID`. Set
+  `ServiceProvider.EncryptNameID`, or `samlsp.Options.EncryptNameID`, to request the encrypted format and to send the
+  `NameID` of a `LogoutRequest` as an `EncryptedID`, encrypted to the IdP's encryption key. `AuthnNameIDFormat` is then
+  only listed in metadata. `ServiceProvider.DecryptNameID` decrypts the `EncryptedID` of a `LogoutRequest` that the
+  application has received and verified.
 - **Consume `EntitiesDescriptor`:** `samlsp.ParseMetadata` uses the first entity that has an `IDPSSODescriptor`; there
   is no way to select a different entity.
 

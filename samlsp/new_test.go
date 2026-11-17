@@ -1,9 +1,13 @@
 package samlsp
 
 import (
+	"net/url"
 	"testing"
 
 	"gotest.tools/assert"
+	is "gotest.tools/assert/cmp"
+
+	"authelia.com/provider/saml"
 )
 
 func TestNewCanAcceptCookieName(t *testing.T) {
@@ -28,4 +32,16 @@ func TestNewCanAcceptCookieName(t *testing.T) {
 			assert.Equal(t, tc.expected, cookieProvider.Name)
 		})
 	}
+}
+
+func TestDefaultServiceProviderRequestsEncryptedNameID(t *testing.T) {
+	sp := DefaultServiceProvider(Options{URL: url.URL{Scheme: "https", Host: "sp.example.com"}, EncryptNameID: true})
+	assert.Check(t, sp.EncryptNameID)
+
+	request, err := sp.MakeAuthenticationRequest("https://idp.example.com/sso", saml.HTTPRedirectBinding, saml.HTTPPostBinding)
+	assert.NilError(t, err)
+	assert.Check(t, is.Equal(string(saml.EncryptedNameIDFormat), *request.NameIDPolicy.Format))
+
+	sp = DefaultServiceProvider(Options{URL: url.URL{Scheme: "https", Host: "sp.example.com"}})
+	assert.Check(t, !sp.EncryptNameID)
 }

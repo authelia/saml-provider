@@ -296,10 +296,19 @@ func TestResolveNameID(t *testing.T) {
 			policy:   &NameIDPolicy{Format: &persistent},
 			expected: expected{invalid: true},
 		},
-		"encrypted": {
+		"encrypted asks for no particular format": {
 			session:  plainSession,
 			policy:   &NameIDPolicy{Format: &encrypted},
-			expected: expected{invalid: true},
+			expected: expected{format: transient, spNameQualifier: requester},
+		},
+		"encrypted uses the formats of the SP metadata": {
+			setup: func(test *IdentityProviderTest) {
+				withSPNameIDFormats(test, EmailAddressNameIDFormat)
+				test.IDP.NameIDProvider = DefaultNameIDProvider{Formats: []string{email, transient}}
+			},
+			session:  emailSession,
+			policy:   &NameIDPolicy{Format: &encrypted},
+			expected: expected{format: email, value: "alice@example.com", spNameQualifier: requester},
 		},
 		"open format, SP metadata lists email": {
 			setup: func(test *IdentityProviderTest) {

@@ -13,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/beevik/etree"
 	"gotest.tools/assert"
 	is "gotest.tools/assert/cmp"
 )
@@ -25,6 +26,9 @@ type soapLogoutSPReceived struct {
 
 	// Request is the verified LogoutRequest, or nil if the request could not be read or verified.
 	Request *LogoutRequest
+
+	// Element is the element of Request which the signature covers.
+	Element *etree.Element
 }
 
 // soapLogoutSPRecorder records the requests that a service provider started by soapLogoutSP received.
@@ -70,8 +74,8 @@ func soapLogoutSP(t *testing.T, sp *ServiceProvider, handler soapLogoutSPHandler
 			ContentType: r.Header.Get("Content-Type"),
 		}
 
-		request, err := soapLogoutSPReadRequest(sp, r)
-		received.Request = request
+		request, element, err := soapLogoutSPReadRequest(sp, r)
+		received.Request, received.Element = request, element
 		recorder.add(received)
 
 		if err != nil {
@@ -118,33 +122,33 @@ func soapLogoutSP(t *testing.T, sp *ServiceProvider, handler soapLogoutSPHandler
 }
 
 // soapLogoutSPReadRequest reads the LogoutRequest of r as sp, verifying that the identity provider signed it.
-func soapLogoutSPReadRequest(sp *ServiceProvider, r *http.Request) (*LogoutRequest, error) {
+func soapLogoutSPReadRequest(sp *ServiceProvider, r *http.Request) (*LogoutRequest, *etree.Element, error) {
 	if r.Method != http.MethodPost {
-		return nil, errors.New("the method is not POST")
+		return nil, nil, errors.New("the method is not POST")
 	}
 
 	message, fault := readSOAPRequest(r)
 	if fault != nil {
-		return nil, errors.New(fault.String)
+		return nil, nil, errors.New(fault.String)
 	}
 
 	certificates, err := sp.getIDPSigningCerts()
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
 	verified, err := verifyEnvelopedSignature(message.Message, certificates)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
 	request := &LogoutRequest{}
 
 	if err = unmarshalElement(verified, request); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
-	return request, nil
+	return request, verified, nil
 }
 
 // newSOAPLogoutFixture is newPropagationFixture with B a SOAP service provider answering as handler decides, an
@@ -171,7 +175,7 @@ func (f *propagationFixture) sendToB(t *testing.T) *LogoutState {
 	endpoint, err := f.test.IDP.logoutRequestEndpoint(f.b.Metadata(), backChannelLogoutBindings...)
 	assert.NilError(t, err)
 
-	f.test.IDP.sendSOAPLogoutRequest(httptest.NewRequest(http.MethodGet, "/logout", nil), state, 0, endpoint)
+	f.test.IDP.sendSOAPLogoutRequest(httptest.NewRequest(http.MethodGet, "/logout", nil), state, 0, f.b.Metadata(), endpoint)
 
 	assert.Check(t, is.Equal(state.Current, -1))
 	assert.Check(t, is.Equal(state.PendingRequestID, ""))
@@ -426,7 +430,7 @@ func TestSendSOAPLogoutRequestFails(t *testing.T) {
 			state := newLogoutState(&f.test.IDP, f.provider.participants[f.session.ID], f.a.MetadataURL.String())
 			assert.Assert(t, is.Len(state.Participants, 1))
 
-			f.test.IDP.sendSOAPLogoutRequest(httptest.NewRequest(http.MethodGet, "/logout", nil), state, 0, endpoint)
+			f.test.IDP.sendSOAPLogoutRequest(httptest.NewRequest(http.MethodGet, "/logout", nil), state, 0, f.b.Metadata(), endpoint)
 
 			assert.Check(t, is.Equal(state.Participants[0].Outcome, LogoutOutcomeFailed))
 			assert.Check(t, is.Contains(state.Participants[0].Reason, tc.reason))

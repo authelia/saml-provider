@@ -101,13 +101,11 @@ func TestServeSSOAcceptsSatisfiableNameIDPolicy(t *testing.T) {
 func TestServeSSORejectsUnsatisfiableNameIDPolicy(t *testing.T) {
 	email := string(EmailAddressNameIDFormat)
 	persistent := string(PersistentNameIDFormat)
-	encrypted := encryptedNameIDFormat
 	other := "https://other.example.com/affiliation"
 
 	for name, policy := range map[string]*NameIDPolicy{
 		"other format":    {Format: &email},
 		"persistent":      {Format: &persistent},
-		"encrypted":       {Format: &encrypted},
 		"other qualifier": {SPNameQualifier: &other},
 	} {
 		t.Run(name, func(t *testing.T) {
@@ -167,10 +165,13 @@ func TestServeIDPInitiatedSkipsNameIDPolicyEnforcer(t *testing.T) {
 	assert.Check(t, is.Equal(w.Code, http.StatusOK))
 }
 
-// Matching formats aren't enough, because the assertion still holds the NameID in plaintext.
-func TestServeSSORefusesEncryptedFormatFromSession(t *testing.T) {
+// The encrypted format is a request, not the format of an identifier, so a session can't supply it.
+func TestServeSSONeverAssertsEncryptedFormatFromSession(t *testing.T) {
 	test := NewIdentityProviderTest(t, applyKey)
+	captured := captureNameID(test)
 	encrypted := encryptedNameIDFormat
 	response := serveSSOWithPolicy(t, test, &Session{ID: "s", NameID: "alice", NameIDFormat: encrypted}, &NameIDPolicy{Format: &encrypted})
-	assertInvalidNameIDPolicy(t, response)
+	assert.Check(t, is.Equal(response.Status.StatusCode.Value, StatusSuccess))
+	assert.Assert(t, *captured != nil)
+	assert.Check(t, is.Equal((*captured).Format, string(TransientNameIDFormat)))
 }

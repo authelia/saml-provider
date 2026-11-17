@@ -222,7 +222,53 @@ type EncryptionCertificateEnforcer interface {
 	// It is also asked before an assertion is encrypted in answer to a request of the assertion query
 	// and request protocol. There is then no AuthnRequest, and req holds only the IDP, HTTPRequest,
 	// ServiceProviderMetadata, SPSSODescriptor and Now. A refusal there is a Responder status.
+	//
+	// It is also asked before the NameID of a LogoutRequest is encrypted to a service provider that
+	// was sent an EncryptedID. There is then no AuthnRequest, and req only has its IDP,
+	// ServiceProviderMetadata, SPSSODescriptor and Now, and as HTTPRequest a request of the identity
+	// provider's own making to its logout URL. A refusal skips that service provider.
 	EnforceEncryptionCertificate(req *IdpAuthnRequest, cert *x509.Certificate) error
+}
+
+// ElementEncryptionPolicy is an interface used by IdentityProvider to decide which parts of an assertion are
+// encrypted on their own, as an EncryptedID or an EncryptedAttribute, which allows the decision to differ for each
+// service provider. The default implementation is DefaultElementEncryptionPolicy, which is used if no
+// ElementEncryptionPolicy is specified.
+//
+// It applies to the assertion of any AssertionMaker, when MakeAssertionEl encrypts and signs it. The parts are
+// encrypted to the key that the assertion is encrypted to, with the same algorithms, so if the service provider
+// has no encryption key and a part must be encrypted, no assertion is sent. The whole assertion is still
+// encrypted afterwards.
+type ElementEncryptionPolicy interface {
+	// EncryptNameID reports whether the NameID of req.Assertion is sent as an EncryptedID although the request
+	// didn't ask for the encrypted format, which SAMLCore §3.4.1.1 allows the policies of an identity provider
+	// to require. It isn't asked when the request did.
+	EncryptNameID(req *IdpAuthnRequest) bool
+
+	// EncryptAttribute reports whether attribute, which is one of req.Assertion, is sent as an
+	// EncryptedAttribute (SAMLCore §2.7.3.2).
+	EncryptAttribute(req *IdpAuthnRequest, attribute Attribute) bool
+}
+
+// DefaultElementEncryptionPolicy is the default ElementEncryptionPolicy. With no options set it encrypts no part
+// of an assertion on its own, so an EncryptedID is only sent to a service provider that requests one.
+type DefaultElementEncryptionPolicy struct {
+	// NameIDServiceProviders lists the entity IDs of the service providers that are always sent an EncryptedID.
+	NameIDServiceProviders []string
+
+	// AttributeServiceProviders lists the entity IDs of the service providers that are sent every attribute as
+	// an EncryptedAttribute.
+	AttributeServiceProviders []string
+}
+
+// EncryptNameID implements ElementEncryptionPolicy.
+func (p DefaultElementEncryptionPolicy) EncryptNameID(req *IdpAuthnRequest) bool {
+	return req.ServiceProviderMetadata != nil && slices.Contains(p.NameIDServiceProviders, req.ServiceProviderMetadata.EntityID)
+}
+
+// EncryptAttribute implements ElementEncryptionPolicy.
+func (p DefaultElementEncryptionPolicy) EncryptAttribute(req *IdpAuthnRequest, _ Attribute) bool {
+	return req.ServiceProviderMetadata != nil && slices.Contains(p.AttributeServiceProviders, req.ServiceProviderMetadata.EntityID)
 }
 
 // AttributeReleaseRequest describes what an AttributeReleasePolicy is asked to release attributes for:
@@ -483,6 +529,11 @@ type IdentityProvider struct {
 	// such service. It is not used by any other AssertionMaker.
 	AttributeReleasePolicy AttributeReleasePolicy
 
+	// ElementEncryptionPolicy decides which service providers are sent an EncryptedID that they didn't request,
+	// and which attributes are sent as an EncryptedAttribute. Defaults to a DefaultElementEncryptionPolicy with
+	// no options set, which encrypts neither. A request for the encrypted NameID format is always honoured.
+	ElementEncryptionPolicy ElementEncryptionPolicy
+
 	// AllowInsecureServiceProviderEndpoints allows responses to be sent to an endpoint of a service
 	// provider whose URL is plain http, on a host which is not loopback. That is an
 	// AssertionConsumerService, or the SingleLogoutService that a LogoutResponse is sent to. By
@@ -503,11 +554,14 @@ type IdentityProvider struct {
 	AllowInsecureServiceProviderEndpoints bool
 
 	// ContentEncryptionMethods lists the identifiers of the block ciphers the identity provider may encrypt an
-	// assertion with. When the service provider lists content encryption algorithms for its key, the first of them
+	// assertion, a NameID or an attribute with, and those it accepts an EncryptedID to be encrypted with. When the service provider lists content encryption algorithms for its key, the first of them
 	// in its order of preference that is also listed here is used, and when it lists none the first one listed
 	// here is used (Metadata Profile for Algorithm Support §2.5). The supported ciphers are AES-128-CBC,
 	// AES-192-CBC, AES-256-CBC, AES-128-GCM, AES-192-GCM and AES-256-GCM, and empty means all of them in that
-	// order, so that a service provider which lists none receives AES-128-CBC.
+	// order, so that a service provider which lists none receives AES-128-CBC. The metadata lists them for the
+	// encryption key of the identity provider with GCM first, as CBC doesn't protect the integrity of what it
+	// encrypts (errata E93). KeyTransportMethods and KeyTransportDigestMethods restrict what is accepted in the
+	// same way.
 	ContentEncryptionMethods []string
 
 	// KeyTransportMethods lists the identifiers of the key transport algorithms the identity provider may encrypt
@@ -715,8 +769,10 @@ func (idp *IdentityProvider) Metadata() *EntityDescriptor {
 			},
 		},
 	}
-	// Encryption requires RSA, so a certificate with any other type of key must not be advertised for it.
-	if _, ok := idp.Certificate.PublicKey.(*rsa.PublicKey); ok {
+	// Encryption requires RSA, so a certificate with any other type of key must not be advertised for it. What
+	// is encrypted to the identity provider is the EncryptedID of a LogoutRequest (SAMLProfiles §4.4.5), which it
+	// can only decrypt with a private key it holds, so a key that is only a Signer isn't advertised either.
+	if methods := idp.encryptionMethods(); methods != nil {
 		keyDescriptors = append(keyDescriptors, KeyDescriptor{
 			Use: "encryption",
 			KeyInfo: KeyInfo{
@@ -726,12 +782,7 @@ func (idp *IdentityProvider) Metadata() *EntityDescriptor {
 					},
 				},
 			},
-			EncryptionMethods: []EncryptionMethod{
-				{Algorithm: "http://www.w3.org/2001/04/xmlenc#aes128-cbc"},
-				{Algorithm: "http://www.w3.org/2001/04/xmlenc#aes192-cbc"},
-				{Algorithm: "http://www.w3.org/2001/04/xmlenc#aes256-cbc"},
-				{Algorithm: "http://www.w3.org/2001/04/xmlenc#rsa-oaep-mgf1p"},
-			},
+			EncryptionMethods: methods,
 		})
 	}
 
@@ -1118,6 +1169,9 @@ type IdpAuthnRequest struct {
 	// Session is the session the assertion is for. ServeSSO and ServeIDPInitiated set it once the
 	// SessionProvider has returned it.
 	Session *Session
+
+	// nameIDEncrypted is whether AssertionEl carries the NameID of the Subject as an EncryptedID.
+	nameIDEncrypted bool
 
 	// responseParticipant is the participant that the assertion in ResponseEl makes of the service
 	// provider, which PublishResponse records each time the response is sent.
@@ -1697,9 +1751,10 @@ type DefaultNameIDPolicyEnforcer struct {
 }
 
 // EnforceNameIDPolicy implements NameIDPolicyEnforcer. Unless the policy leaves the format open, the
-// NameID must have that format. The encrypted format is always refused, because the assertions made
-// here don't contain an EncryptedID. If the policy has an SPNameQualifier, the NameID must also have
-// that value.
+// NameID must have that format. The encrypted format is satisfied by a NameID of any format, which
+// MakeAssertionEl sends as an EncryptedID, so it only requires that the service provider has a key to
+// encrypt it to (SAMLCore §3.4.1.1, errata E6). If the policy has an SPNameQualifier, the NameID must
+// also have that value.
 func (DefaultNameIDPolicyEnforcer) EnforceNameIDPolicy(req *IdpAuthnRequest, _ *Session) error {
 	policy := req.Request.NameIDPolicy
 	if req.Assertion == nil || req.Assertion.Subject == nil || req.Assertion.Subject.NameID == nil {
@@ -1712,7 +1767,9 @@ func (DefaultNameIDPolicyEnforcer) EnforceNameIDPolicy(req *IdpAuthnRequest, _ *
 		switch {
 		case isUnspecifiedNameIDFormat(*policy.Format):
 		case *policy.Format == encryptedNameIDFormat:
-			return fmt.Errorf("the request requires an EncryptedID, which is not supported")
+			if req.SPSSODescriptor == nil || req.spEncryptionKeyDescriptor() == nil {
+				return fmt.Errorf("the request requires an EncryptedID, and the service provider has no encryption key")
+			}
 		case nameID.Format != *policy.Format:
 			return fmt.Errorf("the NameID format is %q and the request requires %q", nameID.Format, *policy.Format)
 		}
@@ -1730,7 +1787,7 @@ func (DefaultNameIDPolicyEnforcer) EnforceNameIDPolicy(req *IdpAuthnRequest, _ *
 const unspecifiedNameIDFormat = "urn:oasis:names:tc:SAML:2.0:nameid-format:unspecified"
 
 // encryptedNameIDFormat is the format that requests an EncryptedID, from SAMLCore §3.4.1.1.
-const encryptedNameIDFormat = "urn:oasis:names:tc:SAML:2.0:nameid-format:encrypted"
+const encryptedNameIDFormat = string(EncryptedNameIDFormat)
 
 // DefaultAssertionMaker produces a SAML assertion for the
 // given request and assigns it to req.Assertion.
@@ -2255,29 +2312,54 @@ func clientAddress(r *http.Request, session *Session) string {
 // (maybe ours?) do not appear to support non-empty prefix lists in XML C14N.
 const canonicalizerPrefixList = ""
 
-// MakeAssertionEl sets `AssertionEl` to a signed, possibly encrypted, version of `Assertion`. The signed
-// assertion is saved in the AssertionStore of the identity provider, if it has one, before it is
-// encrypted.
+// MakeAssertionEl sets `AssertionEl` to a signed, possibly encrypted, version of `Assertion`.
+//
+// The NameID of the Subject is sent as an EncryptedID when the NameIDPolicy of the request has the encrypted
+// format (SAMLCore §3.4.1.1) or the ElementEncryptionPolicy requires it, and the attributes which that policy
+// chooses are sent as EncryptedAttribute elements. They are encrypted before the assertion is signed, as
+// SAMLCore §6.2 requires, so the signature covers the ciphertext. Assertion is not changed, apart from its
+// Signature, and keeps the NameID and the attributes in plaintext. If a part must be encrypted and the service
+// provider has no key to encrypt it to, an error is returned, which wraps ErrInvalidNameIDPolicy when it is the
+// request that asked.
+//
+// The signed assertion is saved in the AssertionStore of the identity provider, if it has one, before it is
+// encrypted as a whole: as it is sent, so with any EncryptedID and EncryptedAttribute in place of their plaintext.
 func (req *IdpAuthnRequest) MakeAssertionEl() error {
 	signingContext, err := req.signingContext()
 	if err != nil {
 		return err
 	}
 
-	assertionEl := req.Assertion.Element()
+	encrypter, err := req.elementEncrypter()
+	if err != nil && !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
 
-	signedAssertionEl, err := signingContext.SignEnveloped(assertionEl)
+	sent, err := req.sentAssertion(encrypter)
+	if err != nil {
+		return err
+	}
+
+	signedAssertionEl, err := signingContext.SignEnveloped(sent.Element())
 	if err != nil {
 		return err
 	}
 
 	sigEl := signedAssertionEl.Child[len(signedAssertionEl.Child)-1]
 	req.Assertion.Signature = sigEl.(*etree.Element)
-	signedAssertionEl = req.Assertion.Element()
+	sent.Signature = req.Assertion.Signature
+	signedAssertionEl = sent.Element()
+
+	req.nameIDEncrypted = sent.Subject != nil && sent.Subject.EncryptedID != nil
 
 	req.saveAssertion(signedAssertionEl)
 
-	req.AssertionEl, err = req.encryptAssertionEl(signedAssertionEl)
+	if encrypter == nil {
+		req.AssertionEl = signedAssertionEl
+		return nil
+	}
+
+	req.AssertionEl, err = encrypter.encryptAssertion(signedAssertionEl)
 
 	return err
 }
@@ -2285,40 +2367,130 @@ func (req *IdpAuthnRequest) MakeAssertionEl() error {
 // encryptAssertionEl returns the EncryptedAssertion element of the signed assertion, or the signed
 // assertion itself when the service provider has no encryption certificate.
 func (req *IdpAuthnRequest) encryptAssertionEl(signedAssertionEl *etree.Element) (*etree.Element, error) {
-	certBuf, err := req.getSPEncryptionCert()
-	if err == os.ErrNotExist {
+	encrypter, err := req.elementEncrypter()
+	if errors.Is(err, os.ErrNotExist) {
 		return signedAssertionEl, nil
 	} else if err != nil {
 		return nil, err
 	}
 
-	var signedAssertionBuf []byte
-	{
-		doc := etree.NewDocument()
-		doc.SetRoot(signedAssertionEl)
+	return encrypter.encryptAssertion(signedAssertionEl)
+}
 
-		signedAssertionBuf, err = doc.WriteToBytes()
-		if err != nil {
-			return nil, err
+// encryptAssertion returns the EncryptedAssertion element of the signed assertion. SAMLCore §6.2: a signed
+// assertion is signed first, and then encrypted.
+func (e *elementEncrypter) encryptAssertion(signedAssertionEl *etree.Element) (*etree.Element, error) {
+	encryptedAssertionEl, err := (&elementEncrypter{certificate: e.certificate, encrypter: e.encrypter}).
+		encrypt("EncryptedAssertion", signedAssertionEl)
+	if err != nil {
+		return nil, err
+	}
+
+	// The Response that holds the EncryptedAssertion declares the prefix.
+	encryptedAssertionEl.RemoveAttr("xmlns:saml")
+
+	return encryptedAssertionEl, nil
+}
+
+// elementEncrypter returns the encrypter of the assertion to the service provider and of the parts of it that
+// are encrypted on their own, with the algorithms negotiated from its metadata. The error is [os.ErrNotExist] if
+// the service provider has no encryption key and doesn't ask for encryption.
+func (req *IdpAuthnRequest) elementEncrypter() (*elementEncrypter, error) {
+	cert, err := req.getSPEncryptionCert()
+	if err != nil {
+		return nil, err
+	}
+
+	encrypter, err := req.assertionEncrypter()
+	if err != nil {
+		return nil, err
+	}
+
+	return &elementEncrypter{certificate: cert, encrypter: encrypter, recipient: req.ServiceProviderMetadata.EntityID}, nil
+}
+
+// requestsEncryptedID reports whether the NameIDPolicy of the request has the encrypted format, which means the
+// assertion MUST contain an EncryptedID instead of a NameID (SAMLCore §3.4.1.1).
+func (req *IdpAuthnRequest) requestsEncryptedID() bool {
+	policy := req.Request.NameIDPolicy
+
+	return policy != nil && policy.Format != nil && *policy.Format == encryptedNameIDFormat
+}
+
+// elementEncryptionPolicy returns the ElementEncryptionPolicy of the identity provider, or
+// DefaultElementEncryptionPolicy if there is none.
+func (req *IdpAuthnRequest) elementEncryptionPolicy() ElementEncryptionPolicy {
+	if req.IDP != nil && req.IDP.ElementEncryptionPolicy != nil {
+		return req.IDP.ElementEncryptionPolicy
+	}
+
+	return DefaultElementEncryptionPolicy{}
+}
+
+// sentAssertion returns a copy of Assertion as it is sent: with the NameID of its Subject replaced by an
+// EncryptedID, and each attribute that is to be encrypted by an EncryptedAttribute, each in the place of its
+// plaintext (SAMLCore §6.1). The encrypter is nil if the service provider has no encryption key.
+func (req *IdpAuthnRequest) sentAssertion(encrypter *elementEncrypter) (*Assertion, error) {
+	sent := *req.Assertion
+	policy := req.elementEncryptionPolicy()
+
+	if subject := sent.Subject; subject != nil && subject.NameID != nil && subject.EncryptedID == nil {
+		requested := req.requestsEncryptedID()
+
+		if requested || policy.EncryptNameID(req) {
+			if encrypter == nil {
+				if requested {
+					return nil, fmt.Errorf("%w: the request requires an EncryptedID, and the service provider has no encryption key", ErrInvalidNameIDPolicy)
+				}
+
+				return nil, errors.New("the NameID must be encrypted, and the service provider has no encryption key")
+			}
+
+			encryptedID, err := encrypter.encryptNameID(subject.NameID)
+			if err != nil {
+				return nil, fmt.Errorf("cannot encrypt the NameID: %w", err)
+			}
+
+			encrypted := *subject
+			encrypted.NameID, encrypted.EncryptedID = nil, encryptedID
+			sent.Subject = &encrypted
 		}
 	}
 
-	encryptor, err := req.assertionEncrypter()
-	if err != nil {
-		return nil, err
+	statements := make([]AttributeStatement, 0, len(sent.AttributeStatements))
+
+	for _, statement := range sent.AttributeStatements {
+		out := AttributeStatement{EncryptedAttributes: slices.Clone(statement.EncryptedAttributes)}
+
+		for i := range statement.Attributes {
+			attribute := &statement.Attributes[i]
+
+			if !policy.EncryptAttribute(req, attribute.clone()) {
+				out.Attributes = append(out.Attributes, *attribute)
+
+				continue
+			}
+
+			if encrypter == nil {
+				return nil, fmt.Errorf("the attribute %q must be encrypted, and the service provider has no encryption key", attribute.Name)
+			}
+
+			encryptedAttribute, err := encrypter.encryptAttribute(attribute)
+			if err != nil {
+				return nil, fmt.Errorf("cannot encrypt the attribute %q: %w", attribute.Name, err)
+			}
+
+			out.EncryptedAttributes = append(out.EncryptedAttributes, encryptedAttribute)
+		}
+
+		statements = append(statements, out)
 	}
 
-	encryptedDataEl, err := encryptor.Encrypt(certBuf, signedAssertionBuf, nil)
-	if err != nil {
-		return nil, err
+	if len(statements) != 0 {
+		sent.AttributeStatements = statements
 	}
 
-	encryptedDataEl.CreateAttr("Type", "http://www.w3.org/2001/04/xmlenc#Element")
-
-	encryptedAssertionEl := etree.NewElement("saml:EncryptedAssertion")
-	encryptedAssertionEl.AddChild(encryptedDataEl)
-
-	return encryptedAssertionEl, nil
+	return &sent, nil
 }
 
 // IdpAuthnRequestForm contans HTML form information to be submitted to the
