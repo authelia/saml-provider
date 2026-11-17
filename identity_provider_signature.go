@@ -82,11 +82,14 @@ func (req *IdpAuthnRequest) verifyAuthnRequestSignature() error {
 		}
 	}
 
-	// SAMLBind §3.4.5.2 and §3.5.5.2 require this of a signed message. The value is checked against
-	// the SSO URL later, by checkRequestStage.
-	if req.Request.Destination == "" {
+	// SAMLBind §3.4.5.2 and §3.5.5.2 require this of a signed message on the browser bindings. The value is
+	// checked against the SSO URL later, by checkRequestStage. The SOAP binding has no such rule, and a request of
+	// the Enhanced Client or Proxy profile is signed before its destination is known (see checkRequestStage).
+	if req.Request.Destination == "" && req.binding != SOAPBinding {
 		return errors.New("signed request has no destination")
 	}
+
+	req.requestAuthenticated = true
 
 	return nil
 }

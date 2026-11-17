@@ -15,7 +15,6 @@ import (
 	"fmt"
 	"html/template"
 	"io"
-	"mime"
 	"net"
 	"net/http"
 	"net/netip"
@@ -119,6 +118,28 @@ type ForceAuthnSessionProvider interface {
 	// no session yet, it must complete the HTTP request and return nil. That includes when a login
 	// form re-presents the request, which arrives here again.
 	GetForcedSession(w http.ResponseWriter, r *http.Request, req *IdpAuthnRequest) *Session
+}
+
+// ECPSessionProvider is an optional interface of a SessionProvider, which is required to serve the Enhanced Client
+// or Proxy profile with ServeECP. That profile has no browser to show a login page to, and leaves how the client
+// authenticates the principal to the identity provider (ECP v2.0 §2.3.5), so GetSession is never used for it.
+type ECPSessionProvider interface {
+	// GetECPSession authenticates the principal from r, which is the SOAP request of the client, and returns the
+	// session, or completes the HTTP request and returns nil. The usual means is HTTP Basic credentials, for which
+	// the response to a request without valid ones is a 401 with a WWW-Authenticate header, which the client
+	// answers by sending the request again (ECP v2.0 §2.3.4). A session cookie that the client kept from an
+	// earlier exchange may also be relied on, unless req.Request.ForceAuthn is true, when the principal must be
+	// authenticated freshly from the credentials in r.
+	//
+	// To refuse the principal with a SAML status that the service provider receives, such as for a disabled
+	// account, call req.WriteErrorResponse with StatusResponder and StatusAuthnFailed and return nil.
+	//
+	// It is called once req is valid, so req.ServiceProviderMetadata is the service provider that the assertion is
+	// for. The client is not the service provider and r isn't authenticated by req, even when req is signed: the
+	// credentials in r are the only evidence of who the principal is. The assertion is returned to the client in
+	// the response to r, so credentials must only be accepted over a channel that protects them, such as TLS.
+	// The body of r has been read.
+	GetECPSession(w http.ResponseWriter, r *http.Request, req *IdpAuthnRequest) *Session
 }
 
 // ServiceProviderProvider is an interface used by IdentityProvider to look up
@@ -392,8 +413,15 @@ type IdentityProvider struct {
 
 	// SOAPLogoutURL is the single logout service on the SOAP binding, which ServeSOAPLogout handles. When it is set
 	// and the SessionProvider implements LogoutSessionProvider, the metadata lists it. It may share its path
-	// with LogoutURL, as Handler tells the two apart by the Content-Type.
+	// with LogoutURL, as Handler tells the two apart by the Content-Type, and with the other services on the
+	// SOAP binding, which Handler tells apart by the message in the envelope.
 	SOAPLogoutURL url.URL
+
+	// ECPURL is the single sign-on service on the SOAP binding, which ServeECP handles for the Enhanced Client or
+	// Proxy profile. When it is set and the SessionProvider implements ECPSessionProvider, the metadata lists it.
+	// It may share its path with SSOURL, as Handler tells the two apart by the Content-Type, and with the other
+	// services on the SOAP binding, which Handler tells apart by the message in the envelope.
+	ECPURL url.URL
 
 	// HTTPClient sends back-channel messages, such as a LogoutRequest over SOAP. Defaults to a client with a
 	// 10 second timeout. A client that is set is copied, and the copy never follows a redirect, whatever its
@@ -415,7 +443,9 @@ type IdentityProvider struct {
 
 	// AttributeServiceURL is the attribute service on the SOAP binding, which ServeAttributeQuery handles.
 	// When it is set and the SessionProvider implements QuerySessionProvider, the metadata has an
-	// AttributeAuthorityDescriptor that lists it.
+	// AttributeAuthorityDescriptor that lists it. Like AuthnQueryServiceURL and AssertionIDRequestServiceURL,
+	// it may share its path with the other services on the SOAP binding, which Handler tells apart by the
+	// message in the envelope.
 	AttributeServiceURL url.URL
 
 	// AuthnQueryServiceURL is the authentication query service on the SOAP binding, which ServeAuthnQuery
@@ -518,7 +548,8 @@ type IdentityProvider struct {
 	defaultReplayStore unsafe.Pointer
 
 	// ArtifactResolutionURL is the artifact resolution service on the SOAP binding, which
-	// ServeArtifactResolution handles, and must have a path of its own. Setting it enables the HTTP-Artifact
+	// ServeArtifactResolution handles. It may share its path with the other services on the SOAP binding, which
+	// Handler tells apart by the message in the envelope. Setting it enables the HTTP-Artifact
 	// binding for responses: the metadata lists the service, an AssertionConsumerService with the
 	// HTTP-Artifact binding may be selected, and a request may name that binding as its ProtocolBinding. The
 	// response then waits in the ArtifactStore while the browser takes an artifact to the service provider,
@@ -738,6 +769,14 @@ func (idp *IdentityProvider) Metadata() *EntityDescriptor {
 		},
 	}
 
+	// ECP v2.0 §2.3.10: the endpoint that a client relays requests to has the SOAP binding.
+	if _, ok := idp.SessionProvider.(ECPSessionProvider); ok && idp.ECPURL.String() != "" {
+		ed.IDPSSODescriptors[0].SingleSignOnServices = append(ed.IDPSSODescriptors[0].SingleSignOnServices, Endpoint{
+			Binding:  SOAPBinding,
+			Location: idp.ECPURL.String(),
+		})
+	}
+
 	if idp.WantAuthnRequestsSigned {
 		wantAuthnRequestsSigned := true
 		ed.IDPSSODescriptors[0].WantAuthnRequestsSigned = &wantAuthnRequestsSigned
@@ -781,83 +820,6 @@ func (idp *IdentityProvider) Metadata() *EntityDescriptor {
 	return ed
 }
 
-// Handler returns an [http.Handler] that serves the metadata and SSO URLs, and the logout URL, SOAP logout URL
-// and artifact resolution URL if they are set. A URL with an empty path is served at "/". When LogoutURL and
-// SOAPLogoutURL share a path, a POST with a text/xml body there goes to ServeSOAPLogout and anything else to
-// ServeSLO.
-//
-// It also serves AttributeServiceURL, AuthnQueryServiceURL and AssertionIDRequestServiceURL if they are set. Each
-// accepts one kind of message, so each needs a path of its own, and Handler panics, as [http.ServeMux] does, if one
-// of them shares its path with another URL.
-func (idp *IdentityProvider) Handler() http.Handler {
-	mux := http.NewServeMux()
-	mux.HandleFunc(handlerPath(idp.MetadataURL), idp.ServeMetadata)
-	mux.HandleFunc(handlerPath(idp.SSOURL), idp.ServeSSO)
-
-	slo, soap := idp.LogoutURL.String() != "", idp.SOAPLogoutURL.String() != ""
-
-	switch {
-	case slo && soap && handlerPath(idp.LogoutURL) == handlerPath(idp.SOAPLogoutURL):
-		mux.HandleFunc(handlerPath(idp.LogoutURL), func(w http.ResponseWriter, r *http.Request) {
-			if isSOAPRequest(r) {
-				idp.ServeSOAPLogout(w, r)
-
-				return
-			}
-
-			idp.ServeSLO(w, r)
-		})
-	default:
-		if slo {
-			mux.HandleFunc(handlerPath(idp.LogoutURL), idp.ServeSLO)
-		}
-
-		if soap {
-			mux.HandleFunc(handlerPath(idp.SOAPLogoutURL), idp.ServeSOAPLogout)
-		}
-	}
-
-	if idp.artifactEnabled() {
-		mux.HandleFunc(handlerPath(idp.ArtifactResolutionURL), idp.ServeArtifactResolution)
-	}
-
-	for _, service := range []struct {
-		url   url.URL
-		serve http.HandlerFunc
-	}{
-		{idp.AttributeServiceURL, idp.ServeAttributeQuery},
-		{idp.AuthnQueryServiceURL, idp.ServeAuthnQuery},
-		{idp.AssertionIDRequestServiceURL, idp.ServeAssertionIDRequest},
-	} {
-		if service.url.String() != "" {
-			mux.HandleFunc(handlerPath(service.url), service.serve)
-		}
-	}
-
-	return mux
-}
-
-// handlerPath returns the path of u to serve it at on a mux, which is "/" when the path is empty.
-func handlerPath(u url.URL) string {
-	if u.Path == "" {
-		return "/"
-	}
-
-	return u.Path
-}
-
-// isSOAPRequest reports whether r is a POST with a text/xml body, which a SOAP 1.1 request is, and which no
-// front-channel binding sends.
-func isSOAPRequest(r *http.Request) bool {
-	if r.Method != http.MethodPost {
-		return false
-	}
-
-	mediaType, _, err := mime.ParseMediaType(r.Header.Get("Content-Type"))
-
-	return err == nil && mediaType == "text/xml"
-}
-
 // ServeMetadata is an [http.HandlerFunc] that serves the IDP metadata.
 func (idp *IdentityProvider) ServeMetadata(w http.ResponseWriter, _ *http.Request) {
 	buf, _ := xml.MarshalIndent(idp.Metadata(), "", "  ")
@@ -897,8 +859,6 @@ func (idp *IdentityProvider) ServeMetadata(w http.ResponseWriter, _ *http.Reques
 // If the assertion cannot be created or encrypted, a Responder error status is sent, or
 // Requester with InvalidNameIDPolicy if the failure is ErrInvalidNameIDPolicy. A failure after
 // the body has started is only logged.
-//
-//nolint:gocyclo // Complexity is inherent to the specification being implemented.
 func (idp *IdentityProvider) ServeSSO(w http.ResponseWriter, r *http.Request) {
 	req, err := NewIdpAuthnRequest(idp, r)
 	if err != nil {
@@ -926,6 +886,15 @@ func (idp *IdentityProvider) ServeSSO(w http.ResponseWriter, r *http.Request) {
 	if session == nil {
 		return
 	}
+
+	req.respond(w, session)
+}
+
+// respond answers a valid request with an assertion about the principal of session, or with the error status of
+// the request that the assertion can't satisfy. It is the same for every binding the request can arrive on; the
+// binding decides how WriteResponse delivers the Response.
+func (req *IdpAuthnRequest) respond(w http.ResponseWriter, session *Session) {
+	idp := req.IDP
 
 	req.Session = session
 
@@ -1043,11 +1012,27 @@ func (req *IdpAuthnRequest) getSession(w http.ResponseWriter, r *http.Request) *
 }
 
 // writeErrorStatus completes the HTTP request with an error Response carrying the given top-level and
-// second-level status, or an internal server error if that Response can't be written.
+// second-level status. If that Response can't be written, it completes it with an internal server error, or with a
+// Server fault on the SOAP binding. Nothing more is written if the body had already started.
 func (req *IdpAuthnRequest) writeErrorStatus(w http.ResponseWriter, topLevelStatus, secondLevelStatus string) {
-	if err := req.WriteErrorResponse(w, topLevelStatus, secondLevelStatus, ""); err != nil {
-		req.IDP.logger().Printf("failed to write response: %s", err)
+	err := req.MakeErrorResponse(topLevelStatus, secondLevelStatus, "")
+	started := false
+
+	if err == nil {
+		if err = req.WriteResponse(w); err == nil {
+			return
+		}
+
+		started = !errors.Is(err, ErrResponseNotBuilt)
+	}
+
+	req.IDP.logger().Printf("failed to write response: %s", err)
+
+	switch {
+	case req.binding != SOAPBinding:
 		http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
+	case !started:
+		writeSOAPFault(w, &soapFault{Code: "Server", String: soapFaultStringProcessing})
 	}
 }
 
@@ -1143,6 +1128,14 @@ type IdpAuthnRequest struct {
 	// POST must send this value in the RedirectQueryFormField field, otherwise the signature is lost
 	// and a service provider that requires one is refused.
 	RedirectQuery string
+
+	// binding is SOAPBinding for a request of the Enhanced Client or Proxy profile, which ServeECP received in a
+	// SOAP envelope and whose Response goes back on the same connection, for the PAOS endpoint of the service
+	// provider. It is empty for a request on a browser binding, whose Response is for an HTTP-POST endpoint.
+	binding string
+
+	// requestAuthenticated is set by Validate if the request has a signature, which was verified.
+	requestAuthenticated bool
 }
 
 // RedirectQueryFormField is the POST form field which re-presents a signed HTTP-Redirect request. See
@@ -1354,10 +1347,19 @@ func (req *IdpAuthnRequest) checkRequestStage() error {
 	//
 	// We require the destination to be correct if it was provided, or if every request must be signed.
 	// verifyAuthnRequestSignature requires it on any other request that is signed.
-	if req.IDP.WantAuthnRequestsSigned || req.Request.Destination != "" {
-		if req.Request.Destination != req.IDP.SSOURL.String() {
+	//
+	// That section is of the browser bindings. A request of the Enhanced Client or Proxy profile is issued, and
+	// signed, before the client chooses the identity provider to send it to (ECP v2.0 §2.3.2 and §2.3.3), so it
+	// usually has no destination, and it is only checked when it was provided.
+	destination, required := req.IDP.SSOURL.String(), req.IDP.WantAuthnRequestsSigned
+	if req.binding == SOAPBinding {
+		destination, required = req.IDP.ECPURL.String(), false
+	}
+
+	if required || req.Request.Destination != "" {
+		if req.Request.Destination != destination {
 			return &statusError{StatusRequester, StatusRequestDenied,
-				fmt.Errorf("expected destination to be %q, not %q", req.IDP.SSOURL.String(), req.Request.Destination)}
+				fmt.Errorf("expected destination to be %q, not %q", destination, req.Request.Destination)}
 		}
 	}
 
@@ -1383,32 +1385,38 @@ func (req *IdpAuthnRequest) listsACSLocation(location string) bool {
 	return false
 }
 
-// responseBindings returns the bindings that this identity provider can send a response with: HTTP-POST, and
-// HTTP-Artifact if it has an ArtifactResolutionURL at which the artifact can be resolved.
-func (idp *IdentityProvider) responseBindings() []string {
-	if idp.artifactEnabled() {
+// responseBindings returns the bindings of the AssertionConsumerService that the Response to the request can be
+// for. A request on a browser binding is answered through the browser with HTTP-POST, or with HTTP-Artifact if the
+// identity provider has an ArtifactResolutionURL at which the artifact can be resolved. A request of the Enhanced
+// Client or Proxy profile is answered to the client, which delivers the Response with PAOS (SAMLProf §4.2.3.7, ECP
+// v2.0 §2.3.10), and never with a browser binding.
+func (req *IdpAuthnRequest) responseBindings() []string {
+	switch {
+	case req.binding == SOAPBinding:
+		return []string{PAOSBinding}
+	case req.IDP.artifactEnabled():
 		return []string{HTTPPostBinding, HTTPArtifactBinding}
+	default:
+		return []string{HTTPPostBinding}
 	}
-
-	return []string{HTTPPostBinding}
 }
 
 // supportedProtocolBinding reports whether the response can be sent with the ProtocolBinding of the
-// request (SAMLCore §3.4.1): one of the bindings this identity provider sends responses with, or none,
-// which leaves the binding to the endpoint.
+// request (SAMLCore §3.4.1): one of the bindings this identity provider sends the response to it with, or
+// none, which leaves the binding to the endpoint.
 func (req *IdpAuthnRequest) supportedProtocolBinding() bool {
-	return req.Request.ProtocolBinding == "" || slices.Contains(req.IDP.responseBindings(), req.Request.ProtocolBinding)
+	return req.Request.ProtocolBinding == "" || slices.Contains(req.responseBindings(), req.Request.ProtocolBinding)
 }
 
 // acsBindings returns the bindings of the endpoints that the response to the request may be sent to: the
 // ProtocolBinding of the request, which the identity provider must honour if it can (SAMLProf §4.1.3.5), or
-// every binding it sends responses with if the request names none, or one that is not supported.
+// every binding it sends the response with if the request names none, or one that is not supported.
 func (req *IdpAuthnRequest) acsBindings() []string {
 	if req.Request.ProtocolBinding != "" && req.supportedProtocolBinding() {
 		return []string{req.Request.ProtocolBinding}
 	}
 
-	return req.IDP.responseBindings()
+	return req.responseBindings()
 }
 
 // checkAuthnRequestSize returns an error if the decoded request is larger than maxAuthnRequestSize.
@@ -1447,7 +1455,8 @@ func isValidAuthnRequestID(id string) bool {
 // getACSEndpoint finds the endpoint to deliver the response to. HTTP-POST, and HTTP-Artifact when the
 // identity provider has an ArtifactResolutionURL, are the only bindings it can send a response with, so
 // other endpoints are never selected, and neither are those of another binding than a ProtocolBinding
-// that the request names.
+// that the request names. For a request of the Enhanced Client or Proxy profile the only binding is PAOS
+// instead, here and below (see responseBindings).
 //
 // An endpoint that the request names, by index or URL, is refused if it is insecure, as described by
 // IdentityProvider.AllowInsecureServiceProviderEndpoints, rather than replaced by another endpoint.
@@ -2394,10 +2403,17 @@ var ErrResponseNotBuilt = errors.New("the response could not be built")
 // PublishResponse, so if it carries an assertion nothing is written once a logout of the session has
 // begun.
 //
-// If ACSEndpoint has the HTTP-Artifact binding, the response is kept in the ArtifactStore and the browser
-// is sent to the endpoint with the artifact from ArtifactBinding instead, in a form or, with
+// A request of the Enhanced Client or Proxy profile, which ServeECP received, is answered with the SOAP envelope of
+// that profile instead.
+//
+// Otherwise, if ACSEndpoint has the HTTP-Artifact binding, the response is kept in the ArtifactStore and the
+// browser is sent to the endpoint with the artifact from ArtifactBinding instead, in a form or, with
 // ArtifactRedirectEncoding, in the query of a redirect.
 func (req *IdpAuthnRequest) WriteResponse(w http.ResponseWriter) error {
+	if req.binding == SOAPBinding {
+		return req.writeECPResponse(w)
+	}
+
 	if req.ACSEndpoint != nil && req.ACSEndpoint.Binding == HTTPArtifactBinding {
 		return req.writeArtifactResponse(w)
 	}
