@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"math/big"
 	"net/url"
+	"slices"
 	"strings"
 
 	"github.com/beevik/etree"
@@ -17,7 +18,8 @@ import (
 	"authelia.com/provider/saml/internal/dsig"
 )
 
-// redirectSignatureHashes lists the signature algorithms accepted on the HTTP-Redirect binding.
+// redirectSignatureHashes lists the signature algorithms that can be verified on the HTTP-Redirect binding, which
+// are those that can be verified in an XML signature.
 var redirectSignatureHashes = map[string]crypto.Hash{
 	dsig.RSASHA1SignatureMethod:     crypto.SHA1,
 	dsig.RSASHA256SignatureMethod:   crypto.SHA256,
@@ -27,6 +29,85 @@ var redirectSignatureHashes = map[string]crypto.Hash{
 	dsig.ECDSASHA256SignatureMethod: crypto.SHA256,
 	dsig.ECDSASHA384SignatureMethod: crypto.SHA384,
 	dsig.ECDSASHA512SignatureMethod: crypto.SHA512,
+}
+
+// defaultSignatureMethods are the signature algorithms the identity provider accepts on what it receives when
+// IdentityProvider.SignatureMethods is empty: all that it can verify but those of SHA-1.
+var defaultSignatureMethods = []string{
+	dsig.RSASHA256SignatureMethod,
+	dsig.RSASHA384SignatureMethod,
+	dsig.RSASHA512SignatureMethod,
+	dsig.ECDSASHA256SignatureMethod,
+	dsig.ECDSASHA384SignatureMethod,
+	dsig.ECDSASHA512SignatureMethod,
+}
+
+// defaultDigestMethods are the digest algorithms the identity provider accepts in the signature of what it
+// receives when IdentityProvider.DigestMethods is empty: all that it can verify but SHA-1.
+var defaultDigestMethods = []string{
+	dsig.SHA256DigestMethod,
+	dsig.SHA384DigestMethod,
+	dsig.SHA512DigestMethod,
+}
+
+// sha1SignatureMethods and sha1DigestMethods can be verified, and are only accepted when they are listed.
+var (
+	sha1SignatureMethods = []string{dsig.RSASHA1SignatureMethod, dsig.ECDSASHA1SignatureMethod}
+	sha1DigestMethods    = []string{dsig.SHA1DigestMethod}
+)
+
+// signaturePolicy is the algorithms that a signature is accepted with.
+type signaturePolicy struct {
+	signatureMethods []string
+	digestMethods    []string
+}
+
+// supportedSignatureMethods and supportedDigestMethods are every algorithm that can be verified, which a list
+// that is configured may name.
+var (
+	supportedSignatureMethods = slices.Concat(defaultSignatureMethods, sha1SignatureMethods)
+	supportedDigestMethods    = slices.Concat(defaultDigestMethods, sha1DigestMethods)
+)
+
+// anySignaturePolicy accepts every algorithm that can be verified. It is the policy of the ServiceProvider,
+// which has no setting for it. Its digest methods are left nil so that the digest of every Reference isn't
+// checked, and the service provider accepts what it did before there were policies.
+var anySignaturePolicy = &signaturePolicy{
+	signatureMethods: supportedSignatureMethods,
+}
+
+// newSignaturePolicy returns the policy of the lists of signature and digest methods, which are the fields of the
+// type named owner. An empty list means the default, and an algorithm that can't be verified is an error.
+func newSignaturePolicy(owner string, signatureMethods, digestMethods []string) (*signaturePolicy, error) {
+	policy := &signaturePolicy{signatureMethods: defaultSignatureMethods, digestMethods: defaultDigestMethods}
+
+	if len(signatureMethods) != 0 {
+		for _, algorithm := range signatureMethods {
+			if !slices.Contains(supportedSignatureMethods, algorithm) {
+				return nil, fmt.Errorf("%s.SignatureMethods: unsupported algorithm %q", owner, algorithm)
+			}
+		}
+
+		policy.signatureMethods = signatureMethods
+	}
+
+	if len(digestMethods) != 0 {
+		for _, algorithm := range digestMethods {
+			if !slices.Contains(supportedDigestMethods, algorithm) {
+				return nil, fmt.Errorf("%s.DigestMethods: unsupported algorithm %q", owner, algorithm)
+			}
+		}
+
+		policy.digestMethods = digestMethods
+	}
+
+	return policy, nil
+}
+
+// signaturePolicy returns the algorithms the identity provider accepts a signature with, or an error if it is
+// configured with an algorithm it can't verify.
+func (idp *IdentityProvider) signaturePolicy() (*signaturePolicy, error) {
+	return newSignaturePolicy("IdentityProvider", idp.SignatureMethods, idp.DigestMethods)
 }
 
 // verifyAuthnRequestSignature verifies any signature on the request, and returns an error if there is
@@ -65,14 +146,19 @@ func (req *IdpAuthnRequest) verifyAuthnRequestSignature() error {
 		return errors.New("request is signed but the service provider has no signing certificate")
 	}
 
+	policy, err := req.IDP.signaturePolicy()
+	if err != nil {
+		return err
+	}
+
 	if req.RedirectQuery != "" {
-		if err := verifyRedirectSignature(req.RedirectQuery, "SAMLRequest", certificates); err != nil {
+		if err := verifyRedirectSignature(req.RedirectQuery, "SAMLRequest", certificates, policy); err != nil {
 			return fmt.Errorf("invalid request signature: %w", err)
 		}
 	}
 
 	if signatureEl != nil {
-		verified, err := verifyEnvelopedSignature(doc.Root(), certificates)
+		verified, err := verifyEnvelopedSignature(doc.Root(), certificates, policy)
 		if err != nil {
 			return fmt.Errorf("invalid request signature: %w", err)
 		}
@@ -174,12 +260,13 @@ var whitespaceRemover = strings.NewReplacer(" ", "", "\t", "", "\r", "", "\n", "
 
 // verifyEnvelopedSignature verifies the signature on el with any of the certificates, and returns the
 // content that it covers. They are tried in turn because a signature with no KeyInfo can only be
-// checked against a single certificate.
-func verifyEnvelopedSignature(el *etree.Element, certificates []*x509.Certificate) (*etree.Element, error) {
+// checked against a single certificate. A signature made with a signature method that the policy doesn't list,
+// or with a Reference whose digest method it doesn't list, is refused as one that doesn't verify is.
+func verifyEnvelopedSignature(el *etree.Element, certificates []*x509.Certificate, policy *signaturePolicy) (*etree.Element, error) {
 	var err error
 
 	for _, certificate := range certificates {
-		validationContext, detached, contextErr := signatureValidationContext(el, []*x509.Certificate{certificate})
+		validationContext, detached, contextErr := signatureValidationContext(el, []*x509.Certificate{certificate}, policy)
 		if contextErr != nil {
 			return nil, contextErr
 		}
@@ -223,8 +310,10 @@ func redirectParameters(rawQuery string) (map[string]string, error) {
 }
 
 // verifyRedirectSignature verifies the signature of the HTTP-Redirect binding. As SAMLBind §3.4.4.1
-// requires, it covers the parameters as they were received rather than a new encoding of their values.
-func verifyRedirectSignature(rawQuery, messageParameter string, certificates []*x509.Certificate) error {
+// requires, it covers the parameters as they were received rather than a new encoding of their values. A SigAlg
+// that the policy doesn't list is refused as a signature that doesn't verify is. The digest methods of the policy
+// have no part in it, as the signature is over the query itself and there is no Reference.
+func verifyRedirectSignature(rawQuery, messageParameter string, certificates []*x509.Certificate, policy *signaturePolicy) error {
 	parameters, err := redirectParameters(rawQuery)
 	if err != nil {
 		return err
@@ -251,6 +340,10 @@ func verifyRedirectSignature(rawQuery, messageParameter string, certificates []*
 	hash, ok := redirectSignatureHashes[algorithm]
 	if !ok {
 		return errors.New("unsupported signature algorithm")
+	}
+
+	if !slices.Contains(policy.signatureMethods, algorithm) {
+		return fmt.Errorf("signature method %s is not allowed", algorithm)
 	}
 
 	encodedSignature, err := url.QueryUnescape(parameters["Signature"])

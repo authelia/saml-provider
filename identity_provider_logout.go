@@ -784,8 +784,13 @@ func (req *IdpLogoutRequest) verifySignature() error {
 		return errors.New("request is signed but the service provider has no signing certificate")
 	}
 
+	policy, err := req.IDP.signaturePolicy()
+	if err != nil {
+		return err
+	}
+
 	if req.RedirectQuery != "" {
-		if err := verifyRedirectSignature(req.RedirectQuery, "SAMLRequest", certificates); err != nil {
+		if err := verifyRedirectSignature(req.RedirectQuery, "SAMLRequest", certificates, policy); err != nil {
 			return fmt.Errorf("invalid request signature: %w", err)
 		}
 
@@ -794,7 +799,7 @@ func (req *IdpLogoutRequest) verifySignature() error {
 	}
 
 	if signatureEl != nil {
-		verified, err := verifyEnvelopedSignature(doc.Root(), certificates)
+		verified, err := verifyEnvelopedSignature(doc.Root(), certificates, policy)
 		if err != nil {
 			return fmt.Errorf("invalid request signature: %w", err)
 		}

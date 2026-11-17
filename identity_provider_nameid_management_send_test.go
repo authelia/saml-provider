@@ -107,7 +107,7 @@ func (m *manageNameIDSP) read(sp *ServiceProvider, r *http.Request) (*ManageName
 		return nil, err
 	}
 
-	verified, err := verifyEnvelopedSignature(message.Message, certificates)
+	verified, err := verifyEnvelopedSignature(message.Message, certificates, anySignaturePolicy)
 	if err != nil {
 		return nil, err
 	}

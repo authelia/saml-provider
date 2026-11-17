@@ -99,7 +99,7 @@ func TestContinueLogoutRedirect(t *testing.T) {
 	assert.Check(t, is.Equal(location.Query().Get("RelayState"), state.ID))
 	assert.Check(t, location.Query().Get("SigAlg") != "")
 	assert.Check(t, location.Query().Get("Signature") != "")
-	assert.NilError(t, verifyRedirectSignature(location.RawQuery, "SAMLRequest", []*x509.Certificate{test.IDP.Certificate}))
+	assert.NilError(t, verifyRedirectSignature(location.RawQuery, "SAMLRequest", []*x509.Certificate{test.IDP.Certificate}, anySignaturePolicy))
 	assert.Check(t, is.Equal(w.Header().Get("Cache-Control"), "no-cache, no-store"))
 
 	compressed, err := base64.StdEncoding.DecodeString(location.Query().Get("SAMLRequest"))
@@ -153,7 +153,7 @@ func TestContinueLogoutPost(t *testing.T) {
 	assert.Check(t, is.Equal(children[0].Tag, "Issuer"))
 	assert.Check(t, is.Equal(children[1].Tag, "Signature"))
 
-	_, err = verifyEnvelopedSignature(doc.Root(), []*x509.Certificate{test.IDP.Certificate})
+	_, err = verifyEnvelopedSignature(doc.Root(), []*x509.Certificate{test.IDP.Certificate}, anySignaturePolicy)
 	assert.NilError(t, err)
 
 	saved, err := provider.LoadLogoutState(r, state.ID)

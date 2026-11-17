@@ -264,7 +264,7 @@ func nameIDTestSOAPMessage(t *testing.T, w *httptest.ResponseRecorder, tag strin
 	assert.Assert(t, is.Equal(message.Tag, tag))
 	assert.Assert(t, is.Equal(message.NamespaceURI(), samlProtocolNS))
 
-	verified, err := verifyEnvelopedSignature(message, []*x509.Certificate{mustParseCertificate(golden.Get(t, "idp_cert.pem"))})
+	verified, err := verifyEnvelopedSignature(message, []*x509.Certificate{mustParseCertificate(golden.Get(t, "idp_cert.pem"))}, anySignaturePolicy)
 	assert.NilError(t, err)
 
 	return verified
@@ -304,7 +304,7 @@ func frontChannelManageNameIDResult(t *testing.T, w *httptest.ResponseRecorder, 
 		assert.NilError(t, err)
 
 		// SAMLProfiles §4.5.3.2: the response MUST be signed, which on this binding is in the query.
-		assert.NilError(t, verifyRedirectSignature(location.RawQuery, "SAMLResponse", certificates))
+		assert.NilError(t, verifyRedirectSignature(location.RawQuery, "SAMLResponse", certificates, anySignaturePolicy))
 
 		compressed, err := base64.StdEncoding.DecodeString(location.Query().Get("SAMLResponse"))
 		assert.NilError(t, err)
@@ -337,7 +337,7 @@ func frontChannelManageNameIDResult(t *testing.T, w *httptest.ResponseRecorder, 
 		doc := etree.NewDocument()
 		assert.NilError(t, doc.ReadFromBytes(buf))
 
-		verified, err := verifyEnvelopedSignature(doc.Root(), certificates)
+		verified, err := verifyEnvelopedSignature(doc.Root(), certificates, anySignaturePolicy)
 		assert.NilError(t, err)
 
 		result.Response = &ManageNameIDResponse{}

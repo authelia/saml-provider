@@ -156,10 +156,15 @@ func (idp *IdentityProvider) verifyFrontChannelRequester(r *http.Request, root *
 		return nil, nil, errors.New("request is signed but the service provider has no signing certificate")
 	}
 
+	policy, err := idp.signaturePolicy()
+	if err != nil {
+		return nil, nil, err
+	}
+
 	var verified *etree.Element
 
 	if redirectQuery != "" {
-		if err = verifyRedirectSignature(redirectQuery, "SAMLRequest", certificates); err != nil {
+		if err = verifyRedirectSignature(redirectQuery, "SAMLRequest", certificates, policy); err != nil {
 			return nil, nil, fmt.Errorf("invalid request signature: %w", err)
 		}
 
@@ -168,7 +173,7 @@ func (idp *IdentityProvider) verifyFrontChannelRequester(r *http.Request, root *
 	}
 
 	if signatureEl != nil {
-		if verified, err = verifyEnvelopedSignature(root, certificates); err != nil {
+		if verified, err = verifyEnvelopedSignature(root, certificates, policy); err != nil {
 			return nil, nil, fmt.Errorf("invalid request signature: %w", err)
 		}
 	}

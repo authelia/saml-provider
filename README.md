@@ -98,11 +98,14 @@ least the subset of SAML known as [interoperable SAML](https://kantarainitiative
 | Verify signed `Response` and `Assertion`     | N/A | ✅  |
 | Sign `AuthnRequest`                          | N/A | ✅  |
 | Verify signed `AuthnRequest`                 | ✅  | N/A |
-| RSA signatures (SHA-1/256/384/512)           | ✅  | ✅  |
-| ECDSA signatures (SHA-1/256/384/512)[^ecdsa] | ✅  | ✅  |
+| RSA signatures (SHA-1/256/384/512)[^sha1]           | ✅  | ✅  |
+| ECDSA signatures (SHA-1/256/384/512)[^ecdsa][^sha1] | ✅  | ✅  |
 | Encrypt `Assertion`                          | ⚠️  | N/A |
 | Decrypt `EncryptedAssertion`                 | N/A | ✅  |
 | `EncryptedID` and `EncryptedAttribute`       | ⚠️  | ✅  |
+
+[^sha1]: The IdP refuses a signature that it receives if its signature or digest algorithm is SHA-1, unless
+    `IdentityProvider.SignatureMethods` and `DigestMethods` list it. The SP accepts SHA-1.
 
 [^ecdsa]: Signatures use the `r||s` encoding XML Signature requires, and DER signatures are rejected unless
     `SignatureVerifier` is set. ECDSA keys cannot be used for assertion encryption or decryption, which require RSA,
@@ -296,8 +299,9 @@ least the subset of SAML known as [interoperable SAML](https://kantarainitiative
   with a `text/xml` body to the SOAP service for the message in the `Body` of the envelope, which it reads within the
   64 KiB limit of a SOAP request, and anything else to the front-channel service of the path.
 - **Verify signed `AuthnRequest`:** any signature on the HTTP Redirect or HTTP POST bindings is verified, and one is
-  required if the SP metadata sets `AuthnRequestsSigned` or `IdentityProvider.WantAuthnRequestsSigned` is set. SHA-1
-  signatures are accepted. A custom login form must send `IdpAuthnRequest.RedirectQuery` in the `SAMLRedirectQuery`
+  required if the SP metadata sets `AuthnRequestsSigned` or `IdentityProvider.WantAuthnRequestsSigned` is set. The
+  algorithms of the signature are held to `IdentityProvider.SignatureMethods` and `DigestMethods` (see **Accepted
+  signature algorithms**). A custom login form must send `IdpAuthnRequest.RedirectQuery` in the `SAMLRedirectQuery`
   field, because the signature of a redirect does not survive being re-presented as a POST.
 - **`NameIDPolicy`:** a request that the assertion can't satisfy receives an `InvalidNameIDPolicy` status. The
   `NameIDProvider` of `IdentityProvider` issues the `NameID`, and `DefaultNameIDProvider` is used if there is none. The
@@ -476,6 +480,17 @@ least the subset of SAML known as [interoperable SAML](https://kantarainitiative
     `ParseServiceProviderMetadata` returns the first. Neither fetches or refreshes metadata, which is for the
     `ServiceProviderProvider`. `samlidp.Options.ServiceProviderMetadataVerifier` verifies the metadata of a service
     before it is registered.
+- **Accepted signature algorithms:** `IdentityProvider.SignatureMethods` and `DigestMethods` list the identifiers of
+  the signature and digest algorithms the IdP accepts on every signature it verifies: the `SigAlg` of the HTTP Redirect
+  binding and the XML signature of an `AuthnRequest`, a `LogoutRequest`, a `LogoutResponse`, a `ManageNameIDRequest` or
+  its response, and every message on the SOAP binding. Empty means RSA and ECDSA with SHA-256, SHA-384 or SHA-512, and
+  the SHA-256, SHA-384 and SHA-512 digests, so a signature made with SHA-1, or whose `SignedInfo` has a `Reference`
+  with a SHA-1 digest, is refused exactly as one that doesn't verify is. To accept SHA-1 from an SP that can't do
+  better, list every algorithm to accept, including `http://www.w3.org/2000/09/xmldsig#rsa-sha1` or
+  `http://www.w3.org/2001/04/xmldsig-more#ecdsa-sha1`, and `http://www.w3.org/2000/09/xmldsig#sha1` in `DigestMethods`.
+  An identifier that isn't supported is a configuration error, which refuses every signed message.
+  `MetadataVerifier` has the same two fields, with the same default, for the signature of metadata. The lists don't
+  restrict `SignatureMethod`, which is what the IdP signs with, and the SP of this package still accepts SHA-1.
 - **Signature defaults:** `SignatureMethod` defaults to RSA-SHA256 for RSA keys, and SHA-1 is only used if set explicitly.
   For ECDSA keys it defaults to the hash matching the curve: SHA-256 for P-256, SHA-384 for P-384 and SHA-512 for P-521.
 - **SPs with ECDSA certificates:** a service provider whose metadata allows encryption with an ECDSA certificate is

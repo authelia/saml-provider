@@ -1585,7 +1585,7 @@ func (sp *ServiceProvider) verifySignature(el *etree.Element) (*etree.Element, e
 		return nil, fmt.Errorf("cannot validate signature on %s: saml config not set up properly, specify either idp metadata url, fingerprints or actual certificate", el.Tag)
 	}
 
-	validationContext, detached, err := signatureValidationContext(el, certs)
+	validationContext, detached, err := signatureValidationContext(el, certs, anySignaturePolicy)
 	if err != nil {
 		return nil, err
 	}
@@ -1607,8 +1607,8 @@ func (sp *ServiceProvider) verifySignature(el *etree.Element) (*etree.Element, e
 }
 
 // signatureValidationContext returns the context for validating the signature on el with the given
-// certificates, and the element to pass to it.
-func signatureValidationContext(el *etree.Element, certs []*x509.Certificate) (*dsig.ValidationContext, *etree.Element, error) {
+// certificates and the algorithms of the policy, and the element to pass to it.
+func signatureValidationContext(el *etree.Element, certs []*x509.Certificate, policy *signaturePolicy) (*dsig.ValidationContext, *etree.Element, error) {
 	certificateStore := dsig.MemoryX509CertificateStore{
 		Roots: certs,
 	}
@@ -1616,6 +1616,9 @@ func signatureValidationContext(el *etree.Element, certs []*x509.Certificate) (*
 	validationContext := dsig.NewDefaultValidationContext(&certificateStore)
 
 	validationContext.IdAttribute = "ID"
+	validationContext.SignatureMethods = policy.signatureMethods
+	validationContext.DigestMethods = policy.digestMethods
+
 	if Clock != nil {
 		validationContext.Clock = Clock
 	}
@@ -2022,7 +2025,7 @@ func (sp *ServiceProvider) ValidateLogoutResponseRedirect(u *url.URL, possibleRe
 			return retErr
 		}
 
-		if err := verifyRedirectSignature(u.RawQuery, "SAMLResponse", certificates); err != nil {
+		if err := verifyRedirectSignature(u.RawQuery, "SAMLResponse", certificates, anySignaturePolicy); err != nil {
 			retErr.PrivateErr = err
 			return retErr
 		}

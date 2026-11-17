@@ -71,6 +71,13 @@ type MetadataVerifier struct {
 	// than MaxValidity in the future. Signed metadata that never expires can be replayed with a key that has
 	// since been withdrawn (SAMLMetaIOP §2.7), so a federation sets it to bound how old the metadata may be.
 	MaxValidity time.Duration
+
+	// SignatureMethods and DigestMethods list the identifiers of the signature algorithms the metadata may be
+	// signed with, and of the digest algorithms the Reference of the signature may name. They are the
+	// IdentityProvider fields of the same names: empty means every supported algorithm but those of SHA-1, an
+	// algorithm that is not supported is an error, and metadata signed with one that isn't listed is refused.
+	SignatureMethods []string
+	DigestMethods    []string
 }
 
 // Verify verifies the signature on the root element of metadata, an EntityDescriptor or an
@@ -83,6 +90,11 @@ type MetadataVerifier struct {
 func (v *MetadataVerifier) Verify(data []byte) ([]byte, error) {
 	if len(v.Certificates) == 0 {
 		return nil, errors.New("no certificates to verify the metadata with")
+	}
+
+	policy, err := newSignaturePolicy("MetadataVerifier", v.SignatureMethods, v.DigestMethods)
+	if err != nil {
+		return nil, err
 	}
 
 	if err := xrv.Validate(bytes.NewReader(data)); err != nil {
@@ -103,7 +115,7 @@ func (v *MetadataVerifier) Verify(data []byte) ([]byte, error) {
 		return nil, err
 	}
 
-	verified, err := verifyEnvelopedSignature(root, v.Certificates)
+	verified, err := verifyEnvelopedSignature(root, v.Certificates, policy)
 	if err != nil {
 		return nil, fmt.Errorf("cannot verify the signature of the metadata: %w", err)
 	}

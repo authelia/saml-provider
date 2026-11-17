@@ -367,7 +367,13 @@ func (idp *IdentityProvider) verifySOAPRequester(r *http.Request, message *etree
 			errors.New("the message is signed but the service provider has no signing certificate")}
 	}
 
-	verified, err := verifyEnvelopedSignature(message, certificates)
+	// A list that can't be used is a fault of the identity provider, and not of the requester.
+	policy, err := idp.signaturePolicy()
+	if err != nil {
+		return nil, nil, &statusError{StatusResponder, "", err}
+	}
+
+	verified, err := verifyEnvelopedSignature(message, certificates, policy)
 	if err != nil {
 		return nil, nil, &statusError{StatusRequester, StatusRequestDenied, fmt.Errorf("invalid message signature: %w", err)}
 	}

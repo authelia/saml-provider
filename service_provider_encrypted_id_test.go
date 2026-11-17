@@ -96,7 +96,7 @@ func TestSPMakesLogoutRequestWithEncryptedID(t *testing.T) {
 		certificates, err := serviceProviderSigningCertificates(test.SP.Metadata())
 		assert.NilError(t, err)
 
-		verified, err := verifyEnvelopedSignature(reparse(t, request.Element()), certificates)
+		verified, err := verifyEnvelopedSignature(reparse(t, request.Element()), certificates, anySignaturePolicy)
 		assert.NilError(t, err)
 		check(t, verified)
 	})
