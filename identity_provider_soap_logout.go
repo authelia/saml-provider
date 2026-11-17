@@ -164,7 +164,8 @@ func soapResponseMessage(body []byte) ([]byte, error) {
 //
 // Every SAML message gets a LogoutResponse: one that is not a LogoutRequest gets Requester/RequestUnsupported, one
 // that can't be verified gets Requester/RequestDenied, and one that is verified but expired, for another destination
-// or of another version gets the matching error status. Its session is not ended. A request that is not a POST gets
+// or of another version gets the matching error status, as does a replay of a request that was already verified,
+// which is Requester/RequestDenied (SAMLSec §6.1.2). Its session is not ended. A request that is not a POST gets
 // StatusMethodNotAllowed, one that is not a SOAP 1.1 envelope gets a Client fault, and a failure to sign or write
 // the response gets a Server fault.
 func (idp *IdentityProvider) ServeSOAPLogout(w http.ResponseWriter, r *http.Request) {

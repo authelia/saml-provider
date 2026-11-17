@@ -88,7 +88,7 @@ least the subset of SAML known as [interoperable SAML](https://kantarainitiative
 | `Scoping` (proxying)                              | ❌  | ❌  |
 | Error status responses                            | ✅  | ✅  |
 | Multiple assertions in a single `Response`        | N/A | ⚠️  |
-| Replay detection                                  | ❌  | ⚠️  |
+| Replay detection                                  | ✅  | ⚠️  |
 
 #### Signing and Encryption
 
@@ -297,7 +297,11 @@ least the subset of SAML known as [interoperable SAML](https://kantarainitiative
   the ACS has been validated, and `Subject`, `NameIDPolicy`, `ForceAuthn`, `IsPassive` and `RequestedAuthnContext`
   refusals use it.
   Other failures produce an HTTP error.
-- **Replay detection:** `AuthnRequest` IDs are not checked for reuse.
+- **Replay detection:** the ID of every `AuthnRequest` that is answered for a session, and of every verified
+  `LogoutRequest` on any binding, is recorded in `IdentityProvider.ReplayStore` until the request expires, and a
+  request presented again is answered with `Requester` and `RequestDenied`. A request that a login form re-presents
+  is not a replay. The default store is a bounded `MemoryReplayStore` that is private to the process, so an IdP which
+  runs as several instances must set a `ReplayStore` they share. If the store fails or is full the request is refused.
 - **Encrypt `Assertion`:** the algorithms are negotiated from the `EncryptionMethod` elements of the SP's encryption
   key, as the Metadata Profile for Algorithm Support §2.5 requires. For content encryption and for key transport
   separately, the first algorithm the SP lists that the IdP allows is used, and if the SP lists algorithms of that

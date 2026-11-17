@@ -192,7 +192,9 @@ func (req *IdpLogoutRequest) matchesSessionNameIDValue(session *Session, nameID 
 // A request that is invalid, can't be verified, or comes from a service provider with no
 // SingleLogoutService for a supported binding gets a StatusBadRequest response. A verified request
 // from a service provider with such an endpoint that is expired, for another destination or of
-// another version is answered there with an error status, and its session is not ended.
+// another version is answered there with an error status, and its session is not ended. Nor is it when
+// the request is a replay of one that was already verified, on any binding, which is answered with
+// Requester and RequestDenied, or when the ReplayStore fails, which is answered with Responder.
 func (idp *IdentityProvider) ServeSLO(w http.ResponseWriter, r *http.Request) {
 	isResponse, err := isLogoutResponse(r)
 	if err != nil {
@@ -309,6 +311,11 @@ func isLogoutResponse(r *http.Request) (bool, error) {
 // serveLogoutResponse handles a LogoutResponse from a participant of a logout, records its outcome and continues the
 // logout. A response to the outstanding request that can't be verified marks the participant failed, as it may still
 // be logged in. A response that can't be read, or is not to the outstanding request, is refused and changes nothing.
+//
+// The ID of a response is not recorded in the ReplayStore. A response only counts as the answer to the outstanding
+// request, whose ID is unique and is no longer outstanding once the state is saved, which the LogoutStateProvider
+// does atomically, so a replayed response is uncorrelated wherever it arrives. A response over SOAP is read from the
+// connection that the identity provider opened, and can't be presented again (SAMLBind §3.2.4).
 func (idp *IdentityProvider) serveLogoutResponse(w http.ResponseWriter, r *http.Request) {
 	provider, ok := idp.SessionProvider.(LogoutStateProvider)
 	if !ok {
@@ -449,6 +456,13 @@ func NewIdpLogoutRequest(idp *IdentityProvider, r *http.Request) (*IdpLogoutRequ
 // the Request, ServiceProviderMetadata and SLOEndpoint properties. On the SOAP binding the request must
 // carry an enveloped signature, and SLOEndpoint is not assigned, as the response goes back on the
 // connection of the request.
+//
+// The last check consumes the ID of the request in the ReplayStore of the identity provider (SAMLSec
+// §6.1.2), so Validate returns nil once for a request, here or at any instance that shares the store:
+// calling it again, or for a copy of the request, returns an error that wraps ErrReplayed and carries a
+// Requester status with RequestDenied. A failure of the store is an error with a Responder status. Nothing
+// is recorded for a request that fails any other check, so only a registered service provider can add to
+// the store.
 func (req *IdpLogoutRequest) Validate() error {
 	// This code runs before any authentication, and the cost of the XML parsing below is
 	// proportional to the size of the request.
@@ -496,7 +510,11 @@ func (req *IdpLogoutRequest) Validate() error {
 		return err
 	}
 
-	return req.checkRequestStage()
+	if err := req.checkRequestStage(); err != nil {
+		return err
+	}
+
+	return req.checkReplay()
 }
 
 // validateSOAP is the rest of Validate on the SOAP binding, after checkTrust: the enveloped signature is verified
@@ -526,7 +544,11 @@ func (req *IdpLogoutRequest) validateSOAP() error {
 		return errors.New("request has no NameID")
 	}
 
-	return req.checkRequestStage()
+	if err := req.checkRequestStage(); err != nil {
+		return err
+	}
+
+	return req.checkReplay()
 }
 
 // checkTrust makes the checks on the identity of the request that are needed before the service
