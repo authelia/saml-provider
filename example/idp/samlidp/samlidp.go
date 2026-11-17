@@ -29,6 +29,10 @@ type Options struct {
 	// metadata, which is URL with /metadata appended. See saml.IdentityProvider.EntityID.
 	EntityID string
 
+	// MetadataInfo is what the metadata says about the identity provider for a federation and for users, such
+	// as its display name, logo, contacts and scopes. See saml.IdentityProvider.MetadataInfo.
+	MetadataInfo saml.MetadataInfo
+
 	// RolloverCertificates are further signing certificates which the metadata publishes but which
 	// are never used to sign, so that the signing key can be changed without downtime. See
 	// saml.IdentityProvider.RolloverCertificates.
@@ -136,6 +140,7 @@ func New(opts Options) (*Server, error) {
 			Certificate:          opts.Certificate,
 			RolloverCertificates: opts.RolloverCertificates,
 			EntityID:             opts.EntityID,
+			MetadataInfo:         opts.MetadataInfo,
 			MetadataURL:          metadataURL,
 			SSOURL:               ssoURL,
 			LoginURL:             loginURL,

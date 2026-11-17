@@ -38,6 +38,7 @@ type EntitiesDescriptor struct {
 	CacheDuration       *time.Duration `xml:"cacheDuration,attr,omitempty"`
 	Name                *string        `xml:",attr,omitempty"`
 	Signature           *etree.Element
+	Extensions          *Extensions          `xml:"Extensions,omitempty"`
 	EntitiesDescriptors []EntitiesDescriptor `xml:"urn:oasis:names:tc:SAML:2.0:metadata EntitiesDescriptor"`
 	EntityDescriptors   []EntityDescriptor   `xml:"urn:oasis:names:tc:SAML:2.0:metadata EntityDescriptor"`
 }
@@ -121,6 +122,7 @@ type EntityDescriptor struct {
 	ValidUntil                    time.Time     `xml:"validUntil,attr,omitempty"`
 	CacheDuration                 time.Duration `xml:"cacheDuration,attr,omitempty"`
 	Signature                     *etree.Element
+	Extensions                    *Extensions                    `xml:"Extensions,omitempty"`
 	RoleDescriptors               []RoleDescriptor               `xml:"RoleDescriptor"`
 	IDPSSODescriptors             []IDPSSODescriptor             `xml:"IDPSSODescriptor"`
 	SPSSODescriptors              []SPSSODescriptor              `xml:"SPSSODescriptor"`
@@ -129,8 +131,8 @@ type EntityDescriptor struct {
 	PDPDescriptors                []PDPDescriptor                `xml:"PDPDescriptor"`
 	AffiliationDescriptor         *AffiliationDescriptor
 	Organization                  *Organization
-	ContactPerson                 *ContactPerson
-	AdditionalMetadataLocations   []string `xml:"AdditionalMetadataLocation"`
+	ContactPeople                 []ContactPerson `xml:"ContactPerson"`
+	AdditionalMetadataLocations   []string        `xml:"AdditionalMetadataLocation"`
 }
 
 // MarshalXML implements [xml.Marshaler].
@@ -175,6 +177,7 @@ func (m *EntityDescriptor) UnmarshalXML(d *xml.Decoder, start xml.StartElement) 
 //
 // See http://docs.oasis-open.org/security/saml/v2.0/saml-metadata-2.0-os.pdf §2.3.2.1.
 type Organization struct {
+	Extensions               *Extensions     `xml:"Extensions,omitempty"`
 	OrganizationNames        []LocalizedName `xml:"OrganizationName"`
 	OrganizationDisplayNames []LocalizedName `xml:"OrganizationDisplayName"`
 	OrganizationURLs         []LocalizedURI  `xml:"OrganizationURL"`
@@ -200,12 +203,41 @@ type LocalizedURI struct {
 //
 // See http://docs.oasis-open.org/security/saml/v2.0/saml-metadata-2.0-os.pdf §2.3.2.2.
 type ContactPerson struct {
-	ContactType      string `xml:"contactType,attr"`
-	Company          string
-	GivenName        string
-	SurName          string
+	// ContactType is technical, support, administrative, billing or other.
+	ContactType string `xml:"contactType,attr"`
+
+	// REFEDSContactType is the remd:contactType attribute of the REFEDS Security Contact Metadata Extension, which
+	// is REFEDSSecurityContactType for the security contact that Sirtfi requires, whose ContactType is other.
+	REFEDSContactType string `xml:"http://refeds.org/metadata contactType,attr,omitempty"`
+
+	Extensions *Extensions `xml:"Extensions,omitempty"`
+	Company    string      `xml:",omitempty"`
+	GivenName  string      `xml:",omitempty"`
+	SurName    string      `xml:",omitempty"`
+
+	// EmailAddresses are URIs, so an address is written as mailto:someone@example.com.
 	EmailAddresses   []string `xml:"EmailAddress"`
 	TelephoneNumbers []string `xml:"TelephoneNumber"`
+}
+
+// UnmarshalXML implements [xml.Unmarshaler]. The contactType and the remd:contactType attributes have the same
+// local name, and each is only read from its own namespace.
+func (m *ContactPerson) UnmarshalXML(d *xml.Decoder, start xml.StartElement) error {
+	type alias ContactPerson
+
+	if err := d.DecodeElement((*alias)(m), &start); err != nil {
+		return err
+	}
+
+	m.ContactType = ""
+
+	for _, attr := range start.Attr {
+		if attr.Name.Space == "" && attr.Name.Local == "contactType" {
+			m.ContactType = attr.Value
+		}
+	}
+
+	return nil
 }
 
 // RoleDescriptor represents the SAML element RoleDescriptor.
@@ -218,6 +250,7 @@ type RoleDescriptor struct {
 	ProtocolSupportEnumeration string      `xml:"protocolSupportEnumeration,attr"`
 	ErrorURL                   string      `xml:"errorURL,attr,omitempty"`
 	Signature                  *etree.Element
+	Extensions                 *Extensions     `xml:"Extensions,omitempty"`
 	KeyDescriptors             []KeyDescriptor `xml:"KeyDescriptor,omitempty"`
 	Organization               *Organization   `xml:"Organization,omitempty"`
 	ContactPeople              []ContactPerson `xml:"ContactPerson,omitempty"`
@@ -510,6 +543,7 @@ type AffiliationDescriptor struct {
 	ValidUntil         time.Time    `xml:"validUntil,attr,omitempty"`
 	CacheDuration      *XSDDuration `xml:"cacheDuration,attr,omitempty"`
 	Signature          *etree.Element
+	Extensions         *Extensions     `xml:"Extensions,omitempty"`
 	AffiliateMembers   []string        `xml:"AffiliateMember"`
 	KeyDescriptors     []KeyDescriptor `xml:"KeyDescriptor"`
 }

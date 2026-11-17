@@ -554,6 +554,21 @@ type IdentityProvider struct {
 	// whatever the entity ID is.
 	EntityID string
 
+	// MetadataInfo is what the metadata says about the identity provider for a federation and for users: its
+	// UIInfo, organization, contacts, errorURL, scopes and entity attributes. Nothing of it is published by
+	// default. See MetadataInfo for what SAML2Int requires. If it is not valid, SignedMetadata returns an error
+	// and ServeMetadata responds with StatusInternalServerError; MetadataInfo.Validate checks it when the
+	// application starts.
+	MetadataInfo MetadataInfo
+
+	// MetadataHook, if it is set, is called by Metadata with the metadata once it is complete, and may change
+	// anything in it, for what has no setting: the RegistrationInfo of a federation, an extension in
+	// Extensions.Other, or an endpoint that the application serves itself. SignedMetadata signs the result. The
+	// hook is not checked, so it can publish metadata that the identity provider doesn't honour, and it must not
+	// remove the keys or endpoints that are in use. It is called for every call of Metadata, and must be safe to
+	// call from more than one goroutine.
+	MetadataHook func(metadata *EntityDescriptor)
+
 	// WantAuthnRequestsSigned requires every AuthnRequest to be signed, and is declared in the
 	// metadata. A request is also required to be signed if the metadata of its service provider
 	// sets AuthnRequestsSigned, and any signature that is present is always verified.
@@ -989,6 +1004,8 @@ func (idp *IdentityProvider) Metadata() *EntityDescriptor {
 	idp.addQueryMetadata(ed, keyDescriptors[:signingKeyDescriptors:signingKeyDescriptors], nameIDFormats)
 
 	idp.nameIDServiceMetadata(&ed.IDPSSODescriptors[0])
+
+	idp.describeMetadata(ed)
 
 	return ed
 }

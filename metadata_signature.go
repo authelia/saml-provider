@@ -21,8 +21,13 @@ const metadataNamespace = "urn:oasis:names:tc:SAML:2.0:metadata"
 // enveloped signature by the key of the identity provider (SAMLMeta §3), so that it can be published over a
 // channel which doesn't authenticate it, or added to a federation which checks who signed it. The signature
 // refers to the ID of the EntityDescriptor, which is random for each call (SAMLMeta §3.1.2), and is its first
-// child, as the schema requires. The document isn't cached, so it is signed again for every call.
+// child, as the schema requires. The document isn't cached, so it is signed again for every call. It returns an
+// error if MetadataInfo is not valid, see MetadataInfo.Validate.
 func (idp *IdentityProvider) SignedMetadata() ([]byte, error) {
+	if err := idp.checkMetadataInfo(); err != nil {
+		return nil, err
+	}
+
 	metadata := idp.Metadata()
 	metadata.ID = fmt.Sprintf("id-%x", randomBytes(20))
 

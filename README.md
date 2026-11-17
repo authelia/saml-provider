@@ -125,6 +125,12 @@ least the subset of SAML known as [interoperable SAML](https://kantarainitiative
 | Consume `EntitiesDescriptor` | ✅  | ⚠️ |
 | Sign published metadata      | ✅  | ❌ |
 | Verify metadata signatures   | ✅  | ❌ |
+| Publish UI, organization, contacts, scopes, entity attributes[^mdext] | ✅  | ❌ |
+| Consume metadata extensions[^mdext] | ✅  | ⚠️ |
+
+[^mdext]: `mdui:UIInfo` and `mdui:DiscoHints`, `mdattr:EntityAttributes`, `shibmd:Scope`, `mdrpi:RegistrationInfo`
+    and `mdrpi:PublicationInfo` are typed, and every other extension is kept as it was parsed. The SP parses them
+    with the metadata of an IdP but doesn't act on them, see the notes below.
 
 ### Identity Provider Limitations
 
@@ -409,8 +415,11 @@ least the subset of SAML known as [interoperable SAML](https://kantarainitiative
   persistent NameID it issues to that SP, followed by `@` and the scope. It is always derived, so it changes with
   `Secret` and not with `Terminate`. Both values must be `uniqueID@scope` with the characters and lengths of the
   profile (`ValidateSubjectIdentifier`): a `Session.SubjectID` that isn't is left out and logged, and an invalid
-  `pairwise-id` or `Scope` fails the request. The `subject-id:req` entity attribute of SP metadata is not read, and
-  the IdP metadata has no `shibmd:Scope`.
+  `pairwise-id` or `Scope` fails the request. The IdP metadata lists that `Scope`, and those of
+  `IdentityProvider.MetadataInfo.Scopes`, as `shibmd:Scope`. The `subject-id:req` entity attribute of SP metadata is
+  read by `EntityDescriptor.SubjectIDRequirement`, for an `AttributeReleasePolicy` to honour:
+  `DefaultAttributeReleasePolicy` doesn't, so an SP that only signals its requirement there receives neither attribute
+  (SDP-IDP15 of SAML2Int is not met by default).
 - **Client address:** assertions state the IP address of the HTTP request. Behind a proxy that is the proxy's address,
   so the `SessionProvider` should set `Session.ClientAddress` to the address of the user.
 - **Assertion lifetime:** an assertion is valid from `MaxClockSkew` before it is made until
@@ -507,6 +516,58 @@ least the subset of SAML known as [interoperable SAML](https://kantarainitiative
   - Metadata whose `validUntil` has passed is refused. `MetadataVerifier.MaxValidity` also refuses metadata with no
     `validUntil`, or one further in the future, so that old metadata with a withdrawn key can't be replayed
     (Metadata Interoperability Profile §2.7).
+  - **Extensions:** `Extensions` on an `EntityDescriptor`, an `EntitiesDescriptor`, every role descriptor, an
+    `Organization` and a `ContactPerson` has typed fields for `mdui:UIInfo` and `mdui:DiscoHints` (Metadata Extensions
+    for Login and Discovery User Interface), `mdattr:EntityAttributes` (Metadata Extension for Entity Attributes),
+    `shibmd:Scope`, and `mdrpi:RegistrationInfo` and `mdrpi:PublicationInfo` (Metadata Extensions for Registration and
+    Publication Information). Any other extension is kept in `Extensions.Other` with its attributes, text and
+    children, so metadata that is parsed and marshalled again keeps it. They are marshalled with their conventional
+    prefixes, the typed ones first. Not kept: a `saml:Assertion` in `EntityAttributes`, the order of text and elements
+    in an unknown extension that mixes them, and the namespace of a prefix inside a value. The entity attributes of
+    an `EntitiesDescriptor` are not passed on to the entities in it.
+  - **What the IdP publishes:** `IdentityProvider.MetadataInfo` (`samlidp.Options.MetadataInfo`) holds what a
+    federation and the SAML V2.0 Deployment Profile for Federation Interoperability (SAML2Int) ask of IdP metadata,
+    and nothing of it is published by default:
+
+    | Setting            | Published as                                                        | SAML2Int             |
+    |:-------------------|:--------------------------------------------------------------------|:---------------------|
+    | `UIInfo`           | `mdui:UIInfo` in the `IDPSSODescriptor`                             | SDP-MD09, SDP-MD10   |
+    | `DiscoHints`       | `mdui:DiscoHints` in the `IDPSSODescriptor`                         |                      |
+    | `Organization`     | `Organization` of the `EntityDescriptor`                            |                      |
+    | `ContactPeople`    | `ContactPerson` of the `EntityDescriptor`                           | SDP-MD11             |
+    | `ErrorURL`         | `errorURL` of the `IDPSSODescriptor`                                | SDP-MD12             |
+    | `Scopes`           | `shibmd:Scope` in the `IDPSSODescriptor` and `AttributeAuthorityDescriptor`, `regexp="false"` | SDP-IDP14 |
+    | `EntityAttributes` | `mdattr:EntityAttributes` of the `EntityDescriptor`                 |                      |
+
+    `EntityAttributes` is where the IdP claims the entity categories it supports
+    (`EntityCategorySupportAttributeName`) or a certification such as Sirtfi (`AssuranceCertificationAttributeName`,
+    `AssuranceCertificationSIRTFI`), whose security contact is a `ContactPerson` with `ContactType` `other` and
+    `REFEDSContactType` `REFEDSSecurityContactType`. The scope of a `PersistentNameIDProvider`, or of any
+    `NameIDProvider` that is a `SubjectIdentifierScopeProvider`, is published without being listed; the scopes of
+    `Session.SubjectID` and of other scoped attributes are not known to the IdP and must be listed in `Scopes`.
+  - `MetadataInfo.Validate` refuses what can't be published, and what SAML2Int forbids in what is published: an
+    `ErrorURL` that isn't an https URL, a logo that is neither an https URL nor a data URI or has no size, a localized
+    value with no language, no value or a language used twice, an `InformationURL`, `PrivacyStatementURL` or
+    `OrganizationURL` that isn't an absolute URL, an `Organization` without a name, display name and URL, an unknown
+    `contactType`, a scope that isn't a domain-like scope, and an entity attribute with no name or no value.
+    `SignedMetadata` returns the same error, so `ServeMetadata` answers 500 and serves nothing, as for an invalid entity
+    ID; `Metadata` doesn't check. It does not require what SAML2Int requires to be present (a display name and logo,
+    a technical contact with an email address, an `errorURL`, a scope), as an IdP outside a federation needs none of it.
+  - `IdentityProvider.MetadataHook` is called by `Metadata` with the finished `EntityDescriptor`, for whatever has no
+    setting, such as `mdrpi:RegistrationInfo` or an extension in `Extensions.Other`. What it changes is signed and is
+    not checked.
+  - **Reading SP metadata:** `EntityDescriptor.EntityAttributeValues`, `EntityCategories` and `HasEntityCategory`
+    (`EntityCategoryResearchAndScholarship`, `EntityCategoryCodeOfConductV1` and others) and `SubjectIDRequirement`
+    read the entity attributes of an SP, for an `AttributeReleasePolicy`, which has the metadata as
+    `AttributeReleaseRequest.ServiceProviderMetadata`. `EntityDescriptor.UIInfo` and `DisplayName`, and
+    `UIInfo.DisplayName`, `Description`, `InformationURL`, `PrivacyStatementURL` and `LocalizedLogos`, choose what to
+    show a user in their language, for a consent page. Nothing in the IdP acts on any of them. An entity category is
+    only worth what the source of the metadata is, so release on one only for metadata from a registrar that is
+    trusted to assign it, such as a verified aggregate. The MDUI of an SP is its own description of itself: escape it,
+    and don't let the browser load or render its logo unchecked.
+  - A `ContactPerson` whose REFEDS `remd:contactType` attribute came after its `contactType` was parsed with the
+    REFEDS value as its `ContactType`; each is now read from its own namespace. `EntityDescriptor.ContactPerson`, which
+    kept only the last contact, is now `ContactPeople`.
   - `ParseServiceProvidersMetadata` returns every entity with an `SPSSODescriptor` in an `EntitiesDescriptor` and the
     groups within it, each expiring with the earliest `validUntil` around it (SAMLMeta §2.3.1).
     `ParseServiceProviderMetadata` returns the first. Neither fetches or refreshes metadata, which is for the
