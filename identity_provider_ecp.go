@@ -110,16 +110,13 @@ func (req *IdpAuthnRequest) validateECP(soap *soapRequest) error {
 
 	// ECP v2.0 §2.3.6.2: the channel bindings of the client and the service provider must be compared, and the
 	// assertion must state the result. That isn't done here, so the request is refused whichever of them sent
-	// some. The raw message is searched, as the extensions aren't parsed; one that a signature doesn't cover
-	// would already have failed Validate.
+	// some. Those of the service provider are in the Extensions of the request.
 	if hasChannelBindings(soap.Headers) {
 		return ErrRequestUnsupported.WithDebug("the client sent channel bindings, which are not supported")
 	}
 
-	for _, extensions := range soap.Message.ChildElements() {
-		if extensions.Tag == "Extensions" && extensions.NamespaceURI() == samlProtocolNS && hasChannelBindings(extensions.ChildElements()) {
-			return ErrRequestUnsupported.WithDebug("the request has channel bindings, which are not supported")
-		}
+	if req.Request.Extensions.Find(channelBindingNS, "ChannelBindings") != nil {
+		return ErrRequestUnsupported.WithDebug("the request has channel bindings, which are not supported")
 	}
 
 	return nil

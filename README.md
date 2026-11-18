@@ -91,6 +91,7 @@ least the subset of SAML known as [interoperable SAML](https://kantarainitiative
 | Error status responses                            | ✅  | ✅  |
 | Multiple assertions in a single `Response`        | N/A | ⚠️  |
 | Replay detection                                  | ✅  | ⚠️  |
+| Protocol `Extensions`[^protoext]                  | ✅  | ⚠️  |
 
 #### Signing and Encryption
 
@@ -127,6 +128,15 @@ least the subset of SAML known as [interoperable SAML](https://kantarainitiative
 [^scoping]: The IdP parses `Scoping` and hands it to the application, and never proxies, so no `Scoping` makes it
 refuse a request. The SP sends `ServiceProvider.Scoping`, and returns a `ProxyRestriction` with the assertion
 without acting on it. See **`Scoping` and `ProxyRestriction`** below.
+
+[^protoext]: Every request and response has `Extensions`, a `*ProtocolExtensions` that keeps each extension element
+    whole, with its attributes, text and children, and `Find` to look one up by namespace and name. The IdP hands
+    those of a request to the application (`IdpAuthnRequest.Request.Extensions`) without acting on any, but for the
+    channel bindings that ECP refuses. `Issuance.ResponseExtensions` (`ServiceProviderIssuance.ResponseExtensions`
+    for each SP) are sent in the `Response` of single sign-on, and an error `Response`, after its `Signature` and
+    covered by it, which signs the `Response` even if only the assertion is otherwise. Each must be in a namespace
+    other than the SAML assertion and protocol namespaces (SAMLCore §3.2.1), or nothing is sent. The SP parses them
+    on what it receives, and doesn't send any.
 
 [^ecp]: The base profile of SAMLProfiles §4.2. The channel bindings, holder-of-key confirmation and delegation of the
     ECP v2.0 extension are not supported, see the notes below.

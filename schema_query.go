@@ -22,6 +22,9 @@ type AttributeQuery struct {
 	Issuer       *Issuer   `xml:"urn:oasis:names:tc:SAML:2.0:assertion Issuer"`
 	Signature    *etree.Element
 
+	// Extensions are the protocol extensions of the message (SAMLCore §3.2.1, §3.2.2), or nil if there are none.
+	Extensions *ProtocolExtensions `xml:"urn:oasis:names:tc:SAML:2.0:protocol Extensions"`
+
 	Subject *Subject
 
 	// Attributes lists the attributes to return, and none means every attribute that policy allows. An
@@ -31,7 +34,7 @@ type AttributeQuery struct {
 
 // Element returns an etree.Element representing the object in XML form.
 func (r *AttributeQuery) Element() *etree.Element {
-	el := newQueryElement("samlp:AttributeQuery", r.ID, r.Version, r.IssueInstant, r.Destination, r.Consent, r.Issuer, r.Signature)
+	el := newQueryElement("samlp:AttributeQuery", r.ID, r.Version, r.IssueInstant, r.Destination, r.Consent, r.Issuer, r.Signature, r.Extensions)
 
 	if r.Subject != nil {
 		el.AddChild(r.Subject.Element())
@@ -93,6 +96,9 @@ type AuthnQuery struct {
 	Issuer       *Issuer   `xml:"urn:oasis:names:tc:SAML:2.0:assertion Issuer"`
 	Signature    *etree.Element
 
+	// Extensions are the protocol extensions of the message (SAMLCore §3.2.1, §3.2.2), or nil if there are none.
+	Extensions *ProtocolExtensions `xml:"urn:oasis:names:tc:SAML:2.0:protocol Extensions"`
+
 	Subject *Subject
 
 	// SessionIndex limits the answer to the session with that index.
@@ -104,7 +110,7 @@ type AuthnQuery struct {
 
 // Element returns an etree.Element representing the object in XML form.
 func (r *AuthnQuery) Element() *etree.Element {
-	el := newQueryElement("samlp:AuthnQuery", r.ID, r.Version, r.IssueInstant, r.Destination, r.Consent, r.Issuer, r.Signature)
+	el := newQueryElement("samlp:AuthnQuery", r.ID, r.Version, r.IssueInstant, r.Destination, r.Consent, r.Issuer, r.Signature, r.Extensions)
 
 	if r.SessionIndex != "" {
 		el.CreateAttr("SessionIndex", r.SessionIndex)
@@ -170,12 +176,15 @@ type AssertionIDRequest struct {
 	Issuer       *Issuer   `xml:"urn:oasis:names:tc:SAML:2.0:assertion Issuer"`
 	Signature    *etree.Element
 
+	// Extensions are the protocol extensions of the message (SAMLCore §3.2.1, §3.2.2), or nil if there are none.
+	Extensions *ProtocolExtensions `xml:"urn:oasis:names:tc:SAML:2.0:protocol Extensions"`
+
 	AssertionIDRefs []AssertionIDRef `xml:"urn:oasis:names:tc:SAML:2.0:assertion AssertionIDRef"`
 }
 
 // Element returns an etree.Element representing the object in XML form.
 func (r *AssertionIDRequest) Element() *etree.Element {
-	el := newQueryElement("samlp:AssertionIDRequest", r.ID, r.Version, r.IssueInstant, r.Destination, r.Consent, r.Issuer, r.Signature)
+	el := newQueryElement("samlp:AssertionIDRequest", r.ID, r.Version, r.IssueInstant, r.Destination, r.Consent, r.Issuer, r.Signature, r.Extensions)
 
 	for i := range r.AssertionIDRefs {
 		el.AddChild(r.AssertionIDRefs[i].Element())
@@ -235,7 +244,7 @@ func (a *AssertionIDRef) Element() *etree.Element {
 
 // newQueryElement returns the element of a request of the assertion query and request protocol with the
 // content of RequestAbstractType (SAMLCore §3.2.1), which every such request begins with.
-func newQueryElement(tag, id, version string, issueInstant time.Time, destination, consent string, issuer *Issuer, signature *etree.Element) *etree.Element {
+func newQueryElement(tag, id, version string, issueInstant time.Time, destination, consent string, issuer *Issuer, signature *etree.Element, extensions *ProtocolExtensions) *etree.Element {
 	el := etree.NewElement(tag)
 	el.CreateAttr("xmlns:saml", "urn:oasis:names:tc:SAML:2.0:assertion")
 	el.CreateAttr("xmlns:samlp", "urn:oasis:names:tc:SAML:2.0:protocol")
@@ -257,6 +266,10 @@ func newQueryElement(tag, id, version string, issueInstant time.Time, destinatio
 
 	if signature != nil {
 		el.AddChild(signature)
+	}
+
+	if extensions != nil {
+		el.AddChild(extensions.Element())
 	}
 
 	return el
