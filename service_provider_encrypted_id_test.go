@@ -175,7 +175,7 @@ func TestSPDoesNotSendNameIDItCannotEncrypt(t *testing.T) {
 			&EntityDescriptor{EntityID: "https://idp.example.com", IDPSSODescriptors: []IDPSSODescriptor{{SSODescriptor: SSODescriptor{RoleDescriptor: RoleDescriptor{
 				KeyDescriptors: []KeyDescriptor{keyDescriptor("signing", rsaCertificate.Raw), keyDescriptor("", rsaCertificate.Raw)},
 			}}}}},
-			"", aes128CBC,
+			"", aes128GCM,
 		},
 		"encryption key is preferred to one with no use": {
 			&EntityDescriptor{EntityID: "https://idp.example.com", IDPSSODescriptors: []IDPSSODescriptor{{SSODescriptor: SSODescriptor{RoleDescriptor: RoleDescriptor{

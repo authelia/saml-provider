@@ -65,14 +65,14 @@ func TestElementEncrypterNameIDRoundTrip(t *testing.T) {
 		content string
 		key     string
 	}{
-		{"defaults", nil, aes128CBC, rsaOAEP},
+		{"defaults", nil, aes128GCM, rsaOAEP},
 		{"aes-128-gcm", []EncryptionMethod{method(aes128GCM)}, aes128GCM, rsaOAEP},
 		{"aes-192-gcm", []EncryptionMethod{method(aes192GCM)}, aes192GCM, rsaOAEP},
 		{"aes-256-gcm", []EncryptionMethod{method(aes256GCM)}, aes256GCM, rsaOAEP},
 		{"aes-192-cbc", []EncryptionMethod{method(aes192CBC)}, aes192CBC, rsaOAEP},
 		{"aes-256-cbc", []EncryptionMethod{method(aes256CBC)}, aes256CBC, rsaOAEP},
 		{"oaep 1.1 sha-256", []EncryptionMethod{method(aes128GCM), oaepMethod(rsaOAEP11, digestSHA256, mgf1SHA256)}, aes128GCM, rsaOAEP11},
-		{"oaep mgf1p sha-512", []EncryptionMethod{oaepMethod(rsaOAEP, digestSHA512, "")}, aes128CBC, rsaOAEP},
+		{"oaep mgf1p sha-512", []EncryptionMethod{oaepMethod(rsaOAEP, digestSHA512, "")}, aes128GCM, rsaOAEP},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			encryptedID, err := testElementEncrypter(t, tc.methods...).encryptNameID(&testEncryptedNameID)

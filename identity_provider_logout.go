@@ -727,7 +727,8 @@ func (req *IdpLogoutRequest) checkRequestStage() error {
 			fmt.Errorf("request issued in the future at %s", req.Request.IssueInstant)}
 	}
 
-	if req.Request.NotOnOrAfter != nil && !req.Now.Before(*req.Request.NotOnOrAfter) {
+	// SAML2Int SDP-G01 requires clock skew to be allowed for when a NotOnOrAfter is enforced.
+	if req.Request.NotOnOrAfter != nil && !req.Now.Before(req.Request.NotOnOrAfter.Add(MaxClockSkew)) {
 		return &statusError{StatusRequester, StatusRequestDenied,
 			fmt.Errorf("request expired at %s", *req.Request.NotOnOrAfter)}
 	}
