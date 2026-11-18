@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"html"
 	"maps"
+	"math/rand/v2"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -16,6 +17,7 @@ import (
 	"runtime"
 	"slices"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -63,6 +65,9 @@ func TestInteropIDPMetadata(t *testing.T) {
 	}
 }
 
+// interopSeed seeds the RandReader of every replay.
+var interopSeed = [32]byte([]byte("authelia saml-provider interop!!"))
+
 // interopInstant is when every interop fixture was made, and what the clock of the identity provider says while
 // one is replayed.
 var interopInstant = time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
@@ -86,6 +91,10 @@ type interopCase struct {
 	Binding      string        `json:"binding"`
 	Request      string        `json:"request"`
 	RequestID    string        `json:"request_id"`
+	Endpoint     string        `json:"endpoint,omitempty"`
+	After        string        `json:"after,omitempty"`
+	ArtifactOf   string        `json:"artifact_of,omitempty"`
+	AssertionOf  string        `json:"assertion_of,omitempty"`
 	Expect       interopExpect `json:"expect"`
 	Verify       []string      `json:"verify"`
 	VerifyWith   string        `json:"verify_with,omitempty"`
@@ -129,6 +138,28 @@ type interopExpect struct {
 	// AuthnRequest named. SecondLevel is the second-level StatusCode of a Response that reports an error.
 	NameID      string `json:"name_id,omitempty"`
 	SecondLevel string `json:"second_level,omitempty"`
+
+	// Attributes are the value of each attribute, by its name, that the assertion must state in plaintext.
+	Attributes map[string]string `json:"attributes,omitempty"`
+
+	// NoAssertion is whether a successful Response carries no assertion, as for a query about a principal that is
+	// not found (SAMLCore §3.3.4).
+	NoAssertion bool `json:"no_assertion,omitempty"`
+
+	// AuthnInstant is the AuthnInstant of the AuthnStatement of the assertion, asserted when it is set.
+	AuthnInstant string `json:"authn_instant,omitempty"`
+
+	// Artifact is whether the response is delivered by artifact, in place of the Response.
+	Artifact bool `json:"artifact,omitempty"`
+
+	// Destination is the Destination of the Response, when it is not the first assertion consumer service of the
+	// service provider, such as the one of the HTTP-Artifact binding.
+	Destination string `json:"destination,omitempty"`
+
+	// IssuesAssertion is whether the ID of the assertion is recorded, for a later case to request it by.
+	// AssertionOf is the case whose recorded assertion the assertion must be.
+	IssuesAssertion bool   `json:"issues_assertion,omitempty"`
+	AssertionOf     string `json:"assertion_of,omitempty"`
 }
 
 // interopProfile is how the identity provider is set up for a case, which SP metadata can't say.
@@ -179,6 +210,20 @@ var interopProfiles = map[string]interopProfile{
 			}
 		},
 	},
+	"rsa-query": {
+		IDPKey:  "idp-rsa",
+		Session: interopEmailSession,
+		Configure: func(_ testing.TB, idp *IdentityProvider) {
+			idp.IssuancePolicy = DefaultIssuancePolicy{AssertionEncryption: NoAssertionEncryption}
+		},
+	},
+	"rsa-query-encrypt-assertion": {
+		IDPKey:  "idp-rsa",
+		Session: interopEmailSession,
+		Configure: func(_ testing.TB, idp *IdentityProvider) {
+			idp.IssuancePolicy = DefaultIssuancePolicy{AssertionEncryption: RequireAssertionEncryption}
+		},
+	},
 	"rsa-subject": {
 		IDPKey:  "idp-rsa",
 		Session: interopEmailSession,
@@ -227,6 +272,7 @@ var interopServiceProviders = map[string]string{
 	"sp-rsa-keyvalue":  "https://sp-rsa-keyvalue.example.com/saml2/metadata",
 	"sp-ecdh":          "https://sp-ecdh.example.com/saml2/metadata",
 	"sp-rsa-mail":      "https://sp-rsa-mail.example.com/saml2/metadata",
+	"sp-rsa-artifact":  "https://sp-rsa-artifact.example.com/saml2/metadata",
 }
 
 // interopEncryptionKeys are the key pairs in testdata/interop/keys that each service provider decrypts with, by its
@@ -237,6 +283,7 @@ var interopEncryptionKeys = map[string]string{
 	"sp-rsa-keyvalue":  "sp-rsa",
 	"sp-ecdh":          "sp-ec",
 	"sp-rsa-mail":      "sp-rsa",
+	"sp-rsa-artifact":  "sp-rsa",
 }
 
 // interopEncryptionKey returns the name of the key pair a service provider of the fixtures decrypts with.
@@ -259,20 +306,30 @@ func newInteropIDP(tb testing.TB, profile string) *IdentityProvider {
 		return nil
 	}
 
-	// TimeNow is the clock of the identity provider, and Clock that of the signatures it verifies.
-	timeNow, clock := TimeNow, Clock
+	// TimeNow is the clock of the identity provider, and Clock that of the signatures it verifies. RandReader is
+	// deterministic, so that the identity provider issues the same artifacts and IDs on every replay, which pysaml2
+	// made its requests for (see TestInteropIssued). Keys and IVs come from xmlenc.RandReader, which is left random.
+	timeNow, clock, randReader := TimeNow, Clock, RandReader
 	TimeNow, Clock = func() time.Time { return interopInstant }, dsig.NewFakeClockAt(interopInstant)
+	RandReader = rand.NewChaCha8(interopSeed)
 
-	tb.Cleanup(func() { TimeNow, Clock = timeNow, clock })
+	tb.Cleanup(func() { TimeNow, Clock, RandReader = timeNow, clock, randReader })
 
 	key, cert := interopKey(tb, p.IDPKey)
 
 	idp := &IdentityProvider{
-		Key:                     key,
-		Certificate:             cert,
-		MetadataURL:             mustParseURL("https://idp.example.com/saml/metadata"),
-		SSOURL:                  mustParseURL("https://idp.example.com/saml/sso"),
-		WantAuthnRequestsSigned: true,
+		Key:                          key,
+		Certificate:                  cert,
+		MetadataURL:                  mustParseURL("https://idp.example.com/saml/metadata"),
+		SSOURL:                       mustParseURL("https://idp.example.com/saml/sso"),
+		AttributeServiceURL:          mustParseURL("https://idp.example.com/saml/attribute"),
+		AuthnQueryServiceURL:         mustParseURL("https://idp.example.com/saml/authn-query"),
+		AssertionIDRequestServiceURL: mustParseURL("https://idp.example.com/saml/assertion-id"),
+		ArtifactResolutionURL:        mustParseURL("https://idp.example.com/saml/artifact"),
+		ArtifactStore:                NewMemoryArtifactStore(16),
+		AssertionStore:               &interopAssertionStore{},
+		ReplayStore:                  NewMemoryReplayStore(64),
+		WantAuthnRequestsSigned:      true,
 		ServiceProviderProvider: &mockServiceProviderProvider{
 			GetServiceProviderFunc: func(_ *http.Request, entityID string) (*EntityDescriptor, error) {
 				for name, id := range interopServiceProviders {
@@ -284,27 +341,99 @@ func newInteropIDP(tb testing.TB, profile string) *IdentityProvider {
 				return nil, os.ErrNotExist
 			},
 		},
-		SessionProvider: &mockSessionProvider{
-			GetSessionFunc: func(http.ResponseWriter, *http.Request, *IdpAuthnRequest) *Session {
-				if p.Session != nil {
-					return p.Session()
-				}
-
-				return &Session{
-					ID:         "interop",
-					CreateTime: interopInstant,
-					ExpireTime: interopInstant.Add(time.Hour),
-					NameID:     "alice",
-					UserName:   "alice",
-					UserEmail:  "alice@example.com",
-				}
-			},
-		},
+		SessionProvider: interopSessionProvider{session: p.Session},
 	}
 
 	p.Configure(tb, idp)
 
 	return idp
+}
+
+// interopSessionProvider is the SessionProvider of the fixtures. Every request finds the session of its profile, or
+// the one every case shares, and a query finds it only when it names the NameID of that session.
+type interopSessionProvider struct {
+	session func() *Session
+}
+
+var _ QuerySessionProvider = interopSessionProvider{}
+
+func (p interopSessionProvider) get() *Session {
+	if p.session != nil {
+		return p.session()
+	}
+
+	return &Session{
+		ID:         "interop",
+		CreateTime: interopInstant,
+		ExpireTime: interopInstant.Add(time.Hour),
+		NameID:     "alice",
+		UserName:   "alice",
+		UserEmail:  "alice@example.com",
+	}
+}
+
+func (p interopSessionProvider) GetSession(http.ResponseWriter, *http.Request, *IdpAuthnRequest) *Session {
+	return p.get()
+}
+
+// names reports whether nameID is the NameID of the session, by its value and its format.
+func (p interopSessionProvider) names(nameID *NameID) bool {
+	session := p.get()
+
+	return nameID != nil && nameID.Value == session.NameID && nameID.Format == session.NameIDFormat && session.NameIDFormat != ""
+}
+
+func (p interopSessionProvider) GetQuerySubject(_ *http.Request, _ *IdpQueryRequest, nameID *NameID) (*Session, error) {
+	if !p.names(nameID) {
+		return nil, nil
+	}
+
+	return p.get(), nil
+}
+
+func (p interopSessionProvider) GetAuthnSessions(_ *http.Request, _ *IdpQueryRequest, nameID *NameID) ([]*Session, error) {
+	if !p.names(nameID) {
+		return []*Session{}, nil
+	}
+
+	return []*Session{p.get()}, nil
+}
+
+// interopAssertionStore is an AssertionStore in memory, for one replay.
+type interopAssertionStore struct {
+	mu         sync.Mutex
+	assertions map[string]interopStoredAssertion
+}
+
+type interopStoredAssertion struct {
+	serviceProvider string
+	assertion       *etree.Element
+	notOnOrAfter    time.Time
+}
+
+func (s *interopAssertionStore) SaveAssertion(_ *http.Request, serviceProvider string, assertion *etree.Element, notOnOrAfter time.Time) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if s.assertions == nil {
+		s.assertions = map[string]interopStoredAssertion{}
+	}
+
+	s.assertions[assertion.SelectAttrValue("ID", "")] = interopStoredAssertion{serviceProvider, assertion, notOnOrAfter}
+
+	return nil
+}
+
+func (s *interopAssertionStore) GetAssertion(_ *http.Request, id string) (*etree.Element, string, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	stored, ok := s.assertions[id]
+	if !ok || !TimeNow().Before(stored.notOnOrAfter) {
+		return nil, "", nil
+	}
+
+	return stored.assertion, stored.serviceProvider, nil
 }
 
 // interopSPMetadata returns the metadata that pysaml2 wrote for a service provider of the fixtures.
@@ -350,6 +479,60 @@ func TestInterop(t *testing.T) {
 			}
 		})
 	}
+}
+
+// What the identity provider issues on a replay must be what pysaml2 made its later requests for: the artifact of a
+// response delivered by artifact, and the ID of an assertion that is requested later. RandReader is deterministic, so a replay issues the same each time, unless the
+// identity provider changes the order in which it draws random bytes. SAML_INTEROP_UPDATE=1 rewrites the record,
+// which generate.sh does between its two passes.
+func TestInteropIssued(t *testing.T) {
+	got := map[string]interopIssued{}
+
+	for _, c := range readInteropManifest(t).Cases {
+		if !c.Expect.Artifact && !c.Expect.IssuesAssertion || c.Skip != "" {
+			continue
+		}
+
+		t.Run(c.ID, func(t *testing.T) {
+			checkInteropCase(t, c)
+
+			r := newInteropReplay(t, c)
+			r.run(t, c)
+			got[c.ID] = r.issued[c.ID]
+		})
+	}
+
+	data, err := json.MarshalIndent(got, "", "  ")
+	require.NoError(t, err)
+
+	data = append(data, '\n')
+	path := filepath.Join("testdata", "interop", "idp", "issued.json")
+
+	if os.Getenv("SAML_INTEROP_UPDATE") == "1" {
+		require.NoError(t, os.WriteFile(path, data, 0o600))
+	}
+
+	want, err := os.ReadFile(path)
+	require.NoError(t, err, "what the identity provider issues changed: run testdata/interop/generate.sh")
+	assert.Equal(t, string(want), string(data), "what the identity provider issues changed: run testdata/interop/generate.sh")
+}
+
+// An artifact is resolved once: the identity provider gives out the message to the first ArtifactResolve, and
+// answers the same request again with Success and no message (SAMLCore §3.5.3, SAMLBind §3.6.6).
+func TestInteropArtifactIsResolvedOnce(t *testing.T) {
+	c := interopManifestCase(t, "artifact-resolve")
+	r := newInteropReplay(t, c)
+
+	r.run(t, c)
+
+	_, again := r.serve(t, c)
+	require.Equal(t, "ArtifactResponse", again.Tag)
+
+	if status := again.FindElement("./Status/StatusCode"); assert.NotNil(t, status) {
+		assert.Equal(t, StatusSuccess, status.SelectAttrValue("Value", ""))
+	}
+
+	assert.Nil(t, again.FindElement("./Response"), "the message was given out twice")
 }
 
 // The replay never depends on the wall clock, however long after the fixtures were made it runs: both clocks of
@@ -428,57 +611,216 @@ func (r *fatalRecorder) Errorf(format string, args ...any) { r.fatal += fmt.Spri
 
 func (r *fatalRecorder) FailNow() { runtime.Goexit() }
 
-var interopResponseInput = regexp.MustCompile(`name="SAMLResponse" value="([^"]*)"`)
+var (
+	interopResponseInput = regexp.MustCompile(`name="SAMLResponse" value="([^"]*)"`)
+	interopArtifactInput = regexp.MustCompile(`name="SAMLart" value="([^"]*)"`)
+)
 
-// runInteropCase replays the request of a case against the identity provider of its profile, asserts what the case
-// expects of the response, and returns the response as the base64 that the browser would post.
+// runInteropCase replays the request of a case against the identity provider of its profile, after the requests of
+// the cases it comes after, asserts what the case expects of the answer, and returns the answer as the base64 that
+// is posted or sent back, or the artifact that is posted in its place.
 func runInteropCase(tb testing.TB, c interopCase) string {
 	tb.Helper()
 
 	checkInteropCase(tb, c)
 
-	encoded, response := replayInteropRequest(tb, c)
+	return newInteropReplay(tb, c).run(tb, c)
+}
 
-	checkInteropResponse(tb, c, response)
+// run replays the cases that a case comes after, and then the case, on the identity provider of the replay.
+func (r *interopReplay) run(tb testing.TB, c interopCase) string {
+	tb.Helper()
+
+	if c.After != "" {
+		after := interopManifestCase(tb, c.After)
+		require.Equal(tb, c.IDPProfile, after.IDPProfile, "case %s comes after a case of another profile", c.ID)
+
+		r.run(tb, after)
+	}
+
+	r.checkNamesIssued(tb, c)
+
+	if c.Expect.Artifact {
+		artifact := r.serveArtifact(tb, c)
+		r.issued[c.ID] = interopIssued{Artifact: artifact}
+
+		return artifact
+	}
+
+	encoded, message := r.serve(tb, c)
+
+	if message.Tag == "ArtifactResponse" {
+		message = r.checkArtifactResponse(tb, &c, message)
+	} else {
+		require.Equal(tb, "Response", message.Tag)
+	}
+
+	checkInteropResponse(tb, c, message)
 
 	if c.Expect.Outcome != "success" && c.Expect.Outcome != StatusSuccess {
 		return encoded
 	}
 
-	assertion := response.FindElement("./Assertion")
+	if c.Expect.NoAssertion {
+		assert.Nil(tb, message.FindElement("./Assertion"), "an Assertion")
+		assert.Nil(tb, message.FindElement("./EncryptedAssertion"), "an EncryptedAssertion")
+
+		return encoded
+	}
+
+	assertion := message.FindElement("./Assertion")
 
 	if c.Expect.EncryptedAssertion {
 		assert.Nil(tb, assertion, "a plaintext Assertion beside the EncryptedAssertion")
 
-		assertion = decryptInteropAssertion(tb, c, response)
+		assertion = decryptInteropAssertion(tb, c, message)
 	}
 
 	if assert.NotNil(tb, assertion, "no Assertion") {
+		if c.Expect.IssuesAssertion {
+			r.issued[c.ID] = interopIssued{AssertionID: assertion.SelectAttrValue("ID", "")}
+		}
+
+		if c.Expect.AssertionOf != "" {
+			issued, ok := r.issued[c.Expect.AssertionOf]
+			require.True(tb, ok, "case %s issued no assertion on this replay", c.Expect.AssertionOf)
+			assert.Equal(tb, issued.AssertionID, assertion.SelectAttrValue("ID", ""), "the assertion of %s", c.Expect.AssertionOf)
+		}
+
 		checkInteropSubject(tb, c, assertion)
 		checkInteropEncryptedAttributes(tb, c, assertion)
+		checkInteropAttributes(tb, c, assertion)
+
+		if c.Expect.AuthnInstant != "" {
+			statements := assertion.FindElements("./AuthnStatement")
+			if assert.Len(tb, statements, 1, "AuthnStatements") {
+				assert.Equal(tb, c.Expect.AuthnInstant, statements[0].SelectAttrValue("AuthnInstant", ""))
+			}
+		}
 	}
 
 	return encoded
 }
 
-// replayInteropRequest serves the request of a case to the identity provider of its profile, and returns the
-// Response, as the base64 the browser would post and as XML.
-func replayInteropRequest(tb testing.TB, c interopCase) (string, *etree.Element) {
+// checkNamesIssued fails a case whose request names an artifact or assertion that the case it was made from did not
+// issue on this replay, as when idp/issued.json is stale, rather than let the identity provider answer it as for an
+// unknown one.
+func (r *interopReplay) checkNamesIssued(tb testing.TB, c interopCase) {
 	tb.Helper()
 
-	idp := newInteropIDP(tb, c.IDPProfile)
+	for of, value := range map[string]func(interopIssued) string{
+		c.ArtifactOf:  func(i interopIssued) string { return i.Artifact },
+		c.AssertionOf: func(i interopIssued) string { return i.AssertionID },
+	} {
+		if of == "" {
+			continue
+		}
+
+		issued, ok := r.issued[of]
+		require.True(tb, ok, "case %s issued nothing on this replay", of)
+
+		body, err := os.ReadFile(filepath.Join("testdata", "interop", c.Request))
+		require.NoError(tb, err)
+		require.Contains(tb, string(body), value(issued),
+			"the request names what %s didn't issue on this replay: run testdata/interop/generate.sh", of)
+	}
+}
+
+// serveArtifact serves the request of a case whose response is delivered by artifact, and returns the artifact
+// that the browser is to post to the service provider, which must be one that this identity provider issued.
+func (r *interopReplay) serveArtifact(tb testing.TB, c interopCase) string {
+	tb.Helper()
 
 	body, err := os.ReadFile(filepath.Join("testdata", "interop", c.Request))
 	require.NoError(tb, err)
 
-	var r *http.Request
+	req := httptest.NewRequest(http.MethodPost, r.idp.SSOURL.String(), bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+
+	w := httptest.NewRecorder()
+	r.idp.ServeSSO(w, req)
+	require.Equal(tb, http.StatusOK, w.Code, "%s", w.Body.String())
+
+	match := interopArtifactInput.FindStringSubmatch(w.Body.String())
+	require.NotNil(tb, match, "no SAMLart in %s", w.Body.String())
+	assert.Nil(tb, interopResponseInput.FindStringSubmatch(w.Body.String()), "a SAMLResponse beside the artifact")
+
+	encoded := html.UnescapeString(match[1])
+
+	artifact, err := ParseArtifact(encoded)
+	require.NoError(tb, err)
+	assert.Equal(tb, ArtifactSourceID(r.idp.entityID()), artifact.SourceID, "the SourceID of the artifact")
+	assert.Equal(tb, uint16(0), artifact.EndpointIndex)
+
+	return encoded
+}
+
+// checkArtifactResponse checks the ArtifactResponse of a case, and returns the Response it carries, with the case
+// changed to expect what the Response answers: the request of the case it comes after.
+func (r *interopReplay) checkArtifactResponse(tb testing.TB, c *interopCase, artifactResponse *etree.Element) *etree.Element {
+	tb.Helper()
+
+	if status := artifactResponse.FindElement("./Status/StatusCode"); assert.NotNil(tb, status) {
+		assert.Equal(tb, StatusSuccess, status.SelectAttrValue("Value", ""))
+	}
+
+	assert.Equal(tb, c.RequestID, artifactResponse.SelectAttrValue("InResponseTo", ""))
+
+	if method := artifactResponse.FindElement("./Signature/SignedInfo/SignatureMethod"); assert.NotNil(tb, method, "the ArtifactResponse is not signed") {
+		assert.Equal(tb, c.Expect.SignatureMethod, method.SelectAttrValue("Algorithm", ""))
+	}
+
+	response := artifactResponse.FindElement("./Response")
+	require.NotNil(tb, response, "the ArtifactResponse carries no Response")
+
+	require.NotEmpty(tb, c.After, "an ArtifactResponse for a case that comes after none")
+
+	c.RequestID = interopManifestCase(tb, c.After).RequestID
+	c.Binding = "post-signed"
+
+	return response
+}
+
+// interopReplay is the identity provider of one replay, whose stores outlive each request served on it, and what
+// it issued on it, by case id.
+type interopReplay struct {
+	idp    *IdentityProvider
+	issued map[string]interopIssued
+}
+
+// interopIssued is what the identity provider issued for a case: the artifact of a response delivered by artifact,
+// or the ID of an assertion that a later case requests.
+type interopIssued struct {
+	Artifact    string `json:"artifact,omitempty"`
+	AssertionID string `json:"assertion_id,omitempty"`
+}
+
+// newInteropReplay returns a replay on the identity provider of the profile of a case.
+func newInteropReplay(tb testing.TB, c interopCase) *interopReplay {
+	tb.Helper()
+
+	return &interopReplay{idp: newInteropIDP(tb, c.IDPProfile), issued: map[string]interopIssued{}}
+}
+
+// serve serves the request of a case, and returns the SAML message the identity provider answers with: the
+// Response posted to the service provider on the browser bindings, and the message in the SOAP Body on the SOAP
+// binding.
+func (r *interopReplay) serve(tb testing.TB, c interopCase) (string, *etree.Element) {
+	tb.Helper()
+
+	body, err := os.ReadFile(filepath.Join("testdata", "interop", c.Request))
+	require.NoError(tb, err)
+
+	var req *http.Request
 
 	switch c.Binding {
 	case "redirect-signed":
-		r = httptest.NewRequest(http.MethodGet, idp.SSOURL.String()+"?"+string(body), nil)
+		req = httptest.NewRequest(http.MethodGet, r.idp.SSOURL.String()+"?"+string(body), nil)
 	case "post-signed":
-		r = httptest.NewRequest(http.MethodPost, idp.SSOURL.String(), bytes.NewReader(body))
-		r.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		req = httptest.NewRequest(http.MethodPost, r.idp.SSOURL.String(), bytes.NewReader(body))
+		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	case "soap":
+		return r.serveSOAP(tb, c, body)
 	default:
 		tb.Fatalf("unknown binding %q", c.Binding)
 
@@ -486,7 +828,7 @@ func replayInteropRequest(tb testing.TB, c interopCase) (string, *etree.Element)
 	}
 
 	w := httptest.NewRecorder()
-	idp.ServeSSO(w, r)
+	r.idp.ServeSSO(w, req)
 	require.Equal(tb, http.StatusOK, w.Code, "%s", w.Body.String())
 
 	match := interopResponseInput.FindStringSubmatch(w.Body.String())
@@ -504,6 +846,31 @@ func replayInteropRequest(tb testing.TB, c interopCase) (string, *etree.Element)
 	return encoded, doc.Root()
 }
 
+// serveSOAP posts the SOAP envelope of a case to the service its endpoint names, and returns the envelope of the
+// answer in base64 and the one SAML message in its Body, which must hold no Fault.
+func (r *interopReplay) serveSOAP(tb testing.TB, c interopCase, body []byte) (string, *etree.Element) {
+	tb.Helper()
+
+	req := httptest.NewRequest(http.MethodPost, "https://idp.example.com/saml/"+c.Endpoint, bytes.NewReader(body))
+	req.Header.Set("Content-Type", "text/xml")
+
+	w := httptest.NewRecorder()
+	interopEndpoints[c.Endpoint](r.idp)(w, req)
+	require.Equal(tb, http.StatusOK, w.Code, "%s", w.Body.String())
+
+	doc := etree.NewDocument()
+	require.NoError(tb, doc.ReadFromBytes(w.Body.Bytes()))
+	require.Equal(tb, "Envelope", doc.Root().Tag, "%s", w.Body.String())
+	require.Equal(tb, "http://schemas.xmlsoap.org/soap/envelope/", doc.Root().NamespaceURI())
+
+	soapBody := doc.Root().FindElement("./Body")
+	require.NotNil(tb, soapBody, "no SOAP Body")
+	require.Nil(tb, soapBody.FindElement("./Fault"), "a SOAP Fault: %s", w.Body.String())
+	require.Len(tb, soapBody.ChildElements(), 1, "the SOAP Body holds other than one message")
+
+	return base64.StdEncoding.EncodeToString(w.Body.Bytes()), soapBody.ChildElements()[0]
+}
+
 // checkInteropResponse checks what the case expects of the Response itself: its status, whom it answers and is
 // for, its signature, and whether it carries an assertion encrypted as a whole, or none for an error.
 func checkInteropResponse(tb testing.TB, c interopCase, response *etree.Element) {
@@ -518,11 +885,20 @@ func checkInteropResponse(tb testing.TB, c interopCase, response *etree.Element)
 		assert.Equal(tb, outcome, status.SelectAttrValue("Value", ""))
 	}
 
-	acs := interopSPMetadata(tb, c.SP).SPSSODescriptors[0].AssertionConsumerServices
-	require.NotEmpty(tb, acs, "%s has no assertion consumer service", c.SP)
-
 	assert.Equal(tb, c.RequestID, response.SelectAttrValue("InResponseTo", ""))
-	assert.Equal(tb, acs[0].Location, response.SelectAttrValue("Destination", ""))
+
+	// A Response on the SOAP binding goes back on the connection it answers, and has no Destination.
+	if c.Binding != "soap" {
+		destination := c.Expect.Destination
+		if destination == "" {
+			acs := interopSPMetadata(tb, c.SP).SPSSODescriptors[0].AssertionConsumerServices
+			require.NotEmpty(tb, acs, "%s has no assertion consumer service", c.SP)
+
+			destination = acs[0].Location
+		}
+
+		assert.Equal(tb, destination, response.SelectAttrValue("Destination", ""))
+	}
 
 	if method := response.FindElement("./Signature/SignedInfo/SignatureMethod"); assert.NotNil(tb, method, "the Response is not signed") {
 		assert.Equal(tb, c.Expect.SignatureMethod, method.SelectAttrValue("Algorithm", ""))
@@ -599,6 +975,23 @@ func checkInteropEncryptedAttributes(tb testing.TB, c interopCase, assertion *et
 		}
 
 		assert.Equal(tb, []string{value}, values, "decrypted values of attribute %s", name)
+	}
+}
+
+// checkInteropAttributes checks that each attribute the case names is stated in plaintext with the value expected.
+func checkInteropAttributes(tb testing.TB, c interopCase, assertion *etree.Element) {
+	tb.Helper()
+
+	for name, value := range c.Expect.Attributes {
+		var values []string
+
+		for _, attribute := range assertion.FindElements(fmt.Sprintf("./AttributeStatement/Attribute[@Name=%q]", name)) {
+			for _, v := range attribute.FindElements("./AttributeValue") {
+				values = append(values, v.Text())
+			}
+		}
+
+		assert.Equal(tb, []string{value}, values, "values of attribute %s", name)
 	}
 }
 
@@ -758,12 +1151,26 @@ func checkInteropCase(tb testing.TB, c interopCase) {
 	if _, ok := interopBindings[c.Binding]; !ok {
 		tb.Fatalf("case %s: unknown binding %q", c.ID, c.Binding)
 	}
+
+	if _, ok := interopEndpoints[c.Endpoint]; (c.Binding == "soap") != ok {
+		tb.Fatalf("case %s: endpoint %q on binding %q", c.ID, c.Endpoint, c.Binding)
+	}
 }
 
 // interopBindings are the bindings a request of the fixtures is sent with, and the HTTP method of each.
 var interopBindings = map[string]string{
 	"redirect-signed": http.MethodGet,
 	"post-signed":     http.MethodPost,
+	"soap":            http.MethodPost,
+}
+
+// interopEndpoints are the services of the identity provider that a request on the SOAP binding is sent to, by the
+// name a case gives them.
+var interopEndpoints = map[string]func(idp *IdentityProvider) http.HandlerFunc{
+	"attribute":    func(idp *IdentityProvider) http.HandlerFunc { return idp.ServeAttributeQuery },
+	"authn-query":  func(idp *IdentityProvider) http.HandlerFunc { return idp.ServeAuthnQuery },
+	"assertion-id": func(idp *IdentityProvider) http.HandlerFunc { return idp.ServeAssertionIDRequest },
+	"artifact":     func(idp *IdentityProvider) http.HandlerFunc { return idp.ServeArtifactResolution },
 }
 
 // readInteropManifest reads testdata/interop/manifest.json.

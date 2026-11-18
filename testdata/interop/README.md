@@ -21,8 +21,8 @@ checks what the case's `verify` lists. This direction only runs when `generate.s
 
 Run `testdata/interop/generate.sh` from anywhere in the repository. It needs Docker and Go. It builds the image in
 `Dockerfile`, makes the keys in `keys/` if any is missing, rewrites the identity provider metadata in `idp/`, has
-pysaml2 rewrite `sp/` and `manifest.json`, replays the requests, and has pysaml2 check the responses. It prints one
-line for each case and exits non-zero if any fails. `generate.py` writes nothing unless every case is made, and
+pysaml2 rewrite `sp/` and `manifest.json` in two passes (see "What the identity provider issued"), replays the
+requests, and has pysaml2 check the responses. It prints one line for each case and exits non-zero if any fails. `generate.py` writes nothing unless every case is made, and
 removes a request or metadata file that no case or service provider makes any more.
 
 A run without a change to the code or to `pysaml2/` changes no file. pysaml2 signs with RSA PKCS #1 v1.5, which is
@@ -36,6 +36,22 @@ Each IdP profile that names an `IDPMetadata` file has its metadata committed in 
 service provider of pysaml2 is configured with, and `idp-rsa-ec-encryption.xml`, which also publishes the elliptic
 curve encryption key of `idp-ec`. `TestInteropIDPMetadata` fails when the identity provider no longer publishes what
 is committed, because the requests were made from it. Run `generate.sh` and commit what it changes.
+
+## What the identity provider issued
+
+An ArtifactResolve names an artifact the identity provider issued, and an AssertionIDRequest the ID of an assertion
+it issued, so pysaml2 can only make them once it knows what the identity provider issues. The replay makes that
+knowable: `newInteropIDP` sets the package's `RandReader` to ChaCha8 with a fixed seed, so the identity provider
+draws the same artifacts and IDs on every replay (keys and IVs come from `xmlenc.RandReader`, which stays random). A
+case that names another as `after` is replayed on the same identity provider after it, so the artifact or assertion
+it refers to is really issued and stored on that replay, and resolved or fetched from its stores.
+
+`TestInteropIssued` replays every case that issues something (`expect.artifact` or `expect.issues_assertion`) and
+records what it issued in `idp/issued.json`, which pysaml2 makes the later requests from (`artifact_of` and
+`assertion_of`). It fails when the identity provider issues something else, as it does if the order in which it draws
+random bytes changes; run `generate.sh` and commit what it changes. `generate.sh` runs `generate.py --first-pass`,
+which leaves out the cases that depend on `idp/issued.json`, then has `TestInteropIssued` record it, and then runs
+`generate.py` again for every case.
 
 ## Versions
 
@@ -56,7 +72,10 @@ The cases are listed in `pysaml2/config.py`, and `generate.py` writes them to `m
 - the service provider (`sp`), whose pysaml2 configuration is in `config.py`;
 - how the identity provider is set up (`idp_profile`), a name in `interopProfiles` in `interop_test.go`, which holds
   everything that service provider metadata can't express, such as whether the assertion is encrypted;
-- the binding of the request, `redirect-signed` or `post-signed`;
+- the binding of the request: `redirect-signed` or `post-signed` through the browser, or `soap`, which posts a SOAP
+  envelope to the service its `endpoint` names (`attribute`, `authn-query`, `assertion-id` or `artifact`) and reads
+  the message in the Body of the answer, which must hold no Fault;
+- optionally the case it comes `after`, which is replayed first on the same identity provider;
 - what the replay asserts (`expect`), and what `verify.py` checks (`verify`).
 
 A case that names an unknown profile, service provider or binding fails. It is never skipped.
@@ -73,7 +92,9 @@ declares it can't.
 bug, its issue or its TODO reference. The request is still written, and the case is skipped with that reason until
 the bug is fixed and the declaration removed.
 
-`TestInterop` fails if no case runs or two cases have the same id, and checks the names of a skipped case too.
+`TestInterop` fails if no case runs or two cases have the same id, and checks the names of a skipped case too. A
+case whose request is made from what another issued (`artifact_of`, `assertion_of`) fails, naming `generate.sh`,
+unless its request names what that case issued on the same replay.
 
 `verify_with: "xmlsec1"`, with a `verify_reason` and a `pysaml2_error`, has `verify.py` check the response with
 xmlsec1 instead, for a response pysaml2 can't consume for reasons of its own. It is set in `config.py`, never decided
@@ -105,19 +126,44 @@ the Response, whether the assertion is encrypted as a whole, the format and valu
 it is set, the algorithms of an encrypted assertion (`content_encryption_method`, `key_transport_method` with its
 `key_transport_digest_method` and `key_transport_mgf`, or `key_agreement_method` and `key_wrap_method` for ECDH-ES),
 whether the NameID is an `EncryptedID` (`encrypted_name_id`), and the value of each attribute that must be an
-`EncryptedAttribute` (`encrypted_attributes`). The Go replay decrypts what is encrypted with the key of the service
-provider before it checks what is inside.
+`EncryptedAttribute` (`encrypted_attributes`) or a plaintext one (`attributes`). For the other protocols it holds
+whether a successful Response carries no assertion (`no_assertion`), as for a query about a principal that isn't
+found, the `authn_instant` of an AuthnStatement, whether the response is delivered by `artifact`, the `destination`
+of a Response that is not the first assertion consumer service, and whether the case `issues_assertion` or expects
+the assertion another issued (`assertion_of`). An ArtifactResponse is checked, and then the Response it carries
+against the case it comes after. The Go replay decrypts what is encrypted with the key of the service provider
+before it checks what is inside.
 
 `verify` names the checks of `verify.py`: `signature`, `in-response-to`, `subject`, `decrypt-assertion`,
-`decrypt-name-id`, `decrypt-attributes` and `error-status`. A Response that reports an error passes `error-status`
+`decrypt-name-id`, `decrypt-attributes`, `attributes`, `no-assertion`, `authn-statement`, `artifact` (pysaml2
+resolves the artifact to the artifact resolution service of the identity provider from its SourceID),
+`artifact-response` (the Response it carries answers the case it comes after, and is signed on its own),
+`assertion-id` (the assertion is the one recorded, with the signature it was issued with) and `error-status`. A Response that reports an error passes `error-status`
 only if its StatusCodes are those expected and pysaml2, having verified its signature, reports it as a
 `StatusError`; any other exception fails it.
 
-Two cases declare the xmlsec1 fallback, for reasons of pysaml2's. It can't decrypt what is encrypted to an elliptic
-curve key: its fixed xmlsec1 command doesn't enable the `agreement-method` key data, allow the AgreementMethod nested
-in the EncryptedKey (`--max-encrypted-key-level 3`) or search for the key laxly, as xmlsec1 doesn't resolve the
-`RecipientKeyInfo`. And it can't decrypt an `EncryptedAttribute` at all, as it passes an object where its decryption
-needs a string.
+Some cases declare a fallback, each for a reason of pysaml2's, with the error it raises.
+
+- It can't decrypt what is encrypted to an elliptic curve key: its fixed xmlsec1 command doesn't enable the
+  `agreement-method` key data, allow the AgreementMethod nested in the EncryptedKey (`--max-encrypted-key-level 3`)
+  or search for the key laxly, as xmlsec1 doesn't resolve the `RecipientKeyInfo`.
+- It can't decrypt an `EncryptedAttribute` at all, as it passes an object where its decryption needs a string.
+- It can't verify any message on the SOAP binding: it takes the message out of the SOAP Body by serializing it again
+  with ElementTree, which renames its namespace prefixes, so the signature, made over the exclusive canonical form
+  that keeps them, no longer verifies.
+
+A case on the SOAP binding is therefore verified with pysaml2 twice. pysaml2 as it is must still fail with its
+`pysaml2_error`. Then `verify.py` replaces that one function of pysaml2 with one that keeps the bytes of the message
+(`pysaml2_unwrap_keeping_bytes`), and runs pysaml2 again: with `verify_with: "pysaml2-unwrapped"` it must then verify
+the case in full, as it does the response delivered by artifact and its ArtifactResponse; otherwise it must verify the
+signature and fail with the `pysaml2_unwrapped_error` the case declares, after which xmlsec1 checks the rest. Those
+second errors are where pysaml2 rejects what SAMLCore §3.3.4 allows or requires of the answer to a query: it requires
+a `SubjectConfirmation`, which the answer to a query that has none doesn't need, and rejects the Success with no
+assertion that a query nothing matches must get. It also only knows an AssertionIDRequest on the URI binding: it
+can't make one for the SOAP binding, and takes the answer for a bare Assertion. Its AssertionIDRequest is made with
+`_message`, which each of pysaml2's `create_` methods makes and signs its message with. pysaml2 parses the answer to a
+query only as unsolicited, as its query responses take no outstanding request IDs, so `verify.py` checks their
+`InResponseTo` itself.
 
 ## Adding a case
 

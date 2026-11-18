@@ -6,7 +6,7 @@ Paths are relative to testdata/interop, which is the working directory in the co
 import datetime
 import shutil
 
-from saml2 import BINDING_HTTP_POST, BINDING_HTTP_REDIRECT
+from saml2 import BINDING_HTTP_ARTIFACT, BINDING_HTTP_POST, BINDING_HTTP_REDIRECT, BINDING_SOAP
 from saml2.client import Saml2Client
 from saml2.config import SPConfig
 from saml2.xmldsig import DIGEST_SHA256, SIG_ECDSA_SHA256, SIG_RSA_SHA256
@@ -48,6 +48,35 @@ PYSAML2_ENCRYPTED_ATTRIBUTE_BUG = (
     "decrypt then fails with TypeError: object of type 'EncryptedData' has no len()"
 )
 
+# Why pysaml2 can't verify the answer to a request on the SOAP binding, for each such case, which declares
+# verify_with "xmlsec1" with it.
+PYSAML2_SOAP_RESERIALIZES = (
+    "pysaml2 7.5.5 takes the message out of a SOAP Body by serializing it again with ElementTree.tostring "
+    "(saml2/soap.py parse_soap_enveloped_saml_thingy), which renames its namespace prefixes, so the signature, made "
+    "over the exclusive canonical form that keeps them, no longer verifies"
+)
+PYSAML2_SOAP_ERROR = "SignatureError: Failed to verify signature"
+
+# Why pysaml2 still can't consume the answer to a query once its SOAP unwrap keeps the bytes (see verify.py), for a
+# case that declares it as pysaml2_unwrapped_error: it verifies the signature, then rejects what SAMLCore §3.3.4
+# allows, or requires, of the answer to a query.
+PYSAML2_NO_SUBJECT_CONFIRMATION = (
+    "; and with the bytes kept, pysaml2 verifies the signature but requires a SubjectConfirmation, which SAMLCore "
+    "§3.3.4 doesn't ask of the answer to a query that has none, and fails with VerificationError: No valid attesting "
+    "address"
+)
+PYSAML2_NO_EMPTY_SUCCESS = (
+    "; and with the bytes kept, pysaml2 verifies the signature but rejects the Success with no assertion that SAMLCore "
+    "§3.3.4 requires when nothing matches the query, with InvalidAssertion: Invalid number of assertions in Response: 0"
+)
+
+# Why pysaml2 can't make or read an AssertionIDRequest on the SOAP binding, for each such case.
+PYSAML2_NO_SOAP_ASSERTION_ID = (
+    "pysaml2 7.5.5 only knows an AssertionIDRequest on the URI binding (SAMLBind §3.7): its "
+    "create_assertion_id_request returns the ID it is given, and its AssertionIDResponse takes the whole message for "
+    "the Assertion that binding returns, so a samlp:Response on the SOAP binding fails with TypeError: Not a assertion"
+)
+
 # A case whose request pysaml2 makes, but which the identity provider is known to get wrong, declares "known_bug"
 # with the bug, its issue or its TODO reference. Its request is still written, and it is skipped with that reason
 # until the bug is fixed and the declaration removed.
@@ -84,11 +113,17 @@ SERVICE_PROVIDERS = {
         "sigalg": SIG_RSA_SHA256,
         "required_attributes": ["mail"],
     },
+    "sp-rsa-artifact": {"sign_key": "sp-rsa", "encryption_key": "sp-rsa", "sigalg": SIG_RSA_SHA256, "artifact_acs": True},
 }
+
+# The file in which TestInteropIssued records what the identity provider issues on a replay, by case id: the
+# artifact of a case that is answered by artifact, and the assertion ID of one whose assertion is fetched later.
+ISSUED = "idp/issued.json"
 
 BINDINGS = {
     "redirect-signed": BINDING_HTTP_REDIRECT,
     "post-signed": BINDING_HTTP_POST,
+    "soap": BINDING_SOAP,
 }
 
 # Every case of the fixtures. generate.py makes the request of each and writes manifest.json from this list;
@@ -294,6 +329,198 @@ CASES = [
         },
         "verify": ["signature", "in-response-to", "error-status"],
     },
+    {
+        "id": "attribute-query",
+        "feature": "attribute-query",
+        "sp": "sp-rsa-mail",
+        "idp_profile": "rsa-query",
+        "binding": "soap",
+        "endpoint": "attribute",
+        "query": {"name_id": "alice@example.com", "attributes": [MAIL]},
+        "expect": {
+            "outcome": "success",
+            "signature_method": RSA_SHA256,
+            "encrypted_assertion": False,
+            "name_id_format": EMAIL,
+            "name_id": "alice@example.com",
+            "attributes": {MAIL: "alice@example.com"},
+        },
+        "verify": ["signature", "in-response-to", "subject", "attributes"],
+        "verify_with": "xmlsec1",
+        "verify_reason": PYSAML2_SOAP_RESERIALIZES + PYSAML2_NO_SUBJECT_CONFIRMATION,
+        "pysaml2_error": PYSAML2_SOAP_ERROR,
+        "pysaml2_unwrapped_error": "VerificationError: No valid attesting address",
+    },
+    {
+        "id": "attribute-query-encrypted-assertion",
+        "feature": "attribute-query/encrypted-assertion",
+        "sp": "sp-rsa-mail",
+        "idp_profile": "rsa-query-encrypt-assertion",
+        "binding": "soap",
+        "endpoint": "attribute",
+        "query": {"name_id": "alice@example.com", "attributes": [MAIL]},
+        "expect": {
+            "outcome": "success",
+            "signature_method": RSA_SHA256,
+            "encrypted_assertion": True,
+            "name_id_format": EMAIL,
+            "name_id": "alice@example.com",
+            "key_transport_method": XENC + "rsa-oaep-mgf1p",
+            "attributes": {MAIL: "alice@example.com"},
+        },
+        "verify": ["signature", "in-response-to", "decrypt-assertion", "subject", "attributes"],
+        "verify_with": "xmlsec1",
+        "verify_reason": PYSAML2_SOAP_RESERIALIZES + PYSAML2_NO_SUBJECT_CONFIRMATION,
+        "pysaml2_error": PYSAML2_SOAP_ERROR,
+        "pysaml2_unwrapped_error": "VerificationError: No valid attesting address",
+    },
+    {
+        "id": "attribute-query-encrypted-id",
+        "feature": "encrypted-id/attribute-query",
+        "sp": "sp-rsa-mail",
+        "idp_profile": "rsa-query",
+        "binding": "soap",
+        "endpoint": "attribute",
+        "query": {"attributes": [MAIL]},
+        "encrypt_subject": {"name_id": "alice@example.com", "template": "oaep", "to": "idp/idp-rsa.xml"},
+        "expect": {
+            "outcome": "success",
+            "signature_method": RSA_SHA256,
+            "encrypted_assertion": False,
+            "name_id_format": EMAIL,
+            "name_id": "alice@example.com",
+            "encrypted_name_id": True,
+            "attributes": {MAIL: "alice@example.com"},
+        },
+        "verify": ["signature", "in-response-to", "decrypt-name-id", "attributes"],
+        "verify_with": "xmlsec1",
+        "verify_reason": PYSAML2_SOAP_RESERIALIZES + PYSAML2_NO_SUBJECT_CONFIRMATION,
+        "pysaml2_error": PYSAML2_SOAP_ERROR,
+        "pysaml2_unwrapped_error": "VerificationError: No valid attesting address",
+    },
+    {
+        "id": "attribute-query-unknown-principal",
+        "feature": "attribute-query/unknown-principal",
+        "sp": "sp-rsa-mail",
+        "idp_profile": "rsa-query",
+        "binding": "soap",
+        "endpoint": "attribute",
+        "query": {"name_id": "bob@example.com", "attributes": [MAIL]},
+        "expect": {"outcome": "success", "signature_method": RSA_SHA256, "no_assertion": True},
+        "verify": ["signature", "in-response-to", "no-assertion"],
+        "verify_with": "xmlsec1",
+        "verify_reason": PYSAML2_SOAP_RESERIALIZES + PYSAML2_NO_EMPTY_SUCCESS,
+        "pysaml2_error": PYSAML2_SOAP_ERROR,
+        "pysaml2_unwrapped_error": "InvalidAssertion: Invalid number of assertions in Response: 0",
+    },
+    {
+        "id": "authn-query",
+        "feature": "authn-query",
+        "sp": "sp-rsa",
+        "idp_profile": "rsa-query",
+        "binding": "soap",
+        "endpoint": "authn-query",
+        "query": {"name_id": "alice@example.com"},
+        "expect": {
+            "outcome": "success",
+            "signature_method": RSA_SHA256,
+            "encrypted_assertion": False,
+            "name_id_format": EMAIL,
+            "name_id": "alice@example.com",
+            "authn_instant": "2026-01-01T00:00:00Z",
+        },
+        "verify": ["signature", "in-response-to", "subject", "authn-statement"],
+        "verify_with": "xmlsec1",
+        "verify_reason": PYSAML2_SOAP_RESERIALIZES + PYSAML2_NO_SUBJECT_CONFIRMATION,
+        "pysaml2_error": PYSAML2_SOAP_ERROR,
+        "pysaml2_unwrapped_error": "VerificationError: No valid attesting address",
+    },
+    {
+        "id": "artifact-sso",
+        "feature": "artifact/sso",
+        "sp": "sp-rsa-artifact",
+        "idp_profile": "rsa",
+        "binding": "post-signed",
+        "response_binding": "artifact",
+        "expect": {"outcome": "success", "artifact": True},
+        "verify": ["artifact"],
+    },
+    {
+        "id": "artifact-resolve",
+        "feature": "artifact/resolve",
+        "sp": "sp-rsa-artifact",
+        "idp_profile": "rsa",
+        "binding": "soap",
+        "endpoint": "artifact",
+        "after": "artifact-sso",
+        "artifact_of": "artifact-sso",
+        "expect": {
+            "outcome": "success",
+            "signature_method": RSA_SHA256,
+            "encrypted_assertion": False,
+            "name_id_format": TRANSIENT,
+            "destination": "https://sp-rsa-artifact.example.com/saml2/acs-artifact",
+        },
+        "verify": ["signature", "in-response-to", "artifact-response", "subject"],
+        "verify_with": "pysaml2-unwrapped",
+        "verify_reason": PYSAML2_SOAP_RESERIALIZES,
+        "pysaml2_error": PYSAML2_SOAP_ERROR,
+    },
+    {
+        "id": "assertion-id-sso",
+        "feature": "assertion-id-request/sso",
+        "sp": "sp-rsa",
+        "idp_profile": "rsa-query",
+        "binding": "post-signed",
+        "expect": {
+            "outcome": "success",
+            "signature_method": RSA_SHA256,
+            "encrypted_assertion": False,
+            "name_id_format": EMAIL,
+            "name_id": "alice@example.com",
+            "issues_assertion": True,
+        },
+        "verify": ["signature", "in-response-to", "subject"],
+    },
+    {
+        "id": "assertion-id-request",
+        "feature": "assertion-id-request",
+        "sp": "sp-rsa",
+        "idp_profile": "rsa-query",
+        "binding": "soap",
+        "endpoint": "assertion-id",
+        "after": "assertion-id-sso",
+        "assertion_of": "assertion-id-sso",
+        "expect": {
+            "outcome": "success",
+            "signature_method": RSA_SHA256,
+            "encrypted_assertion": False,
+            "name_id_format": EMAIL,
+            "name_id": "alice@example.com",
+            "assertion_of": "assertion-id-sso",
+        },
+        "verify": ["signature", "in-response-to", "subject", "assertion-id"],
+        "verify_with": "xmlsec1",
+        "verify_reason": PYSAML2_NO_SOAP_ASSERTION_ID,
+        "pysaml2_error": "TypeError: Not a assertion",
+        "pysaml2_unwrapped_error": "TypeError: Not a assertion",
+    },
+    {
+        "id": "assertion-id-request-other-sp",
+        "feature": "assertion-id-request/other-sp",
+        "sp": "sp-rsa-mail",
+        "idp_profile": "rsa-query",
+        "binding": "soap",
+        "endpoint": "assertion-id",
+        "after": "assertion-id-sso",
+        "assertion_of": "assertion-id-sso",
+        "expect": {"outcome": "success", "signature_method": RSA_SHA256, "no_assertion": True},
+        "verify": ["signature", "in-response-to", "no-assertion"],
+        "verify_with": "xmlsec1",
+        "verify_reason": PYSAML2_NO_SOAP_ASSERTION_ID,
+        "pysaml2_error": "TypeError: Not a assertion",
+        "pysaml2_unwrapped_error": "TypeError: Not a assertion",
+    },
 ]
 
 
@@ -301,8 +528,10 @@ def entity_id(sp):
     return f"https://{sp}.example.com/saml2/metadata"
 
 
-def client(sp):
-    """Returns the pysaml2 service provider of a name in SERVICE_PROVIDERS."""
+def client(sp, allow_unsolicited=False):
+    """Returns the pysaml2 service provider of a name in SERVICE_PROVIDERS. allow_unsolicited is for the answer to a
+    query, which pysaml2 can only parse as unsolicited, as its AttributeResponse and AuthnQueryResponse take no
+    outstanding request IDs; the InResponseTo of such an answer is checked by verify.py itself."""
     entry = SERVICE_PROVIDERS[sp]
     key, cert = f"keys/{entry['sign_key']}.key", f"keys/{entry['sign_key']}.crt"
     enc_key, enc_cert = f"keys/{entry['encryption_key']}.key", f"keys/{entry['encryption_key']}.crt"
@@ -314,13 +543,18 @@ def client(sp):
         "authn_requests_signed": True,
         "want_response_signed": True,
         "want_assertions_signed": False,
-        "allow_unsolicited": False,
+        "allow_unsolicited": allow_unsolicited,
         "signing_algorithm": entry["sigalg"],
         "digest_algorithm": DIGEST_SHA256,
     }
 
     if entry.get("required_attributes"):
         service["required_attributes"] = entry["required_attributes"]
+
+    if entry.get("artifact_acs"):
+        service["endpoints"]["assertion_consumer_service"].append(
+            (f"https://{sp}.example.com/saml2/acs-artifact", BINDING_HTTP_ARTIFACT)
+        )
 
     config = SPConfig()
     config.load(

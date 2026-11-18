@@ -15,7 +15,7 @@
       "request": "sp/requests/authn-request-redirect-rsa-sha256.query",
       "request_id": "id-authn-request-redirect-rsa-sha256",
       "request_sha256": "e8f4524b7796711e9ff469e2cc5af8e2a929d34ec79561f31acb2a2d6b81f9be",
-      "source": "2e5e3ce468e45b5139b0f87f8f83075217e36fe0d7952e46fbdce762cb5eaf10",
+      "source": "a1dfa0d95004462a995b3b580a74cc80a4425278d9ab8e249dcadf9be15ce20e",
       "sp": "sp-rsa",
       "verify": [
         "signature",
@@ -38,7 +38,7 @@
       "request": "sp/requests/authn-request-post-rsa-sha256.form",
       "request_id": "id-authn-request-post-rsa-sha256",
       "request_sha256": "59c9c406bd37619c9b063bc1c58ea026024e626e55acc14496352f626eb73ed2",
-      "source": "8af3da34f1cdbfde53e67f34c58194c4b54e057ead42dc897ffa7e9be5ccfd8f",
+      "source": "8ba725a34a24db4ad266fbc9f62c4088805f873eb5241871dc1d335af4444344",
       "sp": "sp-rsa",
       "verify": [
         "signature",
@@ -104,7 +104,7 @@
       "request": "sp/requests/assertion-encrypted-rsa-oaep-mgf1p.form",
       "request_id": "id-assertion-encrypted-rsa-oaep-mgf1p",
       "request_sha256": "b3dd0fe0a649f2598489699aed2a28076f8c674849195c7e22812acf05869554",
-      "source": "1735d04cf4fbe7ce94fdec5554c6b6c5698adae2777c19a13db4b26ee4cffc3a",
+      "source": "4499a1881b4d6589ecff4f8889b55b829fdedab2cb0bf35b44fa8d16ccae033f",
       "sp": "sp-rsa",
       "verify": [
         "signature",
@@ -133,7 +133,7 @@
       "request": "sp/requests/assertion-encrypted-negotiated.form",
       "request_id": "id-assertion-encrypted-negotiated",
       "request_sha256": "1389b908525e39f553b227d61bc0d580dca1ba5784581715f3a29caf1d159019",
-      "source": "2e1238678492eda0f6290545c79b02d0a47db4375883191034910aa372a22c1f",
+      "source": "9e722de63fd5d6f06c8179c19faac18c5312ce83c3ff4e6be96ec9789e2dfb11",
       "sp": "sp-rsa-negotiate",
       "verify": [
         "signature",
@@ -159,7 +159,7 @@
       "request": "sp/requests/assertion-encrypted-aes256-cbc.form",
       "request_id": "id-assertion-encrypted-aes256-cbc",
       "request_sha256": "abddfcee438b989304c423f59f70abbeadaf225f92c330870ddc820a9949fbc0",
-      "source": "82375cf27904bbd76056a8b0dbcb1597c0494dc42411f4f6e970c123fa9d81ef",
+      "source": "6e362662b7fec623e4e7a85511d3d5ecbf42e7d7b4d72ecf63582f98c5690f5b",
       "sp": "sp-rsa-cbc",
       "verify": [
         "signature",
@@ -185,7 +185,7 @@
       "request": "sp/requests/assertion-encrypted-key-value.form",
       "request_id": "id-assertion-encrypted-key-value",
       "request_sha256": "c5345a3883b7ed4638049099abc8a859a360735fe9cd51d3899679b430ea4ec1",
-      "source": "3b2c88e2f23f329b506a3133da3758eb5fd8df7917c513ed0484072ba7ac9abe",
+      "source": "da1fe3236b1b6cd22f966b76d25da7f9499394b8415a81673975d17093db50d8",
       "sp": "sp-rsa-keyvalue",
       "verify": [
         "signature",
@@ -213,7 +213,7 @@
       "request": "sp/requests/assertion-encrypted-ecdh-es.form",
       "request_id": "id-assertion-encrypted-ecdh-es",
       "request_sha256": "0bf1cc17cbe9720df2b5bc6145092287e722d5cbdf5684d16e84b487fc35e93f",
-      "source": "0f7c6e80da59e20da7d31204c2973ef3c3030c841978508c807383fdd95dab36",
+      "source": "9242985da613772832a9026d549069c4f8bbb9f671a2f010f4d72a5e40ec3f60",
       "sp": "sp-ecdh",
       "verify": [
         "signature",
@@ -240,7 +240,7 @@
       "request": "sp/requests/assertion-encrypted-name-id.form",
       "request_id": "id-assertion-encrypted-name-id",
       "request_sha256": "8000a820539c5ccbe2ac0782969a02abfae57ff7f389ccbde009d628ee6ba4bd",
-      "source": "78a4a9c19e5f3187e559257d700f256eea44df879ead9e0221f8e5701817d900",
+      "source": "0a5f0a6c369cc792e549deea3932fff97491e70eedd7bc1ee470d330fe98f21f",
       "sp": "sp-rsa-mail",
       "verify": [
         "signature",
@@ -267,7 +267,7 @@
       "request": "sp/requests/assertion-encrypted-attribute.form",
       "request_id": "id-assertion-encrypted-attribute",
       "request_sha256": "9bf229504e46b597995615d74daa24816bb3bf2a97c56bb7cc2d2bea8910aee4",
-      "source": "ccaaf3bf2256c514655b83c0182f2d2ae87d050262cb0df64895eede269f7df6",
+      "source": "b5ba27df9ea6ecd09f0d9315099ab91473af054d1ccdf9c84a87055af3b05896",
       "sp": "sp-rsa-mail",
       "verify": [
         "signature",
@@ -299,8 +299,8 @@
       "made_by": "pysaml2+xmlsec1",
       "request": "sp/requests/authn-request-encrypted-subject-rsa-oaep.form",
       "request_id": "id-authn-request-encrypted-subject-rsa-oaep",
-      "request_sha256": "acb25897e568d7d291e568c5a3ed685ef27186e8d401ea2ee815148aa8481580",
-      "source": "f59760f197a21e91e473c1fb85c4dce0a98186d2165cc3902f028d4eb9765d2b",
+      "request_sha256": "75c5ef29440e7b783b91612f5c1e5c071f24cd7d4d475baaa6493688bf06e701",
+      "source": "73743fed8cfb727b11c23fbc9aecdbfc6b86b5b5cb4a7d803a26fb68c6f083cb",
       "sp": "sp-rsa",
       "verify": [
         "signature",
@@ -329,8 +329,8 @@
       "made_by": "pysaml2+xmlsec1",
       "request": "sp/requests/authn-request-encrypted-subject-ecdh-es.form",
       "request_id": "id-authn-request-encrypted-subject-ecdh-es",
-      "request_sha256": "e0deff7895d55464b16817b55fbe9c386acfbe69be19ffeef2c6d1983761b9eb",
-      "source": "4022a6eba33d7df07fbdcf1fc9b15dd3f2ad589ad600b2847c054f2299381a56",
+      "request_sha256": "0d84531db9aee4b38ef2b1c08031688311029010f9af1ebbcd3cd98c9e2b7b17",
+      "source": "da2b1d0f6a38bc22d5d4f31d5f08d04ed4e87fdc43cdaaa15993bb2654d63dea",
       "sp": "sp-rsa",
       "verify": [
         "signature",
@@ -356,14 +356,343 @@
       "made_by": "pysaml2+xmlsec1",
       "request": "sp/requests/authn-request-encrypted-subject-other-principal.form",
       "request_id": "id-authn-request-encrypted-subject-other-principal",
-      "request_sha256": "e34f2b08bc5206412e25b876633b09412d0e16823929cf6684a4a8153fe6b986",
-      "source": "b6f72ec300f4138c42618d4157274f2d8b33eb7ce2e5b28fbe985ab739ced25d",
+      "request_sha256": "578d337fc71b2cbb004b42d66406ecb1cc1187178092673de047b5ee02048b96",
+      "source": "72a74b1fae6e55ba1c89e7e17cabb3baedcb4d08e28f3a46f7ad37a263f2413b",
       "sp": "sp-rsa",
       "verify": [
         "signature",
         "in-response-to",
         "error-status"
       ]
+    },
+    {
+      "binding": "soap",
+      "endpoint": "attribute",
+      "expect": {
+        "attributes": {
+          "urn:oid:0.9.2342.19200300.100.1.3": "alice@example.com"
+        },
+        "encrypted_assertion": false,
+        "name_id": "alice@example.com",
+        "name_id_format": "urn:oasis:names:tc:SAML:1.1:nameid-format:emailAddress",
+        "outcome": "success",
+        "signature_method": "http://www.w3.org/2001/04/xmldsig-more#rsa-sha256"
+      },
+      "feature": "attribute-query",
+      "id": "attribute-query",
+      "idp_profile": "rsa-query",
+      "made_by": "pysaml2",
+      "pysaml2_error": "SignatureError: Failed to verify signature",
+      "pysaml2_unwrapped_error": "VerificationError: No valid attesting address",
+      "query": {
+        "attributes": [
+          "urn:oid:0.9.2342.19200300.100.1.3"
+        ],
+        "name_id": "alice@example.com"
+      },
+      "request": "sp/requests/attribute-query.soap",
+      "request_id": "id-attribute-query",
+      "request_sha256": "7dfea169d83e66baf79a2dc6e156db2266dcdf7ed249dd8b28b41f659fa69873",
+      "source": "63171d060cb1bbb9fce190682f9650a9ce0e4a602d87140d9bf4ab00b6478e9e",
+      "sp": "sp-rsa-mail",
+      "verify": [
+        "signature",
+        "in-response-to",
+        "subject",
+        "attributes"
+      ],
+      "verify_reason": "pysaml2 7.5.5 takes the message out of a SOAP Body by serializing it again with ElementTree.tostring (saml2/soap.py parse_soap_enveloped_saml_thingy), which renames its namespace prefixes, so the signature, made over the exclusive canonical form that keeps them, no longer verifies; and with the bytes kept, pysaml2 verifies the signature but requires a SubjectConfirmation, which SAMLCore \u00a73.3.4 doesn't ask of the answer to a query that has none, and fails with VerificationError: No valid attesting address",
+      "verify_with": "xmlsec1"
+    },
+    {
+      "binding": "soap",
+      "endpoint": "attribute",
+      "expect": {
+        "attributes": {
+          "urn:oid:0.9.2342.19200300.100.1.3": "alice@example.com"
+        },
+        "encrypted_assertion": true,
+        "key_transport_method": "http://www.w3.org/2001/04/xmlenc#rsa-oaep-mgf1p",
+        "name_id": "alice@example.com",
+        "name_id_format": "urn:oasis:names:tc:SAML:1.1:nameid-format:emailAddress",
+        "outcome": "success",
+        "signature_method": "http://www.w3.org/2001/04/xmldsig-more#rsa-sha256"
+      },
+      "feature": "attribute-query/encrypted-assertion",
+      "id": "attribute-query-encrypted-assertion",
+      "idp_profile": "rsa-query-encrypt-assertion",
+      "made_by": "pysaml2",
+      "pysaml2_error": "SignatureError: Failed to verify signature",
+      "pysaml2_unwrapped_error": "VerificationError: No valid attesting address",
+      "query": {
+        "attributes": [
+          "urn:oid:0.9.2342.19200300.100.1.3"
+        ],
+        "name_id": "alice@example.com"
+      },
+      "request": "sp/requests/attribute-query-encrypted-assertion.soap",
+      "request_id": "id-attribute-query-encrypted-assertion",
+      "request_sha256": "8550d8e1b98cc94d6dbc3433d92c3658a5e307d779be16b0f1e4544824682df0",
+      "source": "6ea02619db421edd37408a3f84bc559de0daecb485b1340df8bb53d2887e5fab",
+      "sp": "sp-rsa-mail",
+      "verify": [
+        "signature",
+        "in-response-to",
+        "decrypt-assertion",
+        "subject",
+        "attributes"
+      ],
+      "verify_reason": "pysaml2 7.5.5 takes the message out of a SOAP Body by serializing it again with ElementTree.tostring (saml2/soap.py parse_soap_enveloped_saml_thingy), which renames its namespace prefixes, so the signature, made over the exclusive canonical form that keeps them, no longer verifies; and with the bytes kept, pysaml2 verifies the signature but requires a SubjectConfirmation, which SAMLCore \u00a73.3.4 doesn't ask of the answer to a query that has none, and fails with VerificationError: No valid attesting address",
+      "verify_with": "xmlsec1"
+    },
+    {
+      "binding": "soap",
+      "encrypt_subject": {
+        "name_id": "alice@example.com",
+        "template": "oaep",
+        "to": "idp/idp-rsa.xml"
+      },
+      "endpoint": "attribute",
+      "expect": {
+        "attributes": {
+          "urn:oid:0.9.2342.19200300.100.1.3": "alice@example.com"
+        },
+        "encrypted_assertion": false,
+        "encrypted_name_id": true,
+        "name_id": "alice@example.com",
+        "name_id_format": "urn:oasis:names:tc:SAML:1.1:nameid-format:emailAddress",
+        "outcome": "success",
+        "signature_method": "http://www.w3.org/2001/04/xmldsig-more#rsa-sha256"
+      },
+      "feature": "encrypted-id/attribute-query",
+      "id": "attribute-query-encrypted-id",
+      "idp_profile": "rsa-query",
+      "made_by": "pysaml2+xmlsec1",
+      "pysaml2_error": "SignatureError: Failed to verify signature",
+      "pysaml2_unwrapped_error": "VerificationError: No valid attesting address",
+      "query": {
+        "attributes": [
+          "urn:oid:0.9.2342.19200300.100.1.3"
+        ]
+      },
+      "request": "sp/requests/attribute-query-encrypted-id.soap",
+      "request_id": "id-attribute-query-encrypted-id",
+      "request_sha256": "30a278bf8800fbde6c1d0d07a66150cf2cb8adb7ce252aad747ce7a821b3acaa",
+      "source": "831e104dc9dd689b303c53a5fc6d66810b345311cf2295be7c9fb9b01b85a73e",
+      "sp": "sp-rsa-mail",
+      "verify": [
+        "signature",
+        "in-response-to",
+        "decrypt-name-id",
+        "attributes"
+      ],
+      "verify_reason": "pysaml2 7.5.5 takes the message out of a SOAP Body by serializing it again with ElementTree.tostring (saml2/soap.py parse_soap_enveloped_saml_thingy), which renames its namespace prefixes, so the signature, made over the exclusive canonical form that keeps them, no longer verifies; and with the bytes kept, pysaml2 verifies the signature but requires a SubjectConfirmation, which SAMLCore \u00a73.3.4 doesn't ask of the answer to a query that has none, and fails with VerificationError: No valid attesting address",
+      "verify_with": "xmlsec1"
+    },
+    {
+      "binding": "soap",
+      "endpoint": "attribute",
+      "expect": {
+        "no_assertion": true,
+        "outcome": "success",
+        "signature_method": "http://www.w3.org/2001/04/xmldsig-more#rsa-sha256"
+      },
+      "feature": "attribute-query/unknown-principal",
+      "id": "attribute-query-unknown-principal",
+      "idp_profile": "rsa-query",
+      "made_by": "pysaml2",
+      "pysaml2_error": "SignatureError: Failed to verify signature",
+      "pysaml2_unwrapped_error": "InvalidAssertion: Invalid number of assertions in Response: 0",
+      "query": {
+        "attributes": [
+          "urn:oid:0.9.2342.19200300.100.1.3"
+        ],
+        "name_id": "bob@example.com"
+      },
+      "request": "sp/requests/attribute-query-unknown-principal.soap",
+      "request_id": "id-attribute-query-unknown-principal",
+      "request_sha256": "205a7232f4208461ac99d5ea402951b3d715f4fa4c841ef603d38b3f0002411c",
+      "source": "059372e7e794c9cd94157cadcecc914db2ae6bffed398719c27d48af76e116f1",
+      "sp": "sp-rsa-mail",
+      "verify": [
+        "signature",
+        "in-response-to",
+        "no-assertion"
+      ],
+      "verify_reason": "pysaml2 7.5.5 takes the message out of a SOAP Body by serializing it again with ElementTree.tostring (saml2/soap.py parse_soap_enveloped_saml_thingy), which renames its namespace prefixes, so the signature, made over the exclusive canonical form that keeps them, no longer verifies; and with the bytes kept, pysaml2 verifies the signature but rejects the Success with no assertion that SAMLCore \u00a73.3.4 requires when nothing matches the query, with InvalidAssertion: Invalid number of assertions in Response: 0",
+      "verify_with": "xmlsec1"
+    },
+    {
+      "binding": "soap",
+      "endpoint": "authn-query",
+      "expect": {
+        "authn_instant": "2026-01-01T00:00:00Z",
+        "encrypted_assertion": false,
+        "name_id": "alice@example.com",
+        "name_id_format": "urn:oasis:names:tc:SAML:1.1:nameid-format:emailAddress",
+        "outcome": "success",
+        "signature_method": "http://www.w3.org/2001/04/xmldsig-more#rsa-sha256"
+      },
+      "feature": "authn-query",
+      "id": "authn-query",
+      "idp_profile": "rsa-query",
+      "made_by": "pysaml2",
+      "pysaml2_error": "SignatureError: Failed to verify signature",
+      "pysaml2_unwrapped_error": "VerificationError: No valid attesting address",
+      "query": {
+        "name_id": "alice@example.com"
+      },
+      "request": "sp/requests/authn-query.soap",
+      "request_id": "id-authn-query",
+      "request_sha256": "bf7a449f8efbc4c65decf1027e9bee70144b90def4df52173cb6683ba76a0330",
+      "source": "e352d51a9e0fe3a8ae19b28a0406166bed80ec5471e723c83837e72a0d715bb8",
+      "sp": "sp-rsa",
+      "verify": [
+        "signature",
+        "in-response-to",
+        "subject",
+        "authn-statement"
+      ],
+      "verify_reason": "pysaml2 7.5.5 takes the message out of a SOAP Body by serializing it again with ElementTree.tostring (saml2/soap.py parse_soap_enveloped_saml_thingy), which renames its namespace prefixes, so the signature, made over the exclusive canonical form that keeps them, no longer verifies; and with the bytes kept, pysaml2 verifies the signature but requires a SubjectConfirmation, which SAMLCore \u00a73.3.4 doesn't ask of the answer to a query that has none, and fails with VerificationError: No valid attesting address",
+      "verify_with": "xmlsec1"
+    },
+    {
+      "binding": "post-signed",
+      "expect": {
+        "artifact": true,
+        "outcome": "success"
+      },
+      "feature": "artifact/sso",
+      "id": "artifact-sso",
+      "idp_profile": "rsa",
+      "made_by": "pysaml2",
+      "request": "sp/requests/artifact-sso.form",
+      "request_id": "id-artifact-sso",
+      "request_sha256": "27150ee61ec1b4c0253d08911d65e78fbf8febe06f57ec6e68f0ee0360135941",
+      "response_binding": "artifact",
+      "source": "c83d4499b53ce94908cbb9f9b359c7fc38e24dc516d2f10e5b9ca2132a8a0446",
+      "sp": "sp-rsa-artifact",
+      "verify": [
+        "artifact"
+      ]
+    },
+    {
+      "after": "artifact-sso",
+      "artifact_of": "artifact-sso",
+      "binding": "soap",
+      "endpoint": "artifact",
+      "expect": {
+        "destination": "https://sp-rsa-artifact.example.com/saml2/acs-artifact",
+        "encrypted_assertion": false,
+        "name_id_format": "urn:oasis:names:tc:SAML:2.0:nameid-format:transient",
+        "outcome": "success",
+        "signature_method": "http://www.w3.org/2001/04/xmldsig-more#rsa-sha256"
+      },
+      "feature": "artifact/resolve",
+      "id": "artifact-resolve",
+      "idp_profile": "rsa",
+      "made_by": "pysaml2",
+      "pysaml2_error": "SignatureError: Failed to verify signature",
+      "request": "sp/requests/artifact-resolve.soap",
+      "request_id": "id-artifact-resolve",
+      "request_sha256": "ddca6aefa5ee90dd3d9f704a95e327675b863fba940b08c79c75254f7ca50435",
+      "source": "57dd25006c637c92fa99546da7c76a6e231d77c7ad804fea8c58b73310a9fea4",
+      "sp": "sp-rsa-artifact",
+      "verify": [
+        "signature",
+        "in-response-to",
+        "artifact-response",
+        "subject"
+      ],
+      "verify_reason": "pysaml2 7.5.5 takes the message out of a SOAP Body by serializing it again with ElementTree.tostring (saml2/soap.py parse_soap_enveloped_saml_thingy), which renames its namespace prefixes, so the signature, made over the exclusive canonical form that keeps them, no longer verifies",
+      "verify_with": "pysaml2-unwrapped"
+    },
+    {
+      "binding": "post-signed",
+      "expect": {
+        "encrypted_assertion": false,
+        "issues_assertion": true,
+        "name_id": "alice@example.com",
+        "name_id_format": "urn:oasis:names:tc:SAML:1.1:nameid-format:emailAddress",
+        "outcome": "success",
+        "signature_method": "http://www.w3.org/2001/04/xmldsig-more#rsa-sha256"
+      },
+      "feature": "assertion-id-request/sso",
+      "id": "assertion-id-sso",
+      "idp_profile": "rsa-query",
+      "made_by": "pysaml2",
+      "request": "sp/requests/assertion-id-sso.form",
+      "request_id": "id-assertion-id-sso",
+      "request_sha256": "cff80e6ccee7b6393ceae1a4d9d4648459ed5e392ff8c94a0e957929ccf12ae5",
+      "source": "b1700aa3bf8ff286fa6fef4c81bc859645ac0b8d6132c2b2c02df518c504e567",
+      "sp": "sp-rsa",
+      "verify": [
+        "signature",
+        "in-response-to",
+        "subject"
+      ]
+    },
+    {
+      "after": "assertion-id-sso",
+      "assertion_of": "assertion-id-sso",
+      "binding": "soap",
+      "endpoint": "assertion-id",
+      "expect": {
+        "assertion_of": "assertion-id-sso",
+        "encrypted_assertion": false,
+        "name_id": "alice@example.com",
+        "name_id_format": "urn:oasis:names:tc:SAML:1.1:nameid-format:emailAddress",
+        "outcome": "success",
+        "signature_method": "http://www.w3.org/2001/04/xmldsig-more#rsa-sha256"
+      },
+      "feature": "assertion-id-request",
+      "id": "assertion-id-request",
+      "idp_profile": "rsa-query",
+      "made_by": "pysaml2",
+      "pysaml2_error": "TypeError: Not a assertion",
+      "pysaml2_unwrapped_error": "TypeError: Not a assertion",
+      "request": "sp/requests/assertion-id-request.soap",
+      "request_id": "id-assertion-id-request",
+      "request_sha256": "d335597a73ac69db2afa3fca1b3d9a494412ddd3873ccc4a126a07a1edd0af3c",
+      "source": "aa20bd7ccc48e85dbbdfa859ee90cf70d1f8e44b11e41334b5549d1f5c824ade",
+      "sp": "sp-rsa",
+      "verify": [
+        "signature",
+        "in-response-to",
+        "subject",
+        "assertion-id"
+      ],
+      "verify_reason": "pysaml2 7.5.5 only knows an AssertionIDRequest on the URI binding (SAMLBind \u00a73.7): its create_assertion_id_request returns the ID it is given, and its AssertionIDResponse takes the whole message for the Assertion that binding returns, so a samlp:Response on the SOAP binding fails with TypeError: Not a assertion",
+      "verify_with": "xmlsec1"
+    },
+    {
+      "after": "assertion-id-sso",
+      "assertion_of": "assertion-id-sso",
+      "binding": "soap",
+      "endpoint": "assertion-id",
+      "expect": {
+        "no_assertion": true,
+        "outcome": "success",
+        "signature_method": "http://www.w3.org/2001/04/xmldsig-more#rsa-sha256"
+      },
+      "feature": "assertion-id-request/other-sp",
+      "id": "assertion-id-request-other-sp",
+      "idp_profile": "rsa-query",
+      "made_by": "pysaml2",
+      "pysaml2_error": "TypeError: Not a assertion",
+      "pysaml2_unwrapped_error": "TypeError: Not a assertion",
+      "request": "sp/requests/assertion-id-request-other-sp.soap",
+      "request_id": "id-assertion-id-request-other-sp",
+      "request_sha256": "f5fc9d719f092b6fbb1469b1b977becceabfedd109fffa279894d22c81d29ebf",
+      "source": "4f5851b2d09e2c2420abaceaf9973329c05435560f08fa8fb9e9d8ed48a90d1e",
+      "sp": "sp-rsa-mail",
+      "verify": [
+        "signature",
+        "in-response-to",
+        "no-assertion"
+      ],
+      "verify_reason": "pysaml2 7.5.5 only knows an AssertionIDRequest on the URI binding (SAMLBind \u00a73.7): its create_assertion_id_request returns the ID it is given, and its AssertionIDResponse takes the whole message for the Assertion that binding returns, so a samlp:Response on the SOAP binding fails with TypeError: Not a assertion",
+      "verify_with": "xmlsec1"
     }
   ],
   "instant": "2026-01-01T00:00:00Z",

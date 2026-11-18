@@ -35,8 +35,34 @@
       <EncryptionMethod Algorithm="http://www.w3.org/2001/04/xmlenc#kw-aes192"></EncryptionMethod>
       <EncryptionMethod Algorithm="http://www.w3.org/2001/04/xmlenc#kw-aes128"></EncryptionMethod>
     </KeyDescriptor>
+    <ArtifactResolutionService Binding="urn:oasis:names:tc:SAML:2.0:bindings:SOAP" Location="https://idp.example.com/saml/artifact" index="0"></ArtifactResolutionService>
     <NameIDFormat>urn:oasis:names:tc:SAML:2.0:nameid-format:transient</NameIDFormat>
     <SingleSignOnService Binding="urn:oasis:names:tc:SAML:2.0:bindings:HTTP-Redirect" Location="https://idp.example.com/saml/sso"></SingleSignOnService>
     <SingleSignOnService Binding="urn:oasis:names:tc:SAML:2.0:bindings:HTTP-POST" Location="https://idp.example.com/saml/sso"></SingleSignOnService>
+    <AssertionIDRequestService Binding="urn:oasis:names:tc:SAML:2.0:bindings:SOAP" Location="https://idp.example.com/saml/assertion-id"></AssertionIDRequestService>
   </IDPSSODescriptor>
+  <AuthnAuthorityDescriptor protocolSupportEnumeration="urn:oasis:names:tc:SAML:2.0:protocol">
+    <KeyDescriptor use="signing">
+      <KeyInfo xmlns="http://www.w3.org/2000/09/xmldsig#">
+        <X509Data xmlns="http://www.w3.org/2000/09/xmldsig#">
+          <X509Certificate xmlns="http://www.w3.org/2000/09/xmldsig#">MIIDFTCCAf2gAwIBAgIUDlVQ0w6VMaUkEZf/xzvbipPMOv4wDQYJKoZIhvcNAQELBQAwEjEQMA4GA1UEAwwHaWRwLXJzYTAeFw0yNjAxMDEwMDAwMDBaFw0zNjAxMDEwMDAwMDBaMBIxEDAOBgNVBAMMB2lkcC1yc2EwggEiMA0GCSqGSIb3DQEBAQUAA4IBDwAwggEKAoIBAQC16Z11dozPT4OBFtVY51Q5JQ7PLRPyxiUyMsDB4HF4eDpvQOSJFiry43WeHI+NRMFDh/eJ46i3VbYxzXnc2rgWE7QNPYUJjyqlgxTWU8uH7reF71DtGzWOc0HtTRvzoXCxg2H35rs6pVpACwZ57eZ1Cl6GzTta/A3mXHpl41IrWroKyESnKNgnnjmnxBwNYhJTCXI3MI8uHhlCLEhXe+38d6Wljlk9OleqGpxJJBvjnkXPi55Qhsib1GXGJShq2+cwGpY9wtfaVyosSu7mOeZHeQj/60wygus4mL3BOTepJrgjfAYeVB36RS0r+snBYHaSHdItiRKhYn0WWtGso9+XAgMBAAGjYzBhMB0GA1UdDgQWBBTTElXTmCcMPeOwFDqNvYKAeu5gyTAfBgNVHSMEGDAWgBTTElXTmCcMPeOwFDqNvYKAeu5gyTAPBgNVHRMBAf8EBTADAQH/MA4GA1UdDwEB/wQEAwIFoDANBgkqhkiG9w0BAQsFAAOCAQEAPgY8bMDysKti3X0NUJkfB9ax6iRMQdyKu+RFrHsJhiY5RdjDwMAK02S47Epdr9Nq3SDU4gbuiau06cFj4pstRrsv6egpeliwypAehcbUHMpP+NBwSA5A/dDgUiIKS+G77mm7CEb6McjSTCcYFLb6+8kl0/JpeYSghwD3rCamw9TSrsEIfxWkuKEM8E3Fyd3mLehNkXVfZZfF1e4Xk4KUgn3V3IBoBF3WeAAxRJke9Mt29IeR/M7u/V07Ppz7ElobqpY9dYNXTmLZstu19uXrebHZflQ3CQ4S2UvssJF/khmH9O1okmtiZPFtakJnc2WKkVOsuOkLMeePzkBx/zD+Sg==</X509Certificate>
+        </X509Data>
+      </KeyInfo>
+    </KeyDescriptor>
+    <AuthnQueryService Binding="urn:oasis:names:tc:SAML:2.0:bindings:SOAP" Location="https://idp.example.com/saml/authn-query"></AuthnQueryService>
+    <AssertionIDRequestService Binding="urn:oasis:names:tc:SAML:2.0:bindings:SOAP" Location="https://idp.example.com/saml/assertion-id"></AssertionIDRequestService>
+    <NameIDFormat>urn:oasis:names:tc:SAML:2.0:nameid-format:transient</NameIDFormat>
+  </AuthnAuthorityDescriptor>
+  <AttributeAuthorityDescriptor protocolSupportEnumeration="urn:oasis:names:tc:SAML:2.0:protocol">
+    <KeyDescriptor use="signing">
+      <KeyInfo xmlns="http://www.w3.org/2000/09/xmldsig#">
+        <X509Data xmlns="http://www.w3.org/2000/09/xmldsig#">
+          <X509Certificate xmlns="http://www.w3.org/2000/09/xmldsig#">MIIDFTCCAf2gAwIBAgIUDlVQ0w6VMaUkEZf/xzvbipPMOv4wDQYJKoZIhvcNAQELBQAwEjEQMA4GA1UEAwwHaWRwLXJzYTAeFw0yNjAxMDEwMDAwMDBaFw0zNjAxMDEwMDAwMDBaMBIxEDAOBgNVBAMMB2lkcC1yc2EwggEiMA0GCSqGSIb3DQEBAQUAA4IBDwAwggEKAoIBAQC16Z11dozPT4OBFtVY51Q5JQ7PLRPyxiUyMsDB4HF4eDpvQOSJFiry43WeHI+NRMFDh/eJ46i3VbYxzXnc2rgWE7QNPYUJjyqlgxTWU8uH7reF71DtGzWOc0HtTRvzoXCxg2H35rs6pVpACwZ57eZ1Cl6GzTta/A3mXHpl41IrWroKyESnKNgnnjmnxBwNYhJTCXI3MI8uHhlCLEhXe+38d6Wljlk9OleqGpxJJBvjnkXPi55Qhsib1GXGJShq2+cwGpY9wtfaVyosSu7mOeZHeQj/60wygus4mL3BOTepJrgjfAYeVB36RS0r+snBYHaSHdItiRKhYn0WWtGso9+XAgMBAAGjYzBhMB0GA1UdDgQWBBTTElXTmCcMPeOwFDqNvYKAeu5gyTAfBgNVHSMEGDAWgBTTElXTmCcMPeOwFDqNvYKAeu5gyTAPBgNVHRMBAf8EBTADAQH/MA4GA1UdDwEB/wQEAwIFoDANBgkqhkiG9w0BAQsFAAOCAQEAPgY8bMDysKti3X0NUJkfB9ax6iRMQdyKu+RFrHsJhiY5RdjDwMAK02S47Epdr9Nq3SDU4gbuiau06cFj4pstRrsv6egpeliwypAehcbUHMpP+NBwSA5A/dDgUiIKS+G77mm7CEb6McjSTCcYFLb6+8kl0/JpeYSghwD3rCamw9TSrsEIfxWkuKEM8E3Fyd3mLehNkXVfZZfF1e4Xk4KUgn3V3IBoBF3WeAAxRJke9Mt29IeR/M7u/V07Ppz7ElobqpY9dYNXTmLZstu19uXrebHZflQ3CQ4S2UvssJF/khmH9O1okmtiZPFtakJnc2WKkVOsuOkLMeePzkBx/zD+Sg==</X509Certificate>
+        </X509Data>
+      </KeyInfo>
+    </KeyDescriptor>
+    <AttributeService Binding="urn:oasis:names:tc:SAML:2.0:bindings:SOAP" Location="https://idp.example.com/saml/attribute"></AttributeService>
+    <AssertionIDRequestService Binding="urn:oasis:names:tc:SAML:2.0:bindings:SOAP" Location="https://idp.example.com/saml/assertion-id"></AssertionIDRequestService>
+    <NameIDFormat>urn:oasis:names:tc:SAML:2.0:nameid-format:transient</NameIDFormat>
+  </AttributeAuthorityDescriptor>
 </EntityDescriptor>

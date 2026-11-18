@@ -33,6 +33,10 @@ gotest() {
 docker build -q -t "$image" "$interop" >/dev/null
 run sh keys.sh
 SAML_INTEROP_UPDATE=1 gotest -run '^TestInteropIDPMetadata$' .
+# The first pass makes the requests that don't depend on what the identity provider issues, TestInteropIssued
+# replays them and records what it issues, and the second pass makes every request.
+run python pysaml2/generate.py --first-pass
+SAML_INTEROP_UPDATE=1 gotest -run '^TestInteropIssued$' .
 run python pysaml2/generate.py
 SAML_INTEROP_EMIT="$emit" gotest -run '^TestInterop$' .
 run python pysaml2/verify.py /emit

@@ -24,7 +24,8 @@ import saml2
 from cryptography import x509
 from saml2 import class_name
 from saml2.metadata import create_metadata_string
-from saml2.saml import NAMEID_FORMAT_EMAILADDRESS, NameID, Subject
+from saml2.saml import NAMEID_FORMAT_EMAILADDRESS, AssertionIDRef, NameID, Subject
+from saml2.samlp import AssertionIDRequest
 from saml2.sigver import pre_signature_part
 
 import config
@@ -148,8 +149,10 @@ class _FormInputs(html.parser.HTMLParser):
 def request(client, case):
     """Returns what is sent to the identity provider for a case: a query string or a form body."""
     binding = config.BINDINGS[case["binding"]]
+    response_binding = {"artifact": saml2.BINDING_HTTP_ARTIFACT}.get(case.get("response_binding"), saml2.BINDING_HTTP_POST)
     _, info = client.prepare_for_authenticate(
         binding=binding,
+        response_binding=response_binding,
         relay_state="interop",
         message_id=case["request_id"],
         sign=True,
@@ -249,27 +252,17 @@ def _encrypt_with_xmlsec1(data, template, metadata_path):
         return ElementTree.fromstring(result.stdout)
 
 
-def encrypted_subject_request(client, case):
-    """Returns the POST form body of an AuthnRequest whose Subject is an EncryptedID. pysaml2 makes the request with
-    a NameID in its Subject and a signature template, xmlsec1 encrypts the NameID in place (SAMLCore §2.2.4), and
-    pysaml2 then signs the request, so that the signature covers the EncryptedID."""
+def encrypt_subject_and_sign(client, case, message):
+    """Returns the request message, which pysaml2 made unsigned with a NameID in its Subject, with that NameID
+    encrypted in place by xmlsec1 to the key the case names (SAMLCore §2.2.4) and then signed by pysaml2, so that the
+    signature covers the EncryptedID."""
     spec = case["encrypt_subject"]
     entry = config.SERVICE_PROVIDERS[case["sp"]]
-    idp = next(iter(client.metadata.identity_providers()))
-    destination = client.metadata.single_sign_on_service(idp, saml2.BINDING_HTTP_POST)[0]["location"]
-
-    _, request = client.create_authn_request(
-        destination,
-        binding=saml2.BINDING_HTTP_POST,
-        message_id=case["request_id"],
-        sign=False,
-        subject=Subject(name_id=NameID(format=NAMEID_FORMAT_EMAILADDRESS, text=spec["name_id"])),
-    )
-    request.signature = pre_signature_part(
-        request.id, client.sec.my_cert, 1, sign_alg=entry["sigalg"], digest_alg=config.DIGEST_SHA256
+    message.signature = pre_signature_part(
+        message.id, client.sec.my_cert, 1, sign_alg=entry["sigalg"], digest_alg=config.DIGEST_SHA256
     )
 
-    root = ElementTree.fromstring(str(request))
+    root = ElementTree.fromstring(str(message))
     subject = root.find(f"{{{SAML}}}Subject")
     name_id = subject.find(f"{{{SAML}}}NameID")
     index = list(subject).index(name_id)
@@ -279,13 +272,101 @@ def encrypted_subject_request(client, case):
     subject.remove(name_id)
     subject.insert(index, encrypted_id)
 
-    signed = client.sec.sign_statement(
-        ElementTree.tostring(root).decode(), class_name(request), node_id=request.id
+    return client.sec.sign_statement(ElementTree.tostring(root).decode(), class_name(message), node_id=message.id)
+
+
+def subject_name_id(case):
+    """Returns the NameID that the Subject of the request of a case names, before it is encrypted if it is."""
+    value = case.get("encrypt_subject", case.get("query", {})).get("name_id")
+    return NameID(format=NAMEID_FORMAT_EMAILADDRESS, text=value)
+
+
+def encrypted_subject_request(client, case):
+    """Returns the POST form body of an AuthnRequest whose Subject is an EncryptedID."""
+    idp = next(iter(client.metadata.identity_providers()))
+    destination = client.metadata.single_sign_on_service(idp, saml2.BINDING_HTTP_POST)[0]["location"]
+
+    _, request = client.create_authn_request(
+        destination,
+        binding=saml2.BINDING_HTTP_POST,
+        message_id=case["request_id"],
+        sign=False,
+        subject=Subject(name_id=subject_name_id(case)),
     )
+    signed = encrypt_subject_and_sign(client, case, request)
 
     return urllib.parse.urlencode(
         {"SAMLRequest": base64.b64encode(signed.encode()).decode(), "RelayState": "interop"}
     )
+
+
+URI = "urn:oasis:names:tc:SAML:2.0:attrname-format:uri"
+
+
+def soap_request(client, case):
+    """Returns the SOAP envelope of a query or ArtifactResolve that pysaml2 makes and signs for a case, to the
+    service of the identity provider its endpoint names, as listed in the identity provider metadata."""
+    entry = config.SERVICE_PROVIDERS[case["sp"]]
+    idp = next(iter(client.metadata.identity_providers()))
+    # A request whose Subject is encrypted is made unsigned, and signed once it is encrypted.
+    encrypt = "encrypt_subject" in case
+    sign = {"sign": not encrypt, "sign_alg": entry["sigalg"], "digest_alg": config.DIGEST_SHA256}
+    spec = case.get("query", {})
+
+    if case["endpoint"] == "attribute":
+        destination = client.metadata.attribute_service(idp, saml2.BINDING_SOAP)[0]["location"]
+        attributes = {(name, URI, None): [] for name in spec.get("attributes", [])}
+        _, message = client.create_attribute_query(
+            destination, name_id=subject_name_id(case), attribute=attributes or None, message_id=case["request_id"], **sign
+        )
+    elif case["endpoint"] == "artifact":
+        destination = client.metadata.artifact_resolution_service(idp, saml2.BINDING_SOAP, "idpsso")[0]["location"]
+        _, message = client.create_artifact_resolve(
+            issued(case["artifact_of"])["artifact"], destination, case["request_id"], **sign
+        )
+    elif case["endpoint"] == "assertion-id":
+        # pysaml2's create_assertion_id_request only returns the ID it is given, so the request is made with
+        # _message, which each of its create_ methods makes and signs its message with.
+        destination = client.metadata.assertion_id_request_service(idp, saml2.BINDING_SOAP, "idpsso")[0]["location"]
+        _, message = client._message(
+            AssertionIDRequest,
+            destination,
+            case["request_id"],
+            assertion_id_ref=[AssertionIDRef(text=issued(case["assertion_of"])["assertion_id"])],
+            **sign,
+        )
+    elif case["endpoint"] == "authn-query":
+        destination = client.metadata.authn_query_service(idp, saml2.BINDING_SOAP)[0]["location"]
+        _, message = client.create_authn_query(
+            Subject(name_id=subject_name_id(case)), destination, message_id=case["request_id"], **sign
+        )
+    else:
+        raise RuntimeError(f"{case['id']}: unknown endpoint {case['endpoint']!r}")
+
+    if encrypt:
+        message = encrypt_subject_and_sign(client, case, message)
+
+    # The message is signed already: apply_binding would sign the envelope again.
+    return client.apply_binding(saml2.BINDING_SOAP, str(message), destination, sign=False)["data"]
+
+
+def issued(case_id):
+    """Returns what the identity provider issued for a case on a replay, as TestInteropIssued records it."""
+    try:
+        with open(config.ISSUED) as f:
+            record = json.load(f)
+    except FileNotFoundError:
+        record = {}
+
+    if case_id not in record:
+        raise RuntimeError(f"{config.ISSUED} records nothing for {case_id}: run generate.sh, which records it")
+
+    return record[case_id]
+
+
+def depends_on_issued(case):
+    """Reports whether the request of a case is made from what the identity provider issued for another."""
+    return "artifact_of" in case or "assertion_of" in case
 
 
 def source(case, files, versions):
@@ -304,6 +385,9 @@ def source(case, files, versions):
         if path:
             with open(path, "rb") as f:
                 digest.update(f.read())
+    for of in ("artifact_of", "assertion_of"):
+        if of in case:
+            digest.update(json.dumps(issued(case[of]), sort_keys=True).encode())
     digest.update(json.dumps(versions, sort_keys=True).encode())
 
     return digest.hexdigest()
@@ -344,12 +428,12 @@ def make_case(client, case, files, versions, previous):
     if "encrypt_subject" in case:
         made_by = "pysaml2+xmlsec1"
     case = dict(case, made_by=made_by, request_id="id-" + case["id"])
-    path = f"sp/requests/{case['id']}.{'query' if case['binding'] == 'redirect-signed' else 'form'}"
+    path = f"sp/requests/{case['id']}.{ {'redirect-signed': 'query', 'soap': 'soap'}.get(case['binding'], 'form') }"
 
     unmakeable = case.pop("unmakeable", None)
     known_bug = case.pop("known_bug", None)
 
-    if "encrypt_subject" in case and previous.get(case["id"], (None,))[0] == digest:
+    if ("encrypt_subject" in case or depends_on_issued(case)) and previous.get(case["id"], (None,))[0] == digest:
         data = previous[case["id"]][1]
         case.update(request=path, source=digest, request_sha256=hashlib.sha256(data).hexdigest())
         files[path] = data
@@ -359,7 +443,12 @@ def make_case(client, case, files, versions, previous):
         return case
 
     try:
-        body = encrypted_subject_request(client, case) if "encrypt_subject" in case else request(client, case)
+        if case["binding"] == "soap":
+            body = soap_request(client, case)
+        elif "encrypt_subject" in case:
+            body = encrypted_subject_request(client, case)
+        else:
+            body = request(client, case)
     except Exception as e:  # noqa: BLE001 - re-raised unless it is the error the case declares.
         if unmakeable is None or unmakeable["error"] not in str(e):
             raise RuntimeError(f"pysaml2 could not make the request of {case['id']}") from e
@@ -396,7 +485,9 @@ def write(files):
         os.replace(path + ".tmp", path)
 
 
-def main():
+def main(first_pass=False):
+    """Writes the fixtures. On the first pass, the cases whose requests are made from what the identity provider
+    issued are left out, as TestInteropIssued records that from the requests of this pass."""
     ids = [case["id"] for case in config.CASES]
     duplicates = sorted({i for i in ids if ids.count(i) > 1})
     if duplicates:
@@ -413,6 +504,9 @@ def main():
             files[f"sp/metadata/{sp}.xml"] = metadata(client, sp)
 
         for case in config.CASES:
+            if first_pass and depends_on_issued(case):
+                continue
+
             cases.append(make_case(clients[case["sp"]], case, files, versions, previous))
 
     manifest = {
@@ -440,4 +534,4 @@ def _version():
 
 
 if __name__ == "__main__":
-    main()
+    main(first_pass="--first-pass" in sys.argv[1:])
