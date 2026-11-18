@@ -180,18 +180,56 @@ func TestIDPEncryptionCertificateRejectionDoesNotFallBack(t *testing.T) {
 	}
 }
 
-func TestIDPEncryptionCertificateRejectsNonRSA(t *testing.T) {
-	test := NewIdentityProviderTest(t, applyKey)
-	test.IDP.EncryptionKeyEnforcer = nil
+// An elliptic curve key is encrypted to by ECDH-ES, unless it is on a curve that ECDH-ES isn't supported on, or
+// its certificate doesn't allow key agreement.
+func TestIDPEncryptionCertificateElliptic(t *testing.T) {
 	now := TimeNow()
-	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
-	assert.NilError(t, err)
-	req := spCertRequest(&test.IDP, makeSPCert(t, spCertTemplate{key: key, notBefore: now.Add(-time.Hour), notAfter: now.Add(time.Hour)}))
-	req.Assertion = &Assertion{ID: "id-1", IssueInstant: now, Version: "2.0", Issuer: Issuer{Value: "https://idp.example.com/saml/metadata"}}
 
-	err = req.MakeAssertionEl()
-	assert.Check(t, err != nil)
-	assert.Check(t, req.AssertionEl == nil)
+	p224, err := ecdsa.GenerateKey(elliptic.P224(), rand.Reader)
+	assert.NilError(t, err)
+
+	p256, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	assert.NilError(t, err)
+
+	for name, tc := range map[string]struct {
+		template spCertTemplate
+		err      string
+	}{
+		"P-256":                  {spCertTemplate{key: p256}, ""},
+		"P-256 key agreement":    {spCertTemplate{key: p256, keyUsage: x509.KeyUsageKeyAgreement}, ""},
+		"P-256 signing only":     {spCertTemplate{key: p256, keyUsage: x509.KeyUsageDigitalSignature}, "does not assert keyAgreement"},
+		"P-256 key encipherment": {spCertTemplate{key: p256, keyUsage: x509.KeyUsageKeyEncipherment}, "does not assert keyAgreement"},
+		"P-224":                  {spCertTemplate{key: p224}, "no usable key"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			test := NewIdentityProviderTest(t, applyKey)
+			test.IDP.EncryptionKeyEnforcer = nil
+
+			tc.template.notBefore, tc.template.notAfter = now.Add(-time.Hour), now.Add(time.Hour)
+
+			req := spCertRequest(&test.IDP, makeSPCert(t, tc.template))
+			req.Assertion = &Assertion{ID: "id-1", IssueInstant: now, Version: "2.0", Issuer: Issuer{Value: "https://idp.example.com/saml/metadata"}}
+
+			err := req.MakeAssertionEl()
+			if tc.err != "" {
+				assert.Check(t, is.ErrorContains(err, tc.err))
+				assert.Check(t, req.AssertionEl == nil)
+
+				return
+			}
+
+			assert.NilError(t, err)
+			assert.Check(t, is.Equal(req.AssertionEl.Tag, "EncryptedAssertion"))
+		})
+	}
+
+	// MinimumECKeySize may only make it stricter.
+	test := NewIdentityProviderTest(t, applyKey)
+	test.IDP.EncryptionKeyEnforcer = DefaultEncryptionKeyEnforcer{MinimumECKeySize: 384}
+
+	req := spCertRequest(&test.IDP, makeSPCert(t, spCertTemplate{key: p256, notBefore: now.Add(-time.Hour), notAfter: now.Add(time.Hour)}))
+	_, err = req.spEncryptionKey()
+	assert.Check(t, is.ErrorContains(err, "256-bit curve, smaller than the minimum of 384 bits"))
 }
 
 // entityEnforcer allows weak certificates for one service provider only.

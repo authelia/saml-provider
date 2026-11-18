@@ -208,7 +208,25 @@ func TestIssuanceRefusesEncryptionMethods(t *testing.T) {
 		{"a key transport algorithm as content encryption", ServiceProviderIssuance{ContentEncryptionMethod: rsaOAEP}, nil, "unsupported content encryption method"},
 		{"content encryption the identity provider excludes", ServiceProviderIssuance{ContentEncryptionMethod: aes128CBC}, gcmOnly, "IdentityProvider.ContentEncryptionMethods"},
 		{"RSA PKCS#1 v1.5", ServiceProviderIssuance{KeyTransportMethod: rsaPKCS1v15}, nil, "unsupported key transport method"},
-		{"key agreement", ServiceProviderIssuance{KeyTransportMethod: ecdhES}, nil, "unsupported key transport method"},
+		{"key agreement with a digest", ServiceProviderIssuance{KeyTransportMethod: ecdhES, KeyTransportDigestMethod: digestSHA256}, nil, "has no KeyTransportDigestMethod"},
+		{"key agreement with a mask generation function", ServiceProviderIssuance{KeyTransportMethod: ecdhES, KeyTransportMGF: mgf1SHA256}, nil, "has no KeyTransportDigestMethod"},
+		{"unknown key wrap", ServiceProviderIssuance{KeyWrapMethod: "http://www.w3.org/2001/04/xmlenc#kw-tripledes"}, nil, "unsupported key wrap method"},
+		{
+			"key wrap the identity provider excludes",
+			ServiceProviderIssuance{KeyWrapMethod: "http://www.w3.org/2001/04/xmlenc#kw-aes256"},
+			func(idp *IdentityProvider) {
+				idp.KeyWrapMethods = []string{"http://www.w3.org/2001/04/xmlenc#kw-aes128"}
+			},
+			"IdentityProvider.KeyWrapMethods",
+		},
+		{
+			"key wrap the identity provider doesn't support",
+			ServiceProviderIssuance{KeyWrapMethod: "http://www.w3.org/2001/04/xmlenc#kw-aes256"},
+			func(idp *IdentityProvider) {
+				idp.KeyWrapMethods = []string{"http://www.w3.org/2001/04/xmlenc#kw-tripledes"}
+			},
+			"IdentityProvider.KeyWrapMethods",
+		},
 		{
 			"key transport the identity provider excludes",
 			ServiceProviderIssuance{KeyTransportMethod: rsaOAEP11},

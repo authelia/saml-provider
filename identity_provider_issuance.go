@@ -116,7 +116,18 @@ type Issuance struct {
 	// the key of the service provider list, and must be one that IdentityProvider.KeyTransportMethods allows.
 	// Empty, as it is in IssuanceRequest.Defaults, means the one negotiated from those EncryptionMethods, with its
 	// digest and mask generation function.
+	//
+	// It may also be http://www.w3.org/2009/xmlenc11#ECDH-ES, the key agreement that is used for an elliptic curve
+	// key, which the Metadata Profile for Algorithm Support §2.3 takes as the same type of algorithm. Each can only
+	// be used with its type of key, so a service provider whose key is of the other type is issued nothing.
 	KeyTransportMethod string
+
+	// KeyWrapMethod is the identifier of the symmetric key wrap algorithm that wraps the key of what is encrypted
+	// when that key is agreed with the elliptic curve key of the service provider by ECDH-ES, such as
+	// http://www.w3.org/2001/04/xmlenc#kw-aes256. It must be one that IdentityProvider.KeyWrapMethods allows, and
+	// is not used for an RSA key. Empty, as it is in IssuanceRequest.Defaults, means the one negotiated from the
+	// EncryptionMethods of the key, as IdentityProvider.KeyWrapMethods describes.
+	KeyWrapMethod string
 
 	// KeyTransportDigestMethod is the identifier of the digest of KeyTransportMethod, and KeyTransportMGF that of
 	// its mask generation function, such as http://www.w3.org/2009/xmlenc11#mgf1sha256. They are read like the
@@ -243,6 +254,10 @@ type ServiceProviderIssuance struct {
 	KeyTransportDigestMethod string
 	KeyTransportMGF          string
 
+	// KeyWrapMethod is the identifier of the key wrap algorithm for an elliptic curve key. See
+	// Issuance.KeyWrapMethod. It is used whatever the metadata of the service provider lists.
+	KeyWrapMethod string
+
 	// AssertionEncryption replaces DefaultIssuancePolicy.AssertionEncryption, unless it is nil. It is a pointer
 	// so that EncryptAssertionWhenPossible, which is the zero value, can exempt a service provider from what is
 	// set for every other.
@@ -310,6 +325,10 @@ func (p DefaultIssuancePolicy) Issuance(req IssuanceRequest) (Issuance, error) {
 		issuance.KeyTransportMethod = override.KeyTransportMethod
 		issuance.KeyTransportDigestMethod = override.KeyTransportDigestMethod
 		issuance.KeyTransportMGF = override.KeyTransportMGF
+	}
+
+	if override.KeyWrapMethod != "" {
+		issuance.KeyWrapMethod = override.KeyWrapMethod
 	}
 
 	if override.AssertionEncryption != nil {
@@ -517,7 +536,7 @@ func (idp *IdentityProvider) checkIssuanceEncryption(issuance Issuance) error {
 		return err
 	}
 
-	_, err = policy.encrypterFor(nil, issuance)
+	_, err = policy.encrypterFor(nil, issuance, nil)
 
 	return err
 }
@@ -525,7 +544,7 @@ func (idp *IdentityProvider) checkIssuanceEncryption(issuance Issuance) error {
 // choosesEncryption returns whether the issuance names an encryption algorithm or a parameter of one.
 func (issuance Issuance) choosesEncryption() bool {
 	return issuance.ContentEncryptionMethod != "" || issuance.KeyTransportMethod != "" ||
-		issuance.KeyTransportDigestMethod != "" || issuance.KeyTransportMGF != ""
+		issuance.KeyTransportDigestMethod != "" || issuance.KeyTransportMGF != "" || issuance.KeyWrapMethod != ""
 }
 
 // completeIssuanceConditions returns issuance with the AdditionalAudiences that the assertion states for the
