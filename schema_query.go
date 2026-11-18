@@ -250,7 +250,7 @@ func newQueryElement(tag, id, version string, issueInstant time.Time, destinatio
 	el.CreateAttr("xmlns:samlp", "urn:oasis:names:tc:SAML:2.0:protocol")
 	el.CreateAttr("ID", id)
 	el.CreateAttr("Version", version)
-	el.CreateAttr("IssueInstant", issueInstant.Format(timeFormat))
+	el.CreateAttr("IssueInstant", RelaxedTime(issueInstant).String())
 
 	if destination != "" {
 		el.CreateAttr("Destination", destination)
