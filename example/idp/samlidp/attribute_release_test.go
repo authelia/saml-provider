@@ -32,7 +32,7 @@ func TestNewUsesAttributeReleasePolicy(t *testing.T) {
 		}),
 	})
 	assert.NilError(t, err)
-	server.IDP.EncryptionCertificateEnforcer = test.Server.IDP.EncryptionCertificateEnforcer
+	server.IDP.EncryptionKeyEnforcer = test.Server.IDP.EncryptionKeyEnforcer
 	server.serviceProviders["https://sp.example.com/saml2/metadata"] = test.SP.Metadata()
 	test.Server = server
 

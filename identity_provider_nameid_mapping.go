@@ -249,7 +249,7 @@ func (req *IdpNameIDMappingRequest) MakeResponse(status Status) *NameIDMappingRe
 // The mapped identifier is always returned as an EncryptedID that is encrypted to the encryption key of the
 // target, never in plaintext and never to the requester (SAMLCore §3.8, SAMLProfiles §7.4.2, §7.5). So a
 // requester which is not the target can pass the identifier on to the target, and can't read it or correlate
-// the principal with it. A target with no key that the EncryptionCertificateEnforcer accepts can't be mapped
+// the principal with it. A target with no key that the EncryptionKeyEnforcer accepts can't be mapped
 // to.
 //
 // Every SAML message gets a NameIDMappingResponse, which the schema requires to hold an identifier, so one with

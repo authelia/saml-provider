@@ -54,7 +54,7 @@ const (
 	// only an EncryptedID or EncryptedAttribute elements in it. The assertion is still signed, after its parts are
 	// encrypted (SAMLCore §6.2), and it is still not issued if a part must be encrypted and the encryption key of
 	// the service provider is missing or can't be used. That key is not looked at, and the
-	// EncryptionCertificateEnforcer is not asked about it, when no part is encrypted.
+	// EncryptionKeyEnforcer is not asked about it, when no part is encrypted.
 	NoAssertionEncryption
 )
 

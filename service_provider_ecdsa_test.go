@@ -135,7 +135,7 @@ func TestIDPSendsPlaintextAssertionToSPWithECDSACertificate(t *testing.T) {
 
 	test := NewIdentityProviderTest(t, applyKey)
 	req := IdpAuthnRequest{IDP: &test.IDP, ServiceProviderMetadata: metadata, SPSSODescriptor: &metadata.SPSSODescriptors[0]}
-	_, err := req.getSPEncryptionCert()
+	_, err := req.spEncryptionKey()
 	assert.Check(t, err == os.ErrNotExist, "expected os.ErrNotExist, got %v", err)
 }
 

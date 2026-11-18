@@ -1282,7 +1282,7 @@ func TestServeQueryEncryption(t *testing.T) {
 				f.storeAssertion(t, queryTestStoredAssertionID, f.test.SP.MetadataURL.String())
 
 				// The certificate of the fixture expired before the mocked time, which the default refuses.
-				f.test.IDP.EncryptionCertificateEnforcer = nil
+				f.test.IDP.EncryptionKeyEnforcer = nil
 
 				response := f.query(t, service, service.message(f))
 				assertQueryStatus(t, response, StatusResponder, "")
@@ -1296,12 +1296,12 @@ func TestServeQueryEncryption(t *testing.T) {
 
 		var entityID string
 
-		f.test.IDP.EncryptionCertificateEnforcer = encryptionCertificateEnforcerFunc(func(req *IdpAuthnRequest, cert *x509.Certificate) error {
+		f.test.IDP.EncryptionKeyEnforcer = encryptionKeyEnforcerFunc(func(req *IdpAuthnRequest, key ServiceProviderEncryptionKey) error {
 			entityID = req.ServiceProviderMetadata.EntityID
 
 			assert.Check(t, req.HTTPRequest != nil)
 			assert.Check(t, req.Now.Equal(TimeNow()))
-			assert.Check(t, cert.Equal(f.test.SPCertificate))
+			assert.Check(t, key.Certificate.Equal(f.test.SPCertificate))
 
 			return nil
 		})

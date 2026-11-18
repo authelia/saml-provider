@@ -1,8 +1,12 @@
 package saml
 
 import (
+	"crypto/rsa"
+	"encoding/base64"
 	"encoding/xml"
+	"errors"
 	"fmt"
+	"math/big"
 	"net/url"
 	"time"
 
@@ -256,9 +260,11 @@ type RoleDescriptor struct {
 	ContactPeople              []ContactPerson `xml:"ContactPerson,omitempty"`
 }
 
-// KeyDescriptor represents the XMLSEC object of the same name.
+// KeyDescriptor represents the md:KeyDescriptor element of SAMLMeta §2.4.1.1, which holds one key of an entity.
 type KeyDescriptor struct {
-	Use               string             `xml:"use,attr"`
+	// Use is "signing" or "encryption". It is optional, and empty when the attribute is absent, which means that
+	// the key is for both (SAMLMeta §2.4.1.1), and is how it is written again.
+	Use               string             `xml:"use,attr,omitempty"`
 	KeyInfo           KeyInfo            `xml:"http://www.w3.org/2000/09/xmldsig# KeyInfo"`
 	EncryptionMethods []EncryptionMethod `xml:"EncryptionMethod"`
 }
@@ -299,13 +305,107 @@ type MGF struct {
 	Algorithm string `xml:"Algorithm,attr"`
 }
 
-// KeyInfo represents the XMLSEC object of the same name.
+// KeyInfo represents the ds:KeyInfo element of XML Signature §4.4 as a KeyDescriptor holds it. The Metadata
+// Interoperability Profile (MetaIOP §2.5.1) has it give the key as a KeyValue, an X509Certificate, or both, and
+// lets it name the key as well, which is only a hint.
+//
+// A KeyName, an RSAKeyValue and an X509Certificate are kept, and written again in that order whatever the order
+// they were read in. Every other child is dropped when the element is read, such as a DSAKeyValue or an
+// ECKeyValue, an X509SubjectName and a RetrievalMethod, none of which this package can use.
 type KeyInfo struct {
-	XMLName  xml.Name `xml:"http://www.w3.org/2000/09/xmldsig# KeyInfo"`
+	XMLName xml.Name `xml:"http://www.w3.org/2000/09/xmldsig# KeyInfo"`
+
+	// KeyNames are the names of the key (XML Signature §4.4.1). A name is a reference which only its producer can
+	// resolve, so a KeyInfo with nothing else gives no key.
+	KeyNames []string `xml:"http://www.w3.org/2000/09/xmldsig# KeyName"`
+
+	// KeyValues are the bare public keys (XML Signature §4.4.2), which MetaIOP §2.6.1 requires a metadata consumer
+	// to support.
+	KeyValues []KeyValue `xml:"http://www.w3.org/2000/09/xmldsig# KeyValue"`
+
+	// X509Data holds the certificates of the key. It is not written when it has none, as a ds:X509Data must not be
+	// empty (XML Signature §4.4.4).
 	X509Data X509Data `xml:"X509Data"`
 }
 
-// X509Data represents the XMLSEC object of the same name.
+// MarshalXML implements [xml.Marshaler]. It leaves out what the schema of XML Signature doesn't allow to be empty:
+// an X509Data that has no certificate, which a KeyInfo that only names its key or only has a KeyValue would
+// otherwise gain, and a KeyValue that has no RSAKeyValue, which is one whose key was of a type that is not kept.
+func (k KeyInfo) MarshalXML(e *xml.Encoder, _ xml.StartElement) error {
+	type keyInfo struct {
+		XMLName   xml.Name   `xml:"http://www.w3.org/2000/09/xmldsig# KeyInfo"`
+		KeyNames  []string   `xml:"http://www.w3.org/2000/09/xmldsig# KeyName"`
+		KeyValues []KeyValue `xml:"http://www.w3.org/2000/09/xmldsig# KeyValue"`
+		X509Data  *X509Data  `xml:"X509Data,omitempty"`
+	}
+
+	out := keyInfo{KeyNames: k.KeyNames}
+
+	for _, keyValue := range k.KeyValues {
+		if keyValue.RSAKeyValue != nil {
+			out.KeyValues = append(out.KeyValues, keyValue)
+		}
+	}
+
+	if len(k.X509Data.X509Certificates) != 0 {
+		out.X509Data = &k.X509Data
+	}
+
+	return e.Encode(out)
+}
+
+// KeyValue represents the ds:KeyValue element of XML Signature §4.4.2, which holds a single public key. Only an
+// RSA key is kept: RSAKeyValue is nil for a KeyValue which held a key of another type, such as a DSAKeyValue or
+// the ECKeyValue of XML Signature 1.1, and such a KeyValue is not written again.
+type KeyValue struct {
+	XMLName     xml.Name     `xml:"http://www.w3.org/2000/09/xmldsig# KeyValue"`
+	RSAKeyValue *RSAKeyValue `xml:"http://www.w3.org/2000/09/xmldsig# RSAKeyValue,omitempty"`
+}
+
+// RSAKeyValue represents the ds:RSAKeyValue element of XML Signature §4.4.2.2. Modulus and Exponent are each a
+// ds:CryptoBinary: the base64 encoding of the big-endian octets of the number (XML Signature §4.0.1).
+type RSAKeyValue struct {
+	Modulus  string `xml:"http://www.w3.org/2000/09/xmldsig# Modulus"`
+	Exponent string `xml:"http://www.w3.org/2000/09/xmldsig# Exponent"`
+}
+
+// NewRSAKeyValue returns the KeyValue which holds key.
+func NewRSAKeyValue(key *rsa.PublicKey) KeyValue {
+	return KeyValue{RSAKeyValue: &RSAKeyValue{
+		Modulus:  base64.StdEncoding.EncodeToString(key.N.Bytes()),
+		Exponent: base64.StdEncoding.EncodeToString(big.NewInt(int64(key.E)).Bytes()),
+	}}
+}
+
+// PublicKey returns the RSA public key that v holds, or an error if either number is not a ds:CryptoBinary, the
+// modulus is zero, or the exponent is not one an RSA public key can have. Whitespace in the encoding is ignored,
+// as that of a long value is wrapped.
+func (v RSAKeyValue) PublicKey() (*rsa.PublicKey, error) {
+	modulus, err := base64.StdEncoding.DecodeString(whitespaceRemover.Replace(v.Modulus))
+	if err != nil {
+		return nil, fmt.Errorf("cannot decode the Modulus of the RSAKeyValue: %w", err)
+	}
+
+	exponent, err := base64.StdEncoding.DecodeString(whitespaceRemover.Replace(v.Exponent))
+	if err != nil {
+		return nil, fmt.Errorf("cannot decode the Exponent of the RSAKeyValue: %w", err)
+	}
+
+	n, e := new(big.Int).SetBytes(modulus), new(big.Int).SetBytes(exponent)
+
+	if n.Sign() == 0 {
+		return nil, errors.New("the RSAKeyValue has no Modulus")
+	}
+
+	// The bounds are those of crypto/rsa, which refuses an exponent that doesn't fit in 31 bits.
+	if !e.IsInt64() || e.Int64() < 2 || e.Int64() > 1<<31-1 {
+		return nil, errors.New("the RSAKeyValue has an Exponent that can't be used")
+	}
+
+	return &rsa.PublicKey{N: n, E: int(e.Int64())}, nil
+}
+
+// X509Data represents the ds:X509Data element of XML Signature §4.4.4. Only its certificates are kept.
 type X509Data struct {
 	XMLName          xml.Name          `xml:"http://www.w3.org/2000/09/xmldsig# X509Data"`
 	X509Certificates []X509Certificate `xml:"X509Certificate"`

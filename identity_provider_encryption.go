@@ -705,7 +705,7 @@ func (idp *IdentityProvider) elementDecrypter() (elementDecrypter, error) {
 
 // serviceProviderElementEncrypter returns the encrypter of elements to a service provider outside an
 // AuthnRequest, such as of the NameID of a LogoutRequest: to the encryption key of the first of its
-// SPSSODescriptors that has one, which the EncryptionCertificateEnforcer accepts as for an assertion. The enforcer
+// SPSSODescriptors that has one, which the EncryptionKeyEnforcer accepts as for an assertion. The enforcer
 // is given a request of the identity provider's own making, to its logout URL, as the HTTP request in which a
 // logout continues is not one from the service provider that is encrypted to.
 func (idp *IdentityProvider) serviceProviderElementEncrypter(metadata *EntityDescriptor) (*elementEncrypter, error) {

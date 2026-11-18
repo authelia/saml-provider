@@ -2,7 +2,6 @@ package saml
 
 import (
 	"bytes"
-	"crypto/x509"
 	"errors"
 	"fmt"
 	"net/http"
@@ -623,7 +622,7 @@ func TestIssuanceRequireAssertionEncryption(t *testing.T) {
 func refusingEncryptionCertificate(idp *IdentityProvider) *int {
 	asked := new(int)
 
-	idp.EncryptionCertificateEnforcer = encryptionCertificateEnforcerFunc(func(*IdpAuthnRequest, *x509.Certificate) error {
+	idp.EncryptionKeyEnforcer = encryptionKeyEnforcerFunc(func(*IdpAuthnRequest, ServiceProviderEncryptionKey) error {
 		*asked++
 
 		return errors.New("the certificate is refused")

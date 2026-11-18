@@ -226,7 +226,7 @@ func TestSendManageNameIDRequestEncrypted(t *testing.T) {
 // An identifier that must be encrypted and can't be is not sent.
 func TestSendManageNameIDRequestCannotEncrypt(t *testing.T) {
 	test, sp, _ := sendManageNameIDFixture(t)
-	test.IDP.EncryptionCertificateEnforcer = nil
+	test.IDP.EncryptionKeyEnforcer = nil
 
 	err := sendManageNameID(test, NameIDChange{NameID: *testNameID(test, &test.SP), NewID: "p-alice-2", Encrypt: true})
 	assert.Check(t, is.ErrorContains(err, "cannot encrypt the name identifier management request"))

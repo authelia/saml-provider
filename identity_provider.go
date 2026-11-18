@@ -225,26 +225,41 @@ type SubjectEnforcer interface {
 	EnforceSubject(req *IdpAuthnRequest, session *Session) error
 }
 
-// EncryptionCertificateEnforcer is an interface used by IdentityProvider to decide whether the
-// certificate in the metadata of a service provider may be used to encrypt assertions to it, which
-// allows the decision to differ for each service provider. The default implementation is
-// DefaultEncryptionCertificateEnforcer, which is used if no EncryptionCertificateEnforcer is
-// specified.
-type EncryptionCertificateEnforcer interface {
-	// EnforceEncryptionCertificate returns an error if cert, which was taken from the selected
-	// SPSSODescriptor of req.ServiceProviderMetadata, must not be used to encrypt the assertion. The
-	// login then fails without a response: the assertion is never sent in plaintext, and no other key
-	// of the service provider is tried in its place.
+// ServiceProviderEncryptionKey is a key of a service provider that the identity provider is about to encrypt to,
+// as its metadata gives it. The Metadata Interoperability Profile has a KeyDescriptor give its key as a
+// certificate, as a bare key in a ds:KeyValue, or as both (MetaIOP §2.5.1), and requires a consumer of metadata
+// to support each (MetaIOP §2.6.1).
+type ServiceProviderEncryptionKey struct {
+	// Certificate is the certificate that the KeyDescriptor holds, or nil when it gives the key only as a
+	// ds:KeyValue. There is then no validity period and no key usage to check.
+	Certificate *x509.Certificate
+
+	// PublicKey is the key that is encrypted to: that of Certificate, or else of the ds:RSAKeyValue. It is never
+	// nil when an EncryptionKeyEnforcer is asked, as only RSA key transport is supported.
+	PublicKey *rsa.PublicKey
+}
+
+// EncryptionKeyEnforcer is an interface used by IdentityProvider to decide whether the key in the metadata of a
+// service provider may be used to encrypt assertions to it, which allows the decision to differ for each service
+// provider. The default implementation is DefaultEncryptionKeyEnforcer, which is used if no EncryptionKeyEnforcer
+// is specified. It is asked about every key before anything is encrypted to it, whichever form the metadata gives
+// the key in.
+type EncryptionKeyEnforcer interface {
+	// EnforceEncryptionKey returns an error if key, which was taken from the selected SPSSODescriptor of
+	// req.ServiceProviderMetadata, must not be used to encrypt the assertion. The login then fails without a
+	// response: the assertion is never sent in plaintext, and no other key of the service provider is tried in
+	// its place.
 	//
 	// It is also asked before an assertion is encrypted in answer to a request of the assertion query
 	// and request protocol. There is then no AuthnRequest, and req holds only the IDP, HTTPRequest,
 	// ServiceProviderMetadata, SPSSODescriptor and Now. A refusal there is a Responder status.
 	//
 	// It is also asked before the NameID of a LogoutRequest is encrypted to a service provider that
-	// was sent an EncryptedID. There is then no AuthnRequest, and req only has its IDP,
+	// was sent an EncryptedID, and before the identifier of a NameIDMappingResponse is encrypted to the service
+	// provider it is mapped for. There is then no AuthnRequest, and req only has its IDP,
 	// ServiceProviderMetadata, SPSSODescriptor and Now, and as HTTPRequest a request of the identity
-	// provider's own making to its logout URL. A refusal skips that service provider.
-	EnforceEncryptionCertificate(req *IdpAuthnRequest, cert *x509.Certificate) error
+	// provider's own making to its logout URL. A refusal skips that service provider, or refuses the mapping.
+	EnforceEncryptionKey(req *IdpAuthnRequest, key ServiceProviderEncryptionKey) error
 }
 
 // ElementEncryptionPolicy is an interface used by IdentityProvider to decide which parts of an assertion are
@@ -721,11 +736,11 @@ type IdentityProvider struct {
 	// to one that has. See Issuance.ContentEncryptionMethod and Issuance.AssertionEncryption.
 	IssuancePolicy IssuancePolicy
 
-	// EncryptionCertificateEnforcer decides whether the encryption certificate of a service provider
-	// may be used. Defaults to a DefaultEncryptionCertificateEnforcer with no options set, which
-	// refuses a certificate that is expired or not yet valid, has an RSA key shorter than 2048 bits,
-	// or has a KeyUsage extension without keyEncipherment.
-	EncryptionCertificateEnforcer EncryptionCertificateEnforcer
+	// EncryptionKeyEnforcer decides whether the encryption key of a service provider may be used, whether its
+	// metadata gives the key as a certificate or as a ds:KeyValue (MetaIOP §2.6.1). Defaults to a
+	// DefaultEncryptionKeyEnforcer with no options set, which refuses an RSA key shorter than 2048 bits, and a
+	// certificate that is expired or not yet valid or has a KeyUsage extension without keyEncipherment.
+	EncryptionKeyEnforcer EncryptionKeyEnforcer
 
 	// AttributeReleasePolicy decides which attributes DefaultAssertionMaker and ServeAttributeQuery
 	// state to each service provider. Defaults to DefaultAttributeReleasePolicy{}, which only releases
@@ -2893,7 +2908,7 @@ const canonicalizerPrefixList = ""
 // Signature, and keeps the NameID and the attributes in plaintext. If a part must be encrypted and the service
 // provider has no key to encrypt it to, an error is returned, which wraps ErrInvalidNameIDPolicy when it is the
 // request that asked. That holds under NoAssertionEncryption too, which is the only case in which the encryption
-// key of the service provider is not looked at, and the EncryptionCertificateEnforcer not asked, unless a part is
+// key of the service provider is not looked at, and the EncryptionKeyEnforcer not asked, unless a part is
 // encrypted: a key that can't be used then doesn't stop an assertion that has nothing encrypted in it.
 //
 // The assertion is saved in the AssertionStore of the identity provider, if it has one, before it is encrypted as
@@ -2905,7 +2920,7 @@ func (req *IdpAuthnRequest) MakeAssertionEl() error {
 		return err
 	}
 
-	// The encrypter is resolved once, and with it the EncryptionCertificateEnforcer asked once. An assertion that
+	// The encrypter is resolved once, and with it the EncryptionKeyEnforcer asked once. An assertion that
 	// is not encrypted as a whole only needs it for a part that is, so a key that can't be used is then only an
 	// error if there is such a part, which sentAssertion finds. Everything else fails here, as the assertion is
 	// never sent in plaintext because the key it should be encrypted to was refused.
@@ -2973,7 +2988,7 @@ func (req *IdpAuthnRequest) MakeAssertionEl() error {
 }
 
 // encryptAssertionEl returns the EncryptedAssertion element of the signed assertion, or the signed assertion
-// itself when the service provider has no encryption certificate or the IssuancePolicy gives
+// itself when the service provider has no encryption key or the IssuancePolicy gives
 // NoAssertionEncryption for it. The encryption key is then not looked at, as nothing is encrypted.
 func (req *IdpAuthnRequest) encryptAssertionEl(signedAssertionEl *etree.Element) (*etree.Element, error) {
 	issuance, err := req.Issuance(req.Session)
@@ -3013,8 +3028,9 @@ func (req *IdpAuthnRequest) checkPlaintextAssertion(issuance Issuance) error {
 // encryptAssertion returns the EncryptedAssertion element of the signed assertion. SAMLCore §6.2: a signed
 // assertion is signed first, and then encrypted.
 func (e *elementEncrypter) encryptAssertion(signedAssertionEl *etree.Element) (*etree.Element, error) {
-	encryptedAssertionEl, err := (&elementEncrypter{certificate: e.certificate, encrypter: e.encrypter}).
-		encrypt("EncryptedAssertion", signedAssertionEl)
+	plain := &elementEncrypter{certificate: e.certificate, publicKey: e.publicKey, encrypter: e.encrypter}
+
+	encryptedAssertionEl, err := plain.encrypt("EncryptedAssertion", signedAssertionEl)
 	if err != nil {
 		return nil, err
 	}
@@ -3029,7 +3045,7 @@ func (e *elementEncrypter) encryptAssertion(signedAssertionEl *etree.Element) (*
 // are encrypted on their own, with the algorithms negotiated from its metadata. The error is [os.ErrNotExist] if
 // the service provider has no encryption key and doesn't ask for encryption.
 func (req *IdpAuthnRequest) elementEncrypter() (*elementEncrypter, error) {
-	cert, err := req.getSPEncryptionCert()
+	key, err := req.spEncryptionKey()
 	if err != nil {
 		return nil, err
 	}
@@ -3039,7 +3055,12 @@ func (req *IdpAuthnRequest) elementEncrypter() (*elementEncrypter, error) {
 		return nil, err
 	}
 
-	return &elementEncrypter{certificate: cert, encrypter: encrypter, recipient: req.ServiceProviderMetadata.EntityID}, nil
+	return &elementEncrypter{
+		certificate: key.Certificate,
+		publicKey:   key.PublicKey,
+		encrypter:   encrypter,
+		recipient:   req.ServiceProviderMetadata.EntityID,
+	}, nil
 }
 
 // requestsEncryptedID reports whether the NameIDPolicy of the request has the encrypted format, which means the
@@ -3293,68 +3314,129 @@ func setNoCacheHeaders(w http.ResponseWriter) {
 	w.Header().Set("Pragma", "no-cache")
 }
 
-// spEncryptionKeyDescriptor returns the key descriptor of the certificate used to encrypt things to
-// the SP. It is the first one labeled for encryption which has a certificate, or if there are none
-// the first one with no use which has a certificate, or nil if no such key descriptor is found.
+// spEncryptionKeyDescriptor returns the key descriptor of the key used to encrypt things to the service
+// provider, or nil if it has none. See selectSPEncryptionKey. A descriptor whose key is malformed is returned
+// too, so that a service provider is not taken to have no encryption key when it has one that can't be read,
+// which spEncryptionKey then reports.
 func (req *IdpAuthnRequest) spEncryptionKeyDescriptor() *KeyDescriptor {
+	keyDescriptor, _, _ := req.selectSPEncryptionKey()
+
+	return keyDescriptor
+}
+
+// selectSPEncryptionKey returns the key descriptor used to encrypt things to the service provider, and its key.
+// It is the first one labeled for encryption which has a key that can be encrypted to, or if there are none the
+// first one with no use which has one, as a key with no use is for both signing and encryption (SAMLMeta
+// §2.4.1.1). The descriptor is nil if there is none. A descriptor with a key that is malformed is not passed over
+// for the next: it is returned with the error. See keyDescriptorEncryptionKey for the keys that can be used.
+func (req *IdpAuthnRequest) selectSPEncryptionKey() (*KeyDescriptor, ServiceProviderEncryptionKey, error) {
 	for _, use := range []string{"encryption", ""} {
 		for i := range req.SPSSODescriptor.KeyDescriptors {
 			keyDescriptor := &req.SPSSODescriptor.KeyDescriptors[i]
-			if keyDescriptor.Use == use && firstCertificateData(*keyDescriptor) != "" {
-				return keyDescriptor
+			if keyDescriptor.Use != use {
+				continue
+			}
+
+			key, ok, err := keyDescriptorEncryptionKey(keyDescriptor)
+			if err != nil {
+				return keyDescriptor, ServiceProviderEncryptionKey{}, err
+			}
+
+			if ok {
+				return keyDescriptor, key, nil
 			}
 		}
 	}
 
-	return nil
+	return nil, ServiceProviderEncryptionKey{}, nil
 }
 
-// getSPEncryptionCert returns the certificate which we can use to encrypt things
-// to the SP in PEM format, or nil if no such certificate is found.
-func (req *IdpAuthnRequest) getSPEncryptionCert() (*x509.Certificate, error) {
-	certStr := ""
-	if keyDescriptor := req.spEncryptionKeyDescriptor(); keyDescriptor != nil {
-		certStr = firstCertificateData(*keyDescriptor)
+// keyDescriptorEncryptionKey returns the key of keyDescriptor that can be encrypted to, and whether it has one.
+// MetaIOP §2.6.1 requires the two representations of a key that it reads to be supported: the first
+// X509Certificate which is not empty, and if there is none the first ds:KeyValue with an RSAKeyValue. When there
+// are both they must represent the same key (MetaIOP §2.5.1), and the certificate is the one used, as it tells
+// the EncryptionKeyEnforcer more.
+//
+// Only RSA key transport is supported, so a descriptor has no key that can be used when its certificate holds a
+// key of another type, when its KeyValue does, such as a DSAKeyValue or an ECKeyValue, and when it only names
+// its key with a KeyName, which is a reference that nothing here can resolve. Nor has one whose X509Certificate
+// elements are all empty or hold only whitespace. Such a descriptor is passed over for the next.
+//
+// A certificate or an RSAKeyValue which is present and can't be parsed is an error instead. The metadata is then
+// broken rather than merely of no use, and to pass over it could encrypt to another key than the one its author
+// meant, or send in plaintext what a readable key would have had encrypted.
+func keyDescriptorEncryptionKey(keyDescriptor *KeyDescriptor) (key ServiceProviderEncryptionKey, ok bool, err error) {
+	if data := firstCertificateData(*keyDescriptor); data != "" {
+		der, err := base64.StdEncoding.DecodeString(data)
+		if err != nil {
+			return key, false, fmt.Errorf("cannot decode certificate base64: %v", err)
+		}
+
+		cert, err := x509.ParseCertificate(der)
+		if err != nil {
+			return key, false, fmt.Errorf("cannot parse certificate: %v", err)
+		}
+
+		public, ok := cert.PublicKey.(*rsa.PublicKey)
+		if !ok {
+			return key, false, nil
+		}
+
+		return ServiceProviderEncryptionKey{Certificate: cert, PublicKey: public}, true, nil
 	}
 
-	if certStr == "" {
+	for _, keyValue := range keyDescriptor.KeyInfo.KeyValues {
+		if keyValue.RSAKeyValue == nil {
+			continue
+		}
+
+		public, err := keyValue.RSAKeyValue.PublicKey()
+		if err != nil {
+			return key, false, fmt.Errorf("cannot parse key value: %w", err)
+		}
+
+		return ServiceProviderEncryptionKey{PublicKey: public}, true, nil
+	}
+
+	return key, false, nil
+}
+
+// spEncryptionKey returns the key which things are encrypted to the service provider with, once the
+// EncryptionKeyEnforcer has accepted it. The error is [os.ErrNotExist] if the service provider has no encryption
+// key and its metadata doesn't say that it accepts encryption, which is the only case in which an assertion may
+// be sent to it in plaintext.
+func (req *IdpAuthnRequest) spEncryptionKey() (*ServiceProviderEncryptionKey, error) {
+	keyDescriptor, key, err := req.selectSPEncryptionKey()
+	if err != nil {
+		return nil, err
+	}
+
+	if keyDescriptor == nil {
 		// os.ErrNotExist makes the caller send the assertion in plaintext, which is not acceptable
 		// if the service provider asked for encryption with a key we are unable to use.
 		if req.serviceProviderAcceptsEncryption() {
-			return nil, fmt.Errorf("service provider metadata allows encryption but has no usable certificate in the selected descriptor")
+			return nil, errors.New("service provider metadata allows encryption but has no usable key in the selected descriptor: " +
+				"none of its keys is a certificate with an RSA public key or an RSAKeyValue")
 		}
 
 		return nil, os.ErrNotExist
 	}
 
-	// cleanup whitespace and re-encode a PEM.
-	certStr = regexp.MustCompile(`\s+`).ReplaceAllString(certStr, "")
-
-	certBytes, err := base64.StdEncoding.DecodeString(certStr)
-	if err != nil {
-		return nil, fmt.Errorf("cannot decode certificate base64: %v", err)
+	var enforcer EncryptionKeyEnforcer = DefaultEncryptionKeyEnforcer{}
+	if req.IDP != nil && req.IDP.EncryptionKeyEnforcer != nil {
+		enforcer = req.IDP.EncryptionKeyEnforcer
 	}
 
-	cert, err := x509.ParseCertificate(certBytes)
-	if err != nil {
-		return nil, fmt.Errorf("cannot parse certificate: %v", err)
-	}
-
-	var enforcer EncryptionCertificateEnforcer = DefaultEncryptionCertificateEnforcer{}
-	if req.IDP != nil && req.IDP.EncryptionCertificateEnforcer != nil {
-		enforcer = req.IDP.EncryptionCertificateEnforcer
-	}
-
-	if err := enforcer.EnforceEncryptionCertificate(req, cert); err != nil {
+	if err := enforcer.EnforceEncryptionKey(req, key); err != nil {
 		entityID := ""
 		if req.ServiceProviderMetadata != nil {
 			entityID = req.ServiceProviderMetadata.EntityID
 		}
 
-		return nil, fmt.Errorf("refusing the encryption certificate of service provider %q: %w", entityID, err)
+		return nil, fmt.Errorf("refusing the encryption key of service provider %q: %w", entityID, err)
 	}
 
-	return cert, nil
+	return &key, nil
 }
 
 // oidExtensionKeyUsage is the identifier of the KeyUsage extension, from RFC 5280 §4.2.1.3.
@@ -3366,17 +3448,17 @@ func hasKeyUsageExtension(cert *x509.Certificate) bool {
 	return slices.ContainsFunc(cert.Extensions, func(ext pkix.Extension) bool { return ext.Id.Equal(oidExtensionKeyUsage) })
 }
 
-// DefaultMinimumRSAKeySize is the shortest RSA key, in bits, that DefaultEncryptionCertificateEnforcer
+// DefaultMinimumRSAKeySize is the shortest RSA key, in bits, that DefaultEncryptionKeyEnforcer
 // accepts unless its MinimumRSAKeySize is set. It follows NIST SP 800-131A, which disallows RSA keys
 // shorter than 2048 bits for key transport.
 const DefaultMinimumRSAKeySize = 2048
 
-// DefaultEncryptionCertificateEnforcer is the default EncryptionCertificateEnforcer. With no options
-// set it refuses a certificate which is expired or not yet valid at the time of the request, allowing
-// MaxClockSkew either way, whose RSA key is shorter than DefaultMinimumRSAKeySize, or which has a
-// KeyUsage extension that doesn't assert keyEncipherment. A certificate without a KeyUsage extension
-// is not restricted, as RFC 5280 §4.2.1.3 describes. A key that is not RSA is refused when the
-// assertion is encrypted, whatever the enforcer decides, because only RSA key transport is supported.
+// DefaultEncryptionKeyEnforcer is the default EncryptionKeyEnforcer. With no options set it refuses a key that is
+// not RSA or whose RSA key is shorter than DefaultMinimumRSAKeySize, and a certificate which is expired or not
+// yet valid at the time of the request, allowing MaxClockSkew either way, or which has a KeyUsage extension that
+// doesn't assert keyEncipherment. A certificate without a KeyUsage extension is not restricted, as RFC 5280
+// §4.2.1.3 describes. A key that the metadata gives only as a ds:KeyValue has no certificate, so only its size is
+// checked, which is all that MetaIOP §2.6.1 would have a consumer look at in a certificate too.
 //
 // These checks are a local security policy, not a requirement of SAML. The SAML V2.0 Metadata
 // Interoperability Profile (sstc-metadata-iop §2.5.1) treats the certificate in metadata as merely a
@@ -3386,7 +3468,7 @@ const DefaultMinimumRSAKeySize = 2048
 // to constrain interoperability by the default policies it applies, and this is one. The options exist
 // to interoperate with service providers which follow that profile: each relaxes one check only, so
 // that allowing an expired certificate does not also allow a weak key.
-type DefaultEncryptionCertificateEnforcer struct {
+type DefaultEncryptionKeyEnforcer struct {
 	// IgnoreValidityPeriod accepts a certificate which is expired or not yet valid, as the Metadata
 	// Interoperability Profile expects. Such a certificate is common where metadata is managed by
 	// key rather than by certificate.
@@ -3395,14 +3477,17 @@ type DefaultEncryptionCertificateEnforcer struct {
 	// IgnoreKeyUsage accepts a certificate whose KeyUsage extension doesn't assert keyEncipherment.
 	IgnoreKeyUsage bool
 
-	// MinimumRSAKeySize is the shortest RSA key accepted, in bits. Defaults to
-	// DefaultMinimumRSAKeySize. It may be set lower to accept legacy keys, or higher to be stricter.
+	// MinimumRSAKeySize is the shortest RSA key accepted, in bits, whether it is in a certificate or a
+	// ds:KeyValue. Defaults to DefaultMinimumRSAKeySize. It may be set lower to accept legacy keys, or higher to
+	// be stricter.
 	MinimumRSAKeySize int
 }
 
-// EnforceEncryptionCertificate implements EncryptionCertificateEnforcer.
-func (e DefaultEncryptionCertificateEnforcer) EnforceEncryptionCertificate(req *IdpAuthnRequest, cert *x509.Certificate) error {
-	if !e.IgnoreValidityPeriod {
+// EnforceEncryptionKey implements EncryptionKeyEnforcer.
+func (e DefaultEncryptionKeyEnforcer) EnforceEncryptionKey(req *IdpAuthnRequest, key ServiceProviderEncryptionKey) error {
+	cert := key.Certificate
+
+	if cert != nil && !e.IgnoreValidityPeriod {
 		if cert.NotBefore.After(req.Now.Add(MaxClockSkew)) {
 			return fmt.Errorf("the certificate is not yet valid: it is valid from %s", cert.NotBefore.UTC().Format(time.RFC3339))
 		}
@@ -3412,20 +3497,28 @@ func (e DefaultEncryptionCertificateEnforcer) EnforceEncryptionCertificate(req *
 		}
 	}
 
-	if key, ok := cert.PublicKey.(*rsa.PublicKey); ok {
-		minimum := e.MinimumRSAKeySize
-		if minimum <= 0 {
-			minimum = DefaultMinimumRSAKeySize
-		}
+	public := key.PublicKey
+	if public == nil && cert != nil {
+		public, _ = cert.PublicKey.(*rsa.PublicKey)
+	}
 
-		if size := key.N.BitLen(); size < minimum {
-			return fmt.Errorf("the RSA key is %d-bit, shorter than the minimum of %d bits", size, minimum)
-		}
+	// Only RSA key transport is supported, so there is nothing else that could be encrypted to.
+	if public == nil || public.N == nil {
+		return errors.New("the key is not an RSA public key")
+	}
+
+	minimum := e.MinimumRSAKeySize
+	if minimum <= 0 {
+		minimum = DefaultMinimumRSAKeySize
+	}
+
+	if size := public.N.BitLen(); size < minimum {
+		return fmt.Errorf("the RSA key is %d-bit, shorter than the minimum of %d bits", size, minimum)
 	}
 
 	// RFC 5280 §4.2.1.3: when the extension is present, keyEncipherment is asserted when the key is
 	// used to encrypt keys, which is how RSA is used to encrypt an assertion.
-	if !e.IgnoreKeyUsage && hasKeyUsageExtension(cert) && cert.KeyUsage&x509.KeyUsageKeyEncipherment == 0 {
+	if cert != nil && !e.IgnoreKeyUsage && hasKeyUsageExtension(cert) && cert.KeyUsage&x509.KeyUsageKeyEncipherment == 0 {
 		return fmt.Errorf("the certificate has a KeyUsage extension which does not assert keyEncipherment")
 	}
 
@@ -3452,12 +3545,13 @@ func (req *IdpAuthnRequest) serviceProviderAcceptsEncryption() bool {
 	return false
 }
 
-// firstCertificateData returns the data of the first non-empty certificate in the key descriptor,
-// or an empty string if there is none.
+// firstCertificateData returns the base64 data of the first certificate in the key descriptor which is not
+// empty, with the whitespace that may wrap it removed, or an empty string if there is none. An X509Certificate
+// that is empty and one that only holds whitespace are the same: neither holds a certificate.
 func firstCertificateData(keyDescriptor KeyDescriptor) string {
 	for _, certificate := range keyDescriptor.KeyInfo.X509Data.X509Certificates {
-		if certificate.Data != "" {
-			return certificate.Data
+		if data := strings.Join(strings.Fields(certificate.Data), ""); data != "" {
+			return data
 		}
 	}
 

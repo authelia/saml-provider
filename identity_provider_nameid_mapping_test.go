@@ -367,7 +367,7 @@ func TestNameIDMappingDenied(t *testing.T) {
 		},
 		"allowed target whose encryption key is refused": {
 			configure: func(f *nameIDMappingFixture) {
-				f.test.IDP.EncryptionCertificateEnforcer = DefaultEncryptionCertificateEnforcer{MinimumRSAKeySize: 4096}
+				f.test.IDP.EncryptionKeyEnforcer = DefaultEncryptionKeyEnforcer{MinimumRSAKeySize: 4096}
 			},
 		},
 	} {

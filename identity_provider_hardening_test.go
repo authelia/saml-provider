@@ -246,7 +246,7 @@ func TestIDPGetSPEncryptionCert(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			req := &IdpAuthnRequest{IDP: &test.IDP, Now: TimeNow(), SPSSODescriptor: &SPSSODescriptor{SSODescriptor: SSODescriptor{RoleDescriptor: RoleDescriptor{KeyDescriptors: tc.descriptors}}}}
-			cert, err := req.getSPEncryptionCert()
+			cert, err := req.spEncryptionKey()
 
 			switch {
 			case tc.found:
