@@ -214,6 +214,11 @@ type SubjectEnforcer interface {
 	// which is not nil, as SAMLCore §3.4.1 requires. The service provider receives an AuthnFailed
 	// status, not the error.
 	//
+	// If the request named the principal with an EncryptedID, which req.SubjectEncrypted reports, the NameID
+	// of req.Request.Subject is the identifier that it held, and req.Assertion has the NameID that is then
+	// sent as an EncryptedID. It is not called for an EncryptedID that doesn't identify a principal, which
+	// always gets the AuthnFailed status.
+	//
 	// This is where to accept an identifier in another format which refers to the same principal,
 	// which the default implementation can't recognise.
 	EnforceSubject(req *IdpAuthnRequest, session *Session) error
@@ -1236,6 +1241,18 @@ func (idp *IdentityProvider) ServeMetadata(w http.ResponseWriter, r *http.Reques
 // that is too old or new, or that has the wrong destination is answered with a SAML error status
 // instead. IdpAuthnRequest.Respondable describes the rule.
 //
+// The Subject of the request may name the principal that the assertion must be about (SAMLCore §3.4.1), which the
+// SubjectEnforcer decides, and a request for another principal is answered with AuthnFailed once there is a
+// session. A Subject with more than one identifier is answered with Requester and RequestDenied, and one with a
+// BaseID with Requester and RequestUnsupported. The identifier may be an EncryptedID (SAMLCore §2.2.4) if the
+// request is signed and the service provider has an encryption key, and is otherwise answered with Requester and
+// RequestUnsupported without being decrypted. It is decrypted with the encryption key of the identity provider,
+// from the content that the signature covers, and the assertion then carries the identifier of the principal as
+// an EncryptedID to the service provider. An EncryptedID that can't be decrypted, or that holds an identifier
+// which the identity provider doesn't share with the service provider, is answered exactly as a Subject that
+// names another principal is, with AuthnFailed once there is a session, and the reason is only reported to the
+// Observer as EventPrincipalUnidentified, so that the answer says nothing about the ciphertext (errata E93).
+//
 // A request is used up once it is answered for a session: its ID is recorded in the ReplayStore until
 // the request expires, and the same request presented again is answered with Requester and
 // RequestDenied, without an assertion (SAMLSec §6.1.2). A request that a login form re-presents before
@@ -1382,6 +1399,12 @@ func (req *IdpAuthnRequest) makeAssertion(session *Session) error {
 
 	if err := assertionMaker.MakeAssertion(req, session); err != nil {
 		return ToStatusError(err)
+	}
+
+	// No assertion matches a Subject whose EncryptedID doesn't identify a principal, so the SubjectEnforcer is
+	// not asked, and the request fails here as one that names another principal does (errata E93).
+	if req.subjectUnidentified {
+		return ErrAuthnFailed.WithDebug("the EncryptedID of the request Subject does not identify a principal")
 	}
 
 	if req.Request.Subject != nil {
@@ -1616,9 +1639,26 @@ type IdpAuthnRequest struct {
 	// nameIDEncrypted is whether AssertionEl carries the NameID of the Subject as an EncryptedID.
 	nameIDEncrypted bool
 
+	// SubjectEncrypted is whether the Subject of the request names the principal with an EncryptedID (SAMLCore
+	// §3.4.1, §2.2.4), which Validate sets. Request.Subject.NameID is then the identifier that it held, and the
+	// assertion carries the identifier of the principal as an EncryptedID to the service provider. If it could
+	// not be decrypted, or held an identifier that the identity provider doesn't share with the service
+	// provider, Request.Subject.NameID is nil, and the request is answered with AuthnFailed once there is a
+	// session, as a request that names another principal is.
+	SubjectEncrypted bool
+
+	// subjectUnidentified is whether the EncryptedID of the Subject of the request doesn't identify a principal,
+	// so that no assertion matches the Subject.
+	subjectUnidentified bool
+
 	// encryptedIDRequested is whether the NameID of the Subject must be sent as an EncryptedID although there is
-	// no NameIDPolicy that asks for one: the query that the assertion answers named the principal with one.
+	// no NameIDPolicy that asks for one: the request, or the query that the assertion answers, named the
+	// principal with one.
 	encryptedIDRequested bool
+
+	// requestEl is the element of the request, which verifyAuthnRequestSignature sets. It is the content that
+	// the signature covers if requestAuthenticated.
+	requestEl *etree.Element
 
 	// responseParticipant is the participant that the assertion in ResponseEl makes of the service
 	// provider, which PublishResponse records each time the response is sent.
@@ -1827,7 +1867,91 @@ func (req *IdpAuthnRequest) Validate() error {
 		return ErrNoResponseEndpoint.WithDebugf("cannot find assertion consumer service: %s", err).WithWrap(err)
 	}
 
-	return req.checkRequestStage()
+	if err := req.checkRequestStage(); err != nil {
+		return err
+	}
+
+	return req.identifySubject()
+}
+
+// identifySubject checks the identifier of the Subject of the request, and decrypts it if it is an EncryptedID
+// (SAMLCore §3.4.1, §2.2.4). It must only run once the signature is verified and the endpoint for the response is
+// resolved. The error is a StatusError.
+//
+// A Subject with more than one identifier gets RequestDenied, and one with a BaseID, which is not supported,
+// RequestUnsupported. So does one with an EncryptedID in a request that is not signed: SAMLCore §6.2 has the
+// requester encrypt and then sign, and errata E93 has the receiver require integrity protection before it
+// processes encrypted data, so nothing is decrypted that the service provider is not known to have sent. The
+// EncryptedID is taken from the content that the signature covers. It is also RequestUnsupported for a service
+// provider with no encryption key, before anything is decrypted, as the identifier is sent back encrypted.
+//
+// The decrypted NameID replaces the identifier of Request.Subject, so that the SubjectEnforcer compares the
+// assertion with it. An EncryptedID that can't be decrypted, or that holds an identifier which the identity
+// provider doesn't share with the service provider, is not an error here: the reason is only reported to the
+// Observer, and makeAssertion then fails the request with AuthnFailed at the point where a Subject that names
+// another principal fails. An answer which tells the requester that an EncryptedID was decrypted, or what it
+// held, would let it use the identity provider to learn about a ciphertext that it didn't make (errata E93).
+func (req *IdpAuthnRequest) identifySubject() error {
+	req.SubjectEncrypted, req.subjectUnidentified, req.encryptedIDRequested = false, false, false
+
+	if req.requestEl == nil {
+		return nil
+	}
+
+	identifiers := subjectIdentifiers(req.requestEl)
+
+	if len(identifiers) > 1 {
+		return ErrRequestDenied.WithDebug("the Subject of the request has more than one identifier")
+	}
+
+	if len(identifiers) == 0 || identifiers[0].Tag == "NameID" {
+		return nil
+	}
+
+	if identifiers[0].Tag == "BaseID" {
+		return ErrRequestUnsupported.WithDebug("the Subject of the request has a BaseID, which is not supported")
+	}
+
+	if !req.requestAuthenticated {
+		return ErrRequestUnsupported.WithDebug("the Subject of the request has an EncryptedID, which is only decrypted for a request that is signed")
+	}
+
+	if req.SPSSODescriptor == nil || req.spEncryptionKeyDescriptor() == nil {
+		return ErrRequestUnsupported.WithDebug("the Subject of the request has an EncryptedID, and the service provider has no encryption key to send it back to")
+	}
+
+	// The Subject is unmarshalled from the same content, so it is only nil if the two parsers disagree.
+	if req.Request.Subject == nil {
+		return ErrRequestDenied.WithDebug("the Subject of the request can't be read")
+	}
+
+	decrypter, err := req.IDP.elementDecrypter()
+
+	var nameID *NameID
+	if err == nil {
+		nameID, err = decrypter.decryptNameID(identifiers[0])
+	}
+
+	if err != nil {
+		err = fmt.Errorf("cannot decrypt the EncryptedID: %w", err)
+	} else {
+		err = req.IDP.checkSubjectNameID(req.HTTPRequest, nameID, req.ServiceProviderMetadata, true)
+	}
+
+	req.SubjectEncrypted, req.encryptedIDRequested = true, true
+
+	if err != nil {
+		req.warn(EventPrincipalUnidentified,
+			ErrUnknownPrincipal.WithDebugf("the principal of the request is not identified: %s", err).WithWrap(err))
+
+		req.Request.Subject.NameID, req.subjectUnidentified = nil, true
+
+		return nil
+	}
+
+	req.Request.Subject.NameID = nameID
+
+	return nil
 }
 
 // checkTrust makes the checks on the identity of the request that are needed before the service
@@ -2891,8 +3015,8 @@ func (req *IdpAuthnRequest) elementEncrypter() (*elementEncrypter, error) {
 }
 
 // requestsEncryptedID reports whether the NameIDPolicy of the request has the encrypted format, which means the
-// assertion MUST contain an EncryptedID instead of a NameID (SAMLCore §3.4.1.1), or whether the query that the
-// assertion answers named the principal with an EncryptedID.
+// assertion MUST contain an EncryptedID instead of a NameID (SAMLCore §3.4.1.1), or whether the request, or the
+// query that the assertion answers, named the principal with an EncryptedID.
 func (req *IdpAuthnRequest) requestsEncryptedID() bool {
 	if req.encryptedIDRequested {
 		return true

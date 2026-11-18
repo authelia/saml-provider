@@ -114,6 +114,12 @@ func (idp *IdentityProvider) signaturePolicy() (*signaturePolicy, error) {
 // none and one is required. ServiceProviderMetadata must be set. An error that is not a StatusError is
 // ErrInvalidSignature to the caller.
 //
+// It sets requestEl to the element of the request, which is the content that the signature covers if there is one.
+// An enveloped signature covers the element that it verifies (HTTP-POST, and the SOAP binding of the Enhanced
+// Client or Proxy profile, whose message is taken out of its envelope first). The signature of the HTTP-Redirect
+// binding is over the SAMLRequest parameter as it was received (SAMLBind §3.4.4.1), so it covers every byte that
+// RequestBuffer was inflated from, and the whole of the document.
+//
 //nolint:gocyclo // Complexity is inherent to the specification being implemented.
 func (req *IdpAuthnRequest) verifyAuthnRequestSignature() error {
 	doc := etree.NewDocument()
@@ -124,6 +130,8 @@ func (req *IdpAuthnRequest) verifyAuthnRequestSignature() error {
 	if doc.Root() == nil {
 		return errors.New("request has no root element")
 	}
+
+	req.requestEl = doc.Root()
 
 	signatureEl, err := findChild(doc.Root(), "http://www.w3.org/2000/09/xmldsig#", "Signature")
 	if err != nil {
@@ -168,6 +176,8 @@ func (req *IdpAuthnRequest) verifyAuthnRequestSignature() error {
 		if err := req.useVerifiedRequest(verified); err != nil {
 			return err
 		}
+
+		req.requestEl = verified
 	}
 
 	// SAMLBind §3.4.5.2 and §3.5.5.2 require this of a signed message on the browser bindings. The value is
