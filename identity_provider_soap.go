@@ -363,13 +363,13 @@ func (idp *IdentityProvider) verifySOAPRequester(r *http.Request, message *etree
 		return nil, nil, ErrSignatureRequired.WithDebug("the message is not signed")
 	}
 
-	certificates, err := serviceProviderSigningCertificates(metadata)
+	keys, err := serviceProviderSigningKeys(metadata)
 	if err != nil {
 		return nil, nil, ErrServerError.WithDebugError(err)
 	}
 
-	if len(certificates) == 0 {
-		return nil, nil, ErrInvalidSignature.WithDebug("the message is signed but the service provider has no signing certificate")
+	if len(keys) == 0 {
+		return nil, nil, ErrInvalidSignature.WithDebug("the message is signed but the service provider has no signing key")
 	}
 
 	// A list that can't be used is a fault of the identity provider, and not of the requester.
@@ -378,7 +378,7 @@ func (idp *IdentityProvider) verifySOAPRequester(r *http.Request, message *etree
 		return nil, nil, ErrServerError.WithDebugError(err)
 	}
 
-	verified, err := verifyEnvelopedSignature(message, certificates, policy)
+	verified, err := verifyEnvelopedSignature(message, keys, policy)
 	if err != nil {
 		return nil, nil, ErrInvalidSignature.WithDebugf("invalid message signature: %s", err).WithWrap(err)
 	}

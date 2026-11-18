@@ -93,10 +93,10 @@ func TestSPMakesLogoutRequestWithEncryptedID(t *testing.T) {
 		assert.Nil(t, request.NameID)
 
 		// SAMLCore §6.2: the signature is calculated over the message which contains the EncryptedID.
-		certificates, err := serviceProviderSigningCertificates(test.SP.Metadata())
+		keys, err := serviceProviderSigningKeys(test.SP.Metadata())
 		require.NoError(t, err)
 
-		verified, err := verifyEnvelopedSignature(reparse(t, request.Element()), certificates, anySignaturePolicy)
+		verified, err := verifyEnvelopedSignature(reparse(t, request.Element()), keys, anySignaturePolicy)
 		require.NoError(t, err)
 		check(t, verified)
 	})

@@ -242,7 +242,7 @@ func parseECPResponse(t *testing.T, w *httptest.ResponseRecorder) *ecpResponse {
 	require.Equal(t, message.Tag, "Response")
 	require.Equal(t, message.NamespaceURI(), samlProtocolNS)
 
-	verified, err := verifyEnvelopedSignature(message, []*x509.Certificate{mustParseCertificate(golden.Get(t, "idp_cert.pem"))}, anySignaturePolicy)
+	verified, err := verifyEnvelopedSignature(message, certificateVerificationKeys([]*x509.Certificate{mustParseCertificate(golden.Get(t, "idp_cert.pem"))}), anySignaturePolicy)
 	require.NoError(t, err)
 
 	response := &Response{}

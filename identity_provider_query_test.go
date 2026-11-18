@@ -362,7 +362,7 @@ func parseQueryResponse(t *testing.T, sp *ServiceProvider, code int, header http
 
 	certificates := []*x509.Certificate{mustParseCertificate(golden.Get(t, "idp_cert.pem"))}
 
-	verified, err := verifyEnvelopedSignature(message, certificates, anySignaturePolicy)
+	verified, err := verifyEnvelopedSignature(message, certificateVerificationKeys(certificates), anySignaturePolicy)
 	require.NoError(t, err)
 
 	// SAMLCore §3.2.2: the Issuer, then the Signature, then the Status.
@@ -396,7 +396,7 @@ func parseQueryResponse(t *testing.T, sp *ServiceProvider, code int, header http
 
 		require.Equal(t, assertionEl.Tag, "Assertion")
 
-		verifiedAssertion, err := verifyEnvelopedSignature(assertionEl, certificates, anySignaturePolicy)
+		verifiedAssertion, err := verifyEnvelopedSignature(assertionEl, certificateVerificationKeys(certificates), anySignaturePolicy)
 		require.NoError(t, err)
 
 		assertion := &Assertion{}
@@ -818,7 +818,7 @@ func TestServeAttributeQuery(t *testing.T) {
 	assert.True(t, saved.notOnOrAfter.Equal(assertion.Conditions.NotOnOrAfter))
 	assert.Equal(t, saved.assertion.Tag, "Assertion")
 
-	_, err := verifyEnvelopedSignature(saved.assertion, []*x509.Certificate{f.test.Certificate}, anySignaturePolicy)
+	_, err := verifyEnvelopedSignature(saved.assertion, certificateVerificationKeys([]*x509.Certificate{f.test.Certificate}), anySignaturePolicy)
 	assert.NoError(t, err)
 }
 

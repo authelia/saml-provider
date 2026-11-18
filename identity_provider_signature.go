@@ -12,6 +12,7 @@ import (
 	"net/url"
 	"slices"
 	"strings"
+	"time"
 
 	"github.com/beevik/etree"
 
@@ -146,13 +147,13 @@ func (req *IdpAuthnRequest) verifyAuthnRequestSignature() error {
 		return nil
 	}
 
-	certificates, err := req.serviceProviderSigningCertificates()
+	keys, err := req.serviceProviderSigningKeys()
 	if err != nil {
 		return ErrServerError.WithDebugError(err)
 	}
 
-	if len(certificates) == 0 {
-		return errors.New("request is signed but the service provider has no signing certificate")
+	if len(keys) == 0 {
+		return errors.New("request is signed but the service provider has no signing key")
 	}
 
 	// A list that can't be used is a fault of the identity provider, and not of the requester.
@@ -162,13 +163,13 @@ func (req *IdpAuthnRequest) verifyAuthnRequestSignature() error {
 	}
 
 	if req.RedirectQuery != "" {
-		if err := verifyRedirectSignature(req.RedirectQuery, "SAMLRequest", certificates, policy); err != nil {
+		if err := verifyRedirectSignature(req.RedirectQuery, "SAMLRequest", keys, policy); err != nil {
 			return fmt.Errorf("invalid request signature: %w", err)
 		}
 	}
 
 	if signatureEl != nil {
-		verified, err := verifyEnvelopedSignature(doc.Root(), certificates, policy)
+		verified, err := verifyEnvelopedSignature(doc.Root(), keys, policy)
 		if err != nil {
 			return fmt.Errorf("invalid request signature: %w", err)
 		}
@@ -230,15 +231,55 @@ func (req *IdpAuthnRequest) serviceProviderSignsAuthnRequests() bool {
 	return false
 }
 
-// serviceProviderSigningCertificates returns the certificates that the service provider may sign with.
-func (req *IdpAuthnRequest) serviceProviderSigningCertificates() ([]*x509.Certificate, error) {
-	return serviceProviderSigningCertificates(req.ServiceProviderMetadata)
+// signatureVerificationKey is a key that a signature is verified with.
+type signatureVerificationKey struct {
+	// certificate is the certificate that the key was given in, or nil for a key that was given only as a
+	// ds:KeyValue. There is then no validity period to check, and no certificate that the KeyInfo of a signature
+	// could be matched with.
+	certificate *x509.Certificate
+
+	// publicKey is the key: that of certificate, or else of the ds:RSAKeyValue. It is never nil.
+	publicKey crypto.PublicKey
 }
 
-// serviceProviderSigningCertificates returns the certificates that a service provider may sign with,
-// according to its metadata.
-func serviceProviderSigningCertificates(metadata *EntityDescriptor) ([]*x509.Certificate, error) {
-	var certificates []*x509.Certificate
+// validAt returns true if now is within the validity period of the certificate of the key. A key that was given
+// as a ds:KeyValue has no certificate, and so no validity period.
+func (k signatureVerificationKey) validAt(now time.Time) bool {
+	return k.certificate == nil || (!now.Before(k.certificate.NotBefore) && !now.After(k.certificate.NotAfter))
+}
+
+// certificateVerificationKeys returns the keys of the certificates, for those who only trust certificates.
+func certificateVerificationKeys(certificates []*x509.Certificate) []signatureVerificationKey {
+	keys := make([]signatureVerificationKey, 0, len(certificates))
+
+	for _, certificate := range certificates {
+		keys = append(keys, signatureVerificationKey{certificate: certificate, publicKey: certificate.PublicKey})
+	}
+
+	return keys
+}
+
+// serviceProviderSigningKeys returns the keys that the service provider may sign with.
+func (req *IdpAuthnRequest) serviceProviderSigningKeys() ([]signatureVerificationKey, error) {
+	return serviceProviderSigningKeys(req.ServiceProviderMetadata)
+}
+
+// serviceProviderSigningKeys returns the keys that a service provider may sign with, according to its metadata:
+// those of every KeyDescriptor of its SPSSODescriptors whose use is signing, or which has no use and so is for
+// both signing and encryption (SAMLMeta §2.4.1.1).
+//
+// MetaIOP §2.6.1 requires the two representations of a key that are read to be supported, and they are read as
+// they are for an encryption key (see keyDescriptorEncryptionKey): the X509Certificates of the descriptor, and if
+// none of them holds a certificate the first ds:KeyValue with an RSAKeyValue. When there are both they must
+// represent the same key (MetaIOP §2.5.1), and the certificate is the one used. A KeyValue which holds anything
+// but an RSAKeyValue, such as a DSAKeyValue or an ECKeyValue, gives no key that can be used and is passed over, as
+// is a descriptor which only names its key with a KeyName.
+//
+// A certificate or an RSAKeyValue which is present and can't be parsed is an error instead, as the metadata is
+// then broken rather than merely of no use. A ds:KeyValue has no validity period and no key usage that could be
+// checked, and the size of its key is not checked either, as that of a certificate is not.
+func serviceProviderSigningKeys(metadata *EntityDescriptor) ([]signatureVerificationKey, error) {
+	var keys []signatureVerificationKey
 
 	for _, descriptor := range metadata.SPSSODescriptors {
 		for _, keyDescriptor := range descriptor.KeyDescriptors {
@@ -246,45 +287,109 @@ func serviceProviderSigningCertificates(metadata *EntityDescriptor) ([]*x509.Cer
 				continue
 			}
 
-			for _, certificate := range keyDescriptor.KeyInfo.X509Data.X509Certificates {
-				der, err := base64.StdEncoding.DecodeString(whitespaceRemover.Replace(certificate.Data))
-				if err != nil {
-					return nil, fmt.Errorf("cannot decode service provider certificate: %w", err)
-				}
-				// ServiceProvider.Metadata concatenates any intermediates after the certificate. Those
-				// aren't what the service provider signs with, and must not become trusted signers.
-				parsed, err := x509.ParseCertificates(der)
-				if err != nil {
-					return nil, fmt.Errorf("cannot parse service provider certificate: %w", err)
-				}
-
-				if len(parsed) != 0 {
-					certificates = append(certificates, parsed[0])
-				}
+			certificates, err := keyDescriptorSigningCertificates(&keyDescriptor)
+			if err != nil {
+				return nil, err
 			}
+
+			if len(certificates) != 0 {
+				keys = append(keys, certificateVerificationKeys(certificates)...)
+
+				continue
+			}
+
+			public, err := keyDescriptorSigningKeyValue(&keyDescriptor)
+			if err != nil {
+				return nil, err
+			}
+
+			if public != nil {
+				keys = append(keys, signatureVerificationKey{publicKey: public})
+			}
+		}
+	}
+
+	return keys, nil
+}
+
+// keyDescriptorSigningCertificates returns the certificates of keyDescriptor that the service provider may sign
+// with. An X509Certificate that is empty holds none.
+func keyDescriptorSigningCertificates(keyDescriptor *KeyDescriptor) ([]*x509.Certificate, error) {
+	var certificates []*x509.Certificate
+
+	for _, certificate := range keyDescriptor.KeyInfo.X509Data.X509Certificates {
+		der, err := base64.StdEncoding.DecodeString(whitespaceRemover.Replace(certificate.Data))
+		if err != nil {
+			return nil, fmt.Errorf("cannot decode service provider certificate: %w", err)
+		}
+		// ServiceProvider.Metadata concatenates any intermediates after the certificate. Those
+		// aren't what the service provider signs with, and must not become trusted signers.
+		parsed, err := x509.ParseCertificates(der)
+		if err != nil {
+			return nil, fmt.Errorf("cannot parse service provider certificate: %w", err)
+		}
+
+		if len(parsed) != 0 {
+			certificates = append(certificates, parsed[0])
 		}
 	}
 
 	return certificates, nil
 }
 
+// keyDescriptorSigningKeyValue returns the key of the first ds:KeyValue of keyDescriptor which holds an
+// RSAKeyValue, or nil if there is none.
+func keyDescriptorSigningKeyValue(keyDescriptor *KeyDescriptor) (*rsa.PublicKey, error) {
+	for _, keyValue := range keyDescriptor.KeyInfo.KeyValues {
+		if keyValue.RSAKeyValue == nil {
+			continue
+		}
+
+		public, err := keyValue.RSAKeyValue.PublicKey()
+		if err != nil {
+			return nil, fmt.Errorf("cannot parse service provider key value: %w", err)
+		}
+
+		return public, nil
+	}
+
+	return nil, nil
+}
+
 var whitespaceRemover = strings.NewReplacer(" ", "", "\t", "", "\r", "", "\n", "")
 
-// verifyEnvelopedSignature verifies the signature on el with any of the certificates, and returns the
-// content that it covers. They are tried in turn because a signature with no KeyInfo can only be
-// checked against a single certificate. A signature made with a signature method that the policy doesn't list,
-// or with a Reference whose digest method it doesn't list, is refused as one that doesn't verify is.
-func verifyEnvelopedSignature(el *etree.Element, certificates []*x509.Certificate, policy *signaturePolicy) (*etree.Element, error) {
+// verifyEnvelopedSignature verifies the signature on el with any of the keys, and returns the content that it
+// covers. They are tried in turn because a signature with no KeyInfo can only be checked against a single
+// certificate. A signature made with a signature method that the policy doesn't list, or with a Reference whose
+// digest method it doesn't list, is refused as one that doesn't verify is.
+//
+// A key that has a certificate verifies a signature whose KeyInfo holds that certificate or has no certificate,
+// while the certificate is valid. A key that has none, which was given as a ds:KeyValue, verifies a signature
+// whatever its KeyInfo holds: MetaIOP §2.6.1 has the key be what is trusted, and a certificate that the signer put
+// in its signature says nothing that the metadata didn't.
+func verifyEnvelopedSignature(el *etree.Element, keys []signatureVerificationKey, policy *signaturePolicy) (*etree.Element, error) {
 	var err error
 
-	for _, certificate := range certificates {
-		validationContext, detached, contextErr := signatureValidationContext(el, []*x509.Certificate{certificate}, policy)
+	for _, key := range keys {
+		var certificates []*x509.Certificate
+		if key.certificate != nil {
+			certificates = []*x509.Certificate{key.certificate}
+		}
+
+		validationContext, detached, contextErr := signatureValidationContext(el, certificates, policy)
 		if contextErr != nil {
 			return nil, contextErr
 		}
 
 		var verified *etree.Element
-		if verified, err = validationContext.Validate(detached); err == nil {
+
+		if key.certificate != nil {
+			verified, err = validationContext.Validate(detached)
+		} else {
+			verified, err = validationContext.ValidateWithKey(detached, key.publicKey)
+		}
+
+		if err == nil {
 			return verified, nil
 		}
 	}
@@ -325,7 +430,7 @@ func redirectParameters(rawQuery string) (map[string]string, error) {
 // requires, it covers the parameters as they were received rather than a new encoding of their values. A SigAlg
 // that the policy doesn't list is refused as a signature that doesn't verify is. The digest methods of the policy
 // have no part in it, as the signature is over the query itself and there is no Reference.
-func verifyRedirectSignature(rawQuery, messageParameter string, certificates []*x509.Certificate, policy *signaturePolicy) error {
+func verifyRedirectSignature(rawQuery, messageParameter string, keys []signatureVerificationKey, policy *signaturePolicy) error {
 	parameters, err := redirectParameters(rawQuery)
 	if err != nil {
 		return err
@@ -377,23 +482,23 @@ func verifyRedirectSignature(rawQuery, messageParameter string, certificates []*
 		now = Clock.Now()
 	}
 
-	for _, certificate := range certificates {
-		if now.Before(certificate.NotBefore) || now.After(certificate.NotAfter) {
+	for _, key := range keys {
+		if !key.validAt(now) {
 			continue
 		}
 
-		if verifyDigest(certificate, algorithm, hash, digest, signature) {
+		if verifyDigest(key.publicKey, algorithm, hash, digest, signature) {
 			return nil
 		}
 	}
 
-	return errors.New("no currently valid certificate verifies the signature")
+	return errors.New("no currently valid key verifies the signature")
 }
 
 // verifyDigest returns true if signature is valid for digest, under an algorithm that matches the
 // type of the key.
-func verifyDigest(certificate *x509.Certificate, algorithm string, hash crypto.Hash, digest, signature []byte) bool {
-	switch key := certificate.PublicKey.(type) {
+func verifyDigest(public crypto.PublicKey, algorithm string, hash crypto.Hash, digest, signature []byte) bool {
+	switch key := public.(type) {
 	case *rsa.PublicKey:
 		switch algorithm {
 		case dsig.RSASHA1SignatureMethod, dsig.RSASHA256SignatureMethod, dsig.RSASHA384SignatureMethod, dsig.RSASHA512SignatureMethod:

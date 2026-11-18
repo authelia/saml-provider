@@ -1,7 +1,9 @@
 package dsig
 
 import (
+	"crypto"
 	"crypto/ecdsa"
+	"crypto/rsa"
 	"crypto/x509"
 	"encoding/asn1"
 	"errors"
@@ -58,17 +60,57 @@ func ecdsaRawToDER(public *ecdsa.PublicKey, raw []byte) ([]byte, error) {
 	})
 }
 
-// checkSignature verifies a decoded SignatureValue or query string signature against the certificate.
-func checkSignature(cert *x509.Certificate, algorithm x509.SignatureAlgorithm, signed, signature []byte) error {
-	public, ok := cert.PublicKey.(*ecdsa.PublicKey)
-	if ok && isECDSAAlgorithm(algorithm) {
+// signatureHashes are the hashes of the signature algorithms that can be verified.
+var signatureHashes = map[x509.SignatureAlgorithm]crypto.Hash{
+	x509.SHA1WithRSA:     crypto.SHA1,
+	x509.SHA256WithRSA:   crypto.SHA256,
+	x509.SHA384WithRSA:   crypto.SHA384,
+	x509.SHA512WithRSA:   crypto.SHA512,
+	x509.ECDSAWithSHA1:   crypto.SHA1,
+	x509.ECDSAWithSHA256: crypto.SHA256,
+	x509.ECDSAWithSHA384: crypto.SHA384,
+	x509.ECDSAWithSHA512: crypto.SHA512,
+}
+
+// checkSignature verifies a decoded SignatureValue against the public key, which is that of a certificate or one
+// that is trusted without a certificate, such as the key of a ds:KeyValue. The signature algorithm must be one for
+// the type of the key: RSASSA-PKCS1-v1_5 for an RSA key (XML Signature §6.4.2), and ECDSA for an elliptic curve
+// key, whose signature is r||s (XML Signature 1.1 §6.4.3).
+func checkSignature(public crypto.PublicKey, algorithm x509.SignatureAlgorithm, signed, signature []byte) error {
+	hash, ok := signatureHashes[algorithm]
+	if !ok || !hash.Available() {
+		return fmt.Errorf("cannot verify signature: algorithm %s is not supported", algorithm)
+	}
+
+	h := hash.New()
+	h.Write(signed)
+	digest := h.Sum(nil)
+
+	switch public := public.(type) {
+	case *rsa.PublicKey:
+		if isECDSAAlgorithm(algorithm) {
+			return fmt.Errorf("cannot verify signature: algorithm %s is not one for an RSA key", algorithm)
+		}
+
+		return rsa.VerifyPKCS1v15(public, hash, digest, signature)
+	case *ecdsa.PublicKey:
+		if !isECDSAAlgorithm(algorithm) {
+			return fmt.Errorf("cannot verify signature: algorithm %s is not one for an elliptic curve key", algorithm)
+		}
+
 		der, err := ecdsaRawToDER(public, signature)
 		if err != nil {
 			return err
 		}
-		signature = der
+
+		if !ecdsa.VerifyASN1(public, digest, der) {
+			return errors.New("ECDSA verification failure")
+		}
+
+		return nil
+	default:
+		return fmt.Errorf("cannot verify signature: unsupported public key type %T", public)
 	}
-	return cert.CheckSignature(algorithm, signed, signature)
 }
 
 func isECDSAAlgorithm(algorithm x509.SignatureAlgorithm) bool {

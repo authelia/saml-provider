@@ -171,13 +171,13 @@ func (resp *IdpLogoutResponse) verifySignature(state *LogoutState, entityID stri
 		return resp.checkUnsigned()
 	}
 
-	certificates, err := serviceProviderSigningCertificates(metadata)
+	keys, err := serviceProviderSigningKeys(metadata)
 	if err != nil {
 		return err
 	}
 
-	if len(certificates) == 0 {
-		return errors.New("response is signed but the service provider has no signing certificate")
+	if len(keys) == 0 {
+		return errors.New("response is signed but the service provider has no signing key")
 	}
 
 	policy, err := resp.IDP.signaturePolicy()
@@ -186,13 +186,13 @@ func (resp *IdpLogoutResponse) verifySignature(state *LogoutState, entityID stri
 	}
 
 	if resp.RedirectQuery != "" {
-		if err := verifyRedirectSignature(resp.RedirectQuery, "SAMLResponse", certificates, policy); err != nil {
+		if err := verifyRedirectSignature(resp.RedirectQuery, "SAMLResponse", keys, policy); err != nil {
 			return fmt.Errorf("invalid response signature: %w", err)
 		}
 	}
 
 	if signatureEl != nil {
-		verified, err := verifyEnvelopedSignature(doc.Root(), certificates, policy)
+		verified, err := verifyEnvelopedSignature(doc.Root(), keys, policy)
 		if err != nil {
 			return fmt.Errorf("invalid response signature: %w", err)
 		}

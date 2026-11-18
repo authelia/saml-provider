@@ -123,7 +123,7 @@ func (v *MetadataVerifier) Verify(data []byte) ([]byte, error) {
 		return nil, err
 	}
 
-	verified, err := verifyEnvelopedSignature(root, v.Certificates, policy)
+	verified, err := verifyEnvelopedSignature(root, certificateVerificationKeys(v.Certificates), policy)
 	if err != nil {
 		return nil, fmt.Errorf("cannot verify the signature of the metadata: %w", err)
 	}
