@@ -686,6 +686,12 @@ type IdentityProvider struct {
 	// For a service provider whose metadata lists the signature or digest algorithms it supports, as
 	// alg:SigningMethod or alg:DigestMethod, the first of each that the identity provider can sign with is used in
 	// place of SignatureMethod, unless the policy names another. See IssuanceRequest.Defaults.
+	//
+	// It also decides the content encryption and key transport algorithms that everything encrypted for a service
+	// provider is encrypted with, in place of those negotiated from the EncryptionMethods of its key and within
+	// ContentEncryptionMethods, KeyTransportMethods and KeyTransportDigestMethods, and whether an assertion is
+	// refused to a service provider that has no encryption key. See Issuance.ContentEncryptionMethod and
+	// Issuance.RequireEncryption.
 	IssuancePolicy IssuancePolicy
 
 	// EncryptionCertificateEnforcer decides whether the encryption certificate of a service provider
@@ -731,7 +737,8 @@ type IdentityProvider struct {
 	// AES-192-GCM, AES-256-GCM, AES-128-CBC, AES-192-CBC and AES-256-CBC, and empty means all of them in that
 	// order, so that a service provider which lists none receives AES-128-GCM, one of the two block ciphers
 	// that SAML2Int SDP-ALG01 requires to be used. A service provider that can only decrypt CBC must list it in
-	// the EncryptionMethods of its key, or have it listed there by the ServiceProviderProvider. The metadata
+	// the EncryptionMethods of its key, or be given it by the ContentEncryptionMethod of the IssuancePolicy, which
+	// is used whatever the service provider lists but must be listed here. The metadata
 	// lists them for the encryption key of the identity provider with GCM first, as CBC doesn't protect the
 	// integrity of what it encrypts (errata E93). KeyTransportMethods and KeyTransportDigestMethods restrict
 	// what is accepted in the same way.
@@ -2658,6 +2665,12 @@ func (req *IdpAuthnRequest) MakeAssertionEl() error {
 
 	req.nameIDEncrypted = sent.Subject != nil && sent.Subject.EncryptedID != nil
 
+	if encrypter == nil {
+		if err := req.checkPlaintextAssertion(issuance); err != nil {
+			return err
+		}
+	}
+
 	req.saveAssertion(signedAssertionEl)
 
 	if encrypter == nil {
@@ -2675,12 +2688,32 @@ func (req *IdpAuthnRequest) MakeAssertionEl() error {
 func (req *IdpAuthnRequest) encryptAssertionEl(signedAssertionEl *etree.Element) (*etree.Element, error) {
 	encrypter, err := req.elementEncrypter()
 	if errors.Is(err, os.ErrNotExist) {
+		issuance, err := req.Issuance(req.Session)
+		if err != nil {
+			return nil, err
+		}
+
+		if err := req.checkPlaintextAssertion(issuance); err != nil {
+			return nil, err
+		}
+
 		return signedAssertionEl, nil
 	} else if err != nil {
 		return nil, err
 	}
 
 	return encrypter.encryptAssertion(signedAssertionEl)
+}
+
+// checkPlaintextAssertion returns an error if issuance, which is that of the request, doesn't allow an assertion
+// to be issued to the service provider in plaintext, which it would be as the service provider has no encryption
+// key.
+func (req *IdpAuthnRequest) checkPlaintextAssertion(issuance Issuance) error {
+	if !issuance.RequireEncryption {
+		return nil
+	}
+
+	return fmt.Errorf("IssuancePolicy: the assertion must be encrypted, and the service provider %q has no encryption key", req.ServiceProviderMetadata.EntityID)
 }
 
 // encryptAssertion returns the EncryptedAssertion element of the signed assertion. SAMLCore §6.2: a signed
