@@ -1,7 +1,6 @@
 package saml
 
 import (
-	"crypto/x509"
 	"encoding/base64"
 	"errors"
 	"fmt"
@@ -169,10 +168,10 @@ func TestServeSSOSignedRequestFailsRequestStage(t *testing.T) {
 	}
 }
 
-type encryptionCertificateEnforcerFunc func(*IdpAuthnRequest, *x509.Certificate) error
+type encryptionKeyEnforcerFunc func(*IdpAuthnRequest, ServiceProviderEncryptionKey) error
 
-func (f encryptionCertificateEnforcerFunc) EnforceEncryptionCertificate(req *IdpAuthnRequest, cert *x509.Certificate) error {
-	return f(req, cert)
+func (f encryptionKeyEnforcerFunc) EnforceEncryptionKey(req *IdpAuthnRequest, key ServiceProviderEncryptionKey) error {
+	return f(req, key)
 }
 
 func useSession(test *IdentityProviderTest) {
@@ -200,7 +199,7 @@ func TestServeSSOResponderWhenEncryptionFails(t *testing.T) {
 
 	called := false
 
-	test.IDP.EncryptionCertificateEnforcer = encryptionCertificateEnforcerFunc(func(*IdpAuthnRequest, *x509.Certificate) error {
+	test.IDP.EncryptionKeyEnforcer = encryptionKeyEnforcerFunc(func(*IdpAuthnRequest, ServiceProviderEncryptionKey) error {
 		called = true
 
 		return errors.New("boom")

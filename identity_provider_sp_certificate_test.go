@@ -105,11 +105,11 @@ func TestIDPEncryptionCertificatePolicy(t *testing.T) {
 	for _, tc := range []struct {
 		name     string
 		cert     spCertTemplate
-		enforcer EncryptionCertificateEnforcer
+		enforcer EncryptionKeyEnforcer
 		err      string
 	}{
 		{name: "valid", cert: valid},
-		{name: "default enforcer", cert: valid, enforcer: DefaultEncryptionCertificateEnforcer{}},
+		{name: "default enforcer", cert: valid, enforcer: DefaultEncryptionKeyEnforcer{}},
 		{name: "expired", cert: expired, err: "expired"},
 		{name: "not yet valid", cert: notYetValid, err: "not yet valid"},
 		{name: "expired within the clock skew", cert: with(func(c *spCertTemplate) { c.notAfter = now.Add(-MaxClockSkew / 2) })},
@@ -120,33 +120,33 @@ func TestIDPEncryptionCertificatePolicy(t *testing.T) {
 		{name: "key usage with key encipherment", cert: with(func(c *spCertTemplate) { c.keyUsage = x509.KeyUsageDigitalSignature | x509.KeyUsageKeyEncipherment })},
 		{name: "key usage absent", cert: with(func(c *spCertTemplate) { c.keyUsage = 0 })},
 
-		{name: "expired allowed", cert: expired, enforcer: DefaultEncryptionCertificateEnforcer{IgnoreValidityPeriod: true}},
-		{name: "not yet valid allowed", cert: notYetValid, enforcer: DefaultEncryptionCertificateEnforcer{IgnoreValidityPeriod: true}},
-		{name: "expired allowed does not allow RSA-1024", cert: with(func(c *spCertTemplate) { c.key = rsa1024; c.notAfter = now.Add(-24 * time.Hour) }), enforcer: DefaultEncryptionCertificateEnforcer{IgnoreValidityPeriod: true}, err: "1024-bit"},
+		{name: "expired allowed", cert: expired, enforcer: DefaultEncryptionKeyEnforcer{IgnoreValidityPeriod: true}},
+		{name: "not yet valid allowed", cert: notYetValid, enforcer: DefaultEncryptionKeyEnforcer{IgnoreValidityPeriod: true}},
+		{name: "expired allowed does not allow RSA-1024", cert: with(func(c *spCertTemplate) { c.key = rsa1024; c.notAfter = now.Add(-24 * time.Hour) }), enforcer: DefaultEncryptionKeyEnforcer{IgnoreValidityPeriod: true}, err: "1024-bit"},
 		{name: "expired allowed does not allow a signing only key", cert: with(func(c *spCertTemplate) {
 			c.keyUsage = x509.KeyUsageDigitalSignature
 			c.notAfter = now.Add(-24 * time.Hour)
-		}), enforcer: DefaultEncryptionCertificateEnforcer{IgnoreValidityPeriod: true}, err: "keyEncipherment"},
-		{name: "RSA-1024 allowed", cert: weak, enforcer: DefaultEncryptionCertificateEnforcer{MinimumRSAKeySize: 1024}},
-		{name: "RSA-1024 allowed does not allow expired", cert: with(func(c *spCertTemplate) { c.key = rsa1024; c.notAfter = now.Add(-24 * time.Hour) }), enforcer: DefaultEncryptionCertificateEnforcer{MinimumRSAKeySize: 1024}, err: "expired"},
-		{name: "stricter minimum", cert: valid, enforcer: DefaultEncryptionCertificateEnforcer{MinimumRSAKeySize: 3072}, err: "2048-bit"},
-		{name: "key usage ignored", cert: signingOnly, enforcer: DefaultEncryptionCertificateEnforcer{IgnoreKeyUsage: true}},
+		}), enforcer: DefaultEncryptionKeyEnforcer{IgnoreValidityPeriod: true}, err: "keyEncipherment"},
+		{name: "RSA-1024 allowed", cert: weak, enforcer: DefaultEncryptionKeyEnforcer{MinimumRSAKeySize: 1024}},
+		{name: "RSA-1024 allowed does not allow expired", cert: with(func(c *spCertTemplate) { c.key = rsa1024; c.notAfter = now.Add(-24 * time.Hour) }), enforcer: DefaultEncryptionKeyEnforcer{MinimumRSAKeySize: 1024}, err: "expired"},
+		{name: "stricter minimum", cert: valid, enforcer: DefaultEncryptionKeyEnforcer{MinimumRSAKeySize: 3072}, err: "2048-bit"},
+		{name: "key usage ignored", cert: signingOnly, enforcer: DefaultEncryptionKeyEnforcer{IgnoreKeyUsage: true}},
 		{name: "key usage ignored does not allow expired", cert: with(func(c *spCertTemplate) {
 			c.keyUsage = x509.KeyUsageDigitalSignature
 			c.notAfter = now.Add(-24 * time.Hour)
-		}), enforcer: DefaultEncryptionCertificateEnforcer{IgnoreKeyUsage: true}, err: "expired"},
+		}), enforcer: DefaultEncryptionKeyEnforcer{IgnoreKeyUsage: true}, err: "expired"},
 		{name: "everything allowed", cert: with(func(c *spCertTemplate) {
 			c.key = rsa1024
 			c.keyUsage = x509.KeyUsageDigitalSignature
 			c.notAfter = now.Add(-24 * time.Hour)
-		}), enforcer: DefaultEncryptionCertificateEnforcer{IgnoreValidityPeriod: true, IgnoreKeyUsage: true, MinimumRSAKeySize: 1024}},
+		}), enforcer: DefaultEncryptionKeyEnforcer{IgnoreValidityPeriod: true, IgnoreKeyUsage: true, MinimumRSAKeySize: 1024}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			idp := test.IDP
-			idp.EncryptionCertificateEnforcer = tc.enforcer
+			idp.EncryptionKeyEnforcer = tc.enforcer
 			req := spCertRequest(&idp, makeSPCert(t, tc.cert))
 
-			cert, err := req.getSPEncryptionCert()
+			cert, err := req.spEncryptionKey()
 			if tc.err == "" {
 				assert.Check(t, err)
 				assert.Check(t, cert != nil)
@@ -165,7 +165,7 @@ func TestIDPEncryptionCertificateRejectionDoesNotFallBack(t *testing.T) {
 	// The first encryption key is the one used, so a rejected key must not make the identity
 	// provider try another one, or the service provider's metadata could pick a weaker key.
 	test := NewIdentityProviderTest(t, applyKey)
-	test.IDP.EncryptionCertificateEnforcer = nil
+	test.IDP.EncryptionKeyEnforcer = nil
 	now := TimeNow()
 	rsa2048, _ := spCertTestKeys(t)
 	expired := makeSPCert(t, spCertTemplate{key: rsa2048, notBefore: now.Add(-48 * time.Hour), notAfter: now.Add(-24 * time.Hour)})
@@ -174,7 +174,7 @@ func TestIDPEncryptionCertificateRejectionDoesNotFallBack(t *testing.T) {
 
 	for _, use := range []string{"encryption", ""} {
 		req := spCertRequest(&test.IDP, expired, KeyDescriptor{Use: use, KeyInfo: KeyInfo{X509Data: X509Data{X509Certificates: []X509Certificate{{Data: validData}}}}})
-		cert, err := req.getSPEncryptionCert()
+		cert, err := req.spEncryptionKey()
 		assert.Check(t, is.ErrorContains(err, "expired"), "use=%q", use)
 		assert.Check(t, cert == nil)
 	}
@@ -182,7 +182,7 @@ func TestIDPEncryptionCertificateRejectionDoesNotFallBack(t *testing.T) {
 
 func TestIDPEncryptionCertificateRejectsNonRSA(t *testing.T) {
 	test := NewIdentityProviderTest(t, applyKey)
-	test.IDP.EncryptionCertificateEnforcer = nil
+	test.IDP.EncryptionKeyEnforcer = nil
 	now := TimeNow()
 	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	assert.NilError(t, err)
@@ -200,28 +200,28 @@ type entityEnforcer struct {
 	seen   []string
 }
 
-func (e *entityEnforcer) EnforceEncryptionCertificate(req *IdpAuthnRequest, cert *x509.Certificate) error {
+func (e *entityEnforcer) EnforceEncryptionKey(req *IdpAuthnRequest, key ServiceProviderEncryptionKey) error {
 	e.seen = append(e.seen, req.ServiceProviderMetadata.EntityID)
 	if req.ServiceProviderMetadata.EntityID == e.legacy {
-		return DefaultEncryptionCertificateEnforcer{IgnoreValidityPeriod: true, MinimumRSAKeySize: 1024}.EnforceEncryptionCertificate(req, cert)
+		return DefaultEncryptionKeyEnforcer{IgnoreValidityPeriod: true, MinimumRSAKeySize: 1024}.EnforceEncryptionKey(req, key)
 	}
 
-	return DefaultEncryptionCertificateEnforcer{}.EnforceEncryptionCertificate(req, cert)
+	return DefaultEncryptionKeyEnforcer{}.EnforceEncryptionKey(req, key)
 }
 
-func TestIDPEncryptionCertificateEnforcerPerServiceProvider(t *testing.T) {
+func TestIDPEncryptionKeyEnforcerPerServiceProvider(t *testing.T) {
 	test := NewIdentityProviderTest(t, applyKey)
 	enforcer := &entityEnforcer{legacy: "https://legacy.example.com/saml2/metadata"}
-	test.IDP.EncryptionCertificateEnforcer = enforcer
+	test.IDP.EncryptionKeyEnforcer = enforcer
 
 	// The fixture certificate of the service provider is RSA-1024 and expired at the mocked time.
 	legacy := spCertRequest(&test.IDP, test.SPCertificate)
 	legacy.ServiceProviderMetadata.EntityID = enforcer.legacy
-	_, err := legacy.getSPEncryptionCert()
+	_, err := legacy.spEncryptionKey()
 	assert.Check(t, err)
 
 	other := spCertRequest(&test.IDP, test.SPCertificate)
-	_, err = other.getSPEncryptionCert()
+	_, err = other.spEncryptionKey()
 	assert.Check(t, is.ErrorContains(err, "expired"))
 
 	assert.Check(t, is.DeepEqual([]string{enforcer.legacy, "https://sp.example.com/saml2/metadata"}, enforcer.seen))
@@ -229,7 +229,7 @@ func TestIDPEncryptionCertificateEnforcerPerServiceProvider(t *testing.T) {
 
 func TestIDPServeSSORefusesRejectedEncryptionCertificate(t *testing.T) {
 	test := NewIdentityProviderTest(t, applyKey)
-	test.IDP.EncryptionCertificateEnforcer = nil
+	test.IDP.EncryptionKeyEnforcer = nil
 
 	var logs bytes.Buffer
 
@@ -258,11 +258,11 @@ func TestIDPServeSSORefusesRejectedEncryptionCertificate(t *testing.T) {
 	assert.Check(t, is.Equal(refused.Status.StatusCode.Value, StatusResponder))
 	assert.Check(t, refused.Assertion == nil)
 	assert.Check(t, refused.EncryptedAssertion == nil)
-	assert.Check(t, is.Contains(logs.String(), "encryption certificate"))
+	assert.Check(t, is.Contains(logs.String(), "encryption key"))
 	assert.Check(t, is.Contains(logs.String(), "expired"))
 
 	// The same service provider gets an encrypted assertion once the operator allows it.
-	test.IDP.EncryptionCertificateEnforcer = DefaultEncryptionCertificateEnforcer{IgnoreValidityPeriod: true}
+	test.IDP.EncryptionKeyEnforcer = DefaultEncryptionKeyEnforcer{IgnoreValidityPeriod: true}
 	w = httptest.NewRecorder()
 	test.IDP.ServeSSO(w, r)
 	assert.Check(t, is.Equal(http.StatusOK, w.Code))

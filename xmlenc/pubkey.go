@@ -6,6 +6,7 @@ import (
 	"crypto/x509"
 	"encoding/base64"
 	"fmt"
+	"math/big"
 
 	"github.com/beevik/etree"
 )
@@ -139,20 +140,46 @@ func decryptOAEP(e RSA, privKey crypto.Decrypter, ciphertext []byte) ([]byte, er
 	return privKey.Decrypt(nil, ciphertext, opts)
 }
 
-// Encrypt implements encrypter. certificate must be a []byte containing the ASN.1 bytes
-// of certificate containing an RSA public key.
-func (e RSA) Encrypt(certificate interface{}, plaintext []byte, nonce []byte) (*etree.Element, error) {
-	cert, ok := certificate.(*x509.Certificate)
-	if !ok {
-		return nil, ErrIncorrectKeyType("*x.509 certificate")
+// rsaRecipient returns the RSA public key that recipient is, and the certificate that holds it if it is one.
+func rsaRecipient(recipient interface{}) (*x509.Certificate, *rsa.PublicKey, error) {
+	switch k := recipient.(type) {
+	case *x509.Certificate:
+		if k == nil {
+			return nil, nil, ErrIncorrectKeyType("*x.509 certificate")
+		}
+
+		pubKey, ok := k.PublicKey.(*rsa.PublicKey)
+		if !ok || pubKey == nil || pubKey.N == nil {
+			return nil, nil, ErrIncorrectKeyType("x.509 certificate with an RSA public key")
+		}
+
+		return k, pubKey, nil
+	case *rsa.PublicKey:
+		if k == nil || k.N == nil {
+			return nil, nil, ErrIncorrectKeyType("RSA public key")
+		}
+
+		return nil, k, nil
+	default:
+		return nil, nil, ErrIncorrectKeyType("*x.509 certificate or RSA public key")
+	}
+}
+
+// Encrypt implements Encrypter. recipient is the RSA public key to encrypt to: an *[x509.Certificate] which holds
+// one, or a bare *[rsa.PublicKey]. The KeyInfo of the EncryptedKey identifies the key in the form it was given, so
+// that whoever holds it can tell which of its keys is meant: by the X509Certificate, or for a bare key by its
+// KeyValue with an RSAKeyValue (XML Signature §4.4.2.2), as there is no certificate to name it by.
+func (e RSA) Encrypt(recipient interface{}, plaintext []byte, nonce []byte) (*etree.Element, error) {
+	cert, pubKey, err := rsaRecipient(recipient)
+	if err != nil {
+		return nil, err
 	}
 
-	pubKey, ok := cert.PublicKey.(*rsa.PublicKey)
-	if !ok {
-		return nil, ErrIncorrectKeyType("x.509 certificate with an RSA public key")
-	}
+	var (
+		mgfAlgorithm string
+		ok           bool
+	)
 
-	var mgfAlgorithm string
 	if e.algorithm == algorithmRSAOAEP2009 {
 		if mgfAlgorithm, ok = mgfAlgorithms[e.mgfHash()]; !ok {
 			return nil, fmt.Errorf("MGF1 with %v has no XML Encryption 1.1 identifier", e.mgfHash())
@@ -199,10 +226,20 @@ func (e RSA) Encrypt(certificate interface{}, plaintext []byte, nonce []byte) (*
 	}
 	{
 		innerKeyInfoEl := encryptedKey.CreateElement("ds:KeyInfo")
-		x509data := innerKeyInfoEl.CreateElement("ds:X509Data")
-		x509data.CreateElement("ds:X509Certificate").SetText(
-			base64.StdEncoding.EncodeToString(cert.Raw),
-		)
+
+		if cert != nil {
+			x509data := innerKeyInfoEl.CreateElement("ds:X509Data")
+			x509data.CreateElement("ds:X509Certificate").SetText(
+				base64.StdEncoding.EncodeToString(cert.Raw),
+			)
+		} else {
+			// Each number is a ds:CryptoBinary: its big-endian octets, with no leading zero (XML Signature §4.0.1).
+			rsaKeyValue := innerKeyInfoEl.CreateElement("ds:KeyValue").CreateElement("ds:RSAKeyValue")
+			rsaKeyValue.CreateElement("ds:Modulus").SetText(base64.StdEncoding.EncodeToString(pubKey.N.Bytes()))
+			rsaKeyValue.CreateElement("ds:Exponent").SetText(
+				base64.StdEncoding.EncodeToString(big.NewInt(int64(pubKey.E)).Bytes()),
+			)
+		}
 	}
 
 	buf, err := e.keyEncrypter(e, pubKey, key)

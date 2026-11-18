@@ -103,9 +103,9 @@ var applySigner = idpTestOpts{
 	},
 }
 
-// legacyFixtureEncryptionCertificateEnforcer accepts the RSA-1024 fixture certificates in testdata,
+// legacyFixtureEncryptionKeyEnforcer accepts the RSA-1024 fixture certificates in testdata,
 // which are expired at the mocked time.
-var legacyFixtureEncryptionCertificateEnforcer = DefaultEncryptionCertificateEnforcer{IgnoreValidityPeriod: true, MinimumRSAKeySize: 1024}
+var legacyFixtureEncryptionKeyEnforcer = DefaultEncryptionKeyEnforcer{IgnoreValidityPeriod: true, MinimumRSAKeySize: 1024}
 
 func NewIdentityProviderTest(t *testing.T, opts ...idpTestOpts) *IdentityProviderTest {
 	test := IdentityProviderTest{}
@@ -151,7 +151,7 @@ func NewIdentityProviderTest(t *testing.T, opts ...idpTestOpts) *IdentityProvide
 		},
 		// The fixture sp_cert.pem is an RSA-1024 certificate which expired in 2014, before the mocked
 		// time, and the golden files are encrypted to it. Tests of the default policy set this to nil.
-		EncryptionCertificateEnforcer: legacyFixtureEncryptionCertificateEnforcer,
+		EncryptionKeyEnforcer: legacyFixtureEncryptionKeyEnforcer,
 	}
 
 	// apply the test options.

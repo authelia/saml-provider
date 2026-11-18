@@ -1,0 +1,576 @@
+package saml
+
+import (
+	"crypto/elliptic"
+	"crypto/rsa"
+	"encoding/base64"
+	"encoding/xml"
+	"errors"
+	"os"
+	"strings"
+	"testing"
+
+	"github.com/beevik/etree"
+	"gotest.tools/assert"
+	is "gotest.tools/assert/cmp"
+)
+
+// keyValueMetadata returns metadata as an identity provider reads it once each encryption key in it is given as
+// a ds:KeyValue alone, in place of its certificate (MetaIOP §2.5.1). It is marshalled and parsed again, so that
+// the key is the one the metadata types read from XML.
+func keyValueMetadata(t *testing.T, metadata *EntityDescriptor) *EntityDescriptor {
+	t.Helper()
+
+	for i := range metadata.SPSSODescriptors {
+		keyDescriptors := metadata.SPSSODescriptors[i].KeyDescriptors
+
+		for j := range keyDescriptors {
+			if keyDescriptors[j].Use != "encryption" {
+				continue
+			}
+
+			cert, err := parseCert(firstCertificateData(keyDescriptors[j]))
+			assert.NilError(t, err)
+
+			keyDescriptors[j].KeyInfo = KeyInfo{KeyValues: []KeyValue{NewRSAKeyValue(cert.PublicKey.(*rsa.PublicKey))}}
+		}
+	}
+
+	buf, err := xml.Marshal(metadata)
+	assert.NilError(t, err)
+	assert.Check(t, is.Contains(string(buf), "<RSAKeyValue"))
+
+	parsed := &EntityDescriptor{}
+
+	//nolint:gosec // G709: the XML is what was marshalled above, into a fixed type.
+	assert.NilError(t, xml.Unmarshal(buf, parsed))
+
+	return parsed
+}
+
+// useKeyValueMetadata gives req the metadata of its service provider with the encryption key as a ds:KeyValue.
+func useKeyValueMetadata(t *testing.T, req *IdpAuthnRequest) {
+	t.Helper()
+
+	req.ServiceProviderMetadata = keyValueMetadata(t, req.ServiceProviderMetadata)
+	req.SPSSODescriptor = &req.ServiceProviderMetadata.SPSSODescriptors[0]
+	req.ACSEndpoint = &req.SPSSODescriptor.AssertionConsumerServices[0]
+
+	keyDescriptor := req.spEncryptionKeyDescriptor()
+	assert.Assert(t, keyDescriptor != nil, "the key value is not taken for an encryption key")
+	assert.Assert(t, is.Len(keyDescriptor.KeyInfo.X509Data.X509Certificates, 0))
+}
+
+// checkKeyValueKeyInfo checks that the EncryptedKey of encryptedEl identifies key by its ds:KeyValue, and not by
+// a certificate, which the service provider never published.
+func checkKeyValueKeyInfo(t *testing.T, encryptedEl *etree.Element, key *rsa.PublicKey) {
+	t.Helper()
+
+	encryptedKey := encryptedEl.FindElement("./EncryptedData/KeyInfo/EncryptedKey")
+	assert.Assert(t, encryptedKey != nil)
+
+	keyInfo, err := findOneChild(encryptedKey, xmldsigNamespace, "KeyInfo")
+	assert.NilError(t, err)
+	assert.Check(t, is.DeepEqual(childTags(keyInfo), []string{"KeyValue"}))
+
+	rsaKeyValue := keyInfo.FindElement("./KeyValue/RSAKeyValue")
+	assert.Assert(t, rsaKeyValue != nil)
+	assert.Check(t, is.Equal(rsaKeyValue.NamespaceURI(), xmldsigNamespace))
+	assert.Check(t, is.DeepEqual(childTags(rsaKeyValue), []string{"Modulus", "Exponent"}))
+
+	want := NewRSAKeyValue(key).RSAKeyValue
+	assert.Check(t, is.Equal(rsaKeyValue.FindElement("./Modulus").Text(), want.Modulus))
+	assert.Check(t, is.Equal(rsaKeyValue.FindElement("./Exponent").Text(), want.Exponent))
+}
+
+// recordingEnforcer records the keys that the identity provider asks about, and refuses them with err.
+type recordingEnforcer struct {
+	keys []ServiceProviderEncryptionKey
+	err  error
+}
+
+func (e *recordingEnforcer) EnforceEncryptionKey(_ *IdpAuthnRequest, key ServiceProviderEncryptionKey) error {
+	e.keys = append(e.keys, key)
+
+	return e.err
+}
+
+// MetaIOP §2.6.1: a key that the metadata gives as a ds:KeyValue must be supported. The assertion and its parts
+// are encrypted to it, and the service provider of this library decrypts them.
+func TestIDPEncryptsToKeyValueKey(t *testing.T) {
+	test, req := encryptedPartsRequest(t)
+	useKeyValueMetadata(t, req)
+	requestEncryptedID(req)
+
+	enforcer := &recordingEnforcer{}
+	test.IDP.EncryptionKeyEnforcer = enforcer
+	test.IDP.ElementEncryptionPolicy = DefaultElementEncryptionPolicy{AttributeServiceProviders: []string{test.SP.MetadataURL.String()}}
+
+	spKey := test.SP.Certificate.PublicKey.(*rsa.PublicKey)
+
+	body := respond(t, req)
+
+	// The enforcer is asked before anything is encrypted, about a key that has no certificate.
+	assert.Assert(t, len(enforcer.keys) != 0)
+
+	for _, key := range enforcer.keys {
+		assert.Check(t, key.Certificate == nil)
+		assert.Check(t, spKey.Equal(key.PublicKey))
+	}
+
+	doc := etree.NewDocument()
+	assert.NilError(t, doc.ReadFromString(body))
+
+	encryptedAssertion := doc.Root().FindElement("./EncryptedAssertion")
+	assert.Assert(t, encryptedAssertion != nil, "the assertion is not encrypted: %s", body)
+	checkKeyValueKeyInfo(t, encryptedAssertion, spKey)
+	assert.Check(t, encryptedAssertion.FindElement(".//X509Data") == nil)
+
+	sent := sentAssertionElement(t, test, body)
+	assert.Check(t, !strings.Contains(elementToString(sent), "alice"))
+
+	encryptedID := sent.FindElement("./Subject/EncryptedID")
+	assert.Assert(t, encryptedID != nil)
+	checkKeyValueKeyInfo(t, encryptedID, spKey)
+	assert.Check(t, is.Equal(test.SP.MetadataURL.String(), encryptedID.FindElement("./EncryptedData/KeyInfo/EncryptedKey").SelectAttrValue("Recipient", "")))
+
+	encryptedAttributes := sent.FindElements("./AttributeStatement/EncryptedAttribute")
+	assert.Assert(t, is.Len(encryptedAttributes, 4))
+	assert.Check(t, sent.FindElement("./AttributeStatement/Attribute") == nil)
+
+	for _, encryptedAttribute := range encryptedAttributes {
+		checkKeyValueKeyInfo(t, encryptedAttribute, spKey)
+		assert.Check(t, is.Equal(test.SP.MetadataURL.String(), encryptedAttribute.FindElement("./EncryptedData/KeyInfo/EncryptedKey").SelectAttrValue("Recipient", "")))
+	}
+
+	// The algorithms are still negotiated from the EncryptionMethods of the descriptor.
+	assert.Check(t, is.Equal(aes128GCM, encryptedID.FindElement("./EncryptedData/EncryptionMethod").SelectAttrValue("Algorithm", "")))
+
+	assertion, err := test.SP.ParseXMLResponse([]byte(body), []string{"id-request"}, test.SP.AcsURL)
+	assert.NilError(t, err)
+	assert.Check(t, is.DeepEqual(*req.Assertion.Subject.NameID, *assertion.Subject.NameID))
+	assert.Check(t, is.DeepEqual(req.Assertion.AttributeStatements, assertion.AttributeStatements))
+}
+
+// The key is refused like one in a certificate is: nothing is sent, in plaintext or to another key.
+func TestIDPEnforcerRefusesKeyValueKey(t *testing.T) {
+	refusal := errors.New("this key is not allowed")
+
+	t.Run("custom enforcer", func(t *testing.T) {
+		test, req := encryptedPartsRequest(t)
+		useKeyValueMetadata(t, req)
+
+		// A certificate after it, which the enforcer would accept, is not tried in its place.
+		req.SPSSODescriptor.KeyDescriptors = append(req.SPSSODescriptor.KeyDescriptors, test.SP.Metadata().SPSSODescriptors[0].KeyDescriptors[0])
+
+		enforcer := &recordingEnforcer{err: refusal}
+		test.IDP.EncryptionKeyEnforcer = enforcer
+
+		assert.NilError(t, DefaultAssertionMaker{}.MakeAssertion(req, encryptedPartsSession))
+
+		err := req.MakeAssertionEl()
+		assert.Check(t, errors.Is(err, refusal), "err=%v", err)
+		assert.Check(t, !errors.Is(err, os.ErrNotExist))
+		assert.Check(t, req.AssertionEl == nil)
+		assert.Check(t, errors.Is(req.MakeResponse(), refusal))
+		assert.Check(t, req.ResponseEl == nil)
+
+		assert.Assert(t, len(enforcer.keys) != 0)
+		assert.Check(t, enforcer.keys[0].Certificate == nil)
+	})
+
+	rsa2048, rsa1024 := spCertTestKeys(t)
+
+	for _, tc := range []struct {
+		name     string
+		key      *rsa.PrivateKey
+		enforcer EncryptionKeyEnforcer
+		err      string
+	}{
+		{name: "RSA-2048 with the default enforcer", key: rsa2048, enforcer: DefaultEncryptionKeyEnforcer{}},
+		{name: "RSA-2048 with no enforcer", key: rsa2048},
+		{name: "RSA-1024 with the default enforcer", key: rsa1024, enforcer: DefaultEncryptionKeyEnforcer{}, err: "1024-bit"},
+		{name: "RSA-1024 with no enforcer", key: rsa1024, err: "1024-bit"},
+		{name: "RSA-1024 allowed", key: rsa1024, enforcer: DefaultEncryptionKeyEnforcer{MinimumRSAKeySize: 1024}},
+		{name: "RSA-2048 with a stricter minimum", key: rsa2048, enforcer: DefaultEncryptionKeyEnforcer{MinimumRSAKeySize: 3072}, err: "2048-bit"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			test := NewIdentityProviderTest(t, applyKey)
+			idp := test.IDP
+			idp.EncryptionKeyEnforcer = tc.enforcer
+
+			descriptor := SPSSODescriptor{SSODescriptor: SSODescriptor{RoleDescriptor: RoleDescriptor{KeyDescriptors: []KeyDescriptor{
+				{Use: "encryption", KeyInfo: KeyInfo{KeyValues: []KeyValue{NewRSAKeyValue(&tc.key.PublicKey)}}},
+			}}}}
+			req := &IdpAuthnRequest{
+				IDP:                     &idp,
+				Now:                     TimeNow(),
+				SPSSODescriptor:         &descriptor,
+				ServiceProviderMetadata: &EntityDescriptor{EntityID: "https://sp.example.com/saml2/metadata", SPSSODescriptors: []SPSSODescriptor{descriptor}},
+			}
+
+			key, err := req.spEncryptionKey()
+			if tc.err == "" {
+				assert.NilError(t, err)
+				assert.Check(t, key.Certificate == nil)
+				assert.Check(t, tc.key.PublicKey.Equal(key.PublicKey))
+
+				return
+			}
+
+			assert.Check(t, is.ErrorContains(err, tc.err))
+			assert.Check(t, !errors.Is(err, os.ErrNotExist), "a refused key must not fall back to plaintext")
+			assert.Check(t, key == nil)
+		})
+	}
+}
+
+// The enforcer is given the key, so one that is built without it is refused rather than let through.
+func TestDefaultEncryptionKeyEnforcerRequiresRSAKey(t *testing.T) {
+	_, ecdsaCert := newECDSATestKey(t, elliptic.P256())
+	req := &IdpAuthnRequest{Now: ecdsaCert.NotBefore}
+	enforcer := DefaultEncryptionKeyEnforcer{IgnoreValidityPeriod: true}
+
+	assert.Check(t, is.ErrorContains(enforcer.EnforceEncryptionKey(req, ServiceProviderEncryptionKey{}), "not an RSA public key"))
+	assert.Check(t, is.ErrorContains(enforcer.EnforceEncryptionKey(req, ServiceProviderEncryptionKey{Certificate: ecdsaCert}), "not an RSA public key"))
+}
+
+const (
+	keyValueTestECKeyDescriptor = `<KeyDescriptor xmlns="urn:oasis:names:tc:SAML:2.0:metadata" use="%USE%">` +
+		`<ds:KeyInfo xmlns:ds="http://www.w3.org/2000/09/xmldsig#"><ds:KeyValue>` +
+		`<dsig11:ECKeyValue xmlns:dsig11="http://www.w3.org/2009/xmldsig11#">` +
+		`<dsig11:NamedCurve URI="urn:oid:1.2.840.10045.3.1.7"/>` +
+		`<dsig11:PublicKey>BOVKaiLPKEDChhkA64UEBOXTv/VFHnhrUPN+bXqCvEl7rroAYpH5tKzbiGTtMSlp4JO9Pxg44zeX7EoWDvOrpD0=</dsig11:PublicKey>` +
+		`</dsig11:ECKeyValue></ds:KeyValue></ds:KeyInfo></KeyDescriptor>`
+
+	keyValueTestDSAKeyDescriptor = `<KeyDescriptor xmlns="urn:oasis:names:tc:SAML:2.0:metadata" use="%USE%">` +
+		`<ds:KeyInfo xmlns:ds="http://www.w3.org/2000/09/xmldsig#"><ds:KeyValue>` +
+		`<ds:DSAKeyValue><ds:P>AQAB</ds:P><ds:Q>AQAB</ds:Q><ds:G>AQAB</ds:G><ds:Y>AQAB</ds:Y></ds:DSAKeyValue>` +
+		`</ds:KeyValue></ds:KeyInfo></KeyDescriptor>`
+
+	keyValueTestKeyNameDescriptor = `<KeyDescriptor xmlns="urn:oasis:names:tc:SAML:2.0:metadata" use="%USE%">` +
+		`<ds:KeyInfo xmlns:ds="http://www.w3.org/2000/09/xmldsig#"><ds:KeyName>ServiceProvider.com Encrypt Key</ds:KeyName></ds:KeyInfo>` +
+		`</KeyDescriptor>`
+)
+
+// parsedKeyDescriptor returns the KeyDescriptor of the template, as the metadata types read it, with use as its
+// use attribute, or with none when use is empty.
+func parsedKeyDescriptor(t *testing.T, template, use string) KeyDescriptor {
+	t.Helper()
+
+	if use == "" {
+		template = strings.Replace(template, ` use="%USE%"`, "", 1)
+	}
+
+	var keyDescriptor KeyDescriptor
+
+	assert.NilError(t, xml.Unmarshal([]byte(strings.Replace(template, "%USE%", use, 1)), &keyDescriptor))
+	assert.Check(t, is.Equal(keyDescriptor.Use, use))
+
+	return keyDescriptor
+}
+
+// The key that is encrypted to is the first that can be: a descriptor with none is passed over, and when the
+// metadata allows encryption and no descriptor has one, nothing is sent in plaintext.
+func TestIDPEncryptionKeySelection(t *testing.T) {
+	test := NewIdentityProviderTest(t, applyKey)
+	rsa2048, _ := spCertTestKeys(t)
+	now := TimeNow()
+
+	certData := base64.StdEncoding.EncodeToString(test.SPCertificate.Raw)
+	certKey := test.SPCertificate.PublicKey.(*rsa.PublicKey)
+
+	_, ecdsaCert := newECDSATestKey(t, elliptic.P256())
+
+	withCerts := func(use string, data ...string) KeyDescriptor {
+		keyDescriptor := KeyDescriptor{Use: use}
+		for _, d := range data {
+			keyDescriptor.KeyInfo.X509Data.X509Certificates = append(keyDescriptor.KeyInfo.X509Data.X509Certificates, X509Certificate{Data: d})
+		}
+
+		return keyDescriptor
+	}
+	withKeyValue := func(use string, key *rsa.PublicKey) KeyDescriptor {
+		return KeyDescriptor{Use: use, KeyInfo: KeyInfo{KeyValues: []KeyValue{NewRSAKeyValue(key)}}}
+	}
+	parsed := func(template, use string) KeyDescriptor { return parsedKeyDescriptor(t, template, use) }
+	wrapped := "\n\t  " + certData[:64] + "\n  " + certData[64:] + "\r\n "
+	ecData := base64.StdEncoding.EncodeToString(ecdsaCert.Raw)
+
+	const (
+		failClosed = "fail closed"
+		plaintext  = "plaintext"
+		broken     = "broken"
+		toCert     = "certificate"
+		toKeyValue = "key value"
+	)
+
+	for _, tc := range []struct {
+		name        string
+		descriptors []KeyDescriptor
+		want        string
+		key         *rsa.PublicKey
+	}{
+		// BUG-46: an X509Certificate that is empty and one that only holds whitespace are passed over alike.
+		{name: "whitespace then good, across descriptors", descriptors: []KeyDescriptor{withCerts("encryption", " \n\t "), withCerts("encryption", certData)}, want: toCert},
+		{name: "empty then good, across descriptors", descriptors: []KeyDescriptor{withCerts("encryption", ""), withCerts("encryption", certData)}, want: toCert},
+		{name: "whitespace then good, in one descriptor", descriptors: []KeyDescriptor{withCerts("encryption", "\n  ", certData)}, want: toCert},
+		{name: "empty then good, in one descriptor", descriptors: []KeyDescriptor{withCerts("encryption", "", certData)}, want: toCert},
+		{name: "whitespace then good with no use", descriptors: []KeyDescriptor{withCerts("encryption", " "), withCerts("", certData)}, want: toCert},
+		{name: "whitespace with no use then good with no use", descriptors: []KeyDescriptor{withCerts("", "\r\n"), withCerts("", certData)}, want: toCert},
+		{name: "whitespace only", descriptors: []KeyDescriptor{withCerts("encryption", " \n ")}, want: failClosed},
+		{name: "empty only", descriptors: []KeyDescriptor{withCerts("encryption", "")}, want: failClosed},
+		{name: "whitespace only with no use", descriptors: []KeyDescriptor{withCerts("", " \n ")}, want: failClosed},
+		{name: "whitespace and signing", descriptors: []KeyDescriptor{withCerts("encryption", " \n "), withCerts("signing", certData)}, want: failClosed},
+		{name: "whitespace for signing only", descriptors: []KeyDescriptor{withCerts("signing", " \n ")}, want: plaintext},
+		{name: "certificate wrapped in whitespace", descriptors: []KeyDescriptor{withCerts("encryption", wrapped)}, want: toCert},
+
+		// A certificate that is there and can't be read is an error, and is not passed over.
+		{name: "certificate that is not base64", descriptors: []KeyDescriptor{withCerts("encryption", "!!!"), withCerts("encryption", certData)}, want: broken},
+		{name: "certificate that is not a certificate", descriptors: []KeyDescriptor{withCerts("encryption", "bm90IGEgY2VydGlmaWNhdGU="), withCerts("encryption", certData)}, want: broken},
+		{name: "certificate that is not a certificate with no use", descriptors: []KeyDescriptor{withCerts("", "bm90IGEgY2VydGlmaWNhdGU=")}, want: broken},
+		{name: "good then one that is not a certificate", descriptors: []KeyDescriptor{withCerts("encryption", certData), withCerts("encryption", "bm90IGEgY2VydGlmaWNhdGU=")}, want: toCert},
+
+		// BUG-49: a ds:KeyValue with an RSAKeyValue is a key.
+		{name: "key value", descriptors: []KeyDescriptor{withKeyValue("encryption", &rsa2048.PublicKey)}, want: toKeyValue, key: &rsa2048.PublicKey},
+		{name: "key value with no use", descriptors: []KeyDescriptor{withKeyValue("", &rsa2048.PublicKey)}, want: toKeyValue, key: &rsa2048.PublicKey},
+		{name: "key value for signing only", descriptors: []KeyDescriptor{withKeyValue("signing", &rsa2048.PublicKey)}, want: plaintext},
+		{name: "key value for encryption before one with no use", descriptors: []KeyDescriptor{withCerts("", certData), withKeyValue("encryption", &rsa2048.PublicKey)}, want: toKeyValue, key: &rsa2048.PublicKey},
+		{name: "key name then key value", descriptors: []KeyDescriptor{parsed(keyValueTestKeyNameDescriptor, "encryption"), withKeyValue("encryption", &rsa2048.PublicKey)}, want: toKeyValue, key: &rsa2048.PublicKey},
+		{name: "empty certificate beside a key value", descriptors: []KeyDescriptor{{
+			Use:     "encryption",
+			KeyInfo: KeyInfo{KeyValues: []KeyValue{NewRSAKeyValue(&rsa2048.PublicKey)}, X509Data: X509Data{X509Certificates: []X509Certificate{{Data: " "}}}},
+		}}, want: toKeyValue, key: &rsa2048.PublicKey},
+		{name: "certificate beside its key value", descriptors: []KeyDescriptor{{
+			Use:     "encryption",
+			KeyInfo: KeyInfo{KeyValues: []KeyValue{NewRSAKeyValue(certKey)}, X509Data: X509Data{X509Certificates: []X509Certificate{{Data: certData}}}},
+		}}, want: toCert},
+		{name: "key value that is not base64", descriptors: []KeyDescriptor{
+			{Use: "encryption", KeyInfo: KeyInfo{KeyValues: []KeyValue{{RSAKeyValue: &RSAKeyValue{Modulus: "!!!", Exponent: "AQAB"}}}}},
+			withCerts("encryption", certData),
+		}, want: broken},
+		{name: "key value with no modulus", descriptors: []KeyDescriptor{
+			{Use: "encryption", KeyInfo: KeyInfo{KeyValues: []KeyValue{{RSAKeyValue: &RSAKeyValue{Exponent: "AQAB"}}}}},
+		}, want: broken},
+		{name: "key value with no exponent", descriptors: []KeyDescriptor{
+			{Use: "encryption", KeyInfo: KeyInfo{KeyValues: []KeyValue{{RSAKeyValue: &RSAKeyValue{Modulus: NewRSAKeyValue(certKey).RSAKeyValue.Modulus}}}}},
+		}, want: broken},
+
+		// Only RSA key transport is supported, and a name is not a key.
+		{name: "EC key value for encryption", descriptors: []KeyDescriptor{parsed(keyValueTestECKeyDescriptor, "encryption")}, want: failClosed},
+		{name: "EC key value with no use", descriptors: []KeyDescriptor{parsed(keyValueTestECKeyDescriptor, "")}, want: failClosed},
+		{name: "EC key value for signing only", descriptors: []KeyDescriptor{parsed(keyValueTestECKeyDescriptor, "signing")}, want: plaintext},
+		{name: "DSA key value for encryption", descriptors: []KeyDescriptor{parsed(keyValueTestDSAKeyDescriptor, "encryption")}, want: failClosed},
+		{name: "DSA key value for signing only", descriptors: []KeyDescriptor{parsed(keyValueTestDSAKeyDescriptor, "signing")}, want: plaintext},
+		{name: "key name for encryption", descriptors: []KeyDescriptor{parsed(keyValueTestKeyNameDescriptor, "encryption")}, want: failClosed},
+		{name: "key name with no use", descriptors: []KeyDescriptor{parsed(keyValueTestKeyNameDescriptor, "")}, want: failClosed},
+		{name: "key name for signing only", descriptors: []KeyDescriptor{parsed(keyValueTestKeyNameDescriptor, "signing")}, want: plaintext},
+		{name: "key name for encryption and a signing certificate", descriptors: []KeyDescriptor{parsed(keyValueTestKeyNameDescriptor, "encryption"), withCerts("signing", certData)}, want: failClosed},
+		{name: "EC key value then certificate", descriptors: []KeyDescriptor{parsed(keyValueTestECKeyDescriptor, "encryption"), withCerts("encryption", certData)}, want: toCert},
+		{name: "EC key value then RSA key value", descriptors: []KeyDescriptor{parsed(keyValueTestECKeyDescriptor, "encryption"), withKeyValue("", &rsa2048.PublicKey)}, want: toKeyValue, key: &rsa2048.PublicKey},
+		{name: "EC certificate", descriptors: []KeyDescriptor{withCerts("encryption", ecData)}, want: failClosed},
+		{name: "EC certificate then RSA certificate", descriptors: []KeyDescriptor{withCerts("encryption", ecData), withCerts("encryption", certData)}, want: toCert},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			descriptor := SPSSODescriptor{SSODescriptor: SSODescriptor{RoleDescriptor: RoleDescriptor{KeyDescriptors: tc.descriptors}}}
+			req := &IdpAuthnRequest{
+				IDP:                     &test.IDP,
+				Now:                     now,
+				SPSSODescriptor:         &descriptor,
+				ServiceProviderMetadata: &EntityDescriptor{EntityID: "https://sp.example.com/saml2/metadata", SPSSODescriptors: []SPSSODescriptor{descriptor}},
+			}
+
+			key, err := req.spEncryptionKey()
+
+			switch tc.want {
+			case toCert:
+				assert.NilError(t, err)
+				assert.Check(t, test.SPCertificate.Equal(key.Certificate))
+				assert.Check(t, certKey.Equal(key.PublicKey))
+				assert.Check(t, req.spEncryptionKeyDescriptor() != nil)
+			case toKeyValue:
+				assert.NilError(t, err)
+				assert.Check(t, key.Certificate == nil)
+				assert.Check(t, tc.key.Equal(key.PublicKey))
+				assert.Check(t, req.spEncryptionKeyDescriptor() != nil)
+			case plaintext:
+				assert.Check(t, is.Equal(os.ErrNotExist, err))
+				assert.Check(t, key == nil)
+				assert.Check(t, req.spEncryptionKeyDescriptor() == nil)
+			case failClosed:
+				// Not os.ErrNotExist, which would send the assertion in plaintext.
+				assert.Check(t, is.ErrorContains(err, "allows encryption but has no usable key"))
+				assert.Check(t, !errors.Is(err, os.ErrNotExist))
+				assert.Check(t, key == nil)
+				assert.Check(t, req.spEncryptionKeyDescriptor() == nil)
+			case broken:
+				assert.Check(t, is.ErrorContains(err, "cannot "))
+				assert.Check(t, !errors.Is(err, os.ErrNotExist))
+				assert.Check(t, key == nil)
+
+				// The service provider is not taken to have no key, which is how a request for an EncryptedID
+				// would be answered as if it could not be met rather than as the error it is.
+				assert.Check(t, req.spEncryptionKeyDescriptor() != nil)
+			}
+		})
+	}
+}
+
+// What the selection decides is what is sent: an assertion in plaintext only to a service provider whose
+// metadata has no key that might be for encryption.
+func TestIDPKeyValueFailsClosed(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		template  string
+		use       string
+		plaintext bool
+	}{
+		{name: "EC key value for encryption", template: keyValueTestECKeyDescriptor, use: "encryption"},
+		{name: "EC key value with no use", template: keyValueTestECKeyDescriptor},
+		{name: "EC key value for signing", template: keyValueTestECKeyDescriptor, use: "signing", plaintext: true},
+		{name: "key name for encryption", template: keyValueTestKeyNameDescriptor, use: "encryption"},
+		{name: "key name with no use", template: keyValueTestKeyNameDescriptor},
+		{name: "key name for signing", template: keyValueTestKeyNameDescriptor, use: "signing", plaintext: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, req := encryptedPartsRequest(t)
+			req.SPSSODescriptor.KeyDescriptors = []KeyDescriptor{parsedKeyDescriptor(t, tc.template, tc.use)}
+
+			assert.NilError(t, DefaultAssertionMaker{}.MakeAssertion(req, encryptedPartsSession))
+
+			err := req.MakeResponse()
+			if !tc.plaintext {
+				assert.Check(t, is.ErrorContains(err, "allows encryption but has no usable key"))
+				assert.Check(t, req.AssertionEl == nil)
+				assert.Check(t, req.ResponseEl == nil)
+
+				return
+			}
+
+			assert.NilError(t, err)
+			assert.Check(t, is.Equal(req.AssertionEl.Tag, "Assertion"))
+			assert.Check(t, req.ResponseEl.FindElement("./Assertion") != nil)
+			assert.Check(t, req.ResponseEl.FindElement("./EncryptedAssertion") == nil)
+		})
+	}
+}
+
+// A whitespace-only certificate in the metadata as it is read from XML doesn't hide the key after it.
+func TestIDPEncryptsPastWhitespaceCertificate(t *testing.T) {
+	blank := KeyDescriptor{Use: "encryption", KeyInfo: KeyInfo{X509Data: X509Data{X509Certificates: []X509Certificate{{Data: "\n      "}}}}}
+
+	for name, edit := range map[string]func(descriptor *SPSSODescriptor){
+		"across descriptors": func(descriptor *SPSSODescriptor) {
+			descriptor.KeyDescriptors = append([]KeyDescriptor{blank}, descriptor.KeyDescriptors...)
+		},
+		"in one descriptor": func(descriptor *SPSSODescriptor) {
+			certificates := &descriptor.KeyDescriptors[0].KeyInfo.X509Data.X509Certificates
+			*certificates = append([]X509Certificate{{Data: "\n      "}}, *certificates...)
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			test, req := encryptedPartsRequest(t)
+			edit(req.SPSSODescriptor)
+
+			buf, err := xml.Marshal(req.ServiceProviderMetadata)
+			assert.NilError(t, err)
+
+			req.ServiceProviderMetadata = &EntityDescriptor{}
+			assert.NilError(t, xml.Unmarshal(buf, req.ServiceProviderMetadata))
+			req.SPSSODescriptor = &req.ServiceProviderMetadata.SPSSODescriptors[0]
+			req.ACSEndpoint = &req.SPSSODescriptor.AssertionConsumerServices[0]
+
+			assert.Check(t, is.Equal(req.SPSSODescriptor.KeyDescriptors[0].KeyInfo.X509Data.X509Certificates[0].Data, "\n      "))
+
+			body := respond(t, req)
+
+			encryptedKey := req.ResponseEl.FindElement("./EncryptedAssertion/EncryptedData/KeyInfo/EncryptedKey")
+			assert.Assert(t, encryptedKey != nil, "the assertion is not encrypted: %s", body)
+			assert.Check(t, is.Equal(encryptedKey.FindElement("./KeyInfo/X509Data/X509Certificate").Text(), base64.StdEncoding.EncodeToString(test.SP.Certificate.Raw)))
+
+			_, err = test.SP.ParseXMLResponse([]byte(body), []string{"id-request"}, test.SP.AcsURL)
+			assert.NilError(t, err)
+		})
+	}
+}
+
+// The NameID of a LogoutRequest is encrypted to the key the assertion was (SAMLProfiles §4.4.4.1).
+func TestLogoutRequestToParticipantWithKeyValueKey(t *testing.T) {
+	f := newPropagationFixture(t)
+	nameIDTestServiceProviders(f.test, func(metadata *EntityDescriptor) { *metadata = *keyValueMetadata(t, metadata) }, f.a, f.b)
+	f.encryptParticipants(f.a.MetadataURL.String())
+
+	enforcer := &recordingEnforcer{}
+	f.test.IDP.EncryptionKeyEnforcer = enforcer
+
+	el := sentLogoutRequestElement(t, f.a, sentLogoutRequest(t, f.startLogout(t)))
+	checkEncryptedLogoutRequest(t, f.test, f.a, el)
+
+	encryptedID, err := findOneChild(el, samlAssertionNamespace, "EncryptedID")
+	assert.NilError(t, err)
+	checkKeyValueKeyInfo(t, encryptedID, f.a.Certificate.PublicKey.(*rsa.PublicKey))
+
+	assert.Assert(t, is.Len(enforcer.keys, 1))
+	assert.Check(t, enforcer.keys[0].Certificate == nil)
+}
+
+// The identifier of a NameIDMappingResponse is encrypted to the key of its target (SAMLProfiles §4.6.4.2).
+func TestNameIDMappingToKeyValueKey(t *testing.T) {
+	f := newNameIDMappingFixture(t)
+	nameIDTestServiceProviders(f.test, func(metadata *EntityDescriptor) {
+		if metadata.EntityID == f.b.MetadataURL.String() {
+			*metadata = *keyValueMetadata(t, metadata)
+		}
+	}, f.a, f.b, f.c)
+
+	enforcer := &recordingEnforcer{}
+	f.test.IDP.EncryptionKeyEnforcer = enforcer
+
+	result := f.send(t, nameIDMappingOptions{})
+	checkStatus(t, result.Response.Status, StatusSuccess, "")
+
+	encryptedID := result.Element.FindElement("./EncryptedID")
+	assert.Assert(t, encryptedID != nil)
+	checkKeyValueKeyInfo(t, encryptedID, f.b.Certificate.PublicKey.(*rsa.PublicKey))
+	assert.Check(t, is.Equal(encryptedID.FindElement("./EncryptedData/KeyInfo/EncryptedKey").SelectAttrValue("Recipient", ""), f.b.MetadataURL.String()))
+
+	nameID, err := f.b.DecryptNameID(reparse(t, encryptedID))
+	assert.NilError(t, err)
+	assert.Check(t, is.Equal(nameID.Value, "b-alice"))
+
+	assert.Assert(t, is.Len(enforcer.keys, 1))
+	assert.Check(t, enforcer.keys[0].Certificate == nil)
+	assert.Check(t, f.b.Certificate.PublicKey.(*rsa.PublicKey).Equal(enforcer.keys[0].PublicKey))
+
+	// A refusal of the key refuses the mapping.
+	enforcer.err = errors.New("this key is not allowed")
+
+	f.send(t, nameIDMappingOptions{}).checkNoIdentifier(t, StatusRequester, StatusInvalidNameIDPolicy)
+}
+
+// The answer to a query is encrypted to the key of the requester like the assertion of single sign-on.
+func TestQueryAnswerEncryptedToKeyValueKey(t *testing.T) {
+	f := newQueryFixture(t)
+	f.metadata = func(metadata *EntityDescriptor) {
+		metadata.SPSSODescriptors[0].AttributeConsumingServices = []AttributeConsumingService{service(1, nil, requested(mailAttributeName, uriAttrNameFormat))}
+		*metadata = *keyValueMetadata(t, metadata)
+	}
+
+	enforcer := &recordingEnforcer{}
+	f.test.IDP.EncryptionKeyEnforcer = enforcer
+
+	// parseQueryResponse decrypts the assertion with the key of the service provider.
+	response := f.queryAttributes(t, f.attributeQuery())
+	assertQueryStatus(t, response, StatusSuccess, "")
+	assert.Assert(t, is.Len(response.Assertions, 1))
+	assert.Check(t, is.Equal(response.Encrypted, 1))
+
+	assert.Assert(t, len(enforcer.keys) != 0)
+	assert.Check(t, enforcer.keys[0].Certificate == nil)
+	assert.Check(t, f.test.SP.Certificate.PublicKey.(*rsa.PublicKey).Equal(enforcer.keys[0].PublicKey))
+
+	enforcer.err = errors.New("this key is not allowed")
+	response = f.queryAttributes(t, f.attributeQuery())
+	assertQueryStatus(t, response, StatusResponder, "")
+	assert.Check(t, is.Len(response.Assertions, 0))
+}

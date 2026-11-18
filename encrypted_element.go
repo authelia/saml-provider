@@ -40,8 +40,13 @@ const EncryptedNameIDFormat NameIDFormat = "urn:oasis:names:tc:SAML:2.0:nameid-f
 // elementEncrypter encrypts SAML elements to one entity, as SAMLCore §6.1 describes: the EncryptedData takes the
 // place of the element, with its EncryptedKey inside it, which errata E43 allows.
 type elementEncrypter struct {
-	// certificate holds the RSA key of the entity, from the KeyDescriptor of its metadata.
+	// certificate holds the RSA key of the entity, from the KeyDescriptor of its metadata. It is nil when the
+	// metadata gives the key only as a ds:KeyValue (MetaIOP §2.5.1).
 	certificate *x509.Certificate
+
+	// publicKey is the RSA key of the entity, which is encrypted to when there is no certificate. The EncryptedKey
+	// then identifies it by its ds:KeyValue, as the metadata does.
+	publicKey *rsa.PublicKey
 
 	// encrypter has the key transport and content encryption algorithms negotiated with the entity.
 	encrypter xmlenc.RSA
@@ -63,7 +68,13 @@ func (e *elementEncrypter) encrypt(tag string, plaintext *etree.Element) (*etree
 		return nil, err
 	}
 
-	encryptedDataEl, err := e.encrypter.Encrypt(e.certificate, buf, nil)
+	// The key is given in the form the metadata has it, which is the form the EncryptedKey identifies it in.
+	var recipientKey any = e.publicKey
+	if e.certificate != nil {
+		recipientKey = e.certificate
+	}
+
+	encryptedDataEl, err := e.encrypter.Encrypt(recipientKey, buf, nil)
 	if err != nil {
 		return nil, err
 	}

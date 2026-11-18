@@ -1001,26 +1001,39 @@ without acting on it. See **`Scoping` and `ProxyRestriction`** below.
     decrypt one although its metadata has a key, or that wants a readable assertion with only an `EncryptedID` or
     `EncryptedAttribute` elements in it. Those are still sent when the request or `ElementEncryptionPolicy` asks,
     encrypted before the assertion is signed (SAMLCore §6.2), and the assertion is still refused if one is needed
-    and the key is missing or the `EncryptionCertificateEnforcer` refuses it. The key is not looked at when nothing
+    and the key is missing or the `EncryptionKeyEnforcer` refuses it. The key is not looked at when nothing
     is encrypted. `DefaultIssuancePolicy.AssertionEncryption` sets it for every SP, and the `AssertionEncryption`
     of an entry in `ServiceProviders`, which is a pointer, for one. It applies to single sign-on on every binding,
     to the answer to a query, and to an assertion returned for an `AssertionIDRequest`.
   - With `SignAssertion` and an encrypted assertion, nothing the IdP signs covers the ciphertext, so prefer a GCM
     cipher in `ContentEncryptionMethods` for such an SP (errata E93). With `SignResponse` the assertion that
     `AssertionStore` keeps, and an `AssertionIDRequest` returns in a signed `Response`, is not signed itself.
-- **SPs with ECDSA certificates:** a service provider whose metadata allows encryption with an ECDSA certificate is
-  rejected, including a certificate with no `use`, because assertions cannot be encrypted to it. It must set
-  `use="signing"`.
-- **SP encryption certificates:** by default the IdP refuses to encrypt to a certificate that is expired or not yet
-  valid at the time of the request (allowing `MaxClockSkew`), whose RSA key is shorter than 2048 bits, or whose
-  `KeyUsage` extension does not assert `keyEncipherment`. A certificate without a `KeyUsage` extension is accepted. The
-  login then fails with an HTTP error, and the assertion is neither sent in plaintext nor encrypted to another key.
-  This is a local policy: the SAML V2.0 Metadata Interoperability Profile treats the certificate as a container for the
-  key, which may be expired or carry any usage flags. To interoperate with SPs following it, set
-  `IdentityProvider.EncryptionCertificateEnforcer` to a `DefaultEncryptionCertificateEnforcer` with
-  `IgnoreValidityPeriod`, `IgnoreKeyUsage` or a lower `MinimumRSAKeySize`, each of which relaxes only its own check, or
-  to a custom enforcer to decide differently for each SP. With `samlidp`, set it on `Server.IDP`. The certificates
-  used to verify signed requests from SPs are not checked.
+- **SP encryption keys:** the IdP encrypts to the first `KeyDescriptor` of the SP with `use="encryption"` that has a
+  key it can encrypt to, or else the first with no `use`, which is a key for both signing and encryption (SAMLMeta
+  §2.4.1.1). The key is an RSA key in either of the forms the SAML V2.0 Metadata Interoperability Profile §2.6.1
+  requires a consumer of metadata to support: an `X509Certificate`, or a bare key in a `ds:KeyValue` with an
+  `RSAKeyValue`. When a descriptor has both, the certificate is used. The `EncryptedKey` names the key in the form
+  the metadata gave it: the certificate in an `X509Data`, or the `ds:KeyValue`. A descriptor with no such key is
+  passed over for the next: one whose `X509Certificate` is empty or only whitespace, one with a key of another type,
+  such as an ECDSA certificate or an `ECKeyValue` (only RSA key transport is supported), and one that only names its
+  key with a `KeyName`, which the IdP can't resolve. A certificate or `RSAKeyValue` that is there and can't be parsed
+  is an error instead, and the assertion is not sent.
+- **SPs with no usable encryption key:** when the metadata of an SP has a `KeyDescriptor` that might be for
+  encryption, which is any that is not `use="signing"`, and no key the IdP can encrypt to, the login fails rather
+  than send the assertion in plaintext. An SP whose only key is an ECDSA certificate must therefore set
+  `use="signing"` on it.
+- **SP encryption key policy:** by default the IdP refuses to encrypt to an RSA key shorter than 2048 bits, and to a
+  certificate that is expired or not yet valid at the time of the request (allowing `MaxClockSkew`) or whose
+  `KeyUsage` extension does not assert `keyEncipherment`. A certificate without a `KeyUsage` extension is accepted,
+  and a key given as a `ds:KeyValue` has no certificate, so only its size is checked. The login then fails with an
+  HTTP error, and the assertion is neither sent in plaintext nor encrypted to another key. This is a local policy:
+  the SAML V2.0 Metadata Interoperability Profile treats the certificate as a container for the key, which may be
+  expired or carry any usage flags. To interoperate with SPs following it, set
+  `IdentityProvider.EncryptionKeyEnforcer` to a `DefaultEncryptionKeyEnforcer` with `IgnoreValidityPeriod`,
+  `IgnoreKeyUsage` or a lower `MinimumRSAKeySize`, each of which relaxes only its own check, or to a custom enforcer
+  to decide differently for each SP: it is given a `ServiceProviderEncryptionKey` with the `PublicKey` and the
+  `Certificate`, which is nil for a `ds:KeyValue`, and is asked before anything is encrypted to any key. With
+  `samlidp`, set it on `Server.IDP`. The certificates used to verify signed requests from SPs are not checked.
 - **Signing key rollover:** `IdentityProvider.RolloverCertificates` (`samlidp.Options.RolloverCertificates`) publishes
   further signing certificates in the metadata after `Certificate`, each in its own `KeyDescriptor`, as the Metadata
   Interoperability Profile §2.5 allows, but never signs with them. Publish the next certificate there until every SP has
