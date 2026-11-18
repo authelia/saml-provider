@@ -19,7 +19,8 @@ import (
 	"unsafe"
 
 	"github.com/beevik/etree"
-	xrv "github.com/mattermost/xml-roundtrip-validator"
+
+	"authelia.com/provider/saml/internal/xmlrv"
 )
 
 const (
@@ -662,7 +663,7 @@ func (req *artifactResolveRequest) validate() error {
 		return malformed.WithDebugError(err)
 	}
 
-	if err := xrv.Validate(bytes.NewReader(req.RequestBuffer)); err != nil {
+	if err := xmlrv.Validate(req.RequestBuffer); err != nil {
 		return malformed.WithDebugError(err)
 	}
 

@@ -17,10 +17,11 @@ import (
 	"time"
 
 	"github.com/beevik/etree"
-	xrv "github.com/mattermost/xml-roundtrip-validator"
 	"gotest.tools/assert"
 	is "gotest.tools/assert/cmp"
 	"gotest.tools/golden"
+
+	"authelia.com/provider/saml/internal/xmlrv"
 )
 
 const (
@@ -1755,7 +1756,7 @@ func TestQueryMetadata(t *testing.T) {
 		w := httptest.NewRecorder()
 		f.test.IDP.ServeMetadata(w, httptest.NewRequest(http.MethodGet, f.test.IDP.MetadataURL.String(), nil))
 
-		assert.NilError(t, xrv.Validate(bytes.NewReader(w.Body.Bytes())))
+		assert.NilError(t, xmlrv.Validate(w.Body.Bytes()))
 
 		parsed := &EntityDescriptor{}
 		assert.NilError(t, xml.Unmarshal(w.Body.Bytes(), parsed))

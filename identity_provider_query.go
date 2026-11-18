@@ -1,7 +1,6 @@
 package saml
 
 import (
-	"bytes"
 	"encoding/xml"
 	"errors"
 	"fmt"
@@ -13,7 +12,8 @@ import (
 	"time"
 
 	"github.com/beevik/etree"
-	xrv "github.com/mattermost/xml-roundtrip-validator"
+
+	"authelia.com/provider/saml/internal/xmlrv"
 )
 
 // samlAssertionNS is the namespace of SAML assertions and their content.
@@ -295,7 +295,7 @@ func (req *IdpQueryRequest) answer() ([]*etree.Element, error) {
 // not a StatusError is of a request that could not be read, which is ErrMalformedRequest to the caller.
 func (req *IdpQueryRequest) validate() error {
 	// This code runs before any authentication. The size of the request is limited by soapMaxMessageSize.
-	if err := xrv.Validate(bytes.NewReader(req.RequestBuffer)); err != nil {
+	if err := xmlrv.Validate(req.RequestBuffer); err != nil {
 		return err
 	}
 

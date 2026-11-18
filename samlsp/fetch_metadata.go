@@ -1,7 +1,6 @@
 package samlsp
 
 import (
-	"bytes"
 	"context"
 	"encoding/xml"
 	"errors"
@@ -11,9 +10,8 @@ import (
 	"net/url"
 	"time"
 
-	xrv "github.com/mattermost/xml-roundtrip-validator"
-
 	"authelia.com/provider/saml"
+	"authelia.com/provider/saml/internal/xmlrv"
 )
 
 // ParseMetadata parses arbitrary SAML IDP metadata.
@@ -24,7 +22,7 @@ import (
 func ParseMetadata(data []byte) (*saml.EntityDescriptor, error) {
 	entity := &saml.EntityDescriptor{}
 
-	if err := xrv.Validate(bytes.NewBuffer(data)); err != nil {
+	if err := xmlrv.Validate(data); err != nil {
 		return nil, err
 	}
 

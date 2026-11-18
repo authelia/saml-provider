@@ -24,10 +24,10 @@ import (
 	"time"
 
 	"github.com/beevik/etree"
-	xrv "github.com/mattermost/xml-roundtrip-validator"
 
 	"authelia.com/provider/saml/internal/dsig"
 	"authelia.com/provider/saml/internal/dsig/etreeutils"
+	"authelia.com/provider/saml/internal/xmlrv"
 )
 
 // NameIDFormat is the format of the id.
@@ -938,7 +938,7 @@ func (sp *ServiceProvider) ParseXMLArtifactResponse(soapResponseXML []byte, poss
 	}
 
 	// ensure that the response XML is well-formed before we parse it.
-	if err := xrv.Validate(bytes.NewReader(soapResponseXML)); err != nil {
+	if err := xmlrv.Validate(soapResponseXML); err != nil {
 		retErr.PrivateErr = fmt.Errorf("invalid xml: %s", err)
 		return nil, retErr
 	}
@@ -1064,7 +1064,7 @@ func (sp *ServiceProvider) ParseXMLResponse(decodedResponseXML []byte, possibleR
 	}
 
 	// ensure that the response XML is well-formed before we parse it.
-	if err := xrv.Validate(bytes.NewReader(decodedResponseXML)); err != nil {
+	if err := xmlrv.Validate(decodedResponseXML); err != nil {
 		retErr.PrivateErr = fmt.Errorf("invalid xml: %s", err)
 		return nil, retErr
 	}
@@ -1986,7 +1986,7 @@ func (sp *ServiceProvider) ValidateLogoutResponseForm(postFormData string, possi
 	retErr.Response = string(rawResponseBuf)
 
 	// TODO(ross): add test case for this (SLO does not have tests right now).
-	if err := xrv.Validate(bytes.NewReader(rawResponseBuf)); err != nil {
+	if err := xmlrv.Validate(rawResponseBuf); err != nil {
 		return fmt.Errorf("response contains invalid XML: %s", err)
 	}
 
@@ -2068,7 +2068,7 @@ func (sp *ServiceProvider) ValidateLogoutResponseRedirect(u *url.URL, possibleRe
 		return retErr
 	}
 
-	if err := xrv.Validate(bytes.NewReader(gr)); err != nil {
+	if err := xmlrv.Validate(gr); err != nil {
 		return err
 	}
 

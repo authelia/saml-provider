@@ -1,7 +1,6 @@
 package saml
 
 import (
-	"bytes"
 	"encoding/base64"
 	"encoding/xml"
 	"errors"
@@ -10,7 +9,8 @@ import (
 	"time"
 
 	"github.com/beevik/etree"
-	xrv "github.com/mattermost/xml-roundtrip-validator"
+
+	"authelia.com/provider/saml/internal/xmlrv"
 )
 
 // IdpLogoutResponse is a LogoutResponse that a service provider sent back during a logout.
@@ -101,7 +101,7 @@ func (resp *IdpLogoutResponse) Validate(state *LogoutState) error {
 		return fmt.Errorf("%w: %w", ErrLogoutResponseUncorrelated, err)
 	}
 
-	if err := xrv.Validate(bytes.NewReader(resp.ResponseBuffer)); err != nil {
+	if err := xmlrv.Validate(resp.ResponseBuffer); err != nil {
 		return fmt.Errorf("%w: %w", ErrLogoutResponseUncorrelated, err)
 	}
 
