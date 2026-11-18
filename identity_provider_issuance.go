@@ -65,6 +65,17 @@ type Issuance struct {
 	// entity ID of the service provider, for one that is known by a second name or passes the assertion on
 	// (SAMLCore §2.5.1.4). None may be empty.
 	AdditionalAudiences []string
+
+	// ProxyRestriction is the limit that the Conditions of the assertion put on a service provider which, as a
+	// proxy, issues assertions of its own on the basis of this one (SAMLCore §2.5.1.6): a Count of zero forbids
+	// that, a larger one allows that many assertions in a row, and Audiences names whom they may be issued to. Nil
+	// states no limit. The Count must not be negative, and no audience may be empty.
+	//
+	// It is what the identity provider permits, and is not taken from the Scoping of the request, whose ProxyCount
+	// is how far the request may be passed on and not how far the assertion may be. A proxy that asks with
+	// ProxyCount="0" still has to issue its own assertion. A policy that knows the proxy finds the Scoping in
+	// IssuanceRequest.AuthnRequest.
+	ProxyRestriction *ProxyRestriction
 }
 
 // IssuanceRequest describes what an IssuancePolicy is asked about: a Response of single sign-on, or another
@@ -149,6 +160,10 @@ type ServiceProviderIssuance struct {
 
 	// AdditionalAudiences are further audiences of the assertion. See Issuance.AdditionalAudiences.
 	AdditionalAudiences []string
+
+	// ProxyRestriction limits the assertions that the service provider may issue on the basis of the one it is
+	// given. See Issuance.ProxyRestriction.
+	ProxyRestriction *ProxyRestriction
 }
 
 // DefaultIssuancePolicy is the default IssuancePolicy. With no options set it issues to every service provider
@@ -173,6 +188,7 @@ func (p DefaultIssuancePolicy) Issuance(req IssuanceRequest) (Issuance, error) {
 
 	issuance.Sign = override.Sign
 	issuance.AdditionalAudiences = override.AdditionalAudiences
+	issuance.ProxyRestriction = override.ProxyRestriction
 
 	if override.SignatureMethod != "" {
 		issuance.SignatureMethod = override.SignatureMethod
@@ -352,14 +368,44 @@ func (idp *IdentityProvider) completeIssuance(req IssuanceRequest, issuance Issu
 		}
 	}
 
-	audiences, err := additionalAudiences(req.ServiceProviderMetadata, issuance.AdditionalAudiences)
+	return completeIssuanceConditions(req.ServiceProviderMetadata, issuance)
+}
+
+// completeIssuanceConditions returns issuance with the AdditionalAudiences that the assertion states for the
+// service provider with that metadata, or an error if they or its ProxyRestriction can't be stated.
+func completeIssuanceConditions(metadata *EntityDescriptor, issuance Issuance) (Issuance, error) {
+	audiences, err := additionalAudiences(metadata, issuance.AdditionalAudiences)
 	if err != nil {
 		return Issuance{}, err
 	}
 
 	issuance.AdditionalAudiences = audiences
 
+	if err := checkProxyRestriction(issuance.ProxyRestriction); err != nil {
+		return Issuance{}, err
+	}
+
 	return issuance, nil
+}
+
+// checkProxyRestriction returns an error if restriction, which may be nil, is not one that an assertion can
+// state.
+func checkProxyRestriction(restriction *ProxyRestriction) error {
+	if restriction == nil {
+		return nil
+	}
+
+	if restriction.Count != nil && *restriction.Count < 0 {
+		return errors.New("ProxyRestriction Count must not be negative")
+	}
+
+	for _, audience := range restriction.Audiences {
+		if audience.Value == "" {
+			return errors.New("a ProxyRestriction Audience is empty")
+		}
+	}
+
+	return nil
 }
 
 // additionalAudiences returns audiences without those that are repeated or are the entity ID of the service
@@ -386,7 +432,8 @@ func additionalAudiences(metadata *EntityDescriptor, audiences []string) ([]stri
 // identity provider decides for a principal with that session, which is nil if there is none. What it returns is
 // complete: the SignatureMethod and the AssertionLifetime are never empty, and Sign allows for the
 // WantAssertionsSigned of the service provider. An AssertionMaker other than DefaultAssertionMaker uses it for
-// the AssertionLifetime, IncludeSessionNotOnOrAfter and AdditionalAudiences of the assertion that it makes;
+// the AssertionLifetime, IncludeSessionNotOnOrAfter, AdditionalAudiences and ProxyRestriction of the assertion that
+// it makes;
 // MakeAssertionEl and MakeResponse apply the rest, with Session as the session.
 func (req *IdpAuthnRequest) Issuance(session *Session) (Issuance, error) {
 	if req.ServiceProviderMetadata == nil {
