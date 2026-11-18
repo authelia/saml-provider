@@ -485,7 +485,7 @@ func (req *IdpQueryRequest) subject(subject *Subject) (querySubject, error) {
 		return querySubject{}, ErrInvalidRequest.WithDebug("the query has no Subject")
 	}
 
-	identifiers := querySubjectIdentifiers(req.verified)
+	identifiers := subjectIdentifiers(req.verified)
 
 	if len(identifiers) > 1 {
 		return querySubject{}, ErrRequestDenied.WithDebug("the Subject of the query has more than one identifier")
@@ -559,12 +559,13 @@ func (req *IdpQueryRequest) encryptedSubject(encryptedIDEl *etree.Element) (quer
 	return querySubject{NameID: nameID, Encrypted: true}, nil
 }
 
-// querySubjectIdentifiers returns the NameID, EncryptedID and BaseID elements of the Subject of the query element.
-// Subject doesn't hold the EncryptedID or BaseID, so they are looked for in the content that was verified.
-func querySubjectIdentifiers(query *etree.Element) []*etree.Element {
+// subjectIdentifiers returns the NameID, EncryptedID and BaseID elements of the Subject of the request element, a
+// query or an AuthnRequest. Subject doesn't hold the EncryptedID or BaseID, so they are looked for in the content
+// that was verified.
+func subjectIdentifiers(request *etree.Element) []*etree.Element {
 	var identifiers []*etree.Element
 
-	for _, child := range query.ChildElements() {
+	for _, child := range request.ChildElements() {
 		if child.Tag != "Subject" || child.NamespaceURI() != samlAssertionNS {
 			continue
 		}
