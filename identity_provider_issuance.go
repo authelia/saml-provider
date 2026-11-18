@@ -23,7 +23,8 @@ const (
 	SignResponseAndAssertion ResponseSigning = iota
 
 	// SignAssertion signs the Assertion and leaves the Response unsigned, for a service provider that can't
-	// process a signed Response. A Response without an assertion, which reports an error, is still signed.
+	// process a signed Response. A Response without an assertion, which reports an error, is still signed, and so
+	// is one that carries ResponseExtensions, which the signature of the assertion doesn't cover.
 	SignAssertion
 
 	// SignResponse signs the Response, and the Assertion only if the metadata of the service provider sets
@@ -130,6 +131,13 @@ type Issuance struct {
 	// (SAML2Int SDP-IDP11), or never. It applies to every assertion that is issued to the service provider: that
 	// of single sign-on on every binding, of the answer to a query, and one that an AssertionIDRequest returns.
 	AssertionEncryption AssertionEncryption
+
+	// ResponseExtensions are the protocol extensions that the Response of single sign-on carries in its
+	// Extensions (SAMLCore §3.2.2), which the service provider has agreed to, or nil for none. They are sent in
+	// both a Response that holds an assertion and one that reports an error, and each must be in a namespace other
+	// than those of SAML assertions and protocols. The Response is signed whenever it carries them, whatever Sign
+	// says, so that they are covered by a signature. The Response to a query carries none.
+	ResponseExtensions *ProtocolExtensions
 }
 
 // IssuanceRequest describes what an IssuancePolicy is asked about: a Response of single sign-on, or another
@@ -239,6 +247,10 @@ type ServiceProviderIssuance struct {
 	// so that EncryptAssertionWhenPossible, which is the zero value, can exempt a service provider from what is
 	// set for every other.
 	AssertionEncryption *AssertionEncryption
+
+	// ResponseExtensions are the protocol extensions that the Response of single sign-on carries, as
+	// Issuance.ResponseExtensions describes. Nil means none.
+	ResponseExtensions *ProtocolExtensions
 }
 
 // DefaultIssuancePolicy is the default IssuancePolicy. With no options set it issues to every service provider
@@ -271,6 +283,7 @@ func (p DefaultIssuancePolicy) Issuance(req IssuanceRequest) (Issuance, error) {
 	issuance.Sign = override.Sign
 	issuance.AdditionalAudiences = override.AdditionalAudiences
 	issuance.ProxyRestriction = override.ProxyRestriction
+	issuance.ResponseExtensions = override.ResponseExtensions
 
 	if override.SignatureMethod != "" {
 		issuance.SignatureMethod = override.SignatureMethod
@@ -599,6 +612,14 @@ func (req *IdpAuthnRequest) Issuance(session *Session) (Issuance, error) {
 	issuance, notes, err := req.IDP.resolveIssuance(issuanceRequest)
 	if err != nil {
 		return Issuance{}, err
+	}
+
+	// Only the Response of single sign-on, which reports success or an error, carries the extensions, so a query
+	// is not refused for extensions it doesn't send.
+	if issuanceRequest.ACSEndpoint != nil {
+		if err = issuance.ResponseExtensions.check(); err != nil {
+			return Issuance{}, fmt.Errorf("IssuancePolicy: ResponseExtensions: %w", err)
+		}
 	}
 
 	// The policy is asked for each part of a response, and what was not negotiated is reported for the first.

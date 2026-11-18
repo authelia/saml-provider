@@ -21,6 +21,9 @@ type ManageNameIDRequest struct {
 	Issuer       *Issuer   `xml:"urn:oasis:names:tc:SAML:2.0:assertion Issuer"`
 	Signature    *etree.Element
 
+	// Extensions are the protocol extensions of the message (SAMLCore §3.2.1, §3.2.2), or nil if there are none.
+	Extensions *ProtocolExtensions `xml:"urn:oasis:names:tc:SAML:2.0:protocol Extensions"`
+
 	// NameID is the identifier of the principal, as the two providers know it before the request.
 	NameID *NameID
 
@@ -66,6 +69,10 @@ func (r *ManageNameIDRequest) Element() *etree.Element {
 
 	if r.Signature != nil {
 		el.AddChild(r.Signature)
+	}
+
+	if r.Extensions != nil {
+		el.AddChild(r.Extensions.Element())
 	}
 
 	// The schema has one identifier, and a NameID must never be written beside its own ciphertext.
@@ -131,13 +138,16 @@ type ManageNameIDResponse struct {
 	Consent      string    `xml:",attr"`
 	Issuer       *Issuer   `xml:"urn:oasis:names:tc:SAML:2.0:assertion Issuer"`
 	Signature    *etree.Element
-	Status       Status `xml:"urn:oasis:names:tc:SAML:2.0:protocol Status"`
+
+	// Extensions are the protocol extensions of the message (SAMLCore §3.2.1, §3.2.2), or nil if there are none.
+	Extensions *ProtocolExtensions `xml:"urn:oasis:names:tc:SAML:2.0:protocol Extensions"`
+	Status     Status              `xml:"urn:oasis:names:tc:SAML:2.0:protocol Status"`
 }
 
 // Element returns an etree.Element representing the object in XML form.
 func (r *ManageNameIDResponse) Element() *etree.Element {
 	el := etree.NewElement("samlp:ManageNameIDResponse")
-	statusResponseElement(el, r.ID, r.InResponseTo, r.Version, r.IssueInstant, r.Destination, r.Consent, r.Issuer, r.Signature)
+	statusResponseElement(el, r.ID, r.InResponseTo, r.Version, r.IssueInstant, r.Destination, r.Consent, r.Issuer, r.Signature, r.Extensions)
 	el.AddChild(r.Status.Element())
 
 	return el
@@ -180,6 +190,9 @@ type NameIDMappingRequest struct {
 	Issuer       *Issuer   `xml:"urn:oasis:names:tc:SAML:2.0:assertion Issuer"`
 	Signature    *etree.Element
 
+	// Extensions are the protocol extensions of the message (SAMLCore §3.2.1, §3.2.2), or nil if there are none.
+	Extensions *ProtocolExtensions `xml:"urn:oasis:names:tc:SAML:2.0:protocol Extensions"`
+
 	// NameID is the identifier of the principal, as the requester and the identity provider know it.
 	NameID *NameID
 
@@ -216,6 +229,10 @@ func (r *NameIDMappingRequest) Element() *etree.Element {
 
 	if r.Signature != nil {
 		el.AddChild(r.Signature)
+	}
+
+	if r.Extensions != nil {
+		el.AddChild(r.Extensions.Element())
 	}
 
 	// The schema has one identifier, and a NameID must never be written beside its own ciphertext.
@@ -268,7 +285,10 @@ type NameIDMappingResponse struct {
 	Consent      string    `xml:",attr"`
 	Issuer       *Issuer   `xml:"urn:oasis:names:tc:SAML:2.0:assertion Issuer"`
 	Signature    *etree.Element
-	Status       Status `xml:"urn:oasis:names:tc:SAML:2.0:protocol Status"`
+
+	// Extensions are the protocol extensions of the message (SAMLCore §3.2.1, §3.2.2), or nil if there are none.
+	Extensions *ProtocolExtensions `xml:"urn:oasis:names:tc:SAML:2.0:protocol Extensions"`
+	Status     Status              `xml:"urn:oasis:names:tc:SAML:2.0:protocol Status"`
 
 	// NameID is the mapped identifier in plaintext.
 	NameID *NameID
@@ -284,7 +304,7 @@ type NameIDMappingResponse struct {
 // with an error status, is written with an empty NameID.
 func (r *NameIDMappingResponse) Element() *etree.Element {
 	el := etree.NewElement("samlp:NameIDMappingResponse")
-	statusResponseElement(el, r.ID, r.InResponseTo, r.Version, r.IssueInstant, r.Destination, r.Consent, r.Issuer, r.Signature)
+	statusResponseElement(el, r.ID, r.InResponseTo, r.Version, r.IssueInstant, r.Destination, r.Consent, r.Issuer, r.Signature, r.Extensions)
 	el.AddChild(r.Status.Element())
 
 	// A NameID must never be written beside its own ciphertext.
@@ -325,7 +345,7 @@ func (r *NameIDMappingResponse) setSignature(signature *etree.Element) {
 
 // statusResponseElement writes the attributes, Issuer and Signature of a StatusResponseType (SAMLCore §3.2.2)
 // to el.
-func statusResponseElement(el *etree.Element, id, inResponseTo, version string, issueInstant time.Time, destination, consent string, issuer *Issuer, signature *etree.Element) {
+func statusResponseElement(el *etree.Element, id, inResponseTo, version string, issueInstant time.Time, destination, consent string, issuer *Issuer, signature *etree.Element, extensions *ProtocolExtensions) {
 	el.CreateAttr("xmlns:saml", samlAssertionNamespace)
 	el.CreateAttr("xmlns:samlp", samlProtocolNS)
 	el.CreateAttr("ID", id)
@@ -351,5 +371,9 @@ func statusResponseElement(el *etree.Element, id, inResponseTo, version string, 
 
 	if signature != nil {
 		el.AddChild(signature)
+	}
+
+	if extensions != nil {
+		el.AddChild(extensions.Element())
 	}
 }

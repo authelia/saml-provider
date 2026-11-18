@@ -3677,20 +3677,23 @@ func (req *IdpAuthnRequest) newResponse(status Status) *Response {
 //
 // The response is signed unless the IssuancePolicy of the identity provider has only the Assertion signed for
 // this service provider. A response without an assertion is always signed, as nothing else in it is: it reports
-// an error, which the service provider could otherwise be sent by anyone.
+// an error, which the service provider could otherwise be sent by anyone. So is one with extensions, which the
+// signature of the assertion doesn't cover.
 func (req *IdpAuthnRequest) signResponse(response *Response, assertionEl *etree.Element) (*etree.Element, error) {
-	responseEl := response.Element()
-	if assertionEl != nil {
-		responseEl.AddChild(assertionEl)
-	}
-
 	issuance, err := req.Issuance(req.Session)
 	if err != nil {
 		return nil, err
 	}
 
+	response.Extensions = issuance.ResponseExtensions.clone()
+
+	responseEl := response.Element()
+	if assertionEl != nil {
+		responseEl.AddChild(assertionEl)
+	}
+
 	// The entity ID is the Issuer, and an invalid one is refused where the response is signed.
-	if assertionEl != nil && issuance.Sign == SignAssertion {
+	if assertionEl != nil && issuance.Sign == SignAssertion && response.Extensions == nil {
 		if err = req.IDP.checkEntityID(); err != nil {
 			return nil, err
 		}

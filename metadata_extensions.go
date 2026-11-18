@@ -296,7 +296,8 @@ type ExtensionElement struct {
 	// Attrs are the attributes, but for namespace declarations.
 	Attrs []xml.Attr `xml:",any,attr"`
 
-	// Content is the text, without the white space around it.
+	// Content is the text. That of an element of metadata Extensions is without the white space around it, and
+	// that of an element of ProtocolExtensions is as it was received.
 	Content string `xml:",chardata"`
 
 	Children []ExtensionElement `xml:",any"`
@@ -310,20 +311,25 @@ func (m *ExtensionElement) UnmarshalXML(d *xml.Decoder, start xml.StartElement) 
 		return err
 	}
 
-	var attrs []xml.Attr
+	m.Attrs = withoutNamespaceDeclarations(m.Attrs)
+	m.Content = strings.TrimSpace(m.Content)
 
-	for _, attr := range m.Attrs {
+	return nil
+}
+
+// withoutNamespaceDeclarations returns attrs without the namespace declarations among them.
+func withoutNamespaceDeclarations(attrs []xml.Attr) []xml.Attr {
+	var out []xml.Attr
+
+	for _, attr := range attrs {
 		if attr.Name.Space == "xmlns" || (attr.Name.Space == "" && attr.Name.Local == "xmlns") {
 			continue
 		}
 
-		attrs = append(attrs, attr)
+		out = append(out, attr)
 	}
 
-	m.Attrs = attrs
-	m.Content = strings.TrimSpace(m.Content)
-
-	return nil
+	return out
 }
 
 // MarshalXML implements [xml.Marshaler]. The element declares its namespace as the default one, and the encoder

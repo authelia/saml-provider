@@ -68,6 +68,9 @@ type AuthnRequest struct {
 	Issuer       *Issuer   `xml:"urn:oasis:names:tc:SAML:2.0:assertion Issuer"`
 	Signature    *etree.Element
 
+	// Extensions are the protocol extensions of the message (SAMLCore §3.2.1, §3.2.2), or nil if there are none.
+	Extensions *ProtocolExtensions `xml:"urn:oasis:names:tc:SAML:2.0:protocol Extensions"`
+
 	Subject               *Subject
 	NameIDPolicy          *NameIDPolicy `xml:"urn:oasis:names:tc:SAML:2.0:protocol NameIDPolicy"`
 	Conditions            *Conditions
@@ -102,6 +105,9 @@ type LogoutRequest struct {
 	NameID       *NameID
 	Signature    *etree.Element
 
+	// Extensions are the protocol extensions of the message (SAMLCore §3.2.1, §3.2.2), or nil if there are none.
+	Extensions *ProtocolExtensions `xml:"urn:oasis:names:tc:SAML:2.0:protocol Extensions"`
+
 	// EncryptedID is the EncryptedID element which identifies the principal in place of the NameID (SAMLCore
 	// §3.7.1). Element writes it and not the NameID when it is set. It isn't unmarshalled: the receiver decrypts
 	// it from the element whose signature it verified, as IdpLogoutRequest.Validate and
@@ -134,6 +140,10 @@ func (r *LogoutRequest) Element() *etree.Element {
 
 	if r.Signature != nil {
 		el.AddChild(r.Signature)
+	}
+
+	if r.Extensions != nil {
+		el.AddChild(r.Extensions.Element())
 	}
 
 	// The schema has one identifier, and a NameID must never be written beside its own ciphertext.
@@ -252,6 +262,10 @@ func (r *AuthnRequest) Element() *etree.Element {
 
 	if r.Signature != nil {
 		el.AddChild(r.Signature)
+	}
+
+	if r.Extensions != nil {
+		el.AddChild(r.Extensions.Element())
 	}
 
 	if r.Subject != nil {
@@ -412,7 +426,10 @@ type ArtifactResolve struct {
 	Destination  string    `xml:",attr,omitempty"`
 	Issuer       *Issuer   `xml:"urn:oasis:names:tc:SAML:2.0:assertion Issuer"`
 	Signature    *etree.Element
-	Artifact     string `xml:"urn:oasis:names:tc:SAML:2.0:protocol Artifact"`
+
+	// Extensions are the protocol extensions of the message (SAMLCore §3.2.1, §3.2.2), or nil if there are none.
+	Extensions *ProtocolExtensions `xml:"urn:oasis:names:tc:SAML:2.0:protocol Extensions"`
+	Artifact   string              `xml:"urn:oasis:names:tc:SAML:2.0:protocol Artifact"`
 }
 
 // Element returns an etree.Element representing the object in XML form.
@@ -447,6 +464,10 @@ func (r *ArtifactResolve) Element() *etree.Element {
 		// ref: https://authelia.com/provider/saml/issues/535
 		// ref: https://www.wiktorzychla.com/2017/09/adfs-and-saml2-artifact-binding-woes.html
 		el.AddChild(r.Signature)
+	}
+
+	if r.Extensions != nil {
+		el.AddChild(r.Extensions.Element())
 	}
 
 	artifact := etree.NewElement("samlp:Artifact")
@@ -513,8 +534,11 @@ type ArtifactResponse struct {
 	IssueInstant time.Time `xml:",attr"`
 	Issuer       *Issuer   `xml:"urn:oasis:names:tc:SAML:2.0:assertion Issuer"`
 	Signature    *etree.Element
-	Status       Status    `xml:"urn:oasis:names:tc:SAML:2.0:protocol Status"`
-	Response     *Response `xml:"urn:oasis:names:tc:SAML:2.0:protocol Response"`
+
+	// Extensions are the protocol extensions of the message (SAMLCore §3.2.1, §3.2.2), or nil if there are none.
+	Extensions *ProtocolExtensions `xml:"urn:oasis:names:tc:SAML:2.0:protocol Extensions"`
+	Status     Status              `xml:"urn:oasis:names:tc:SAML:2.0:protocol Status"`
+	Response   *Response           `xml:"urn:oasis:names:tc:SAML:2.0:protocol Response"`
 }
 
 // Element returns an etree.Element representing the object in XML form.
@@ -547,6 +571,10 @@ func (r *ArtifactResponse) Element() *etree.Element {
 
 	if r.Signature != nil {
 		el.AddChild(r.Signature)
+	}
+
+	if r.Extensions != nil {
+		el.AddChild(r.Extensions.Element())
 	}
 
 	el.AddChild(r.Status.Element())
@@ -605,7 +633,10 @@ type Response struct {
 	Consent      string    `xml:",attr"`
 	Issuer       *Issuer   `xml:"urn:oasis:names:tc:SAML:2.0:assertion Issuer"`
 	Signature    *etree.Element
-	Status       Status `xml:"urn:oasis:names:tc:SAML:2.0:protocol Status"`
+
+	// Extensions are the protocol extensions of the message (SAMLCore §3.2.1, §3.2.2), or nil if there are none.
+	Extensions *ProtocolExtensions `xml:"urn:oasis:names:tc:SAML:2.0:protocol Extensions"`
+	Status     Status              `xml:"urn:oasis:names:tc:SAML:2.0:protocol Status"`
 
 	// TODO(ross): more than one EncryptedAssertion is allowed.
 	EncryptedAssertion *etree.Element `xml:"urn:oasis:names:tc:SAML:2.0:assertion EncryptedAssertion"`
@@ -652,6 +683,10 @@ func (r *Response) Element() *etree.Element {
 
 	if r.Signature != nil {
 		el.AddChild(r.Signature)
+	}
+
+	if r.Extensions != nil {
+		el.AddChild(r.Extensions.Element())
 	}
 
 	el.AddChild(r.Status.Element())
@@ -1610,7 +1645,10 @@ type LogoutResponse struct {
 	Consent      string    `xml:",attr"`
 	Issuer       *Issuer   `xml:"urn:oasis:names:tc:SAML:2.0:assertion Issuer"`
 	Signature    *etree.Element
-	Status       Status `xml:"urn:oasis:names:tc:SAML:2.0:protocol Status"`
+
+	// Extensions are the protocol extensions of the message (SAMLCore §3.2.1, §3.2.2), or nil if there are none.
+	Extensions *ProtocolExtensions `xml:"urn:oasis:names:tc:SAML:2.0:protocol Extensions"`
+	Status     Status              `xml:"urn:oasis:names:tc:SAML:2.0:protocol Status"`
 }
 
 // Element returns an etree.Element representing the object in XML form.
@@ -1642,6 +1680,10 @@ func (r *LogoutResponse) Element() *etree.Element {
 
 	if r.Signature != nil {
 		el.AddChild(r.Signature)
+	}
+
+	if r.Extensions != nil {
+		el.AddChild(r.Extensions.Element())
 	}
 
 	el.AddChild(r.Status.Element())
