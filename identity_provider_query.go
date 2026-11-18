@@ -790,6 +790,16 @@ func (req *IdpQueryRequest) issueAssertion(assertion *Assertion) ([]*etree.Eleme
 	shell := req.authnRequest()
 	shell.Assertion = assertion
 
+	// What the service provider may not do with the assertion of single sign-on, it may not do with this one.
+	issuance, err := shell.Issuance(nil)
+	if err != nil {
+		return nil, fmt.Errorf("cannot make the assertion: %w", err)
+	}
+
+	if assertion.Conditions != nil {
+		assertion.Conditions.ProxyRestriction = issuance.ProxyRestriction.clone()
+	}
+
 	if err := shell.MakeAssertionEl(); err != nil {
 		return nil, fmt.Errorf("cannot make the assertion: %w", err)
 	}

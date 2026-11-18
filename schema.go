@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"compress/flate"
 	"encoding/xml"
+	"fmt"
+	"slices"
 	"strconv"
 	"time"
 
@@ -70,7 +72,10 @@ type AuthnRequest struct {
 	NameIDPolicy          *NameIDPolicy `xml:"urn:oasis:names:tc:SAML:2.0:protocol NameIDPolicy"`
 	Conditions            *Conditions
 	RequestedAuthnContext *RequestedAuthnContext
-	// Scoping               *Scoping // TODO.
+
+	// Scoping is which identity providers the requester accepts and how far the request may be proxied (SAMLCore
+	// §3.4.1.2).
+	Scoping *Scoping `xml:"urn:oasis:names:tc:SAML:2.0:protocol Scoping"`
 
 	ForceAuthn                     *bool  `xml:",attr"`
 	IsPassive                      *bool  `xml:",attr"`
@@ -264,9 +269,11 @@ func (r *AuthnRequest) Element() *etree.Element {
 	if r.RequestedAuthnContext != nil {
 		el.AddChild(r.RequestedAuthnContext.Element())
 	}
-	// if r.Scoping != nil {
-	// 	el.AddChild(r.Scoping.Element())
-	// }.
+
+	if r.Scoping != nil {
+		el.AddChild(r.Scoping.Element())
+	}
+
 	if r.ForceAuthn != nil {
 		el.CreateAttr("ForceAuthn", strconv.FormatBool(*r.ForceAuthn))
 	}
@@ -1251,8 +1258,56 @@ func (a *OneTimeUse) Element() *etree.Element {
 //
 // See http://docs.oasis-open.org/security/saml/v2.0/saml-core-2.0-os.pdf §2.5.1.6.
 type ProxyRestriction struct {
-	Count     *int
-	Audiences []Audience
+	// Count is how many times an assertion may be issued on the basis of the one before it, starting from this
+	// one. Zero means that the relying party must not issue an assertion to another on the basis of this one,
+	// and nil is no limit.
+	Count *int `xml:",attr"`
+
+	// Audiences are those that an assertion may be issued to on the basis of this one. None is no restriction.
+	Audiences []Audience `xml:"Audience"`
+}
+
+// UnmarshalXML implements [xml.Unmarshaler]. It returns an error if the Count is not a non-negative integer.
+func (a *ProxyRestriction) UnmarshalXML(d *xml.Decoder, start xml.StartElement) error {
+	aux := struct {
+		Count     *string    `xml:",attr"`
+		Audiences []Audience `xml:"Audience"`
+	}{}
+
+	if err := d.DecodeElement(&aux, &start); err != nil {
+		return err
+	}
+
+	restriction := ProxyRestriction{Audiences: aux.Audiences}
+
+	if aux.Count != nil {
+		count, err := parseNonNegativeInteger(*aux.Count)
+		if err != nil {
+			return fmt.Errorf("the Count of the ProxyRestriction is %w", err)
+		}
+
+		restriction.Count = &count
+	}
+
+	*a = restriction
+
+	return nil
+}
+
+// clone returns a copy of the restriction which shares nothing with it, or nil for nil.
+func (a *ProxyRestriction) clone() *ProxyRestriction {
+	if a == nil {
+		return nil
+	}
+
+	restriction := &ProxyRestriction{Audiences: slices.Clone(a.Audiences)}
+
+	if a.Count != nil {
+		count := *a.Count
+		restriction.Count = &count
+	}
+
+	return restriction
 }
 
 // Element returns an etree.Element representing the object in XML form.

@@ -2182,6 +2182,7 @@ func (DefaultAssertionMaker) MakeAssertion(req *IdpAuthnRequest, session *Sessio
 					Audiences: audiences,
 				},
 			},
+			ProxyRestriction: issuance.ProxyRestriction.clone(),
 		},
 		AuthnStatements: []AuthnStatement{
 			{

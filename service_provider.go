@@ -144,6 +144,10 @@ type ServiceProvider struct {
 	// context in authentication requests.
 	RequestedAuthnContext *RequestedAuthnContext
 
+	// Scoping is sent with every AuthnRequest if it is set: the identity providers that are accepted, how far the
+	// request may be proxied, and on whose behalf it is made (SAMLCore §3.4.1.2).
+	Scoping *Scoping
+
 	// AllowIdpInitiated.
 	AllowIDPInitiated bool
 
@@ -603,6 +607,7 @@ func (sp *ServiceProvider) MakeAuthenticationRequest(idpURL string, binding stri
 		},
 		ForceAuthn:            sp.ForceAuthn,
 		RequestedAuthnContext: sp.RequestedAuthnContext,
+		Scoping:               sp.Scoping,
 	}
 	// We don't need to sign the XML document if the IDP uses HTTP-Redirect binding.
 	if len(sp.SignatureMethod) > 0 && binding == HTTPPostBinding {

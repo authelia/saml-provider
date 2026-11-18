@@ -85,7 +85,9 @@ least the subset of SAML known as [interoperable SAML](https://kantarainitiative
 | `ForceAuthn` / `IsPassive`                        | ✅  | ✅  |
 | `RequestedAuthnContext`                           | ✅  | ✅  |
 | `AttributeConsumingService` attribute release     | ✅  | ❌  |
-| `Scoping` (proxying)                              | ❌  | ❌  |
+| `Scoping` (`ProxyCount`, `IDPList`, `RequesterID`)[^scoping] | ✅  | ✅  |
+| `ProxyRestriction`, for each SP[^scoping]         | ✅  | ⚠️  |
+| Proxying an `AuthnRequest` to another IdP         | ❌  | N/A |
 | Error status responses                            | ✅  | ✅  |
 | Multiple assertions in a single `Response`        | N/A | ⚠️  |
 | Replay detection                                  | ✅  | ⚠️  |
@@ -121,6 +123,10 @@ least the subset of SAML known as [interoperable SAML](https://kantarainitiative
     `EncryptionKey`. XML signatures are verified against `xmlsec1` 1.3.13
     in both directions, on P-256, P-384 and P-521. HTTP-Redirect signatures are covered by unit tests only, and other
     implementations have not been tested.
+
+[^scoping]: The IdP parses `Scoping` and hands it to the application, and never proxies, so no `Scoping` makes it
+refuse a request. The SP sends `ServiceProvider.Scoping`, and returns a `ProxyRestriction` with the assertion
+without acting on it. See **`Scoping` and `ProxyRestriction`** below.
 
 [^ecp]: The base profile of SAMLProfiles §4.2. The channel bindings, holder-of-key confirmation and delegation of the
     ECP v2.0 extension are not supported, see the notes below.
@@ -397,6 +403,55 @@ least the subset of SAML known as [interoperable SAML](https://kantarainitiative
   none, and a custom `AssertionMaker` can set a different class. `minimum`, `maximum` and `better` need `DefaultAuthnContextEnforcer.Strength` to rank classes. Without it,
   `minimum` and `maximum` only match a listed class, and `better` never matches. `DefaultAuthnContextEnforcer` refuses an `AuthnContextDeclRef`, and an assertion can't state one. Set
   `IdentityProvider.AuthnContextEnforcer` to decide differently.
+- **`Scoping` and `ProxyRestriction`:** the `Scoping` of an `AuthnRequest` (SAMLCore §3.4.1.2) is parsed into
+  `IdpAuthnRequest.Request.Scoping`, so a `SessionProvider`, an `AssertionMaker`, an `IssuancePolicy`
+  (`req.AuthnRequest`) and an `AttributeReleasePolicy` can log it or decide by it. The IdP authenticates principals
+  itself and never proxies a request, which settles what the element means for it:
+  - `ProxyCount` limits how many further IdPs the request may be passed to. There are none, so any value, including
+    0, is satisfied, and `ProxyCountExceeded` is never returned.
+  - `IDPList` is advisory, and a request whose list doesn't name the IdP is answered like any other: SPs send their
+    discovery list to every IdP, and a proxy has to forward the list it was given. To refuse instead, answer from the
+    `SessionProvider`:
+
+    ```go
+    if scoping := req.Request.Scoping; scoping != nil && scoping.IDPList != nil &&
+        scoping.IDPList.GetComplete == "" && !scoping.IDPList.Contains(idpEntityID) {
+        _ = req.WriteErrorResponse(w, saml.StatusResponder, saml.StatusNoSupportedIDP, "")
+        return nil
+    }
+    ```
+
+  - `GetComplete` is never fetched: it is a URL from a request that needs no signature. A list that has one is
+    incomplete, so `IDPList.Contains` returning false then says nothing.
+  - `RequesterID` is the chain of requesters as the sender claims it. Only decide by it for a proxy that is trusted
+    and whose requests are signed.
+
+  A `Scoping` that the schema doesn't allow (a `ProxyCount` that is not a non-negative integer, a second or an empty
+  `IDPList`, an `IDPEntry` without a `ProviderID`, an empty `RequesterID` or `GetComplete`) fails the request with an
+  HTTP 400, like any request that doesn't parse. There is no limit on the number of entries other than the 16 KiB
+  limit on the request, which allows a few hundred.
+
+  A `ProxyRestriction` (SAMLCore §2.5.1.6) limits what an SP that is itself a proxy may issue on the basis of the
+  assertion it is given. It is set for each SP with `IssuancePolicy`, and is in the `Conditions` of every assertion
+  that SP receives, from single sign-on or a query:
+
+  ```go
+  none, one := 0, 1
+  idp.IssuancePolicy = saml.DefaultIssuancePolicy{ServiceProviders: map[string]saml.ServiceProviderIssuance{
+      // Not a proxy: nothing may be issued on the basis of its assertions.
+      "https://app.example.com/metadata": {ProxyRestriction: &saml.ProxyRestriction{Count: &none}},
+      // A proxy, for one further hop, to these audiences only.
+      "https://proxy.example.com/metadata": {ProxyRestriction: &saml.ProxyRestriction{
+          Count:     &one,
+          Audiences: []saml.Audience{{Value: "https://behind.example.com/metadata"}},
+      }},
+  }}
+  ```
+
+  It is deliberately not derived from the `ProxyCount` of the request, which counts in the other direction: a proxy
+  that sends `ProxyCount="0"` so that the request goes no further would be told with `Count="0"` that it may not issue
+  its own assertion either. A policy of your own that knows better for some proxy has the `Scoping` in
+  `req.AuthnRequest`. Without a policy no `ProxyRestriction` is stated.
 - **Request `Subject`:** the assertion must strongly match the subject the request names, or the request receives an
   `AuthnFailed` status. The request must name the principal with a `NameID` of the same value, and the same format,
   qualifiers and `SPProvidedID` where it gives them. If it lists `SubjectConfirmation` elements, the assertion must have
@@ -714,7 +769,8 @@ least the subset of SAML known as [interoperable SAML](https://kantarainitiative
     still uses the first of those digests; name the `DigestMethod` as well to fix both.
   - `AssertionLifetime` and `IncludeSessionNotOnOrAfter` replace those of the IdP for the assertions of single
     sign-on, and `AdditionalAudiences` adds audiences to their `AudienceRestriction` after the entity ID of the SP.
-    They are applied by `DefaultAssertionMaker`; another `AssertionMaker` reads them from
+    `ProxyRestriction` states what an SP that is a proxy may issue on the basis of them, see **`Scoping` and
+    `ProxyRestriction`**. They are applied by `DefaultAssertionMaker`; another `AssertionMaker` reads them from
     `IdpAuthnRequest.Issuance`.
   - With `SignAssertion` and an encrypted assertion, nothing the IdP signs covers the ciphertext, so prefer a GCM
     cipher in `ContentEncryptionMethods` for such an SP (errata E93). With `SignResponse` the assertion that
@@ -788,6 +844,11 @@ least the subset of SAML known as [interoperable SAML](https://kantarainitiative
   - A received HTTP Redirect `LogoutResponse` may also use an embedded XML signature instead of the `SigAlg` and
     `Signature` query parameters the binding requires. `SignatureVerifier` does not apply to the query parameters.
 - **SOAP:** only used as a client to send `ArtifactResolve`.
+- **`Scoping` and `ProxyRestriction`:** `ServiceProvider.Scoping` is sent with every `AuthnRequest`, under its
+  signature when it is signed. `samlsp.Options` has no setting for it; set it on `Middleware.ServiceProvider`. A
+  `ProxyRestriction` of an assertion is returned in `Assertion.Conditions.ProxyRestriction` and nothing more: it
+  never makes an assertion invalid (SAMLCore §2.5.1.6), and an application that issues assertions of its own on the
+  basis of one must honour it itself.
 - **Multiple assertions in a single `Response`:** only the first valid assertion is returned.
 - **Replay detection:** SP-initiated responses must match a tracked request ID, but assertion IDs are not remembered,
   so an unsolicited response accepted with `AllowIDPInitiated` can be replayed until it expires.
