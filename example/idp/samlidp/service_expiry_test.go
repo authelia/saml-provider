@@ -42,10 +42,12 @@ func putExpiryService(test *ServerTest, metadata string) int {
 	return w.Code
 }
 
+// A validUntil has passed once it is saml.MaxClockSkew ago (SAML2Int SDP-G01), which is three minutes, so these
+// are around three minutes before the time of the tests.
 const (
-	beforeNow = "2015-12-01T01:57:08Z"
-	atNow     = "2015-12-01T01:57:09Z"
-	afterNow  = "2015-12-01T01:57:10Z"
+	beforeNow = "2015-12-01T01:54:08Z"
+	atNow     = "2015-12-01T01:54:09Z"
+	afterNow  = "2015-12-01T01:54:10Z"
 	zeroTime  = "0001-01-01T00:00:00Z"
 )
 

@@ -202,12 +202,15 @@ func TestParseResponseChecksAssertionOnlySignature(t *testing.T) {
 	now := later.UTC().Format(time.RFC3339)
 	far := later.Add(100 * time.Hour).UTC().Format(time.RFC3339)
 
-	root.CreateAttr("IssueInstant", now)
-
 	unsigned, err := doc.WriteToString()
 	assert.NilError(t, err)
 
 	_, err = test.SP.ParseXMLResponse([]byte(unsigned), []string{"id-request"}, test.SP.AcsURL)
+	assert.NilError(t, err)
+
+	root.CreateAttr("IssueInstant", now)
+
+	unsigned, err = doc.WriteToString()
 	assert.NilError(t, err)
 
 	TimeNow = func() time.Time { return later }
@@ -291,7 +294,7 @@ func TestParseResponseRejectsDeclarationUsedOnlyInSignature(t *testing.T) {
 
 	var invalid *InvalidResponseError
 	assert.Assert(t, errors.As(err, &invalid), "got %v", err)
-	assert.Check(t, is.ErrorContains(invalid.PrivateErr, "response IssueInstant expired"))
+	assert.Check(t, is.ErrorContains(invalid.PrivateErr, "response expired"))
 }
 
 // logoutResponseWithDeclarationUsedInSignature returns a signed response for another destination,

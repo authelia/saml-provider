@@ -581,8 +581,9 @@ func TestMetadataResolverKeepsTheLastGoodCopyUntilItExpires(t *testing.T) {
 				rt.clock.Advance(time.Hour)
 			}
 
-			// 8 hours have passed. One second before the validUntil it is served, and at the validUntil it is not.
-			rt.clock.Advance(16*time.Hour - time.Second)
+			// 8 hours have passed. It is served until MaxClockSkew after the validUntil (SAML2Int SDP-G01): one
+			// second before that it is, and at that instant it is not.
+			rt.clock.Advance(16*time.Hour + MaxClockSkew - time.Second)
 			isServed(t, resolver, sp1)
 
 			rt.clock.Advance(time.Second)
@@ -765,15 +766,28 @@ func TestMetadataResolverValidity(t *testing.T) {
 			err:   "metadata has no validUntil",
 		},
 		"validUntil in the past": {
-			attrs: func(rt *resolverTest) string { return rt.in(-time.Second) },
+			attrs: func(rt *resolverTest) string { return rt.in(-time.Hour) },
 			err:   "metadata has expired",
+		},
+		// SAML2Int SDP-G01: the clock of the publisher may be MaxClockSkew behind or ahead.
+		"validUntil the clock skew ago": {
+			attrs: func(rt *resolverTest) string { return rt.in(-MaxClockSkew) },
+			err:   "metadata has expired",
+		},
+		"validUntil within the clock skew": {
+			attrs: func(rt *resolverTest) string { return rt.in(-MaxClockSkew + time.Second) },
 		},
 		"validUntil now": {
 			attrs: func(rt *resolverTest) string { return rt.in(0) },
-			err:   "metadata has expired",
 		},
-		"validUntil beyond the default": {
-			attrs: func(rt *resolverTest) string { return rt.in(14*day + time.Second) },
+		"validUntil at the default": {
+			attrs: func(rt *resolverTest) string { return rt.in(14 * day) },
+		},
+		"validUntil beyond the default, within the clock skew": {
+			attrs: func(rt *resolverTest) string { return rt.in(14*day + MaxClockSkew) },
+		},
+		"validUntil beyond the default and the clock skew": {
+			attrs: func(rt *resolverTest) string { return rt.in(14*day + MaxClockSkew + time.Second) },
 			err:   "metadata is valid for longer than 336h0m0s",
 		},
 		"validUntil beyond MaxValidity": {
@@ -794,7 +808,7 @@ func TestMetadataResolverValidity(t *testing.T) {
 			source: MetadataSource{AllowMissingValidUntil: true},
 		},
 		"validUntil in the past, with AllowMissingValidUntil": {
-			attrs:  func(rt *resolverTest) string { return rt.in(-time.Second) },
+			attrs:  func(rt *resolverTest) string { return rt.in(-MaxClockSkew) },
 			source: MetadataSource{AllowMissingValidUntil: true},
 			err:    "metadata has expired",
 		},
@@ -929,7 +943,7 @@ func TestMetadataResolverSourcesInOrder(t *testing.T) {
 	isNotExist(t, resolver, sp3)
 
 	// When the first has expired, the second is what is left.
-	rt.clock.Advance(time.Hour)
+	rt.clock.Advance(time.Hour + MaxClockSkew)
 	isNotExist(t, resolver, sp1)
 	assert.Check(t, is.Equal(sp2+"/acs", acs()))
 	isServed(t, resolver, "https://local.example.org")
@@ -1257,7 +1271,7 @@ func TestMetadataResolverAsTheProviderOfAnIdentityProvider(t *testing.T) {
 	_, err = test.IDP.serviceProvider(httptest.NewRequest(http.MethodGet, "/", nil), sp2)
 	assert.Check(t, errors.Is(err, os.ErrNotExist))
 
-	rt.clock.Advance(time.Hour)
+	rt.clock.Advance(time.Hour + MaxClockSkew)
 
 	_, err = test.IDP.serviceProvider(httptest.NewRequest(http.MethodGet, "/", nil), sp1)
 	assert.Check(t, errors.Is(err, os.ErrNotExist))
@@ -1277,6 +1291,6 @@ func TestMetadataResolverDefaultClockFollowsTimeNow(t *testing.T) {
 	isServed(t, resolver, sp1)
 	assert.Check(t, resolver.Status()[0].LastSuccess.Equal(rt.clock.Now()))
 
-	rt.clock.Advance(time.Hour)
+	rt.clock.Advance(time.Hour + MaxClockSkew)
 	isNotExist(t, resolver, sp1)
 }

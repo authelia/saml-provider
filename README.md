@@ -165,7 +165,7 @@ without acting on it. See **`Scoping` and `ProxyRestriction`** below.
 
     | Requirement                   | Status     | Notes                                                                 |
     |:------------------------------|:-----------|:----------------------------------------------------------------------|
-    | SDP-G01 clock skew            | Default    | `MaxClockSkew` is three minutes, and is allowed for `NotBefore`, a `NotOnOrAfter` and an `IssueInstant` in the future. The oldest request accepted (`MaxIssueDelay`, `MaxAuthnRequestAge`) is not extended by it |
+    | SDP-G01 clock skew            | Default    | `MaxClockSkew` is three minutes, and is allowed for in either direction on every time that an SP or a metadata publisher states: an `IssueInstant` (with `MaxIssueDelay` or `MaxAuthnRequestAge`), the `NotOnOrAfter` of a `LogoutRequest`, and the `validUntil` of metadata, also against `MaxValidity`. It is not held to the three to five minutes of the profile |
     | SDP-G02 256 characters        | Deployment | Not checked for a `NameID` or attribute value of the `Session`; what the IdP generates is shorter |
     | SDP-G03 no DTD                | Enforced   | No message the IdP makes has one                                      |
     | SDP-G04 entity ID             | Enforced   | See **Entity ID**                                                     |
@@ -575,8 +575,20 @@ without acting on it. See **`Scoping` and `ProxyRestriction`** below.
   `IdentityProvider.AssertionLifetime` after, which defaults to `MaxIssueDelay` and sets both the `Conditions` and the
   bearer `SubjectConfirmationData` `NotOnOrAfter`. It is independent of `IdentityProvider.MaxAuthnRequestAge`, the
   oldest `AuthnRequest` accepted, which also defaults to `MaxIssueDelay`. A `LogoutRequest` older than `MaxIssueDelay`
-  is refused, and so is one that is `MaxClockSkew` or more past its `NotOnOrAfter` (SAML2Int SDP-G01). `MaxClockSkew`
-  defaults to three minutes, and SDP-G01 requires it to be between three and five.
+  is refused, and so is one that is past its `NotOnOrAfter`.
+- **Clock skew:** `MaxClockSkew` is how far the clock of another party may be behind or ahead, and is allowed for in
+  the same way wherever a time that another party stated is checked, by the IdP and by the SP (SAML2Int SDP-G01). A
+  time is valid from `MaxClockSkew` before its `NotBefore`, inclusive, until `MaxClockSkew` after its `NotOnOrAfter`,
+  exclusive. An `IssueInstant` with a maximum age is the validity period from the `IssueInstant` to the maximum age
+  after it, so a message is accepted from `MaxClockSkew` before its `IssueInstant` until `MaxIssueDelay` (or
+  `MaxAuthnRequestAge`) and `MaxClockSkew` after it: with the defaults, an `AuthnRequest` is accepted for four and a
+  half minutes after it was issued, where it was 90 seconds, and the SP now refuses a `Response` or an assertion
+  whose `IssueInstant` is more than `MaxClockSkew` in the future. A `validUntil` of metadata has passed
+  `MaxClockSkew` after it, and is too far ahead when it is more than `MaxValidity` and `MaxClockSkew` ahead. The ID
+  of a request stays in the `ReplayStore` for `MaxClockSkew` longer than the request is accepted. `MaxClockSkew`
+  defaults to three minutes. SDP-G01 requires between three and five, and the value is not held to that: zero makes
+  every check exact, and a deployment may need more, but outside the range it is outside the profile. The validity
+  of an X.509 certificate is not a time of this kind, and is checked as before.
 - **`SessionNotOnOrAfter`:** only stated when `IdentityProvider.IncludeSessionNotOnOrAfter` is set, as
   `Session.ExpireTime`, and omitted if that is zero. An SP that honours it ends its session when the IdP's ends. With
   it set, `DefaultAssertionMaker` refuses a session that has already expired. `samlsp` does not honour it.
@@ -763,7 +775,9 @@ without acting on it. See **`Scoping` and `ProxyRestriction`** below.
       is `AllowUnsigned`, which requires an https URL, as the certificate of the server is then all that
       authenticates the metadata. A `File` needs no signature, and is verified if it has a `Verifier`.
     - **Validity (SDP-MD03):** metadata whose root element has no `validUntil`, one that has passed, or one further
-      ahead than `MetadataSource.MaxValidity` is refused, from a URL and from a file. `MaxValidity` defaults to 14
+      ahead than `MetadataSource.MaxValidity` is refused, from a URL and from a file. `MaxClockSkew` is allowed for
+      in both directions (SDP-G01), so a `validUntil` has passed three minutes after it, and a publisher whose
+      clock is ahead may state exactly `MaxValidity`. `MaxValidity` defaults to 14
       days (`DefaultMetadataMaxValidity`), which is what large federations publish and is how long a key that was
       withdrawn can still be used by replaying old metadata. `AllowMissingValidUntil` accepts metadata with no
       `validUntil`, against SDP-MD03, for the metadata of a service provider that is maintained by hand; it then
@@ -777,14 +791,13 @@ without acting on it. See **`Scoping` and `ProxyRestriction`** below.
       in a row up to the maximum. Requests are conditional (`If-None-Match`, `If-Modified-Since`), and a 304 keeps
       the copy and its `validUntil`. A file is read again when its modification time or size has changed.
     - **Failure:** when a refresh fails, for the network, the signature, the validity or the content, the last
-      copy that was accepted is served until its `validUntil` passes, and then nothing is. A document with no
+      copy that was accepted is served until `MaxClockSkew` after its `validUntil`, and then nothing is. A document with no
       service provider in it is a failure.
     - **Bounds:** `MaxSize` (128 MiB) limits the document that is read, and `FetchTimeout` (1 minute) the whole
       request. `HTTPClient` makes the requests, and decides about redirects and which servers are trusted. `Clock`
       is a `clockwork.Clock` for tests; without it the time is that of `TimeNow`.
     - **Not supported:** the Metadata Query Protocol (MDQ), where the metadata of each entity is fetched when it is
-      first needed, and keeping the cache across a restart. The tolerance of three to five minutes for clock skew
-      that SDP-G01 asks for on `validUntil` isn't applied to metadata, here or elsewhere in the IdP.
+      first needed, and keeping the cache across a restart.
     - `samlidp.Options.ServiceProviderProvider` takes a resolver for the service providers that aren't registered
       with the demo IdP.
 - **Accepted signature algorithms:** `IdentityProvider.SignatureMethods` and `DigestMethods` list the identifiers of

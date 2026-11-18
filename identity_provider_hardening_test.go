@@ -135,7 +135,8 @@ func TestIDPValidateIssueInstantBounds(t *testing.T) {
 		{name: "beyond the skew limit", offset: MaxClockSkew + time.Second, errMsg: "in the future"},
 		{name: "far future", offset: 24 * 365 * 20 * time.Hour, errMsg: "in the future"},
 		{name: "at the age limit", offset: -MaxIssueDelay},
-		{name: "beyond the age limit", offset: -MaxIssueDelay - time.Second, errMsg: "expired"},
+		{name: "beyond the age limit, within the clock skew", offset: -MaxIssueDelay - MaxClockSkew + time.Second},
+		{name: "beyond the age limit and the clock skew", offset: -MaxIssueDelay - MaxClockSkew, errMsg: "expired"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			_, err := hardeningValidate(test, hardeningRequest(`ID="id-1"`, TimeNow().Add(tc.offset), hardeningIssuer))
@@ -318,7 +319,7 @@ func TestNewIdpAuthnRequestLimitsPostBody(t *testing.T) {
 
 func TestIDPMaxAuthnRequestAge(t *testing.T) {
 	test := NewIdentityProviderTest(t, applyKey)
-	old := hardeningRequest(`ID="id-1"`, TimeNow().Add(-4*time.Minute), hardeningIssuer)
+	old := hardeningRequest(`ID="id-1"`, TimeNow().Add(-3*time.Minute-MaxClockSkew), hardeningIssuer)
 
 	_, err := hardeningValidate(test, old)
 	assert.Check(t, is.ErrorContains(err, "expired"), "the default age limit is MaxIssueDelay")

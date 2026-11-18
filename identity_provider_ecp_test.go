@@ -629,7 +629,7 @@ func TestServeECPRequestStatuses(t *testing.T) {
 		},
 		{
 			name:    "expired",
-			request: func(r *AuthnRequest) { r.IssueInstant = TimeNow().Add(-2 * MaxIssueDelay) },
+			request: func(r *AuthnRequest) { r.IssueInstant = TimeNow().Add(-MaxIssueDelay - MaxClockSkew) },
 			top:     StatusRequester, second: StatusRequestDenied,
 		},
 		{

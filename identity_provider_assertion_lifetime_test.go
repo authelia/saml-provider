@@ -58,7 +58,7 @@ func TestIDPAssertionLifetimeNegative(t *testing.T) {
 func TestIDPAssertionLifetimeDoesNotChangeRequestAge(t *testing.T) {
 	test := NewIdentityProviderTest(t, applyKey)
 	test.IDP.AssertionLifetime = 10 * time.Minute
-	old := hardeningRequest(`ID="id-1"`, TimeNow().Add(-MaxIssueDelay-time.Second), hardeningIssuer)
+	old := hardeningRequest(`ID="id-1"`, TimeNow().Add(-MaxIssueDelay-MaxClockSkew), hardeningIssuer)
 
 	_, err := hardeningValidate(test, old)
 	assert.Check(t, is.ErrorContains(err, "expired"), "MaxAuthnRequestAge must not default to AssertionLifetime")

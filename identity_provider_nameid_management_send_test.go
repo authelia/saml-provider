@@ -7,7 +7,6 @@ import (
 	"strings"
 	"sync"
 	"testing"
-	"time"
 
 	"github.com/beevik/etree"
 	"gotest.tools/assert"
@@ -317,7 +316,7 @@ func TestSendManageNameIDRequestInvalidResponse(t *testing.T) {
 		},
 		"expired": {
 			respond: func(_ http.ResponseWriter, response *ManageNameIDResponse) bool {
-				response.IssueInstant = TimeNow().Add(-MaxIssueDelay - time.Second)
+				response.IssueInstant = TimeNow().Add(-MaxIssueDelay - MaxClockSkew)
 
 				return true
 			},

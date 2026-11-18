@@ -110,7 +110,7 @@ func TestLogoutResponseRejects(t *testing.T) {
 		{name: "no issuer", mutate: func(r *LogoutResponse) { r.Issuer = nil }, expected: "response is not from the service provider that was sent the logout request", uncorrelated: true},
 		{name: "unrelated with version 1.0", mutate: func(r *LogoutResponse) { r.InResponseTo, r.Version = "id-other", "1.0" }, expected: "response is not to the outstanding logout request", uncorrelated: true},
 		{name: "wrong destination", mutate: func(r *LogoutResponse) { r.Destination = "https://idp.example.com/other" }, expected: `not "https://idp.example.com/other"`},
-		{name: "expired", mutate: func(r *LogoutResponse) { r.IssueInstant = r.IssueInstant.Add(-MaxIssueDelay - time.Minute) }, expected: "response expired at"},
+		{name: "expired", mutate: func(r *LogoutResponse) { r.IssueInstant = r.IssueInstant.Add(-MaxIssueDelay - MaxClockSkew) }, expected: "response expired at"},
 		{name: "in the future", mutate: func(r *LogoutResponse) { r.IssueInstant = r.IssueInstant.Add(MaxClockSkew + time.Minute) }, expected: "response issued in the future"},
 		{name: "version 1.0", mutate: func(r *LogoutResponse) { r.Version = "1.0" }, expected: "expected SAML response version 2.0 got 1.0"},
 		{name: "no outstanding request", state: func(s *LogoutState) { s.Current = -1 }, expected: "there is no outstanding logout request", uncorrelated: true},

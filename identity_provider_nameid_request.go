@@ -78,14 +78,8 @@ func (h protocolRequestHeader) checkRequestStage(now time.Time, endpoint string)
 		return statusErr
 	}
 
-	if h.IssueInstant.Add(MaxIssueDelay).Before(now) {
-		return &statusError{StatusRequester, StatusRequestDenied,
-			fmt.Errorf("request expired at %s", h.IssueInstant.Add(MaxIssueDelay))}
-	}
-
-	if h.IssueInstant.After(now.Add(MaxClockSkew)) {
-		return &statusError{StatusRequester, StatusRequestDenied,
-			fmt.Errorf("request issued in the future at %s", h.IssueInstant)}
+	if err := checkIssueInstant("request", h.IssueInstant, now, MaxIssueDelay); err != nil {
+		return &statusError{StatusRequester, StatusRequestDenied, err}
 	}
 
 	// SAMLBind §3.4.5.2 and §3.5.5.2 require the Destination of a signed message on the front channel, which
@@ -462,8 +456,8 @@ func errorStatus(err error) Status {
 
 // checkReplay consumes the ID of the request in the ReplayStore of idp, for the kind of the message. It must be
 // the last check of the request, once it is verified, so that only a registered service provider can add to the
-// store. The ID is recorded until the request would be refused for its age, which is MaxIssueDelay after its
-// IssueInstant, and MaxClockSkew longer. The error is a *statusError, as IdentityProvider.checkReplay describes.
+// store. The ID is recorded until the request would be refused for its age, which is MaxIssueDelay and
+// MaxClockSkew after its IssueInstant, and MaxClockSkew longer. The error is a *statusError, as IdentityProvider.checkReplay describes.
 func (h protocolRequestHeader) checkReplay(idp *IdentityProvider, r *http.Request, kind string) error {
 	return idp.checkReplay(requestContext(r), kind, h.Issuer.Value, h.ID, h.IssueInstant.Add(MaxIssueDelay))
 }

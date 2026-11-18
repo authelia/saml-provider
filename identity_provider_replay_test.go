@@ -555,7 +555,7 @@ func TestServeSSORecordsRequestUntilItExpires(t *testing.T) {
 			}
 
 			assert.Assert(t, is.Equal(store.calls(), 1))
-			assert.Check(t, store.expiries[0].Equal(issued.Add(maxAge).Add(MaxClockSkew)), "expires %s", store.expiries[0])
+			assert.Check(t, store.expiries[0].Equal(issued.Add(maxAge).Add(2*MaxClockSkew)), "expires %s", store.expiries[0])
 			assert.Check(t, is.Equal(store.contexts[0].Value(replayTestContextKey{}), "value"))
 			assert.Check(t, is.Equal(store.keys[0], replayKey(replayKindAuthnRequest,
 				test.IDP.MetadataURL.String(), test.SP.MetadataURL.String(), authnRequestID(t, body))))
@@ -815,7 +815,7 @@ func TestLogoutRecordsRequestUntilItExpires(t *testing.T) {
 			assertLogoutStatus(t, soapLogoutResponse(t, serveSOAPLogout(test, r)), StatusSuccess, "")
 
 			assert.Assert(t, is.Equal(store.calls(), 1))
-			assert.Check(t, store.expiries[0].Equal(issued.Add(tc.expires).Add(MaxClockSkew)), "expires %s", store.expiries[0])
+			assert.Check(t, store.expiries[0].Equal(issued.Add(tc.expires).Add(2*MaxClockSkew)), "expires %s", store.expiries[0])
 			assert.Check(t, is.Equal(store.keys[0], replayKey(replayKindLogoutRequest,
 				test.IDP.MetadataURL.String(), test.SP.MetadataURL.String(), id)))
 		})

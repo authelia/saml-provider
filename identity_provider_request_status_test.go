@@ -84,7 +84,7 @@ func TestServeSSOVersionMismatch(t *testing.T) {
 
 func TestServeSSOExpiredRequestDenied(t *testing.T) {
 	test := NewIdentityProviderTest(t, applyKey)
-	w, id := serveSSOModified(t, test, func(r *AuthnRequest) { r.IssueInstant = TimeNow().Add(-2 * MaxIssueDelay) })
+	w, id := serveSSOModified(t, test, func(r *AuthnRequest) { r.IssueInstant = TimeNow().Add(-MaxIssueDelay - MaxClockSkew) })
 	assertRequestStatus(t, w, id, StatusRequester, StatusRequestDenied)
 }
 

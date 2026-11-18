@@ -150,15 +150,7 @@ func (resp *IdpLogoutResponse) checkResponse(state *LogoutState, entityID string
 		return fmt.Errorf("expected destination to be %q, not %q", resp.IDP.LogoutURL.String(), resp.Response.Destination)
 	}
 
-	if resp.Response.IssueInstant.Add(MaxIssueDelay).Before(resp.Now) {
-		return fmt.Errorf("response expired at %s", resp.Response.IssueInstant.Add(MaxIssueDelay))
-	}
-
-	if resp.Response.IssueInstant.After(resp.Now.Add(MaxClockSkew)) {
-		return fmt.Errorf("response issued in the future at %s", resp.Response.IssueInstant)
-	}
-
-	return nil
+	return checkIssueInstant("response", resp.Response.IssueInstant, resp.Now, MaxIssueDelay)
 }
 
 // verifySignature verifies the signature of the response, which is required except on SOAP when the response comes
