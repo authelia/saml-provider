@@ -1,7 +1,6 @@
 package saml
 
 import (
-	"bytes"
 	"encoding/xml"
 	"errors"
 	"fmt"
@@ -11,7 +10,8 @@ import (
 	"os"
 
 	"github.com/beevik/etree"
-	xrv "github.com/mattermost/xml-roundtrip-validator"
+
+	"authelia.com/provider/saml/internal/xmlrv"
 )
 
 const (
@@ -55,10 +55,10 @@ type soapRequest struct {
 	Message  *etree.Element   // Root of Body re-parsed.
 }
 
-// parseSOAPEnvelope validates buf with xrv, parses it, checks the Envelope and Body, and returns the envelope
+// parseSOAPEnvelope validates buf with xmlrv, parses it, checks the Envelope and Body, and returns the envelope
 // document, the header blocks, and the one Body child detached with its in-scope namespaces.
 func parseSOAPEnvelope(buf []byte) (*etree.Document, []*etree.Element, *etree.Element, error) {
-	if err := xrv.Validate(bytes.NewReader(buf)); err != nil {
+	if err := xmlrv.Validate(buf); err != nil {
 		return nil, nil, nil, errSOAPNotXML
 	}
 

@@ -12,9 +12,9 @@ import (
 	"time"
 
 	"github.com/beevik/etree"
-	xrv "github.com/mattermost/xml-roundtrip-validator"
 
 	"authelia.com/provider/saml/internal/dsig"
+	"authelia.com/provider/saml/internal/xmlrv"
 )
 
 // ErrPartialLogout is returned by LogoutSessionProvider.TerminateSession when the session at the
@@ -740,7 +740,7 @@ func (req *IdpLogoutRequest) Validate() error {
 		return ErrMalformedRequest.WithDebugError(err)
 	}
 
-	if err := xrv.Validate(bytes.NewReader(req.RequestBuffer)); err != nil {
+	if err := xmlrv.Validate(req.RequestBuffer); err != nil {
 		return ErrMalformedRequest.WithDebugError(err)
 	}
 	//nolint:gosec // G709: the size is limited and the XML validated above, as for an AuthnRequest, into a fixed type.

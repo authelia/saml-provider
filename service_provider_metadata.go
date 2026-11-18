@@ -1,7 +1,6 @@
 package saml
 
 import (
-	"bytes"
 	"encoding/xml"
 	"errors"
 	"fmt"
@@ -10,7 +9,7 @@ import (
 	"slices"
 	"time"
 
-	xrv "github.com/mattermost/xml-roundtrip-validator"
+	"authelia.com/provider/saml/internal/xmlrv"
 )
 
 // CurrentMetadata returns metadata without the service provider descriptors whose validUntil has
@@ -77,7 +76,7 @@ func ParseServiceProviderMetadata(data []byte) (*EntityDescriptor, error) {
 // earliest validUntil of the groups around it, SAMLMeta §2.3.1. Metadata from a source that doesn't authenticate it
 // must be verified with a MetadataVerifier first, and the XML that it returns parsed.
 func ParseServiceProvidersMetadata(data []byte) ([]*EntityDescriptor, error) {
-	if err := xrv.Validate(bytes.NewBuffer(data)); err != nil {
+	if err := xmlrv.Validate(data); err != nil {
 		return nil, err
 	}
 

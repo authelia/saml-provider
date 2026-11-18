@@ -31,9 +31,9 @@ import (
 	"unsafe"
 
 	"github.com/beevik/etree"
-	xrv "github.com/mattermost/xml-roundtrip-validator"
 
 	"authelia.com/provider/saml/internal/dsig"
+	"authelia.com/provider/saml/internal/xmlrv"
 )
 
 // maxAuthnRequestSize is the largest decoded AuthnRequest that the identity provider will process.
@@ -1871,7 +1871,7 @@ func (req *IdpAuthnRequest) Validate() error {
 		return ErrMalformedRequest.WithDebugError(err)
 	}
 
-	if err := xrv.Validate(bytes.NewReader(req.RequestBuffer)); err != nil {
+	if err := xmlrv.Validate(req.RequestBuffer); err != nil {
 		return ErrMalformedRequest.WithDebugError(err)
 	}
 

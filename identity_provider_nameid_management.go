@@ -1,7 +1,6 @@
 package saml
 
 import (
-	"bytes"
 	"encoding/xml"
 	"errors"
 	"fmt"
@@ -10,7 +9,8 @@ import (
 	"unicode/utf8"
 
 	"github.com/beevik/etree"
-	xrv "github.com/mattermost/xml-roundtrip-validator"
+
+	"authelia.com/provider/saml/internal/xmlrv"
 )
 
 // maxSPProvidedIDLength is the longest NewID, in characters, that a service provider may register as its
@@ -222,7 +222,7 @@ func (req *IdpManageNameIDRequest) Validate() error {
 		return ErrMalformedRequest.WithDebugError(err)
 	}
 
-	if err := xrv.Validate(bytes.NewReader(req.RequestBuffer)); err != nil {
+	if err := xmlrv.Validate(req.RequestBuffer); err != nil {
 		return ErrMalformedRequest.WithDebugError(err)
 	}
 

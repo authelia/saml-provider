@@ -1,7 +1,6 @@
 package saml
 
 import (
-	"bytes"
 	"encoding/xml"
 	"errors"
 	"fmt"
@@ -11,7 +10,8 @@ import (
 	"time"
 
 	"github.com/beevik/etree"
-	xrv "github.com/mattermost/xml-roundtrip-validator"
+
+	"authelia.com/provider/saml/internal/xmlrv"
 )
 
 // NameIDMappingProvider is an optional interface of a NameIDProvider, which is required to serve a
@@ -137,7 +137,7 @@ func (req *IdpNameIDMappingRequest) Validate() error {
 		return ErrMalformedRequest.WithDebugError(err)
 	}
 
-	if err := xrv.Validate(bytes.NewReader(req.RequestBuffer)); err != nil {
+	if err := xmlrv.Validate(req.RequestBuffer); err != nil {
 		return ErrMalformedRequest.WithDebugError(err)
 	}
 

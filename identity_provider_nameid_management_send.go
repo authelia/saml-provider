@@ -1,7 +1,6 @@
 package saml
 
 import (
-	"bytes"
 	"encoding/xml"
 	"errors"
 	"fmt"
@@ -9,7 +8,8 @@ import (
 	"time"
 
 	"github.com/beevik/etree"
-	xrv "github.com/mattermost/xml-roundtrip-validator"
+
+	"authelia.com/provider/saml/internal/xmlrv"
 )
 
 // NameIDChange is a change to the identifier of a principal that the identity provider tells a service provider
@@ -210,7 +210,7 @@ func validateManageNameIDResponse(buf []byte, overTLS bool, requestID string, me
 		return nil, err
 	}
 
-	if err := xrv.Validate(bytes.NewReader(buf)); err != nil {
+	if err := xmlrv.Validate(buf); err != nil {
 		return nil, err
 	}
 

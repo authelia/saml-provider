@@ -1,7 +1,6 @@
 package saml
 
 import (
-	"bytes"
 	"crypto/x509"
 	"encoding/xml"
 	"errors"
@@ -9,9 +8,9 @@ import (
 	"time"
 
 	"github.com/beevik/etree"
-	xrv "github.com/mattermost/xml-roundtrip-validator"
 
 	"authelia.com/provider/saml/internal/dsig"
+	"authelia.com/provider/saml/internal/xmlrv"
 )
 
 // metadataNamespace is the namespace of the elements of SAML metadata.
@@ -106,7 +105,7 @@ func (v *MetadataVerifier) Verify(data []byte) ([]byte, error) {
 		return nil, err
 	}
 
-	if err := xrv.Validate(bytes.NewReader(data)); err != nil {
+	if err := xmlrv.Validate(data); err != nil {
 		return nil, err
 	}
 

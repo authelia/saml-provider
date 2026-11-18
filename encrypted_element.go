@@ -13,8 +13,8 @@ import (
 	"strings"
 
 	"github.com/beevik/etree"
-	xrv "github.com/mattermost/xml-roundtrip-validator"
 
+	"authelia.com/provider/saml/internal/xmlrv"
 	"authelia.com/provider/saml/xmlenc"
 )
 
@@ -176,7 +176,7 @@ func (d elementDecrypter) decrypt(encryptedEl *etree.Element) (*etree.Element, e
 		return nil, err
 	}
 
-	if err := xrv.Validate(bytes.NewReader(plaintext)); err != nil {
+	if err := xmlrv.Validate(plaintext); err != nil {
 		return nil, fmt.Errorf("plaintext response contains invalid XML: %s", err)
 	}
 
