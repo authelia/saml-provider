@@ -1,6 +1,8 @@
 package saml
 
 import (
+	"crypto/ecdsa"
+	"crypto/ed25519"
 	"crypto/elliptic"
 	"crypto/rsa"
 	"encoding/base64"
@@ -225,14 +227,17 @@ func TestIDPEnforcerRefusesKeyValueKey(t *testing.T) {
 	}
 }
 
-// The enforcer is given the key, so one that is built without it is refused rather than let through.
-func TestDefaultEncryptionKeyEnforcerRequiresRSAKey(t *testing.T) {
+// The enforcer is given the key, so one that is built without it is refused rather than let through, as is a key
+// that is neither RSA nor elliptic curve. An elliptic curve key in a certificate with no key is read from it.
+func TestDefaultEncryptionKeyEnforcerRequiresKey(t *testing.T) {
 	_, ecdsaCert := newECDSATestKey(t, elliptic.P256())
 	req := &IdpAuthnRequest{Now: ecdsaCert.NotBefore}
 	enforcer := DefaultEncryptionKeyEnforcer{IgnoreValidityPeriod: true}
 
-	assert.Check(t, is.ErrorContains(enforcer.EnforceEncryptionKey(req, ServiceProviderEncryptionKey{}), "not an RSA public key"))
-	assert.Check(t, is.ErrorContains(enforcer.EnforceEncryptionKey(req, ServiceProviderEncryptionKey{Certificate: ecdsaCert}), "not an RSA public key"))
+	assert.Check(t, is.ErrorContains(enforcer.EnforceEncryptionKey(req, ServiceProviderEncryptionKey{}), "neither an RSA nor an elliptic curve"))
+	assert.Check(t, is.ErrorContains(enforcer.EnforceEncryptionKey(req, ServiceProviderEncryptionKey{PublicKey: ed25519.PublicKey(make([]byte, ed25519.PublicKeySize))}), "neither an RSA nor an elliptic curve"))
+	assert.Check(t, enforcer.EnforceEncryptionKey(req, ServiceProviderEncryptionKey{Certificate: ecdsaCert}))
+	assert.Check(t, is.ErrorContains(enforcer.EnforceEncryptionKey(req, ServiceProviderEncryptionKey{PublicKey: (*ecdsa.PublicKey)(nil)}), "not an elliptic curve public key"))
 }
 
 const (
@@ -297,11 +302,15 @@ func TestIDPEncryptionKeySelection(t *testing.T) {
 	wrapped := "\n\t  " + certData[:64] + "\n  " + certData[64:] + "\r\n "
 	ecData := base64.StdEncoding.EncodeToString(ecdsaCert.Raw)
 
+	_, p224Cert := newECDSATestKey(t, elliptic.P224())
+	p224Data := base64.StdEncoding.EncodeToString(p224Cert.Raw)
+
 	const (
 		failClosed = "fail closed"
 		plaintext  = "plaintext"
 		broken     = "broken"
 		toCert     = "certificate"
+		toECCert   = "elliptic curve certificate"
 		toKeyValue = "key value"
 	)
 
@@ -356,7 +365,7 @@ func TestIDPEncryptionKeySelection(t *testing.T) {
 			{Use: "encryption", KeyInfo: KeyInfo{KeyValues: []KeyValue{{RSAKeyValue: &RSAKeyValue{Modulus: NewRSAKeyValue(certKey).RSAKeyValue.Modulus}}}}},
 		}, want: broken},
 
-		// Only RSA key transport is supported, and a name is not a key.
+		// A key value is only read as an RSAKeyValue, and a name is not a key.
 		{name: "EC key value for encryption", descriptors: []KeyDescriptor{parsed(keyValueTestECKeyDescriptor, "encryption")}, want: failClosed},
 		{name: "EC key value with no use", descriptors: []KeyDescriptor{parsed(keyValueTestECKeyDescriptor, "")}, want: failClosed},
 		{name: "EC key value for signing only", descriptors: []KeyDescriptor{parsed(keyValueTestECKeyDescriptor, "signing")}, want: plaintext},
@@ -368,8 +377,14 @@ func TestIDPEncryptionKeySelection(t *testing.T) {
 		{name: "key name for encryption and a signing certificate", descriptors: []KeyDescriptor{parsed(keyValueTestKeyNameDescriptor, "encryption"), withCerts("signing", certData)}, want: failClosed},
 		{name: "EC key value then certificate", descriptors: []KeyDescriptor{parsed(keyValueTestECKeyDescriptor, "encryption"), withCerts("encryption", certData)}, want: toCert},
 		{name: "EC key value then RSA key value", descriptors: []KeyDescriptor{parsed(keyValueTestECKeyDescriptor, "encryption"), withKeyValue("", &rsa2048.PublicKey)}, want: toKeyValue, key: &rsa2048.PublicKey},
-		{name: "EC certificate", descriptors: []KeyDescriptor{withCerts("encryption", ecData)}, want: failClosed},
-		{name: "EC certificate then RSA certificate", descriptors: []KeyDescriptor{withCerts("encryption", ecData), withCerts("encryption", certData)}, want: toCert},
+
+		// An elliptic curve key on P-256, P-384 or P-521 is agreed with by ECDH-ES, and one on another curve is not
+		// a key that can be encrypted to.
+		{name: "EC certificate", descriptors: []KeyDescriptor{withCerts("encryption", ecData)}, want: toECCert},
+		{name: "EC certificate with no use", descriptors: []KeyDescriptor{withCerts("", ecData)}, want: toECCert},
+		{name: "EC certificate then RSA certificate", descriptors: []KeyDescriptor{withCerts("encryption", ecData), withCerts("encryption", certData)}, want: toECCert},
+		{name: "P-224 certificate", descriptors: []KeyDescriptor{withCerts("encryption", p224Data)}, want: failClosed},
+		{name: "P-224 certificate then RSA certificate", descriptors: []KeyDescriptor{withCerts("encryption", p224Data), withCerts("encryption", certData)}, want: toCert},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			descriptor := SPSSODescriptor{SSODescriptor: SSODescriptor{RoleDescriptor: RoleDescriptor{KeyDescriptors: tc.descriptors}}}
@@ -387,6 +402,11 @@ func TestIDPEncryptionKeySelection(t *testing.T) {
 				assert.NilError(t, err)
 				assert.Check(t, test.SPCertificate.Equal(key.Certificate))
 				assert.Check(t, certKey.Equal(key.PublicKey))
+				assert.Check(t, req.spEncryptionKeyDescriptor() != nil)
+			case toECCert:
+				assert.NilError(t, err)
+				assert.Check(t, ecdsaCert.Equal(key.Certificate))
+				assert.Check(t, ecdsaCert.PublicKey.(*ecdsa.PublicKey).Equal(key.PublicKey))
 				assert.Check(t, req.spEncryptionKeyDescriptor() != nil)
 			case toKeyValue:
 				assert.NilError(t, err)

@@ -16,6 +16,7 @@ import (
 	is "gotest.tools/assert/cmp"
 
 	"authelia.com/provider/saml/internal/dsig"
+	"authelia.com/provider/saml/xmlenc"
 )
 
 // signedRedirectQuery splits a signed redirect query into what was signed and the decoded signature.
@@ -139,8 +140,10 @@ func TestIDPSendsPlaintextAssertionToSPWithECDSACertificate(t *testing.T) {
 	assert.Check(t, err == os.ErrNotExist, "expected os.ErrNotExist, got %v", err)
 }
 
-func TestIDPRejectsSPOfferingECDSACertificateForEncryption(t *testing.T) {
-	_, ecdsaCert := newECDSATestKey(t, elliptic.P256())
+// An SP that offers an elliptic curve key for encryption is sent an assertion encrypted to it by ECDH-ES, which
+// its private key decrypts.
+func TestIDPEncryptsToSPOfferingECDSACertificate(t *testing.T) {
+	key, ecdsaCert := newECDSATestKey(t, elliptic.P256())
 	for _, use := range []string{"encryption", ""} {
 		t.Run("use="+use, func(t *testing.T) {
 			test := NewIdentityProviderTest(t, applyKey)
@@ -151,7 +154,20 @@ func TestIDPRejectsSPOfferingECDSACertificateForEncryption(t *testing.T) {
 			descriptor := KeyDescriptor{Use: use}
 			descriptor.KeyInfo.X509Data.X509Certificates = []X509Certificate{{Data: base64.StdEncoding.EncodeToString(ecdsaCert.Raw)}}
 			req.SPSSODescriptor.KeyDescriptors = []KeyDescriptor{descriptor}
-			assert.Check(t, is.ErrorContains(req.MakeAssertionEl(), "RSA public key"))
+			assert.NilError(t, req.MakeAssertionEl())
+			assert.Assert(t, is.Equal(req.AssertionEl.Tag, "EncryptedAssertion"))
+
+			encryptedData := req.AssertionEl.FindElement("./EncryptedData")
+			assert.Assert(t, encryptedData != nil)
+
+			agreement := encryptedData.FindElement("./KeyInfo/EncryptedKey/KeyInfo/AgreementMethod")
+			assert.Assert(t, agreement != nil)
+			assert.Check(t, is.Equal(agreement.SelectAttrValue("Algorithm", ""), "http://www.w3.org/2009/xmlenc11#ECDH-ES"))
+
+			plaintext, err := xmlenc.Decrypt(key, encryptedData)
+			assert.NilError(t, err)
+			assert.Check(t, is.Contains(string(plaintext), `<saml:Assertion `))
+			assert.Check(t, is.Contains(string(plaintext), `Recipient="https://sp.example.com/saml2/acs"`))
 		})
 	}
 }

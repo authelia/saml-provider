@@ -3,6 +3,8 @@ package saml
 import (
 	"context"
 	"crypto"
+	"crypto/ecdsa"
+	"crypto/elliptic"
 	"crypto/rsa"
 	"crypto/x509"
 	"encoding/base64"
@@ -18,7 +20,35 @@ import (
 const (
 	algorithmRSAOAEPMGF1P = "http://www.w3.org/2001/04/xmlenc#rsa-oaep-mgf1p"
 	algorithmRSAOAEP2009  = "http://www.w3.org/2009/xmlenc11#rsa-oaep"
+	algorithmECDHES       = "http://www.w3.org/2009/xmlenc11#ECDH-ES"
 )
+
+// keyWrapAlgorithms are the symmetric key wrap algorithms this identity provider can wrap the key of an assertion
+// with when it agrees the key with ECDH-ES, in the default order of IdentityProvider.KeyWrapMethods. XML
+// Encryption 1.1 §5.1 requires every implementation to support AES Key Wrap with a 128-bit and a 256-bit key, and
+// the 256-bit one is first, as it is the stronger.
+var keyWrapAlgorithms = []xmlenc.KeyWrap{
+	xmlenc.AES256KW,
+	xmlenc.AES192KW,
+	xmlenc.AES128KW,
+}
+
+// keyWrapIdentifiers are the identifiers of the symmetric key wrap algorithms of XML Encryption §5.6, XML
+// Encryption 1.1 §5.7 and RFC 6931, including those this identity provider can't use. They tell which algorithms
+// a service provider lists are key wrap algorithms, for the Metadata Profile for Algorithm Support §2.5.
+var keyWrapIdentifiers = []string{
+	"http://www.w3.org/2001/04/xmlenc#kw-tripledes",
+	"http://www.w3.org/2001/04/xmlenc#kw-aes128",
+	"http://www.w3.org/2001/04/xmlenc#kw-aes192",
+	"http://www.w3.org/2001/04/xmlenc#kw-aes256",
+	"http://www.w3.org/2009/xmlenc11#kw-aes-128-pad",
+	"http://www.w3.org/2009/xmlenc11#kw-aes-192-pad",
+	"http://www.w3.org/2009/xmlenc11#kw-aes-256-pad",
+	"http://www.w3.org/2001/04/xmldsig-more#kw-camellia128",
+	"http://www.w3.org/2001/04/xmldsig-more#kw-camellia192",
+	"http://www.w3.org/2001/04/xmldsig-more#kw-camellia256",
+	"http://www.w3.org/2007/05/xmldsig-more#kw-seed128",
+}
 
 // contentEncryptionCiphers are the block ciphers this identity provider can encrypt an assertion with, in the
 // default order of IdentityProvider.ContentEncryptionMethods. Those in GCM mode are first, as SAML2Int SDP-ALG01
@@ -104,6 +134,7 @@ type encryptionPolicy struct {
 	content       []xmlenc.BlockCipher
 	keyTransports []string
 	digests       []keyTransportDigest
+	keyWraps      []xmlenc.KeyWrap
 }
 
 // encryptionPolicy returns the algorithms the identity provider allows, or an error if it is configured with an
@@ -113,6 +144,7 @@ func (idp *IdentityProvider) encryptionPolicy() (*encryptionPolicy, error) {
 		content:       contentEncryptionCiphers,
 		keyTransports: keyTransportAlgorithms,
 		digests:       keyTransportDigests,
+		keyWraps:      keyWrapAlgorithms,
 	}
 	if idp == nil {
 		return policy, nil
@@ -156,7 +188,40 @@ func (idp *IdentityProvider) encryptionPolicy() (*encryptionPolicy, error) {
 		}
 	}
 
+	if len(idp.KeyWrapMethods) != 0 {
+		policy.keyWraps = nil
+
+		for _, algorithm := range idp.KeyWrapMethods {
+			i := slices.IndexFunc(keyWrapAlgorithms, func(w xmlenc.KeyWrap) bool { return w.Algorithm() == algorithm })
+			if i < 0 {
+				return nil, fmt.Errorf("IdentityProvider.KeyWrapMethods: unsupported algorithm %q", algorithm)
+			}
+
+			policy.keyWraps = append(policy.keyWraps, keyWrapAlgorithms[i])
+		}
+	}
+
 	return policy, nil
+}
+
+// isEncryptableKey reports whether the identity provider can encrypt to the public key: an RSA key, by RSA-OAEP,
+// or an elliptic curve key on P-256, P-384 or P-521, by ECDH-ES.
+func isEncryptableKey(public crypto.PublicKey) bool {
+	switch public := public.(type) {
+	case *rsa.PublicKey:
+		return public != nil && public.N != nil
+	case *ecdsa.PublicKey:
+		if public == nil {
+			return false
+		}
+
+		switch public.Curve {
+		case elliptic.P256(), elliptic.P384(), elliptic.P521():
+			return true
+		}
+	}
+
+	return false
 }
 
 // lookupKeyTransportDigest returns the digest of digests with the identifier algorithm, which may be legacy.
@@ -184,10 +249,10 @@ func lookupKeyTransportDigest(digests []keyTransportDigest, algorithm string) (k
 // for each type of algorithm. If the service provider lists algorithms of a type and none of them can be used,
 // this fails rather than choose one the service provider might not support, or send the assertion unencrypted.
 // If it lists none of a type, §2.5 leaves the choice to the identity provider, which uses the first one it allows.
-func (req *IdpAuthnRequest) assertionEncrypter() (xmlenc.RSA, error) {
+func (req *IdpAuthnRequest) assertionEncrypter(key crypto.PublicKey) (xmlenc.Encrypter, error) {
 	policy, err := req.IDP.encryptionPolicy()
 	if err != nil {
-		return xmlenc.RSA{}, err
+		return nil, err
 	}
 
 	var methods []EncryptionMethod
@@ -197,58 +262,186 @@ func (req *IdpAuthnRequest) assertionEncrypter() (xmlenc.RSA, error) {
 
 	issuance, err := req.Issuance(req.Session)
 	if err != nil {
-		return xmlenc.RSA{}, err
+		return nil, err
 	}
 
-	encrypter, err := policy.encrypterFor(methods, issuance)
+	encrypter, err := policy.encrypterFor(methods, issuance, key)
 	if err != nil {
-		return xmlenc.RSA{}, fmt.Errorf("%s: %w", req.ServiceProviderMetadata.EntityID, err)
+		return nil, fmt.Errorf("%s: %w", req.ServiceProviderMetadata.EntityID, err)
 	}
 
 	return encrypter, nil
 }
 
-// encrypterFor returns the encrypter for the key whose KeyDescriptor lists methods, with the content encryption
-// and the key transport that issuance chooses, and the one that it doesn't choose negotiated from methods as
-// encrypter does. It returns an error if what issuance chooses is not supported or the policy doesn't allow it.
-func (policy *encryptionPolicy) encrypterFor(methods []EncryptionMethod, issuance Issuance) (xmlenc.RSA, error) {
-	var (
-		content   xmlenc.BlockCipher
-		encrypter xmlenc.RSA
-		err       error
-	)
-
-	// Both choices are checked before anything is negotiated, so that what is refused doesn't depend on the
-	// metadata of the service provider.
-	if issuance.ContentEncryptionMethod != "" {
-		if content, err = policy.chosenContentEncryption(issuance.ContentEncryptionMethod); err != nil {
-			return xmlenc.RSA{}, err
-		}
+// encrypterFor returns the encrypter for key, whose KeyDescriptor lists methods, with the content encryption, the
+// key transport and the key wrap that issuance chooses, and those that it doesn't choose negotiated from methods
+// as encrypter does. A key transport is used for an RSA key and ECDH-ES with a key wrap for an elliptic curve key.
+// It returns an error if what issuance chooses is not supported, the policy doesn't allow it, or it can't be used
+// with the key. A nil key checks only what issuance chooses.
+func (policy *encryptionPolicy) encrypterFor(methods []EncryptionMethod, issuance Issuance, key crypto.PublicKey) (xmlenc.Encrypter, error) {
+	// Every choice is checked before anything is negotiated, so that what is refused doesn't depend on the
+	// metadata of the service provider or the type of its key.
+	chosen, err := policy.chosenEncryption(issuance)
+	if err != nil {
+		return nil, err
 	}
 
-	if issuance.KeyTransportMethod != "" {
-		if encrypter, err = policy.chosenKeyTransport(issuance); err != nil {
-			return xmlenc.RSA{}, err
-		}
-	} else if issuance.KeyTransportDigestMethod != "" || issuance.KeyTransportMGF != "" {
-		return xmlenc.RSA{}, errors.New("a KeyTransportDigestMethod or KeyTransportMGF without a KeyTransportMethod")
-	}
-
+	content := chosen.content
 	if content == nil {
 		if content, err = policy.contentEncryption(methods); err != nil {
-			return xmlenc.RSA{}, err
+			return nil, err
 		}
 	}
 
-	if issuance.KeyTransportMethod == "" {
-		if encrypter, err = policy.keyTransport(methods); err != nil {
-			return xmlenc.RSA{}, err
+	agreement := issuance.KeyTransportMethod == algorithmECDHES
+
+	switch key.(type) {
+	case *ecdsa.PublicKey:
+		if issuance.KeyTransportMethod != "" && !agreement {
+			return nil, fmt.Errorf("the key transport method %q can't encrypt to an elliptic curve key", issuance.KeyTransportMethod)
 		}
+
+		return policy.keyAgreement(methods, agreement, content, chosen.keyWrap)
+	case nil:
+		return nil, nil
+	}
+
+	if agreement {
+		return nil, fmt.Errorf("the key agreement method %q needs an elliptic curve key", algorithmECDHES)
+	}
+
+	encrypter := chosen.keyTransport
+	if encrypter == nil {
+		negotiated, err := policy.keyTransport(methods)
+		if err != nil {
+			return nil, err
+		}
+
+		encrypter = &negotiated
 	}
 
 	encrypter.BlockCipher = content
 
-	return encrypter, nil
+	return *encrypter, nil
+}
+
+// chosenEncryption is what an Issuance chooses to encrypt with: each is nil when it chooses none.
+type chosenEncryption struct {
+	content      xmlenc.BlockCipher
+	keyWrap      xmlenc.KeyWrap
+	keyTransport *xmlenc.RSA
+}
+
+// chosenEncryption returns the algorithms that issuance chooses, or an error which says what of them is not
+// supported or not allowed.
+func (policy *encryptionPolicy) chosenEncryption(issuance Issuance) (chosen chosenEncryption, err error) {
+	if issuance.ContentEncryptionMethod != "" {
+		if chosen.content, err = policy.chosenContentEncryption(issuance.ContentEncryptionMethod); err != nil {
+			return chosen, err
+		}
+	}
+
+	if issuance.KeyWrapMethod != "" {
+		if chosen.keyWrap, err = policy.chosenKeyWrap(issuance.KeyWrapMethod); err != nil {
+			return chosen, err
+		}
+	}
+
+	if issuance.KeyTransportMethod == algorithmECDHES && (issuance.KeyTransportDigestMethod != "" || issuance.KeyTransportMGF != "") {
+		return chosen, fmt.Errorf("the key agreement method %q has no KeyTransportDigestMethod or KeyTransportMGF", algorithmECDHES)
+	}
+
+	chosen.keyTransport, err = policy.chosenRSAKeyTransport(issuance)
+
+	return chosen, err
+}
+
+// chosenRSAKeyTransport returns the encrypter for the RSA key transport that issuance chooses, nil if it chooses
+// none or ECDH-ES, or an error which says what of it is not supported or not allowed.
+func (policy *encryptionPolicy) chosenRSAKeyTransport(issuance Issuance) (*xmlenc.RSA, error) {
+	switch issuance.KeyTransportMethod {
+	case algorithmECDHES:
+		return nil, nil
+	case "":
+		if issuance.KeyTransportDigestMethod != "" || issuance.KeyTransportMGF != "" {
+			return nil, errors.New("a KeyTransportDigestMethod or KeyTransportMGF without a KeyTransportMethod")
+		}
+
+		return nil, nil
+	}
+
+	encrypter, err := policy.chosenKeyTransport(issuance)
+	if err != nil {
+		return nil, err
+	}
+
+	return &encrypter, nil
+}
+
+// keyAgreement returns the ECDH-ES encrypter of content, whose key is wrapped with keyWrap, or with the key wrap
+// negotiated from methods if that is nil. Unless chosen says that the IssuancePolicy chose ECDH-ES, methods must
+// list it if they list any key transport or key agreement algorithm, as the Metadata Profile for Algorithm Support
+// §2.5 has them taken as one type.
+func (policy *encryptionPolicy) keyAgreement(methods []EncryptionMethod, chosen bool, content xmlenc.BlockCipher, keyWrap xmlenc.KeyWrap) (xmlenc.Encrypter, error) {
+	if !chosen {
+		listed := slices.ContainsFunc(methods, func(m EncryptionMethod) bool { return slices.Contains(keyTransportIdentifiers, m.Algorithm) })
+		if listed && !slices.ContainsFunc(methods, func(m EncryptionMethod) bool { return m.Algorithm == algorithmECDHES }) {
+			return nil, fmt.Errorf("the encryption key is an elliptic curve key and lists no key agreement algorithm the identity provider allows")
+		}
+	}
+
+	if keyWrap == nil {
+		var err error
+
+		if keyWrap, err = policy.keyWrap(methods); err != nil {
+			return nil, err
+		}
+	}
+
+	return xmlenc.ECDHES{BlockCipher: content, KeyWrap: keyWrap, DigestMethod: xmlenc.SHA256}, nil
+}
+
+// chosenKeyWrap returns the key wrap with the identifier algorithm, or an error if there is none or the policy
+// doesn't allow it.
+func (policy *encryptionPolicy) chosenKeyWrap(algorithm string) (xmlenc.KeyWrap, error) {
+	if !slices.ContainsFunc(keyWrapAlgorithms, func(w xmlenc.KeyWrap) bool { return w.Algorithm() == algorithm }) {
+		return nil, fmt.Errorf("unsupported key wrap method %q", algorithm)
+	}
+
+	for _, keyWrap := range policy.keyWraps {
+		if keyWrap.Algorithm() == algorithm {
+			return keyWrap, nil
+		}
+	}
+
+	return nil, fmt.Errorf("the key wrap method %q is not one of IdentityProvider.KeyWrapMethods", algorithm)
+}
+
+// keyWrap returns the first key wrap of methods that the policy allows, or the first the policy allows if methods
+// lists none.
+func (policy *encryptionPolicy) keyWrap(methods []EncryptionMethod) (xmlenc.KeyWrap, error) {
+	listed := false
+
+	for _, method := range methods {
+		if !slices.Contains(keyWrapIdentifiers, method.Algorithm) {
+			continue
+		}
+
+		listed = true
+
+		for _, keyWrap := range policy.keyWraps {
+			// The key size of these algorithms is fixed by the algorithm, so one that lists another can't be met.
+			if keyWrap.Algorithm() == method.Algorithm && (method.KeySize == 0 || method.KeySize == keyWrap.KeySize()*8) {
+				return keyWrap, nil
+			}
+		}
+	}
+
+	if listed {
+		return nil, fmt.Errorf("the encryption key lists no key wrap algorithm the identity provider allows")
+	}
+
+	return policy.keyWraps[0], nil
 }
 
 // chosenContentEncryption returns the block cipher with the identifier algorithm, or an error if there is none or

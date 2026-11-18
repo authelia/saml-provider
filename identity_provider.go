@@ -234,9 +234,11 @@ type ServiceProviderEncryptionKey struct {
 	// ds:KeyValue. There is then no validity period and no key usage to check.
 	Certificate *x509.Certificate
 
-	// PublicKey is the key that is encrypted to: that of Certificate, or else of the ds:RSAKeyValue. It is never
-	// nil when an EncryptionKeyEnforcer is asked, as only RSA key transport is supported.
-	PublicKey *rsa.PublicKey
+	// PublicKey is the key that is encrypted to: that of Certificate, or else of the ds:RSAKeyValue. It is an
+	// *rsa.PublicKey, whose key is transported with RSA-OAEP, or an *ecdsa.PublicKey on P-256, P-384 or P-521, with
+	// which a key is agreed by ECDH-ES (XML Encryption 1.1 §5.6.4). It is never nil when an EncryptionKeyEnforcer
+	// is asked.
+	PublicKey crypto.PublicKey
 }
 
 // EncryptionKeyEnforcer is an interface used by IdentityProvider to decide whether the key in the metadata of a
@@ -802,6 +804,14 @@ type IdentityProvider struct {
 	// transport digest that SAML2Int SDP-ALG01 requires. The legacy identifiers of SHA-256 and SHA-512 are
 	// accepted, and the standard ones are written.
 	KeyTransportDigestMethods []string
+
+	// KeyWrapMethods lists the identifiers of the symmetric key wrap algorithms (XML Encryption §5.6) that the
+	// identity provider may wrap the key of an assertion with when it agrees that key with the elliptic curve key
+	// of a service provider by ECDH-ES (XML Encryption 1.1 §5.6.4), and is chosen from like
+	// ContentEncryptionMethods. The supported algorithms are AES Key Wrap with a 256-bit, a 192-bit or a 128-bit
+	// key, and empty means all of them in that order. The agreed key is derived with ConcatKDF and SHA-256, which
+	// XML Encryption 1.1 §5.4.1 requires every implementation to support. It has no effect on an RSA key.
+	KeyWrapMethods []string
 
 	// SignatureMethods lists the identifiers of the signature algorithms that the identity provider accepts on what
 	// it receives: the SigAlg of a message signed on the HTTP-Redirect binding, and the SignatureMethod of the XML
@@ -3050,7 +3060,7 @@ func (req *IdpAuthnRequest) elementEncrypter() (*elementEncrypter, error) {
 		return nil, err
 	}
 
-	encrypter, err := req.assertionEncrypter()
+	encrypter, err := req.assertionEncrypter(key.PublicKey)
 	if err != nil {
 		return nil, err
 	}
@@ -3357,9 +3367,11 @@ func (req *IdpAuthnRequest) selectSPEncryptionKey() (*KeyDescriptor, ServiceProv
 // are both they must represent the same key (MetaIOP §2.5.1), and the certificate is the one used, as it tells
 // the EncryptionKeyEnforcer more.
 //
-// Only RSA key transport is supported, so a descriptor has no key that can be used when its certificate holds a
-// key of another type, when its KeyValue does, such as a DSAKeyValue or an ECKeyValue, and when it only names
-// its key with a KeyName, which is a reference that nothing here can resolve. Nor has one whose X509Certificate
+// A certificate may hold an RSA key, whose key is transported with RSA-OAEP, or an elliptic curve key on P-256,
+// P-384 or P-521, with which a key is agreed by ECDH-ES. A descriptor has no key that can be used when its
+// certificate holds a key of another type, when its KeyValue holds anything but an RSAKeyValue, such as a
+// DSAKeyValue or an ECKeyValue, and when it only names its key with a KeyName, which is a reference that nothing
+// here can resolve. Nor has one whose X509Certificate
 // elements are all empty or hold only whitespace. Such a descriptor is passed over for the next.
 //
 // A certificate or an RSAKeyValue which is present and can't be parsed is an error instead. The metadata is then
@@ -3377,12 +3389,11 @@ func keyDescriptorEncryptionKey(keyDescriptor *KeyDescriptor) (key ServiceProvid
 			return key, false, fmt.Errorf("cannot parse certificate: %v", err)
 		}
 
-		public, ok := cert.PublicKey.(*rsa.PublicKey)
-		if !ok {
+		if !isEncryptableKey(cert.PublicKey) {
 			return key, false, nil
 		}
 
-		return ServiceProviderEncryptionKey{Certificate: cert, PublicKey: public}, true, nil
+		return ServiceProviderEncryptionKey{Certificate: cert, PublicKey: cert.PublicKey}, true, nil
 	}
 
 	for _, keyValue := range keyDescriptor.KeyInfo.KeyValues {
@@ -3416,7 +3427,7 @@ func (req *IdpAuthnRequest) spEncryptionKey() (*ServiceProviderEncryptionKey, er
 		// if the service provider asked for encryption with a key we are unable to use.
 		if req.serviceProviderAcceptsEncryption() {
 			return nil, errors.New("service provider metadata allows encryption but has no usable key in the selected descriptor: " +
-				"none of its keys is a certificate with an RSA public key or an RSAKeyValue")
+				"none of its keys is a certificate with an RSA public key or an elliptic curve key on P-256, P-384 or P-521, or an RSAKeyValue")
 		}
 
 		return nil, os.ErrNotExist
@@ -3453,10 +3464,16 @@ func hasKeyUsageExtension(cert *x509.Certificate) bool {
 // shorter than 2048 bits for key transport.
 const DefaultMinimumRSAKeySize = 2048
 
-// DefaultEncryptionKeyEnforcer is the default EncryptionKeyEnforcer. With no options set it refuses a key that is
-// not RSA or whose RSA key is shorter than DefaultMinimumRSAKeySize, and a certificate which is expired or not
-// yet valid at the time of the request, allowing MaxClockSkew either way, or which has a KeyUsage extension that
-// doesn't assert keyEncipherment. A certificate without a KeyUsage extension is not restricted, as RFC 5280
+// DefaultMinimumECKeySize is the size in bits of the smallest curve of an elliptic curve key that
+// DefaultEncryptionKeyEnforcer accepts unless its MinimumECKeySize is set. It is that of P-256, the smallest curve
+// that the SAML V2.0 Deployment Profile for Federation Interoperability allows (SDP-MD07).
+const DefaultMinimumECKeySize = 256
+
+// DefaultEncryptionKeyEnforcer is the default EncryptionKeyEnforcer. With no options set it refuses an RSA key
+// shorter than DefaultMinimumRSAKeySize, an elliptic curve key on a curve of fewer than DefaultMinimumECKeySize
+// bits, and a certificate which is expired or not yet valid at the time of the request, allowing MaxClockSkew
+// either way, or which has a KeyUsage extension that doesn't assert keyEncipherment for an RSA key or keyAgreement
+// for an elliptic curve key. A certificate without a KeyUsage extension is not restricted, as RFC 5280
 // §4.2.1.3 describes. A key that the metadata gives only as a ds:KeyValue has no certificate, so only its size is
 // checked, which is all that MetaIOP §2.6.1 would have a consumer look at in a certificate too.
 //
@@ -3474,13 +3491,19 @@ type DefaultEncryptionKeyEnforcer struct {
 	// key rather than by certificate.
 	IgnoreValidityPeriod bool
 
-	// IgnoreKeyUsage accepts a certificate whose KeyUsage extension doesn't assert keyEncipherment.
+	// IgnoreKeyUsage accepts a certificate whose KeyUsage extension doesn't assert keyEncipherment for an RSA key,
+	// or keyAgreement for an elliptic curve key.
 	IgnoreKeyUsage bool
 
 	// MinimumRSAKeySize is the shortest RSA key accepted, in bits, whether it is in a certificate or a
 	// ds:KeyValue. Defaults to DefaultMinimumRSAKeySize. It may be set lower to accept legacy keys, or higher to
 	// be stricter.
 	MinimumRSAKeySize int
+
+	// MinimumECKeySize is the size in bits of the smallest curve of an elliptic curve key that is accepted.
+	// Defaults to DefaultMinimumECKeySize. Only P-256, P-384 and P-521 can be encrypted to, so it may only be set
+	// higher, to be stricter.
+	MinimumECKeySize int
 }
 
 // EnforceEncryptionKey implements EncryptionKeyEnforcer.
@@ -3499,10 +3522,21 @@ func (e DefaultEncryptionKeyEnforcer) EnforceEncryptionKey(req *IdpAuthnRequest,
 
 	public := key.PublicKey
 	if public == nil && cert != nil {
-		public, _ = cert.PublicKey.(*rsa.PublicKey)
+		public = cert.PublicKey
 	}
 
-	// Only RSA key transport is supported, so there is nothing else that could be encrypted to.
+	switch public := public.(type) {
+	case *rsa.PublicKey:
+		return e.enforceRSAKey(public, cert)
+	case *ecdsa.PublicKey:
+		return e.enforceECKey(public, cert)
+	default:
+		return errors.New("the key is neither an RSA nor an elliptic curve public key")
+	}
+}
+
+// enforceRSAKey returns an error if the RSA key, of cert if that is not nil, may not be encrypted to.
+func (e DefaultEncryptionKeyEnforcer) enforceRSAKey(public *rsa.PublicKey, cert *x509.Certificate) error {
 	if public == nil || public.N == nil {
 		return errors.New("the key is not an RSA public key")
 	}
@@ -3520,6 +3554,30 @@ func (e DefaultEncryptionKeyEnforcer) EnforceEncryptionKey(req *IdpAuthnRequest,
 	// used to encrypt keys, which is how RSA is used to encrypt an assertion.
 	if cert != nil && !e.IgnoreKeyUsage && hasKeyUsageExtension(cert) && cert.KeyUsage&x509.KeyUsageKeyEncipherment == 0 {
 		return fmt.Errorf("the certificate has a KeyUsage extension which does not assert keyEncipherment")
+	}
+
+	return nil
+}
+
+// enforceECKey returns an error if the elliptic curve key, of cert if that is not nil, may not be encrypted to.
+func (e DefaultEncryptionKeyEnforcer) enforceECKey(public *ecdsa.PublicKey, cert *x509.Certificate) error {
+	if public == nil || public.Curve == nil {
+		return errors.New("the key is not an elliptic curve public key")
+	}
+
+	minimum := e.MinimumECKeySize
+	if minimum <= 0 {
+		minimum = DefaultMinimumECKeySize
+	}
+
+	if size := public.Curve.Params().BitSize; size < minimum {
+		return fmt.Errorf("the elliptic curve key is on a %d-bit curve, smaller than the minimum of %d bits", size, minimum)
+	}
+
+	// RFC 5280 §4.2.1.3: when the extension is present, keyAgreement is asserted when the key is used for key
+	// agreement, which is how ECDH-ES uses it.
+	if cert != nil && !e.IgnoreKeyUsage && hasKeyUsageExtension(cert) && cert.KeyUsage&x509.KeyUsageKeyAgreement == 0 {
+		return fmt.Errorf("the certificate has a KeyUsage extension which does not assert keyAgreement")
 	}
 
 	return nil

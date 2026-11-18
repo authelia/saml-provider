@@ -40,16 +40,18 @@ const EncryptedNameIDFormat NameIDFormat = "urn:oasis:names:tc:SAML:2.0:nameid-f
 // elementEncrypter encrypts SAML elements to one entity, as SAMLCore §6.1 describes: the EncryptedData takes the
 // place of the element, with its EncryptedKey inside it, which errata E43 allows.
 type elementEncrypter struct {
-	// certificate holds the RSA key of the entity, from the KeyDescriptor of its metadata. It is nil when the
-	// metadata gives the key only as a ds:KeyValue (MetaIOP §2.5.1).
+	// certificate holds the key of the entity, from the KeyDescriptor of its metadata. It is nil when the metadata
+	// gives the key only as a ds:KeyValue (MetaIOP §2.5.1).
 	certificate *x509.Certificate
 
-	// publicKey is the RSA key of the entity, which is encrypted to when there is no certificate. The EncryptedKey
-	// then identifies it by its ds:KeyValue, as the metadata does.
-	publicKey *rsa.PublicKey
+	// publicKey is the key of the entity, which is encrypted to when there is no certificate: an *rsa.PublicKey,
+	// or an *ecdsa.PublicKey for ECDH-ES. The EncryptedKey then identifies it by its ds:KeyValue, as the metadata
+	// does.
+	publicKey crypto.PublicKey
 
-	// encrypter has the key transport and content encryption algorithms negotiated with the entity.
-	encrypter xmlenc.RSA
+	// encrypter has the key transport or key agreement and content encryption algorithms negotiated with the
+	// entity: an xmlenc.RSA for an RSA key, and an xmlenc.ECDHES for an elliptic curve key.
+	encrypter xmlenc.Encrypter
 
 	// recipient is the identifier of the entity, written as the Recipient of the EncryptedKey (SAMLCore §2.2.4).
 	recipient string

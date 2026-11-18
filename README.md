@@ -105,7 +105,7 @@ least the subset of SAML known as [interoperable SAML](https://kantarainitiative
 | Verify signed `AuthnRequest`                 | ✅  | N/A |
 | RSA signatures (SHA-1/256/384/512)[^sha1]           | ✅  | ✅  |
 | ECDSA signatures (SHA-1/256/384/512)[^ecdsa][^sha1] | ✅  | ✅  |
-| Encrypt `Assertion`                          | ⚠️  | N/A |
+| Encrypt `Assertion`                          | ✅  | N/A |
 | Decrypt `EncryptedAssertion`                 | N/A | ✅  |
 | `EncryptedID` and `EncryptedAttribute`       | ⚠️  | ✅  |
 
@@ -118,8 +118,9 @@ least the subset of SAML known as [interoperable SAML](https://kantarainitiative
     negotiated from the `EncryptionMethod` elements of a key, see **Encrypt `Assertion`**.
 
 [^ecdsa]: Signatures use the `r||s` encoding XML Signature requires, and DER signatures are rejected unless
-    `SignatureVerifier` is set. ECDSA keys cannot be used for assertion encryption or decryption, which require RSA,
-    so metadata does not advertise encryption for an ECDSA certificate. An IdP that signs with ECDSA can have an RSA
+    `SignatureVerifier` is set. The IdP encrypts to the elliptic curve key of an SP by ECDH-ES (see **Encrypt
+    `Assertion`**), but only decrypts with an RSA key, so its metadata does not advertise encryption for an ECDSA
+    certificate, and neither does the metadata of the SP. An IdP that signs with ECDSA can have an RSA
     `EncryptionKey`. XML signatures are verified against `xmlsec1` 1.3.13
     in both directions, on P-256, P-384 and P-521. HTTP-Redirect signatures are covered by unit tests only, and other
     implementations have not been tested.
@@ -705,9 +706,25 @@ without acting on it. See **`Scoping` and `ProxyRestriction`** below.
   SDP-ALG01 requires. An SP that can only decrypt CBC must list it in the `EncryptionMethod` elements of its key, or
   the `IssuancePolicy` must name it for that SP (see **Issuance for each service provider**). Set
   `IdentityProvider.ContentEncryptionMethods`, `KeyTransportMethods` and `KeyTransportDigestMethods` to restrict or
-  reorder them for every SP; without them GCM comes before CBC. 3DES, RSA PKCS#1 v1.5, key agreement and an OAEP label (`OAEPparams`) are never used, and
-  algorithms the IdP doesn't recognise as either type are ignored. SAMLConformance §4.2 lists 3DES and RSA PKCS#1 v1.5 as
-  mandatory to implement, so an SP that only lists them can't be sent an encrypted assertion.
+  reorder them for every SP; without them GCM comes before CBC. 3DES, RSA PKCS#1 v1.5, Diffie-Hellman key agreement
+  and an OAEP label (`OAEPparams`) are never used, and algorithms the IdP doesn't recognise as any type are ignored.
+  SAMLConformance §4.2 lists 3DES and RSA PKCS#1 v1.5 as mandatory to implement, but they are refused on purpose: 3DES
+  is deprecated (NIST SP 800-131A), and RSA PKCS#1 v1.5 key transport is open to padding oracle attacks at the SP, so
+  an SP that only lists them can't be sent an encrypted assertion.
+  - **Elliptic curve keys:** an SP whose encryption key is on P-256, P-384 or P-521 is encrypted to by the
+    ephemeral-static ECDH-ES of XML Encryption 1.1 §5.6.4: a new key pair is made for each message, the key that is
+    agreed with it is derived with ConcatKDF and SHA-256 (§5.4.1), and it wraps the content encryption key with AES
+    Key Wrap (RFC 3394). The `EncryptedKey` holds an `AgreementMethod` with the new public key as a
+    `dsig11:ECKeyValue` in its `OriginatorKeyInfo`, and the key of the SP in its `RecipientKeyInfo` in the form
+    the metadata gave it. The content encryption is negotiated as for RSA. ECDH-ES and the RSA key transports are
+    one type of algorithm (Metadata Profile for Algorithm Support §2.3), so an elliptic curve key whose
+    `EncryptionMethod` elements list a key transport but not ECDH-ES is not encrypted to, and key wrap is its own
+    type: the first of `kw-aes256`, `kw-aes192` and `kw-aes128` that the SP lists and
+    `IdentityProvider.KeyWrapMethods` allows is used, or the first that it allows, `kw-aes256` by default, if the SP
+    lists none. `KeyTransportMethods` and `KeyTransportDigestMethods` don't apply to it. ConcatKDF names the key wrap
+    in its `AlgorithmID` and neither party. What the IdP encrypts this way is decrypted by `xmlsec1` 1.3.13 on every
+    curve and key wrap, and it decrypts what `xmlsec1` encrypts. `xmlenc.ECDHES` is the encrypter, and the
+    `xmlenc.AESKeyWrap` decrypters accept the private key of the recipient.
 - **`EncryptedID` and `EncryptedAttribute`:** the `NameID` of an assertion is sent as an `EncryptedID` when the
   `NameIDPolicy` has the encrypted format, or when `IdentityProvider.ElementEncryptionPolicy` requires it for the SP,
   and that policy also chooses the attributes sent as `EncryptedAttribute`. `DefaultElementEncryptionPolicy` lists the
@@ -976,7 +993,10 @@ without acting on it. See **`Scoping` and `ProxyRestriction`** below.
     `IdpAuthnRequest.Issuance`.
   - `ContentEncryptionMethod` is the block cipher, and `KeyTransportMethod` with `KeyTransportDigestMethod` and
     `KeyTransportMGF` the key transport, that the IdP encrypts with for that SP, whatever the `EncryptionMethod`
-    elements of its key list, for an SP whose metadata lists nothing or the wrong thing and can't be changed:
+    elements of its key list, for an SP whose metadata lists nothing or the wrong thing and can't be changed.
+    `KeyTransportMethod` may be ECDH-ES for an SP with an elliptic curve key, and `KeyWrapMethod` is then the key
+    wrap. A key transport can't be used with an elliptic curve key, nor ECDH-ES with an RSA key, and the login then
+    fails; `KeyWrapMethod` is not used for an RSA key, so a policy for every SP may set it:
 
     ```go
     "https://legacy.example.com/metadata": {
@@ -1012,19 +1032,21 @@ without acting on it. See **`Scoping` and `ProxyRestriction`** below.
   key it can encrypt to, or else the first with no `use`, which is a key for both signing and encryption (SAMLMeta
   §2.4.1.1). The key is an RSA key in either of the forms the SAML V2.0 Metadata Interoperability Profile §2.6.1
   requires a consumer of metadata to support: an `X509Certificate`, or a bare key in a `ds:KeyValue` with an
-  `RSAKeyValue`. When a descriptor has both, the certificate is used. The `EncryptedKey` names the key in the form
-  the metadata gave it: the certificate in an `X509Data`, or the `ds:KeyValue`. A descriptor with no such key is
-  passed over for the next: one whose `X509Certificate` is empty or only whitespace, one with a key of another type,
-  such as an ECDSA certificate or an `ECKeyValue` (only RSA key transport is supported), and one that only names its
-  key with a `KeyName`, which the IdP can't resolve. A certificate or `RSAKeyValue` that is there and can't be parsed
+  `RSAKeyValue`, or an elliptic curve key on P-256, P-384 or P-521 in an `X509Certificate`. When a descriptor has
+  both, the certificate is used. The `EncryptedKey` names the key in the form the metadata gave it: the certificate in
+  an `X509Data`, or the `ds:KeyValue`. A descriptor with no such key is passed over for the next: one whose
+  `X509Certificate` is empty or only whitespace, one with a key of another type or curve, an elliptic curve key given
+  only as a `dsig11:ECKeyValue`, which is not read, and one that only names its key with a `KeyName`, which the IdP
+  can't resolve. A certificate or `RSAKeyValue` that is there and can't be parsed
   is an error instead, and the assertion is not sent.
 - **SPs with no usable encryption key:** when the metadata of an SP has a `KeyDescriptor` that might be for
   encryption, which is any that is not `use="signing"`, and no key the IdP can encrypt to, the login fails rather
-  than send the assertion in plaintext. An SP whose only key is an ECDSA certificate must therefore set
-  `use="signing"` on it.
-- **SP encryption key policy:** by default the IdP refuses to encrypt to an RSA key shorter than 2048 bits, and to a
-  certificate that is expired or not yet valid at the time of the request (allowing `MaxClockSkew`) or whose
-  `KeyUsage` extension does not assert `keyEncipherment`. A certificate without a `KeyUsage` extension is accepted,
+  than send the assertion in plaintext. An SP whose only key is an ECDSA certificate on another curve than P-256,
+  P-384 or P-521 must therefore set `use="signing"` on it.
+- **SP encryption key policy:** by default the IdP refuses to encrypt to an RSA key shorter than 2048 bits, to an
+  elliptic curve key on a curve of fewer than 256 bits (`MinimumECKeySize`, SAML2Int SDP-MD07), and to a certificate
+  that is expired or not yet valid at the time of the request (allowing `MaxClockSkew`) or whose `KeyUsage` extension
+  does not assert `keyEncipherment` for an RSA key or `keyAgreement` for an elliptic curve key (RFC 5280 §4.2.1.3). A certificate without a `KeyUsage` extension is accepted,
   and a key given as a `ds:KeyValue` has no certificate, so only its size is checked. The login then fails with an
   HTTP error, and the assertion is neither sent in plaintext nor encrypted to another key. This is a local policy:
   the SAML V2.0 Metadata Interoperability Profile treats the certificate as a container for the key, which may be
