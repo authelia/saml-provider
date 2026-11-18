@@ -175,7 +175,7 @@ func checkNegotiated(t *testing.T, encryptedData *etree.Element, want negotiated
 }
 
 func TestIDPNegotiatesEncryptionWithServiceProvider(t *testing.T) {
-	defaults := negotiated{content: aes128CBC, keyTransport: rsaOAEP, digest: digestSHA1}
+	defaults := negotiated{content: aes128GCM, keyTransport: rsaOAEP, digest: digestSHA1}
 	with := func(change func(*negotiated)) negotiated {
 		n := defaults
 		change(&n)
@@ -272,12 +272,12 @@ func TestIDPEncryptionAlgorithmConfiguration(t *testing.T) {
 		{
 			name:      "empty list means the defaults",
 			configure: func(idp *IdentityProvider) { idp.ContentEncryptionMethods = []string{} },
-			want:      negotiated{content: aes128CBC, keyTransport: rsaOAEP, digest: digestSHA1},
+			want:      negotiated{content: aes128GCM, keyTransport: rsaOAEP, digest: digestSHA1},
 		},
 		{
 			name:      "first key transport is the default",
 			configure: func(idp *IdentityProvider) { idp.KeyTransportMethods = []string{rsaOAEP11} },
-			want:      negotiated{content: aes128CBC, keyTransport: rsaOAEP11, digest: digestSHA1, mgf: mgf1SHA1},
+			want:      negotiated{content: aes128GCM, keyTransport: rsaOAEP11, digest: digestSHA1, mgf: mgf1SHA1},
 		},
 		{
 			name:      "key transport not allowed",
@@ -288,7 +288,7 @@ func TestIDPEncryptionAlgorithmConfiguration(t *testing.T) {
 		{
 			name:      "first digest is the default",
 			configure: func(idp *IdentityProvider) { idp.KeyTransportDigestMethods = []string{digestSHA256} },
-			want:      negotiated{content: aes128CBC, keyTransport: rsaOAEP, digest: digestSHA256},
+			want:      negotiated{content: aes128GCM, keyTransport: rsaOAEP, digest: digestSHA256},
 		},
 		{
 			name: "first digest is the default mgf",
@@ -296,13 +296,13 @@ func TestIDPEncryptionAlgorithmConfiguration(t *testing.T) {
 				idp.KeyTransportMethods = []string{rsaOAEP11}
 				idp.KeyTransportDigestMethods = []string{digestSHA256}
 			},
-			want: negotiated{content: aes128CBC, keyTransport: rsaOAEP11, digest: digestSHA256, mgf: mgf1SHA256},
+			want: negotiated{content: aes128GCM, keyTransport: rsaOAEP11, digest: digestSHA256, mgf: mgf1SHA256},
 		},
 		{
 			name:      "listed key transport without a digest means sha-1",
 			configure: func(idp *IdentityProvider) { idp.KeyTransportDigestMethods = []string{digestSHA256, digestSHA1} },
 			methods:   []EncryptionMethod{method(rsaOAEP11)},
-			want:      negotiated{content: aes128CBC, keyTransport: rsaOAEP11, digest: digestSHA1, mgf: mgf1SHA1},
+			want:      negotiated{content: aes128GCM, keyTransport: rsaOAEP11, digest: digestSHA1, mgf: mgf1SHA1},
 		},
 		{
 			name:      "listed key transport without a digest when sha-1 is not allowed",
@@ -319,7 +319,7 @@ func TestIDPEncryptionAlgorithmConfiguration(t *testing.T) {
 		{
 			name:      "legacy digest identifier in configuration",
 			configure: func(idp *IdentityProvider) { idp.KeyTransportDigestMethods = []string{digestLegacy256} },
-			want:      negotiated{content: aes128CBC, keyTransport: rsaOAEP, digest: digestSHA256},
+			want:      negotiated{content: aes128GCM, keyTransport: rsaOAEP, digest: digestSHA256},
 		},
 		{
 			name:      "digest not allowed",

@@ -21,20 +21,24 @@ const (
 )
 
 // contentEncryptionCiphers are the block ciphers this identity provider can encrypt an assertion with, in the
-// default order of IdentityProvider.ContentEncryptionMethods. AES-128-CBC is first because a service provider
-// which lists no algorithm is most likely to support it, as XML Encryption §5.1 requires every implementation to.
+// default order of IdentityProvider.ContentEncryptionMethods. Those in GCM mode are first, as SAML2Int SDP-ALG01
+// requires AES-128-GCM or AES-256-GCM to be used and CBC doesn't protect the integrity of what it encrypts
+// (errata E93). AES-128-GCM is the first of them because XML Encryption 1.1 §5.1 requires every implementation
+// to support it and leaves AES-256-GCM optional, so it is what a service provider which lists no algorithm is
+// most likely to decrypt.
 var contentEncryptionCiphers = []xmlenc.BlockCipher{
-	xmlenc.AES128CBC,
-	xmlenc.AES192CBC,
-	xmlenc.AES256CBC,
 	xmlenc.AES128GCM,
 	xmlenc.AES192GCM,
 	xmlenc.AES256GCM,
+	xmlenc.AES128CBC,
+	xmlenc.AES192CBC,
+	xmlenc.AES256CBC,
 }
 
 // keyTransportAlgorithms are the key transport algorithms this identity provider can encrypt the key of an
-// assertion with, in the default order of IdentityProvider.KeyTransportMethods. RSA-OAEP-MGF1P is first for the
-// same reason as AES-128-CBC.
+// assertion with, in the default order of IdentityProvider.KeyTransportMethods. RSA-OAEP-MGF1P is first because
+// XML Encryption §5.1 requires every implementation to support it, and it is the key transport algorithm of
+// SAML2Int SDP-ALG01.
 var keyTransportAlgorithms = []string{
 	algorithmRSAOAEPMGF1P,
 	algorithmRSAOAEP2009,
@@ -50,7 +54,8 @@ type keyTransportDigest struct {
 
 // keyTransportDigests are the digests this identity provider can use for RSA-OAEP, in the default order of
 // IdentityProvider.KeyTransportDigestMethods. SHA-1 is first because it is the default of XML Encryption §5.4.2,
-// and so the digest a service provider which names none is certain to support.
+// and so the digest a service provider which names none is certain to support, and the key transport digest of
+// SAML2Int SDP-ALG01.
 var keyTransportDigests = []keyTransportDigest{
 	{xmlenc.SHA1, crypto.SHA1, "http://www.w3.org/2009/xmlenc11#mgf1sha1"},
 	{xmlenc.SHA256, crypto.SHA256, "http://www.w3.org/2009/xmlenc11#mgf1sha256"},

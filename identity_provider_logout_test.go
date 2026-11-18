@@ -376,13 +376,31 @@ func TestServeSLOFutureDenied(t *testing.T) {
 }
 
 func TestServeSLONotOnOrAfterDenied(t *testing.T) {
-	// The request is no longer valid at the instant of NotOnOrAfter itself (SAMLCore §3.7.1).
-	for name, offset := range map[string]time.Duration{"past": -time.Minute, "now": 0} {
+	// The request is no longer valid at the instant of NotOnOrAfter itself (SAMLCore §3.7.1), once MaxClockSkew
+	// is allowed for the clock of the service provider (SAML2Int SDP-G01).
+	for name, offset := range map[string]time.Duration{"past": -time.Hour, "skew ago": -MaxClockSkew} {
 		t.Run(name, func(t *testing.T) {
 			requestStageLogoutStatus(t, func(r *LogoutRequest) {
 				notOnOrAfter := TimeNow().Add(offset)
 				r.NotOnOrAfter = &notOnOrAfter
 			}, StatusRequester, StatusRequestDenied)
+		})
+	}
+}
+
+// SAML2Int SDP-G01 requires clock skew to be allowed for in either direction, and names the NotOnOrAfter of a
+// LogoutRequest.
+func TestServeSLONotOnOrAfterAllowsClockSkew(t *testing.T) {
+	for name, offset := range map[string]time.Duration{"now": 0, "within skew": -MaxClockSkew + time.Second} {
+		t.Run(name, func(t *testing.T) {
+			test, provider := logoutTestIDP(t)
+			r, _ := redirectLogoutRequest(t, &test.SP, func(r *LogoutRequest) {
+				notOnOrAfter := TimeNow().Add(offset)
+				r.NotOnOrAfter = &notOnOrAfter
+			})
+			_, response := redirectedLogoutResponse(t, serveSLO(test, r))
+			assert.Check(t, is.Equal(response.Status.StatusCode.Value, StatusSuccess))
+			assert.Check(t, is.DeepEqual(provider.terminated, provider.sessions))
 		})
 	}
 }

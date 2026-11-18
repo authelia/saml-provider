@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"cmp"
 	"crypto"
+	"crypto/ecdsa"
 	"crypto/rsa"
 	"crypto/x509"
 	"crypto/x509/pkix"
@@ -600,7 +601,7 @@ type IdentityProvider struct {
 
 	// EntityID is the entity identifier of the identity provider, which is the entityID of its metadata, the Issuer
 	// of every assertion, response, logout request and logout response, and the NameQualifier of every NameID that
-	// it asserts. SAMLCore §8.3.6 requires it to be an absolute URI of no more than 1024 characters, and a message
+	// it asserts. SAML2Int SDP-G04 requires it to be an absolute URI of no more than 256 characters, and a message
 	// is refused if it is not. Defaults to MetadataURL, which remains the URL at which the metadata is served
 	// whatever the entity ID is.
 	EntityID string
@@ -726,18 +727,21 @@ type IdentityProvider struct {
 	// ContentEncryptionMethods lists the identifiers of the block ciphers the identity provider may encrypt an
 	// assertion, a NameID or an attribute with, and those it accepts an EncryptedID to be encrypted with. When the service provider lists content encryption algorithms for its key, the first of them
 	// in its order of preference that is also listed here is used, and when it lists none the first one listed
-	// here is used (Metadata Profile for Algorithm Support §2.5). The supported ciphers are AES-128-CBC,
-	// AES-192-CBC, AES-256-CBC, AES-128-GCM, AES-192-GCM and AES-256-GCM, and empty means all of them in that
-	// order, so that a service provider which lists none receives AES-128-CBC. The metadata lists them for the
-	// encryption key of the identity provider with GCM first, as CBC doesn't protect the integrity of what it
-	// encrypts (errata E93). KeyTransportMethods and KeyTransportDigestMethods restrict what is accepted in the
-	// same way.
+	// here is used (Metadata Profile for Algorithm Support §2.5). The supported ciphers are AES-128-GCM,
+	// AES-192-GCM, AES-256-GCM, AES-128-CBC, AES-192-CBC and AES-256-CBC, and empty means all of them in that
+	// order, so that a service provider which lists none receives AES-128-GCM, one of the two block ciphers
+	// that SAML2Int SDP-ALG01 requires to be used. A service provider that can only decrypt CBC must list it in
+	// the EncryptionMethods of its key, or have it listed there by the ServiceProviderProvider. The metadata
+	// lists them for the encryption key of the identity provider with GCM first, as CBC doesn't protect the
+	// integrity of what it encrypts (errata E93). KeyTransportMethods and KeyTransportDigestMethods restrict
+	// what is accepted in the same way.
 	ContentEncryptionMethods []string
 
 	// KeyTransportMethods lists the identifiers of the key transport algorithms the identity provider may encrypt
 	// the key of an assertion with, and is chosen from like ContentEncryptionMethods. The supported algorithms
 	// are RSA-OAEP-MGF1P (XML Encryption §5.4.2) and the RSA-OAEP of XML Encryption 1.1 (§5.5.2), and empty
-	// means both in that order, so that a service provider which lists none receives RSA-OAEP-MGF1P.
+	// means both in that order, so that a service provider which lists none receives RSA-OAEP-MGF1P, the key
+	// transport algorithm that SAML2Int SDP-ALG01 requires.
 	KeyTransportMethods []string
 
 	// KeyTransportDigestMethods lists the identifiers of the digests the identity provider may use for RSA-OAEP,
@@ -745,8 +749,9 @@ type IdentityProvider struct {
 	// service provider lists no key transport algorithm. A key transport algorithm it lists without a digest or
 	// mask generation function means the default of that algorithm, SHA-1 or MGF1 with SHA-1, and can't be used
 	// unless SHA-1 is allowed. The supported digests are SHA-1, SHA-256 and SHA-512, and empty means all of them in
-	// that order, so that a service provider which lists no key transport algorithm receives SHA-1. The legacy
-	// identifiers of SHA-256 and SHA-512 are accepted, and the standard ones are written.
+	// that order, so that a service provider which lists no key transport algorithm receives SHA-1, the key
+	// transport digest that SAML2Int SDP-ALG01 requires. The legacy identifiers of SHA-256 and SHA-512 are
+	// accepted, and the standard ones are written.
 	KeyTransportDigestMethods []string
 
 	// SignatureMethods lists the identifiers of the signature algorithms that the identity provider accepts on what
@@ -1119,11 +1124,12 @@ func (idp *IdentityProvider) entityID() string {
 	return idp.MetadataURL.String()
 }
 
-// maxEntityIDLength is the longest entity identifier that SAMLCore §8.3.6 allows, in characters.
-const maxEntityIDLength = 1024
+// maxEntityIDLength is the longest entity identifier that SAML2Int SDP-G04 allows a deployment to be named by, in
+// characters. SAMLCore §8.3.6 allows 1024, so the entity identifier of a service provider may be longer.
+const maxEntityIDLength = 256
 
 // checkEntityID returns an error unless the entity identifier is an absolute URI, as SAMLCore §1.3.2 requires, of
-// no more than 1024 characters, as SAMLCore §8.3.6 requires.
+// no more than 256 characters, as SAML2Int SDP-G04 requires.
 func (idp *IdentityProvider) checkEntityID() error {
 	entityID := idp.entityID()
 	if utf8.RuneCountInString(entityID) > maxEntityIDLength {
@@ -1136,6 +1142,21 @@ func (idp *IdentityProvider) checkEntityID() error {
 
 	if u, err := url.Parse(entityID); err != nil || !u.IsAbs() {
 		return fmt.Errorf("the entity ID %q is not an absolute URI", entityID)
+	}
+
+	return nil
+}
+
+// minimumECKeySize is the shortest EC public key that SAML2Int SDP-MD07 allows, in bits.
+const minimumECKeySize = 256
+
+// checkSigningKeySize returns an error if public is an ECDSA key on a curve of fewer than 256 bits, such as
+// P-224, which SAML2Int SDP-MD07 does not allow. The size of an RSA key is not checked.
+func checkSigningKeySize(public crypto.PublicKey) error {
+	if key, ok := public.(*ecdsa.PublicKey); ok && key.Curve != nil {
+		if size := key.Curve.Params().BitSize; size < minimumECKeySize {
+			return fmt.Errorf("the ECDSA signing key of the identity provider has %d bits, which is shorter than %d bits", size, minimumECKeySize)
+		}
 	}
 
 	return nil
@@ -3273,6 +3294,10 @@ func (idp *IdentityProvider) signingContextWith(signatureMethod, digestMethod st
 	// If signer is set, use it instead of the private key.
 	signer, err := idp.signer()
 	if err != nil {
+		return nil, err
+	}
+
+	if err = checkSigningKeySize(signer.Public()); err != nil {
 		return nil, err
 	}
 

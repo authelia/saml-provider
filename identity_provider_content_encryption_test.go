@@ -50,8 +50,8 @@ func TestIDPChoosesContentEncryptionFromMetadata(t *testing.T) {
 		methods []string
 		want    string
 	}{
-		{"nothing advertised", nil, aes128CBC},
-		{"only key transport advertised", []string{rsaOAEP}, aes128CBC},
+		{"nothing advertised", nil, aes128GCM},
+		{"only key transport advertised", []string{rsaOAEP}, aes128GCM},
 		{"gcm advertised", []string{aes128GCM, rsaOAEP}, aes128GCM},
 		{"gcm preferred", []string{aes128GCM, aes128CBC}, aes128GCM},
 		{"cbc preferred over gcm", []string{aes128CBC, aes128GCM}, aes128CBC},

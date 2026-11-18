@@ -113,13 +113,13 @@ func TestIDPEntityIDInArtifactSourceID(t *testing.T) {
 	assert.Check(t, is.Equal(artifact.SourceID, ArtifactSourceID(entityIDTestValue)))
 }
 
-// SAMLCore §8.3.6 requires an entity identifier to be a URI of no more than 1024 characters, and
-// SAMLCore §1.3.2 requires the URI to be absolute.
+// SAML2Int SDP-G04 requires an entity identifier to be an absolute URI of no more than 256 characters, which is
+// within the 1024 characters of SAMLCore §8.3.6.
 func TestIDPRefusesInvalidEntityID(t *testing.T) {
 	for name, entityID := range map[string]string{
 		"relative":   "idp",
 		"whitespace": "urn:example: idp",
-		"too long":   "urn:example:" + strings.Repeat("a", 1024-len("urn:example:")+1),
+		"too long":   "urn:example:" + strings.Repeat("a", 256-len("urn:example:")+1),
 	} {
 		t.Run(name, func(t *testing.T) {
 			test, req := entityIDRequest(t, entityID)
@@ -140,7 +140,7 @@ func TestIDPRefusesInvalidEntityID(t *testing.T) {
 }
 
 func TestIDPAcceptsLongestEntityID(t *testing.T) {
-	entityID := "urn:example:" + strings.Repeat("a", 1024-len("urn:example:"))
+	entityID := "urn:example:" + strings.Repeat("a", 256-len("urn:example:"))
 	_, req := entityIDRequest(t, entityID)
 
 	w := httptest.NewRecorder()

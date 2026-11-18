@@ -9,6 +9,8 @@ import (
 	"encoding/asn1"
 	"encoding/base64"
 	"math/big"
+	"net/http"
+	"net/http/httptest"
 	"testing"
 	"time"
 
@@ -111,6 +113,36 @@ func TestIDPRejectsKeyWhichCannotSign(t *testing.T) {
 	assert.NilError(t, err)
 	assert.NilError(t, DefaultAssertionMaker{}.MakeAssertion(req, &Session{ID: "f00d", NameID: "alice"}))
 	assert.Check(t, is.ErrorContains(req.MakeResponse(), "crypto.Signer"))
+}
+
+// SAML2Int SDP-MD07 requires an EC public key to be at least 256 bits in length.
+func TestIDPRejectsECDSAKeyShorterThan256Bits(t *testing.T) {
+	key, cert := newECDSATestKey(t, elliptic.P224())
+
+	for name, apply := range map[string]func(test *IdentityProviderTest){
+		"key":           func(test *IdentityProviderTest) { test.IDP.Key = key },
+		"opaque signer": func(test *IdentityProviderTest) { test.IDP.Signer = opaqueSigner{key} },
+	} {
+		t.Run(name, func(t *testing.T) {
+			test := NewIdentityProviderTest(t)
+			test.IDP.Key = nil
+			test.IDP.Signer = nil
+			test.IDP.Certificate = cert
+			apply(test)
+
+			req, err := hardeningValidate(test, hardeningRequest(`ID="id-1"`, TimeNow(), hardeningIssuer))
+			assert.NilError(t, err)
+			assert.NilError(t, DefaultAssertionMaker{}.MakeAssertion(req, &Session{ID: "f00d", NameID: "alice"}))
+			assert.Check(t, is.ErrorContains(req.MakeResponse(), "shorter than 256 bits"))
+
+			_, err = test.IDP.SignedMetadata()
+			assert.Check(t, is.ErrorContains(err, "shorter than 256 bits"))
+
+			w := httptest.NewRecorder()
+			test.IDP.ServeMetadata(w, httptest.NewRequest(http.MethodGet, test.IDP.MetadataURL.String(), nil))
+			assert.Check(t, is.Equal(w.Code, http.StatusInternalServerError))
+		})
+	}
 }
 
 func TestIDPMetadataOmitsEncryptionForECDSACertificate(t *testing.T) {

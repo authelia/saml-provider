@@ -146,7 +146,34 @@ least the subset of SAML known as [interoperable SAML](https://kantarainitiative
 - **Entity ID:** the IdP has a single entity ID for every SP, `IdentityProvider.EntityID` (`samlidp.Options.EntityID`),
   or `MetadataURL` if that is empty. It is the `entityID` of the metadata, the `Issuer` of every message and the
   `NameQualifier` of every `NameID`, and the metadata is still served at `MetadataURL`. It must be an absolute URI of
-  at most 1024 characters, or the metadata and every message are refused.
+  at most 256 characters (SAML2Int SDP-G04), or the metadata and every message are refused. The entity ID of an SP
+  may be as long as the 1024 characters of SAMLCore §8.3.6.
+- **SAML2Int:** what the IdP does about the requirements of the SAML V2.0 Deployment Profile for Federation
+  Interoperability that apply to an IdP. "Enforced" is refused or done whatever the settings are, "default" is what
+  happens unless a setting changes it, and "deployment" is left to the application or its configuration.
+
+    | Requirement                   | Status     | Notes                                                                 |
+    |:------------------------------|:-----------|:----------------------------------------------------------------------|
+    | SDP-G01 clock skew            | Default    | `MaxClockSkew` is three minutes, and is allowed for `NotBefore`, a `NotOnOrAfter` and an `IssueInstant` in the future. The oldest request accepted (`MaxIssueDelay`, `MaxAuthnRequestAge`) is not extended by it |
+    | SDP-G02 256 characters        | Deployment | Not checked for a `NameID` or attribute value of the `Session`; what the IdP generates is shorter |
+    | SDP-G03 no DTD                | Enforced   | No message the IdP makes has one                                      |
+    | SDP-G04 entity ID             | Enforced   | See **Entity ID**                                                     |
+    | SDP-MD02 metadata trust       | Deployment | `MetadataVerifier` verifies the signature of SP metadata              |
+    | SDP-MD04, SDP-MD05, SDP-MD08  | Enforced   | The metadata lists only the endpoints that are served, and keys as X.509 certificates |
+    | SDP-MD06 RSA 2048 bits        | Default    | Enforced for the keys of the IdP that are decrypted with, and by default for the key of an SP that is encrypted to. Not checked for the signing key of the IdP or of an SP |
+    | SDP-MD07 EC 256 bits          | Enforced   | For the key the IdP signs with. Not checked for `RolloverCertificates` or the signing key of an SP |
+    | SDP-MD09 to SDP-MD12          | Deployment | `MetadataInfo`; what is set is validated, nothing is required         |
+    | SDP-ALG01 algorithms          | Default    | RSA-SHA256 or ECDSA-SHA256 with the SHA-256 digest (an ECDSA key on a larger curve needs `SignatureMethod` set to ECDSA-SHA256), AES-128-GCM, RSA-OAEP-MGF1P with SHA-1. An SP gets another algorithm only if its metadata lists it first |
+    | SDP-IDP02 to SDP-IDP08        | Enforced   | An http endpoint needs `AllowInsecureServiceProviderEndpoints`; `ForceAuthn` needs a `ForceAuthnSessionProvider` |
+    | SDP-IDP09, SDP-IDP10          | Default    | `IssuancePolicy` may sign only the assertion for an SP                |
+    | SDP-IDP11 encrypted assertion | Default    | Encrypted whenever the SP has an encryption key, and sent in plaintext to one that has none. An `EncryptedID` or `EncryptedAttribute` is only sent on request or by `ElementEncryptionPolicy` |
+    | SDP-IDP12 transient `NameID`  | Deployment | The `NameIDProvider` and the formats of the SP decide                 |
+    | SDP-IDP13 to SDP-IDP17        | Enforced   | When the `Session` has a `SubjectID` or the `NameIDProvider` supplies a `pairwise-id`, see **Subject identifier requirement** |
+    | SDP-IDP18 to SDP-IDP20        | Default    | For the attributes `DefaultAssertionMaker` makes; `Session.CustomAttributes` are sent as they are |
+    | SDP-IDP21 to SDP-IDP31        | Enforced   | A `LogoutResponse` uses the binding of the request if the SP has an endpoint for it, and HTTP-Redirect otherwise. An `EncryptedID` is only sent to an SP that was sent one |
+    | SDP-IDP32                     | Enforced   | A signature is verified with any signing key of the SP                |
+    | SDP-IDP33                     | Deployment | As SDP-MD09 to SDP-MD12                                               |
+
 - **Single Logout:** the front channel and the SOAP back channel are supported; the Asynchronous Single Logout Profile
   Extension is not. `IdentityProvider.ServeSLO` handles a `LogoutRequest` from an SP on the HTTP Redirect or HTTP POST
   binding at `IdentityProvider.LogoutURL`, and answers with a signed `LogoutResponse`. The request must be signed.
@@ -488,7 +515,8 @@ least the subset of SAML known as [interoperable SAML](https://kantarainitiative
   `IdentityProvider.AssertionLifetime` after, which defaults to `MaxIssueDelay` and sets both the `Conditions` and the
   bearer `SubjectConfirmationData` `NotOnOrAfter`. It is independent of `IdentityProvider.MaxAuthnRequestAge`, the
   oldest `AuthnRequest` accepted, which also defaults to `MaxIssueDelay`. A `LogoutRequest` older than `MaxIssueDelay`
-  is refused.
+  is refused, and so is one that is `MaxClockSkew` or more past its `NotOnOrAfter` (SAML2Int SDP-G01). `MaxClockSkew`
+  defaults to three minutes, and SDP-G01 requires it to be between three and five.
 - **`SessionNotOnOrAfter`:** only stated when `IdentityProvider.IncludeSessionNotOnOrAfter` is set, as
   `Session.ExpireTime`, and omitted if that is zero. An SP that honours it ends its session when the IdP's ends. With
   it set, `DefaultAssertionMaker` refuses a session that has already expired. `samlsp` does not honour it.
@@ -508,9 +536,11 @@ least the subset of SAML known as [interoperable SAML](https://kantarainitiative
   type but none the IdP allows, the assertion is not sent. Content encryption may use AES-128/192/256-CBC and
   AES-128/192/256-GCM, and key transport RSA-OAEP-MGF1P or XML Encryption 1.1 RSA-OAEP, with the SHA-1, SHA-256 or
   SHA-512 digest and MGF1 hash the SP names in `ds:DigestMethod` and `xenc11:MGF`. An SP that lists nothing of a type
-  receives the first the IdP allows, which is AES-128-CBC and RSA-OAEP-MGF1P with SHA-1 by default. Set
+  receives the first the IdP allows, which is AES-128-GCM and RSA-OAEP-MGF1P with SHA-1 by default, as SAML2Int
+  SDP-ALG01 requires. An SP that can only decrypt CBC must list it in the `EncryptionMethod` elements of its key, or
+  the `ServiceProviderProvider` must add it to the metadata it returns for that SP. Set
   `IdentityProvider.ContentEncryptionMethods`, `KeyTransportMethods` and `KeyTransportDigestMethods` to restrict or
-  reorder them. 3DES, RSA PKCS#1 v1.5, key agreement and an OAEP label (`OAEPparams`) are never used, and
+  reorder them for every SP; without them GCM comes before CBC. 3DES, RSA PKCS#1 v1.5, key agreement and an OAEP label (`OAEPparams`) are never used, and
   algorithms the IdP doesn't recognise as either type are ignored. SAMLConformance §4.2 lists 3DES and RSA PKCS#1 v1.5 as
   mandatory to implement, so an SP that only lists them can't be sent an encrypted assertion.
 - **`EncryptedID` and `EncryptedAttribute`:** the `NameID` of an assertion is sent as an `EncryptedID` when the
@@ -667,6 +697,8 @@ least the subset of SAML known as [interoperable SAML](https://kantarainitiative
     entity, each of the two types on its own. None means the entity says nothing, not that it supports nothing.
 - **Signature defaults:** `SignatureMethod` defaults to RSA-SHA256 for RSA keys, and SHA-1 is only used if set explicitly.
   For ECDSA keys it defaults to the hash matching the curve: SHA-256 for P-256, SHA-384 for P-384 and SHA-512 for P-521.
+  An ECDSA key on a curve of fewer than 256 bits, such as P-224, is refused (SAML2Int SDP-MD07): nothing is signed
+  with it and `ServeMetadata` answers 500. The size of an RSA signing key is not checked.
 - **Issuance for each service provider:** `IdentityProvider.IssuancePolicy` decides, for each SP, what is signed, with
   which algorithms, and how its assertions are issued. Without one, every SP gets the settings of the IdP and both
   signatures, with the algorithms its metadata lists if it lists any (see **Negotiated from metadata** below). `DefaultIssuancePolicy.ServiceProviders` maps an entity ID to what differs for it, and a field that is
@@ -804,7 +836,8 @@ least the subset of SAML known as [interoperable SAML](https://kantarainitiative
   **Decrypt `EncryptedAssertion`**, so the `Assertion` returned is the same as for plaintext. The `EncryptedKey` may be
   inside the `EncryptedData` or beside it (errata E43). An `EncryptedID` must hold a `NameID`. Set
   `ServiceProvider.EncryptNameID`, or `samlsp.Options.EncryptNameID`, to request the encrypted format and to send the
-  `NameID` of a `LogoutRequest` as an `EncryptedID`, encrypted to the IdP's encryption key. `AuthnNameIDFormat` is then
+  `NameID` of a `LogoutRequest` as an `EncryptedID`, encrypted to the IdP's encryption key with the algorithms its
+  `EncryptionMethod` elements list, or AES-128-GCM and RSA-OAEP-MGF1P if they list none. `AuthnNameIDFormat` is then
   only listed in metadata. `ServiceProvider.DecryptNameID` decrypts the `EncryptedID` of a `LogoutRequest` that the
   application has received and verified.
 - **Consume `EntitiesDescriptor`:** `samlsp.ParseMetadata` uses the first entity that has an `IDPSSODescriptor`; there
