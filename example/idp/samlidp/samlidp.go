@@ -77,6 +77,11 @@ type Options struct {
 	// ServiceProviderMetadataVerifier, when it is set, refuses the metadata of a service that isn't signed by one
 	// of its certificates, and registers only what the signature covers. See saml.MetadataVerifier.
 	ServiceProviderMetadataVerifier *saml.MetadataVerifier
+
+	// ServiceProviderProvider, when it is set, is asked for a service provider that no registered service has,
+	// such as a saml.ServiceProviderMetadataResolver which loads the metadata of a federation and keeps it
+	// fresh. The caller starts and closes it.
+	ServiceProviderProvider saml.ServiceProviderProvider
 }
 
 // Server represents an IDP server. The server provides the following URLs:
@@ -112,6 +117,9 @@ type Server struct {
 	// ServiceProviderMetadataVerifier verifies the signature of the metadata of a service before it is registered,
 	// when it is set.
 	ServiceProviderMetadataVerifier *saml.MetadataVerifier
+
+	// ServiceProviderProvider is asked for a service provider that no registered service has, when it is set.
+	ServiceProviderProvider saml.ServiceProviderProvider
 }
 
 // maxAdminBodySize is the largest request body that the RESTful interfaces accept, which leaves room
@@ -172,6 +180,7 @@ func New(opts Options) (*Server, error) {
 		AdminAuthorizer:   opts.AdminAuthorizer,
 
 		ServiceProviderMetadataVerifier: opts.ServiceProviderMetadataVerifier,
+		ServiceProviderProvider:         opts.ServiceProviderProvider,
 	}
 
 	s.IDP.SessionProvider = s

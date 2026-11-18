@@ -25,15 +25,22 @@ type Service struct {
 // GetServiceProvider returns the Service Provider metadata for the
 // service provider ID, which is typically the service provider's
 // metadata URL. If an appropriate service provider cannot be found then
-// the returned error must be os.ErrNotExist.
-func (s *Server) GetServiceProvider(_ *http.Request, serviceProviderID string) (*saml.EntityDescriptor, error) {
+// the returned error must be os.ErrNotExist. A registered service comes first, and the ServiceProviderProvider
+// of the server is asked for any other.
+func (s *Server) GetServiceProvider(r *http.Request, serviceProviderID string) (*saml.EntityDescriptor, error) {
 	s.idpConfigMu.RLock()
-	defer s.idpConfigMu.RUnlock()
 	rv, ok := s.serviceProviders[serviceProviderID]
-	if !ok {
-		return nil, os.ErrNotExist
+	s.idpConfigMu.RUnlock()
+
+	if ok {
+		return rv, nil
 	}
-	return rv, nil
+
+	if s.ServiceProviderProvider != nil {
+		return s.ServiceProviderProvider.GetServiceProvider(r, serviceProviderID)
+	}
+
+	return nil, os.ErrNotExist
 }
 
 // HandleListServices handles the `GET /services/` request and responds with a JSON formatted list
