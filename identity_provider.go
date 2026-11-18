@@ -24,6 +24,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 	"unicode"
 	"unicode/utf8"
@@ -254,7 +255,8 @@ type EncryptionCertificateEnforcer interface {
 // It applies to the assertion of any AssertionMaker, when MakeAssertionEl encrypts and signs it. The parts are
 // encrypted to the key that the assertion is encrypted to, with the same algorithms, so if the service provider
 // has no encryption key and a part must be encrypted, no assertion is sent. The whole assertion is still
-// encrypted afterwards.
+// encrypted afterwards, unless the IssuancePolicy gives NoAssertionEncryption for the service provider, and it is
+// then sent signed, with those parts as the only ciphertext in it.
 type ElementEncryptionPolicy interface {
 	// EncryptNameID reports whether the NameID of req.Assertion is sent as an EncryptedID although the request
 	// didn't ask for the encrypted format, which SAMLCore §3.4.1.1 allows the policies of an identity provider
@@ -715,8 +717,8 @@ type IdentityProvider struct {
 	// It also decides the content encryption and key transport algorithms that everything encrypted for a service
 	// provider is encrypted with, in place of those negotiated from the EncryptionMethods of its key and within
 	// ContentEncryptionMethods, KeyTransportMethods and KeyTransportDigestMethods, and whether an assertion is
-	// refused to a service provider that has no encryption key. See Issuance.ContentEncryptionMethod and
-	// Issuance.RequireEncryption.
+	// encrypted as a whole: it can be refused to a service provider that has no encryption key, or sent unencrypted
+	// to one that has. See Issuance.ContentEncryptionMethod and Issuance.AssertionEncryption.
 	IssuancePolicy IssuancePolicy
 
 	// EncryptionCertificateEnforcer decides whether the encryption certificate of a service provider
@@ -2878,8 +2880,11 @@ func clientAddress(r *http.Request, session *Session) string {
 const canonicalizerPrefixList = ""
 
 // MakeAssertionEl sets `AssertionEl` to a signed, possibly encrypted, version of `Assertion`. The assertion is
-// signed unless the IssuancePolicy of the identity provider has only the Response signed for this service
-// provider and its metadata doesn't set WantAssertionsSigned; the Signature of Assertion is then nil.
+// encrypted, as an EncryptedAssertion, if the service provider has an encryption key, unless the IssuancePolicy
+// gives NoAssertionEncryption for it. If the policy gives RequireAssertionEncryption and the service provider has
+// no encryption key, an error is returned. The assertion is signed unless the IssuancePolicy of the identity
+// provider has only the Response signed for this service provider and its metadata doesn't set
+// WantAssertionsSigned; the Signature of Assertion is then nil.
 //
 // The NameID of the Subject is sent as an EncryptedID when the NameIDPolicy of the request has the encrypted
 // format (SAMLCore §3.4.1.1) or the ElementEncryptionPolicy requires it, and the attributes which that policy
@@ -2887,7 +2892,9 @@ const canonicalizerPrefixList = ""
 // SAMLCore §6.2 requires, so the signature covers the ciphertext. Assertion is not changed, apart from its
 // Signature, and keeps the NameID and the attributes in plaintext. If a part must be encrypted and the service
 // provider has no key to encrypt it to, an error is returned, which wraps ErrInvalidNameIDPolicy when it is the
-// request that asked.
+// request that asked. That holds under NoAssertionEncryption too, which is the only case in which the encryption
+// key of the service provider is not looked at, and the EncryptionCertificateEnforcer not asked, unless a part is
+// encrypted: a key that can't be used then doesn't stop an assertion that has nothing encrypted in it.
 //
 // The assertion is saved in the AssertionStore of the identity provider, if it has one, before it is encrypted as
 // a whole: as it is sent, so signed if it is, and with any EncryptedID and EncryptedAttribute in place of their
@@ -2898,12 +2905,19 @@ func (req *IdpAuthnRequest) MakeAssertionEl() error {
 		return err
 	}
 
-	encrypter, err := req.elementEncrypter()
-	if err != nil && !errors.Is(err, os.ErrNotExist) {
-		return err
+	// The encrypter is resolved once, and with it the EncryptionCertificateEnforcer asked once. An assertion that
+	// is not encrypted as a whole only needs it for a part that is, so a key that can't be used is then only an
+	// error if there is such a part, which sentAssertion finds. Everything else fails here, as the assertion is
+	// never sent in plaintext because the key it should be encrypted to was refused.
+	resolveEncrypter := sync.OnceValues(req.elementEncrypter)
+
+	if issuance.AssertionEncryption != NoAssertionEncryption {
+		if _, err := resolveEncrypter(); err != nil && !errors.Is(err, os.ErrNotExist) {
+			return err
+		}
 	}
 
-	sent, err := req.sentAssertion(encrypter)
+	sent, err := req.sentAssertion(resolveEncrypter)
 	if err != nil {
 		return err
 	}
@@ -2931,6 +2945,15 @@ func (req *IdpAuthnRequest) MakeAssertionEl() error {
 
 	req.nameIDEncrypted = sent.Subject != nil && sent.Subject.EncryptedID != nil
 
+	if issuance.AssertionEncryption == NoAssertionEncryption {
+		req.saveAssertion(signedAssertionEl)
+		req.AssertionEl = signedAssertionEl
+
+		return nil
+	}
+
+	// An error other than that there is no key was returned above.
+	encrypter, _ := resolveEncrypter()
 	if encrypter == nil {
 		if err := req.checkPlaintextAssertion(issuance); err != nil {
 			return err
@@ -2949,16 +2972,21 @@ func (req *IdpAuthnRequest) MakeAssertionEl() error {
 	return err
 }
 
-// encryptAssertionEl returns the EncryptedAssertion element of the signed assertion, or the signed
-// assertion itself when the service provider has no encryption certificate.
+// encryptAssertionEl returns the EncryptedAssertion element of the signed assertion, or the signed assertion
+// itself when the service provider has no encryption certificate or the IssuancePolicy gives
+// NoAssertionEncryption for it. The encryption key is then not looked at, as nothing is encrypted.
 func (req *IdpAuthnRequest) encryptAssertionEl(signedAssertionEl *etree.Element) (*etree.Element, error) {
+	issuance, err := req.Issuance(req.Session)
+	if err != nil {
+		return nil, err
+	}
+
+	if issuance.AssertionEncryption == NoAssertionEncryption {
+		return signedAssertionEl, nil
+	}
+
 	encrypter, err := req.elementEncrypter()
 	if errors.Is(err, os.ErrNotExist) {
-		issuance, err := req.Issuance(req.Session)
-		if err != nil {
-			return nil, err
-		}
-
 		if err := req.checkPlaintextAssertion(issuance); err != nil {
 			return nil, err
 		}
@@ -2975,7 +3003,7 @@ func (req *IdpAuthnRequest) encryptAssertionEl(signedAssertionEl *etree.Element)
 // to be issued to the service provider in plaintext, which it would be as the service provider has no encryption
 // key.
 func (req *IdpAuthnRequest) checkPlaintextAssertion(issuance Issuance) error {
-	if !issuance.RequireEncryption {
+	if issuance.AssertionEncryption != RequireAssertionEncryption {
 		return nil
 	}
 
@@ -3037,10 +3065,30 @@ func (req *IdpAuthnRequest) elementEncryptionPolicy() ElementEncryptionPolicy {
 	return DefaultElementEncryptionPolicy{}
 }
 
+// partEncrypter returns the encrypter that resolveEncrypter gives, for a part of an assertion that must be
+// encrypted. The error is missing if the service provider has no encryption key, and that of resolveEncrypter if
+// its key can't be used, so that the part is never left in plaintext.
+func partEncrypter(resolveEncrypter func() (*elementEncrypter, error), missing error) (*elementEncrypter, error) {
+	encrypter, err := resolveEncrypter()
+
+	switch {
+	case errors.Is(err, os.ErrNotExist):
+		return nil, missing
+	case err != nil:
+		return nil, err
+	case encrypter == nil:
+		return nil, missing
+	}
+
+	return encrypter, nil
+}
+
 // sentAssertion returns a copy of Assertion as it is sent: with the NameID of its Subject replaced by an
 // EncryptedID, and each attribute that is to be encrypted by an EncryptedAttribute, each in the place of its
-// plaintext (SAMLCore §6.1). The encrypter is nil if the service provider has no encryption key.
-func (req *IdpAuthnRequest) sentAssertion(encrypter *elementEncrypter) (*Assertion, error) {
+// plaintext (SAMLCore §6.1). The encrypter is what resolveEncrypter returns, as elementEncrypter does, and is only
+// asked for when a part is to be encrypted. An error of it is then returned, so that no assertion is sent with a
+// part in plaintext that should not be.
+func (req *IdpAuthnRequest) sentAssertion(resolveEncrypter func() (*elementEncrypter, error)) (*Assertion, error) {
 	sent := *req.Assertion
 	policy := req.elementEncryptionPolicy()
 
@@ -3048,12 +3096,14 @@ func (req *IdpAuthnRequest) sentAssertion(encrypter *elementEncrypter) (*Asserti
 		requested := req.requestsEncryptedID()
 
 		if requested || policy.EncryptNameID(req) {
-			if encrypter == nil {
-				if requested {
-					return nil, fmt.Errorf("%w: the request requires an EncryptedID, and the service provider has no encryption key", ErrInvalidNameIDPolicy)
-				}
+			missing := errors.New("the NameID must be encrypted, and the service provider has no encryption key")
+			if requested {
+				missing = fmt.Errorf("%w: the request requires an EncryptedID, and the service provider has no encryption key", ErrInvalidNameIDPolicy)
+			}
 
-				return nil, errors.New("the NameID must be encrypted, and the service provider has no encryption key")
+			encrypter, err := partEncrypter(resolveEncrypter, missing)
+			if err != nil {
+				return nil, err
 			}
 
 			encryptedID, err := encrypter.encryptNameID(subject.NameID)
@@ -3081,8 +3131,9 @@ func (req *IdpAuthnRequest) sentAssertion(encrypter *elementEncrypter) (*Asserti
 				continue
 			}
 
-			if encrypter == nil {
-				return nil, fmt.Errorf("the attribute %q must be encrypted, and the service provider has no encryption key", attribute.Name)
+			encrypter, err := partEncrypter(resolveEncrypter, fmt.Errorf("the attribute %q must be encrypted, and the service provider has no encryption key", attribute.Name))
+			if err != nil {
+				return nil, err
 			}
 
 			encryptedAttribute, err := encrypter.encryptAttribute(attribute)

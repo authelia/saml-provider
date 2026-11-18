@@ -380,10 +380,7 @@ func plaintextAssertionResponse(t *testing.T, req *IdpAuthnRequest, mutate func(
 
 	assert.NilError(t, DefaultAssertionMaker{}.MakeAssertion(req, encryptedPartsSession))
 
-	encrypter, err := req.elementEncrypter()
-	assert.NilError(t, err)
-
-	sent, err := req.sentAssertion(encrypter)
+	sent, err := req.sentAssertion(req.elementEncrypter)
 	assert.NilError(t, err)
 
 	if mutate != nil {

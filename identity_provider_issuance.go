@@ -33,6 +33,31 @@ const (
 	SignResponse
 )
 
+// AssertionEncryption is whether the identity provider encrypts an assertion as a whole, as an EncryptedAssertion
+// (SAMLCore §2.3.4), for a service provider. It says nothing of the parts of an assertion that are encrypted on
+// their own: an EncryptedID or an EncryptedAttribute is sent when the request or the ElementEncryptionPolicy asks
+// for one, whatever this is.
+type AssertionEncryption int
+
+const (
+	// EncryptAssertionWhenPossible encrypts the assertion for a service provider that has an encryption key, and
+	// sends it in plaintext to one that has none. It is the default.
+	EncryptAssertionWhenPossible AssertionEncryption = iota
+
+	// RequireAssertionEncryption only issues an assertion encrypted. A service provider that has no encryption
+	// key is then issued none, in place of an assertion in plaintext (SAML2Int SDP-IDP11). A Response that
+	// reports an error has no assertion and is still sent.
+	RequireAssertionEncryption
+
+	// NoAssertionEncryption never encrypts the assertion as a whole, although the service provider has an
+	// encryption key, for one that can't decrypt an EncryptedAssertion or that wants an assertion it can read with
+	// only an EncryptedID or EncryptedAttribute elements in it. The assertion is still signed, after its parts are
+	// encrypted (SAMLCore §6.2), and it is still not issued if a part must be encrypted and the encryption key of
+	// the service provider is missing or can't be used. That key is not looked at, and the
+	// EncryptionCertificateEnforcer is not asked about it, when no part is encrypted.
+	NoAssertionEncryption
+)
+
 // Issuance is how the identity provider issues a Response and its Assertion to a service provider, as an
 // IssuancePolicy decides.
 type Issuance struct {
@@ -100,10 +125,11 @@ type Issuance struct {
 	KeyTransportDigestMethod string
 	KeyTransportMGF          string
 
-	// RequireEncryption is whether an assertion is only issued to the service provider encrypted. One that has no
-	// encryption key is then issued none, in place of an assertion in plaintext (SAML2Int SDP-IDP11). A Response
-	// that reports an error has no assertion and is still sent.
-	RequireEncryption bool
+	// AssertionEncryption is whether the assertion is encrypted as a whole: when the service provider has an
+	// encryption key, which is the default, always, so that a service provider with no key is issued no assertion
+	// (SAML2Int SDP-IDP11), or never. It applies to every assertion that is issued to the service provider: that
+	// of single sign-on on every binding, of the answer to a query, and one that an AssertionIDRequest returns.
+	AssertionEncryption AssertionEncryption
 }
 
 // IssuanceRequest describes what an IssuancePolicy is asked about: a Response of single sign-on, or another
@@ -143,9 +169,9 @@ type IssuanceRequest struct {
 }
 
 // IssuancePolicy is an interface used by IdentityProvider to decide how a Response and its Assertion are issued
-// to a service provider: what is signed, with which algorithms, and for how long the assertion is valid. It
-// allows the decision to differ for each service provider. The default implementation is DefaultIssuancePolicy,
-// which is used if no IssuancePolicy is specified.
+// to a service provider: what is signed, with which algorithms, for how long the assertion is valid, and whether
+// it is encrypted. It allows the decision to differ for each service provider. The default implementation is
+// DefaultIssuancePolicy, which is used if no IssuancePolicy is specified.
 type IssuancePolicy interface {
 	// Issuance returns how the message of req is issued. It starts from req.Defaults, which holds the settings
 	// of the identity provider. If an error is returned, or what is returned can't be done, such as a
@@ -209,17 +235,20 @@ type ServiceProviderIssuance struct {
 	KeyTransportDigestMethod string
 	KeyTransportMGF          string
 
-	// RequireEncryption replaces DefaultIssuancePolicy.RequireEncryption, unless it is nil.
-	RequireEncryption *bool
+	// AssertionEncryption replaces DefaultIssuancePolicy.AssertionEncryption, unless it is nil. It is a pointer
+	// so that EncryptAssertionWhenPossible, which is the zero value, can exempt a service provider from what is
+	// set for every other.
+	AssertionEncryption *AssertionEncryption
 }
 
 // DefaultIssuancePolicy is the default IssuancePolicy. With no options set it issues to every service provider
 // with the settings of the identity provider, and signs both the Response and the Assertion.
 type DefaultIssuancePolicy struct {
-	// RequireEncryption is whether an assertion is only issued encrypted, so that a service provider with no
-	// encryption key is issued none. See Issuance.RequireEncryption. It is for every service provider, unless
-	// its entry in ServiceProviders says otherwise.
-	RequireEncryption bool
+	// AssertionEncryption is whether an assertion is encrypted as a whole: RequireAssertionEncryption issues none
+	// to a service provider with no encryption key, and NoAssertionEncryption sends every assertion unencrypted.
+	// See Issuance.AssertionEncryption. It is for every service provider, unless its entry in ServiceProviders
+	// says otherwise.
+	AssertionEncryption AssertionEncryption
 
 	// ServiceProviders holds what differs for a service provider, by its entity ID.
 	ServiceProviders map[string]ServiceProviderIssuance
@@ -228,7 +257,7 @@ type DefaultIssuancePolicy struct {
 // Issuance implements IssuancePolicy.
 func (p DefaultIssuancePolicy) Issuance(req IssuanceRequest) (Issuance, error) {
 	issuance := req.Defaults
-	issuance.RequireEncryption = p.RequireEncryption
+	issuance.AssertionEncryption = p.AssertionEncryption
 
 	if req.ServiceProviderMetadata == nil {
 		return issuance, nil
@@ -270,8 +299,8 @@ func (p DefaultIssuancePolicy) Issuance(req IssuanceRequest) (Issuance, error) {
 		issuance.KeyTransportMGF = override.KeyTransportMGF
 	}
 
-	if override.RequireEncryption != nil {
-		issuance.RequireEncryption = *override.RequireEncryption
+	if override.AssertionEncryption != nil {
+		issuance.AssertionEncryption = *override.AssertionEncryption
 	}
 
 	return issuance, nil
@@ -455,11 +484,17 @@ func (idp *IdentityProvider) completeIssuance(req IssuanceRequest, issuance Issu
 }
 
 // checkIssuanceEncryption returns an error if issuance chooses an encryption algorithm that the identity provider
-// can't or may not encrypt with. It is checked for every message, and not when something is encrypted, so that a
-// choice that can't be carried out is found before the service provider it is for is sent an assertion in
-// plaintext, or one encrypted with something else. An issuance that chooses none is not checked: the algorithms
+// can't or may not encrypt with, or an AssertionEncryption that is none of the constants. It is checked for every
+// message, and not when something is encrypted, so that a choice that can't be carried out is found before the
+// service provider it is for is sent an assertion in plaintext, or one encrypted with something else. An issuance that chooses none is not checked: the algorithms
 // of the identity provider are then looked at when they are negotiated with.
 func (idp *IdentityProvider) checkIssuanceEncryption(issuance Issuance) error {
+	switch issuance.AssertionEncryption {
+	case EncryptAssertionWhenPossible, RequireAssertionEncryption, NoAssertionEncryption:
+	default:
+		return fmt.Errorf("unknown AssertionEncryption %d", issuance.AssertionEncryption)
+	}
+
 	if !issuance.choosesEncryption() {
 		return nil
 	}

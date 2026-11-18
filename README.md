@@ -177,7 +177,7 @@ without acting on it. See **`Scoping` and `ProxyRestriction`** below.
     | SDP-ALG01 algorithms          | Default    | RSA-SHA256 or ECDSA-SHA256 with the SHA-256 digest (an ECDSA key on a larger curve needs `SignatureMethod` set to ECDSA-SHA256), AES-128-GCM, RSA-OAEP-MGF1P with SHA-1. An SP gets another algorithm only if its metadata lists it first or `IssuancePolicy` names it |
     | SDP-IDP02 to SDP-IDP08        | Enforced   | An http endpoint needs `AllowInsecureServiceProviderEndpoints`; `ForceAuthn` needs a `ForceAuthnSessionProvider` |
     | SDP-IDP09, SDP-IDP10          | Default    | `IssuancePolicy` may sign only the assertion for an SP                |
-    | SDP-IDP11 encrypted assertion | Default    | Encrypted whenever the SP has an encryption key, and sent in plaintext to one that has none unless `IssuancePolicy` sets `RequireEncryption`, which refuses it. An `EncryptedID` or `EncryptedAttribute` is only sent on request or by `ElementEncryptionPolicy` |
+    | SDP-IDP11 encrypted assertion | Default    | Encrypted whenever the SP has an encryption key, and sent in plaintext to one that has none unless `IssuancePolicy` sets `RequireAssertionEncryption`, which refuses it. `NoAssertionEncryption` sends an SP that has a key a plaintext assertion. An `EncryptedID` or `EncryptedAttribute` is only sent on request or by `ElementEncryptionPolicy` |
     | SDP-IDP12 transient `NameID`  | Deployment | The `NameIDProvider` and the formats of the SP decide                 |
     | SDP-IDP13 to SDP-IDP17        | Enforced   | When the `Session` has a `SubjectID` or the `NameIDProvider` supplies a `pairwise-id`, see **Subject identifier requirement** |
     | SDP-IDP18 to SDP-IDP20        | Default    | For the attributes `DefaultAssertionMaker` makes; `Session.CustomAttributes` are sent as they are |
@@ -330,8 +330,8 @@ without acting on it. See **`Scoping` and `ProxyRestriction`** below.
     `Requester/RequestUnsupported`, a `SPNameQualifier` that isn't the SP or an affiliation it is a member of
     `Requester/RequestDenied`. A principal that isn't found is answered `Success` with no assertion.
   - The assertion carries the `NameID` of the query and no `SubjectConfirmation`, is signed, and is encrypted as for
-    single sign-on when the SP has an encryption key. When there is nothing to state the answer is `Success` with no
-    assertion (SAMLCore §3.3.4).
+    single sign-on: when the SP has an encryption key, unless `IssuancePolicy` says otherwise. When there is nothing
+    to state the answer is `Success` with no assertion (SAMLCore §3.3.4).
   - An `AttributeQuery` is never answered with more than single sign-on would state. The attributes are those of the
     default `AttributeConsumingService` in the SP metadata, narrowed to the attributes and values the query names, so
     an SP whose metadata requests none receives none. `IdentityProvider.AttributeReleasePolicy` decides for queries
@@ -993,11 +993,18 @@ without acting on it. See **`Scoping` and `ProxyRestriction`** below.
     must be supported and within `ContentEncryptionMethods`, `KeyTransportMethods` and
     `KeyTransportDigestMethods`, which stay the limit of what the IdP ever encrypts with: 3DES, RSA PKCS#1 v1.5 or
     a cipher those lists exclude sends nothing to that SP, signed or encrypted, and is not replaced by another.
-  - `RequireEncryption` refuses to issue an assertion in plaintext: an SP with no encryption key gets a `Response`
-    with the `Responder` status in place of it, and no assertion in answer to a query (SAML2Int SDP-IDP11). It is
-    off by default. `DefaultIssuancePolicy.RequireEncryption` sets it for every SP, and the `RequireEncryption` of
-    an entry in `ServiceProviders` for one, or exempts one from it. An SP that has a key is always encrypted to;
-    there is no setting that sends it plaintext.
+  - `AssertionEncryption` is whether the assertion is encrypted as a whole. `EncryptAssertionWhenPossible`, the
+    default, encrypts it for an SP that has an encryption key and sends it in plaintext to one that has none.
+    `RequireAssertionEncryption` refuses to issue an assertion in plaintext: an SP with no encryption key gets a
+    `Response` with the `Responder` status in place of it, and no assertion in answer to a query (SAML2Int
+    SDP-IDP11). `NoAssertionEncryption` never wraps the assertion in an `EncryptedAssertion`, for an SP that can't
+    decrypt one although its metadata has a key, or that wants a readable assertion with only an `EncryptedID` or
+    `EncryptedAttribute` elements in it. Those are still sent when the request or `ElementEncryptionPolicy` asks,
+    encrypted before the assertion is signed (SAMLCore §6.2), and the assertion is still refused if one is needed
+    and the key is missing or the `EncryptionCertificateEnforcer` refuses it. The key is not looked at when nothing
+    is encrypted. `DefaultIssuancePolicy.AssertionEncryption` sets it for every SP, and the `AssertionEncryption`
+    of an entry in `ServiceProviders`, which is a pointer, for one. It applies to single sign-on on every binding,
+    to the answer to a query, and to an assertion returned for an `AssertionIDRequest`.
   - With `SignAssertion` and an encrypted assertion, nothing the IdP signs covers the ciphertext, so prefer a GCM
     cipher in `ContentEncryptionMethods` for such an SP (errata E93). With `SignResponse` the assertion that
     `AssertionStore` keeps, and an `AssertionIDRequest` returns in a signed `Response`, is not signed itself.
