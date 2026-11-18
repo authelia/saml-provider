@@ -1,0 +1,114 @@
+{
+  "cases": [
+    {
+      "binding": "redirect-signed",
+      "expect": {
+        "encrypted_assertion": false,
+        "name_id_format": "urn:oasis:names:tc:SAML:2.0:nameid-format:transient",
+        "outcome": "success",
+        "signature_method": "http://www.w3.org/2001/04/xmldsig-more#rsa-sha256"
+      },
+      "feature": "authn-request/signed",
+      "id": "authn-request-redirect-rsa-sha256",
+      "idp_profile": "rsa",
+      "made_by": "pysaml2",
+      "request": "sp/requests/authn-request-redirect-rsa-sha256.query",
+      "request_id": "id-authn-request-redirect-rsa-sha256",
+      "sp": "sp-rsa",
+      "verify": [
+        "signature",
+        "in-response-to",
+        "subject"
+      ]
+    },
+    {
+      "binding": "post-signed",
+      "expect": {
+        "encrypted_assertion": false,
+        "name_id_format": "urn:oasis:names:tc:SAML:2.0:nameid-format:transient",
+        "outcome": "success",
+        "signature_method": "http://www.w3.org/2001/04/xmldsig-more#rsa-sha256"
+      },
+      "feature": "authn-request/signed",
+      "id": "authn-request-post-rsa-sha256",
+      "idp_profile": "rsa",
+      "made_by": "pysaml2",
+      "request": "sp/requests/authn-request-post-rsa-sha256.form",
+      "request_id": "id-authn-request-post-rsa-sha256",
+      "sp": "sp-rsa",
+      "verify": [
+        "signature",
+        "in-response-to",
+        "subject"
+      ]
+    },
+    {
+      "binding": "redirect-signed",
+      "expect": {
+        "encrypted_assertion": false,
+        "name_id_format": "urn:oasis:names:tc:SAML:2.0:nameid-format:transient",
+        "outcome": "success",
+        "signature_method": "http://www.w3.org/2001/04/xmldsig-more#rsa-sha256"
+      },
+      "feature": "authn-request/signed",
+      "id": "authn-request-redirect-ecdsa-sha256",
+      "idp_profile": "rsa",
+      "made_by": "pysaml2",
+      "request_id": "id-authn-request-redirect-ecdsa-sha256",
+      "skip": "pysaml2 7.5.5 only signs with RSA: saml2/entity.py checks the signature algorithm against saml2.xmldsig.SIG_ALLOWED_ALG, which lists only RSA (\"XXX SIG_ALLOWED_ALG should be configurable\"): Exception: Signature algo not in allowed list: http://www.w3.org/2001/04/xmldsig-more#ecdsa-sha256",
+      "sp": "sp-ec",
+      "verify": [
+        "signature",
+        "in-response-to",
+        "subject"
+      ]
+    },
+    {
+      "binding": "post-signed",
+      "expect": {
+        "encrypted_assertion": false,
+        "name_id_format": "urn:oasis:names:tc:SAML:2.0:nameid-format:transient",
+        "outcome": "success",
+        "signature_method": "http://www.w3.org/2001/04/xmldsig-more#rsa-sha256"
+      },
+      "feature": "authn-request/signed",
+      "id": "authn-request-post-ecdsa-sha256",
+      "idp_profile": "rsa",
+      "made_by": "pysaml2",
+      "request_id": "id-authn-request-post-ecdsa-sha256",
+      "skip": "pysaml2 7.5.5 only signs with RSA: saml2/entity.py checks the signature algorithm against saml2.xmldsig.SIG_ALLOWED_ALG, which lists only RSA (\"XXX SIG_ALLOWED_ALG should be configurable\"): Exception: Signature algo not in allowed list: http://www.w3.org/2001/04/xmldsig-more#ecdsa-sha256",
+      "sp": "sp-ec",
+      "verify": [
+        "signature",
+        "in-response-to",
+        "subject"
+      ]
+    },
+    {
+      "binding": "post-signed",
+      "expect": {
+        "encrypted_assertion": true,
+        "key_transport_method": "http://www.w3.org/2001/04/xmlenc#rsa-oaep-mgf1p",
+        "name_id_format": "urn:oasis:names:tc:SAML:2.0:nameid-format:transient",
+        "outcome": "success",
+        "signature_method": "http://www.w3.org/2001/04/xmldsig-more#rsa-sha256"
+      },
+      "feature": "assertion-encryption",
+      "id": "assertion-encrypted-rsa-oaep-mgf1p",
+      "idp_profile": "rsa-encrypt-assertion",
+      "made_by": "pysaml2",
+      "request": "sp/requests/assertion-encrypted-rsa-oaep-mgf1p.form",
+      "request_id": "id-assertion-encrypted-rsa-oaep-mgf1p",
+      "sp": "sp-rsa",
+      "verify": [
+        "signature",
+        "in-response-to",
+        "subject",
+        "decrypt-assertion"
+      ]
+    }
+  ],
+  "instant": "2026-01-01T00:00:00Z",
+  "pysaml2": "7.5.5",
+  "xmlsec1": "xmlsec1 1.3.7 (openssl)"
+}
