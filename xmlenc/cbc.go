@@ -129,7 +129,7 @@ func (e CBC) Decrypt(key interface{}, ciphertextEl *etree.Element) ([]byte, erro
 	plaintext := make([]byte, len(ciphertext))
 	mode.CryptBlocks(plaintext, ciphertext) // decrypt in place.
 
-	plaintext, err = stripPadding(plaintext)
+	plaintext, err = stripPadding(plaintext, block.BlockSize())
 	if err != nil {
 		return nil, err
 	}
@@ -182,18 +182,24 @@ func appendPadding(buf []byte, blockSize int) []byte {
 	return append(buf, padding...)
 }
 
-func stripPadding(buf []byte) ([]byte, error) {
+// stripPadding removes the padding of XML Encryption §5.2 from buf: the last byte is the number of bytes of
+// padding, which is from one to blockSize, and the bytes before it are arbitrary.
+func stripPadding(buf []byte, blockSize int) ([]byte, error) {
 	if len(buf) < 1 {
 		return nil, errors.New("buffer is too short for padding")
 	}
 
 	paddingBytes := int(buf[len(buf)-1])
-	if paddingBytes > len(buf)-1 {
-		return nil, errors.New("buffer is too short for padding")
-	}
-
 	if paddingBytes < 1 {
 		return nil, errors.New("padding must be at least one byte")
+	}
+
+	if paddingBytes > blockSize {
+		return nil, errors.New("padding must be at most one block")
+	}
+
+	if paddingBytes > len(buf)-1 {
+		return nil, errors.New("buffer is too short for padding")
 	}
 
 	return buf[:len(buf)-paddingBytes], nil

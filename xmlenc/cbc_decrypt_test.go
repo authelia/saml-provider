@@ -1,8 +1,10 @@
 package xmlenc
 
 import (
+	"crypto/cipher"
 	"encoding/base64"
 	"encoding/hex"
+	"strings"
 	"testing"
 
 	"github.com/beevik/etree"
@@ -72,4 +74,52 @@ func TestTripleDESRoundTrip(t *testing.T) {
 	plaintext, err := TripleDES.Decrypt(key, el)
 	assert.NilError(t, err)
 	assert.Check(t, is.Equal("hello world", string(plaintext)))
+}
+
+// XML Encryption §5.2: the last byte of the plaintext is the number of bytes of padding, which is at least one and
+// at most a block. A larger number would otherwise remove that many bytes of the content, up to 255 of them.
+func TestCBCDecryptRejectsPaddingLongerThanABlock(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		cipher CBC
+	}{
+		{"aes-128", AES128CBC.(CBC)},
+		{"aes-192", AES192CBC.(CBC)},
+		{"aes-256", AES256CBC.(CBC)},
+		{"3des", TripleDES.(CBC)},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			key := make([]byte, tc.cipher.KeySize())
+			for i := range key {
+				key[i] = byte(i * 7)
+			}
+
+			block, err := tc.cipher.cipher(key)
+			assert.NilError(t, err)
+
+			blockSize := block.BlockSize()
+			content := strings.Repeat("<saml:Assertion/>", 16)[:17*blockSize]
+
+			for last := range 256 {
+				// The last block is all padding, whatever its last byte claims.
+				padded := append([]byte(content), make([]byte, blockSize)...)
+				padded[len(padded)-1] = byte(last)
+
+				ciphertext := make([]byte, blockSize+len(padded))
+				cipher.NewCBCEncrypter(block, ciphertext[:blockSize]).CryptBlocks(ciphertext[blockSize:], padded) //nolint:gosec // A fixed IV makes the test deterministic.
+
+				plaintext, err := tc.cipher.Decrypt(key, cbcElement(tc.cipher, ciphertext))
+
+				switch {
+				case last == 0:
+					assert.Check(t, is.Error(err, "padding must be at least one byte"))
+				case last > blockSize:
+					assert.Check(t, is.Error(err, "padding must be at most one block"), "padding of %d bytes: %q", last, plaintext)
+				default:
+					assert.NilError(t, err)
+					assert.Check(t, is.Equal(content+string(make([]byte, blockSize-last)), string(plaintext)))
+				}
+			}
+		})
+	}
 }

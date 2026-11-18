@@ -158,16 +158,7 @@ func TestElementDecrypterRejects(t *testing.T) {
 	assert.NilError(t, err)
 
 	flip := func(path string) func(*testing.T, *etree.Element) {
-		return func(t *testing.T, el *etree.Element) {
-			value := el.FindElement(path)
-			assert.Assert(t, value != nil)
-
-			buf, err := base64.StdEncoding.DecodeString(value.Text())
-			assert.NilError(t, err)
-
-			buf[len(buf)-1] ^= 0x01
-			value.SetText(base64.StdEncoding.EncodeToString(buf))
-		}
+		return func(t *testing.T, el *etree.Element) { flipCipherValueBit(t, el, path, -1) }
 	}
 
 	for _, tc := range []struct {
@@ -181,7 +172,16 @@ func TestElementDecrypterRejects(t *testing.T) {
 		{name: "wrong key", content: aes128GCM, decrypter: func(d *elementDecrypter) { d.keys = []decryptionKey{{key: otherKey}} }, err: "certificate does not match provided key"},
 		{name: "no key", content: aes128GCM, decrypter: func(d *elementDecrypter) { d.keys = nil }, err: "there is no private key to decrypt with"},
 		{name: "tampered gcm ciphertext", content: aes128GCM, mutate: flip("./EncryptedData/CipherData/CipherValue"), err: "message authentication failed"},
-		{name: "tampered cbc ciphertext", content: aes128CBC, mutate: flip("./EncryptedData/CipherData/CipherValue"), err: ""},
+		{
+			// CBC has no integrity protection, so a change is only found by what it does to the plaintext. One to the
+			// IV makes the same change to the first block and no other, which here turns the "<" that opens the
+			// element into a "=". See TestElementDecrypterTamperedCBCPadding for a change that may not be found.
+			name: "tampered cbc initialization vector", content: aes128CBC,
+			mutate: func(t *testing.T, el *etree.Element) {
+				flipCipherValueBit(t, el, "./EncryptedData/CipherData/CipherValue", 0)
+			},
+			err: "cannot parse plaintext response",
+		},
 		{name: "tampered key", content: aes128GCM, mutate: flip("./EncryptedData/KeyInfo/EncryptedKey/CipherData/CipherValue"), err: "decryption error"},
 		{
 			name: "type is content", content: aes128GCM,
@@ -281,14 +281,61 @@ func TestElementDecrypterRejects(t *testing.T) {
 			nameID, err := decrypter.decryptNameID(encryptedID)
 			assert.Check(t, nameID == nil)
 
-			if tc.err == "" {
-				// CBC has no integrity protection, so what the tampering breaks varies: the padding, the XML or
-				// the element. It must never yield the identifier.
-				assert.Check(t, err != nil)
-			} else {
-				assert.Check(t, is.ErrorContains(err, tc.err))
-			}
+			assert.Check(t, is.ErrorContains(err, tc.err))
 		})
+	}
+}
+
+// flipCipherValueBit changes one bit of the byte at index of the CipherValue at path in el. A negative index
+// counts from the end.
+func flipCipherValueBit(t *testing.T, el *etree.Element, path string, index int) {
+	t.Helper()
+
+	value := el.FindElement(path)
+	assert.Assert(t, value != nil)
+
+	buf, err := base64.StdEncoding.DecodeString(value.Text())
+	assert.NilError(t, err)
+
+	if index < 0 {
+		index += len(buf)
+	}
+
+	buf[index] ^= 0x01
+	value.SetText(base64.StdEncoding.EncodeToString(buf))
+}
+
+// A change to the last block of a CBC ciphertext replaces the last block of the plaintext with bytes that nobody
+// chose. The identifier here is a whole number of blocks, so that block holds nothing but the padding of XML
+// Encryption §5.2, of which only the last byte has a meaning. The change is therefore refused, as it nearly always
+// is, or the bytes happen to be padding again and the identifier is the one that was encrypted. It can never be
+// another one. This is why the elementDecrypter must only be given what a signature or the peer vouches for.
+func TestElementDecrypterTamperedCBCPadding(t *testing.T) {
+	el := testEncryptedNameID.Element()
+	el.CreateAttr("xmlns:saml", samlAssertionNamespace)
+
+	doc := etree.NewDocument()
+	doc.SetRoot(el)
+
+	plaintext, err := doc.WriteToBytes()
+	assert.NilError(t, err)
+	assert.Assert(t, is.Equal(0, len(plaintext)%16), "the last block must hold only padding")
+
+	for range 64 {
+		encryptedID, err := testElementEncrypter(t, method(aes128CBC)).encryptNameID(&testEncryptedNameID)
+		assert.NilError(t, err)
+
+		encryptedID = reparse(t, encryptedID)
+		flipCipherValueBit(t, encryptedID, "./EncryptedData/CipherData/CipherValue", -1)
+
+		nameID, err := testElementDecrypter().decryptNameID(encryptedID)
+		if err != nil {
+			assert.Check(t, nameID == nil)
+
+			continue
+		}
+
+		assert.Check(t, is.DeepEqual(testEncryptedNameID, *nameID))
 	}
 }
 
