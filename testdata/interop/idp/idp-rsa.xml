@@ -1,0 +1,40 @@
+<EntityDescriptor xmlns="urn:oasis:names:tc:SAML:2.0:metadata" validUntil="2026-01-03T00:00:00Z" cacheDuration="PT48H" entityID="https://idp.example.com/saml/metadata">
+  <Extensions>
+    <alg:DigestMethod xmlns:alg="urn:oasis:names:tc:SAML:metadata:algsupport" Algorithm="http://www.w3.org/2001/04/xmlenc#sha256"></alg:DigestMethod>
+    <alg:DigestMethod xmlns:alg="urn:oasis:names:tc:SAML:metadata:algsupport" Algorithm="http://www.w3.org/2001/04/xmldsig-more#sha384"></alg:DigestMethod>
+    <alg:DigestMethod xmlns:alg="urn:oasis:names:tc:SAML:metadata:algsupport" Algorithm="http://www.w3.org/2001/04/xmlenc#sha512"></alg:DigestMethod>
+    <alg:SigningMethod xmlns:alg="urn:oasis:names:tc:SAML:metadata:algsupport" Algorithm="http://www.w3.org/2001/04/xmldsig-more#rsa-sha256"></alg:SigningMethod>
+    <alg:SigningMethod xmlns:alg="urn:oasis:names:tc:SAML:metadata:algsupport" Algorithm="http://www.w3.org/2001/04/xmldsig-more#rsa-sha384"></alg:SigningMethod>
+    <alg:SigningMethod xmlns:alg="urn:oasis:names:tc:SAML:metadata:algsupport" Algorithm="http://www.w3.org/2001/04/xmldsig-more#rsa-sha512"></alg:SigningMethod>
+    <alg:SigningMethod xmlns:alg="urn:oasis:names:tc:SAML:metadata:algsupport" Algorithm="http://www.w3.org/2001/04/xmldsig-more#ecdsa-sha256"></alg:SigningMethod>
+    <alg:SigningMethod xmlns:alg="urn:oasis:names:tc:SAML:metadata:algsupport" Algorithm="http://www.w3.org/2001/04/xmldsig-more#ecdsa-sha384"></alg:SigningMethod>
+    <alg:SigningMethod xmlns:alg="urn:oasis:names:tc:SAML:metadata:algsupport" Algorithm="http://www.w3.org/2001/04/xmldsig-more#ecdsa-sha512"></alg:SigningMethod>
+  </Extensions>
+  <IDPSSODescriptor xmlns="urn:oasis:names:tc:SAML:2.0:metadata" protocolSupportEnumeration="urn:oasis:names:tc:SAML:2.0:protocol" WantAuthnRequestsSigned="true">
+    <KeyDescriptor use="signing">
+      <KeyInfo xmlns="http://www.w3.org/2000/09/xmldsig#">
+        <X509Data xmlns="http://www.w3.org/2000/09/xmldsig#">
+          <X509Certificate xmlns="http://www.w3.org/2000/09/xmldsig#">MIIDFTCCAf2gAwIBAgIUDlVQ0w6VMaUkEZf/xzvbipPMOv4wDQYJKoZIhvcNAQELBQAwEjEQMA4GA1UEAwwHaWRwLXJzYTAeFw0yNjAxMDEwMDAwMDBaFw0zNjAxMDEwMDAwMDBaMBIxEDAOBgNVBAMMB2lkcC1yc2EwggEiMA0GCSqGSIb3DQEBAQUAA4IBDwAwggEKAoIBAQC16Z11dozPT4OBFtVY51Q5JQ7PLRPyxiUyMsDB4HF4eDpvQOSJFiry43WeHI+NRMFDh/eJ46i3VbYxzXnc2rgWE7QNPYUJjyqlgxTWU8uH7reF71DtGzWOc0HtTRvzoXCxg2H35rs6pVpACwZ57eZ1Cl6GzTta/A3mXHpl41IrWroKyESnKNgnnjmnxBwNYhJTCXI3MI8uHhlCLEhXe+38d6Wljlk9OleqGpxJJBvjnkXPi55Qhsib1GXGJShq2+cwGpY9wtfaVyosSu7mOeZHeQj/60wygus4mL3BOTepJrgjfAYeVB36RS0r+snBYHaSHdItiRKhYn0WWtGso9+XAgMBAAGjYzBhMB0GA1UdDgQWBBTTElXTmCcMPeOwFDqNvYKAeu5gyTAfBgNVHSMEGDAWgBTTElXTmCcMPeOwFDqNvYKAeu5gyTAPBgNVHRMBAf8EBTADAQH/MA4GA1UdDwEB/wQEAwIFoDANBgkqhkiG9w0BAQsFAAOCAQEAPgY8bMDysKti3X0NUJkfB9ax6iRMQdyKu+RFrHsJhiY5RdjDwMAK02S47Epdr9Nq3SDU4gbuiau06cFj4pstRrsv6egpeliwypAehcbUHMpP+NBwSA5A/dDgUiIKS+G77mm7CEb6McjSTCcYFLb6+8kl0/JpeYSghwD3rCamw9TSrsEIfxWkuKEM8E3Fyd3mLehNkXVfZZfF1e4Xk4KUgn3V3IBoBF3WeAAxRJke9Mt29IeR/M7u/V07Ppz7ElobqpY9dYNXTmLZstu19uXrebHZflQ3CQ4S2UvssJF/khmH9O1okmtiZPFtakJnc2WKkVOsuOkLMeePzkBx/zD+Sg==</X509Certificate>
+        </X509Data>
+      </KeyInfo>
+    </KeyDescriptor>
+    <KeyDescriptor use="encryption">
+      <KeyInfo xmlns="http://www.w3.org/2000/09/xmldsig#">
+        <X509Data xmlns="http://www.w3.org/2000/09/xmldsig#">
+          <X509Certificate xmlns="http://www.w3.org/2000/09/xmldsig#">MIIDFTCCAf2gAwIBAgIUDlVQ0w6VMaUkEZf/xzvbipPMOv4wDQYJKoZIhvcNAQELBQAwEjEQMA4GA1UEAwwHaWRwLXJzYTAeFw0yNjAxMDEwMDAwMDBaFw0zNjAxMDEwMDAwMDBaMBIxEDAOBgNVBAMMB2lkcC1yc2EwggEiMA0GCSqGSIb3DQEBAQUAA4IBDwAwggEKAoIBAQC16Z11dozPT4OBFtVY51Q5JQ7PLRPyxiUyMsDB4HF4eDpvQOSJFiry43WeHI+NRMFDh/eJ46i3VbYxzXnc2rgWE7QNPYUJjyqlgxTWU8uH7reF71DtGzWOc0HtTRvzoXCxg2H35rs6pVpACwZ57eZ1Cl6GzTta/A3mXHpl41IrWroKyESnKNgnnjmnxBwNYhJTCXI3MI8uHhlCLEhXe+38d6Wljlk9OleqGpxJJBvjnkXPi55Qhsib1GXGJShq2+cwGpY9wtfaVyosSu7mOeZHeQj/60wygus4mL3BOTepJrgjfAYeVB36RS0r+snBYHaSHdItiRKhYn0WWtGso9+XAgMBAAGjYzBhMB0GA1UdDgQWBBTTElXTmCcMPeOwFDqNvYKAeu5gyTAfBgNVHSMEGDAWgBTTElXTmCcMPeOwFDqNvYKAeu5gyTAPBgNVHRMBAf8EBTADAQH/MA4GA1UdDwEB/wQEAwIFoDANBgkqhkiG9w0BAQsFAAOCAQEAPgY8bMDysKti3X0NUJkfB9ax6iRMQdyKu+RFrHsJhiY5RdjDwMAK02S47Epdr9Nq3SDU4gbuiau06cFj4pstRrsv6egpeliwypAehcbUHMpP+NBwSA5A/dDgUiIKS+G77mm7CEb6McjSTCcYFLb6+8kl0/JpeYSghwD3rCamw9TSrsEIfxWkuKEM8E3Fyd3mLehNkXVfZZfF1e4Xk4KUgn3V3IBoBF3WeAAxRJke9Mt29IeR/M7u/V07Ppz7ElobqpY9dYNXTmLZstu19uXrebHZflQ3CQ4S2UvssJF/khmH9O1okmtiZPFtakJnc2WKkVOsuOkLMeePzkBx/zD+Sg==</X509Certificate>
+        </X509Data>
+      </KeyInfo>
+      <EncryptionMethod Algorithm="http://www.w3.org/2009/xmlenc11#aes128-gcm"></EncryptionMethod>
+      <EncryptionMethod Algorithm="http://www.w3.org/2009/xmlenc11#aes192-gcm"></EncryptionMethod>
+      <EncryptionMethod Algorithm="http://www.w3.org/2009/xmlenc11#aes256-gcm"></EncryptionMethod>
+      <EncryptionMethod Algorithm="http://www.w3.org/2001/04/xmlenc#aes128-cbc"></EncryptionMethod>
+      <EncryptionMethod Algorithm="http://www.w3.org/2001/04/xmlenc#aes192-cbc"></EncryptionMethod>
+      <EncryptionMethod Algorithm="http://www.w3.org/2001/04/xmlenc#aes256-cbc"></EncryptionMethod>
+      <EncryptionMethod Algorithm="http://www.w3.org/2001/04/xmlenc#rsa-oaep-mgf1p"></EncryptionMethod>
+      <EncryptionMethod Algorithm="http://www.w3.org/2009/xmlenc11#rsa-oaep"></EncryptionMethod>
+    </KeyDescriptor>
+    <NameIDFormat>urn:oasis:names:tc:SAML:2.0:nameid-format:transient</NameIDFormat>
+    <SingleSignOnService Binding="urn:oasis:names:tc:SAML:2.0:bindings:HTTP-Redirect" Location="https://idp.example.com/saml/sso"></SingleSignOnService>
+    <SingleSignOnService Binding="urn:oasis:names:tc:SAML:2.0:bindings:HTTP-POST" Location="https://idp.example.com/saml/sso"></SingleSignOnService>
+  </IDPSSODescriptor>
+</EntityDescriptor>
