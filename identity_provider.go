@@ -1616,6 +1616,10 @@ type IdpAuthnRequest struct {
 	// nameIDEncrypted is whether AssertionEl carries the NameID of the Subject as an EncryptedID.
 	nameIDEncrypted bool
 
+	// encryptedIDRequested is whether the NameID of the Subject must be sent as an EncryptedID although there is
+	// no NameIDPolicy that asks for one: the query that the assertion answers named the principal with one.
+	encryptedIDRequested bool
+
 	// responseParticipant is the participant that the assertion in ResponseEl makes of the service
 	// provider, which PublishResponse records each time the response is sent.
 	responseParticipant *SessionParticipant
@@ -2887,8 +2891,13 @@ func (req *IdpAuthnRequest) elementEncrypter() (*elementEncrypter, error) {
 }
 
 // requestsEncryptedID reports whether the NameIDPolicy of the request has the encrypted format, which means the
-// assertion MUST contain an EncryptedID instead of a NameID (SAMLCore §3.4.1.1).
+// assertion MUST contain an EncryptedID instead of a NameID (SAMLCore §3.4.1.1), or whether the query that the
+// assertion answers named the principal with an EncryptedID.
 func (req *IdpAuthnRequest) requestsEncryptedID() bool {
+	if req.encryptedIDRequested {
+		return true
+	}
+
 	policy := req.Request.NameIDPolicy
 
 	return policy != nil && policy.Format != nil && *policy.Format == encryptedNameIDFormat

@@ -1072,20 +1072,19 @@ var querySubjectCases = []querySubjectCase{
 		top: StatusRequester,
 	},
 	{
-		name: "EncryptedID",
-		mutate: func(_ *queryFixture, message *etree.Element) {
-			subject := message.FindElement("./Subject")
-			subject.RemoveChild(subject.FindElement("./NameID"))
-			subject.CreateElement("saml:EncryptedID").CreateElement("xenc:EncryptedData").CreateAttr("xmlns:xenc", "http://www.w3.org/2001/04/xmlenc#")
-		},
-		top: StatusRequester, second: StatusRequestUnsupported,
-	},
-	{
 		name: "EncryptedID beside a NameID",
 		mutate: func(_ *queryFixture, message *etree.Element) {
 			message.FindElement("./Subject").CreateElement("saml:EncryptedID")
 		},
-		top: StatusRequester, second: StatusRequestUnsupported,
+		top: StatusRequester, second: StatusRequestDenied,
+	},
+	{
+		name: "two NameIDs",
+		mutate: func(_ *queryFixture, message *etree.Element) {
+			subject := message.FindElement("./Subject")
+			subject.InsertChildAt(0, subject.FindElement("./NameID").Copy())
+		},
+		top: StatusRequester, second: StatusRequestDenied,
 	},
 	{
 		name: "BaseID",
