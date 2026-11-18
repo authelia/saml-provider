@@ -47,9 +47,10 @@ type Options struct {
 	RolloverCertificates []*x509.Certificate
 
 	// EncryptionCertificate and EncryptionKey are the key pair that service providers encrypt to, in place of
-	// Certificate and Key. See saml.IdentityProvider.EncryptionCertificate.
+	// Certificate and Key: an RSA key, which is a crypto.Decrypter, or an elliptic curve key, which is an
+	// *ecdsa.PrivateKey or an xmlenc.KeyAgreer. See saml.IdentityProvider.EncryptionCertificate.
 	EncryptionCertificate *x509.Certificate
-	EncryptionKey         crypto.Decrypter
+	EncryptionKey         crypto.PrivateKey
 
 	// DecryptionKeys are further key pairs which are decrypted with but which the metadata doesn't publish, so
 	// that the encryption key can be changed without downtime. See saml.IdentityProvider.DecryptionKeys.

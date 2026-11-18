@@ -140,7 +140,7 @@ func (w AESKeyWrap) Unwrap(kek, wrapped []byte) ([]byte, error) {
 
 // Decrypt implements Decrypter for an EncryptedKey that this algorithm wraps. The key is the key encryption key,
 // a []byte, or the private key that it is agreed with, as the AgreementMethod of the EncryptedKey says: an
-// *[ecdsa.PrivateKey] or *[ecdh.PrivateKey] for ECDH-ES (XML Encryption 1.1 §5.6.4).
+// *[ecdsa.PrivateKey], an *[ecdh.PrivateKey] or another KeyAgreer for ECDH-ES (XML Encryption 1.1 §5.6.4).
 func (w AESKeyWrap) Decrypt(key interface{}, ciphertextEl *etree.Element) ([]byte, error) {
 	kek, ok := key.([]byte)
 	if !ok {

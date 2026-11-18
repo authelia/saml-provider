@@ -3,6 +3,7 @@ package saml
 import (
 	"context"
 	"crypto"
+	"crypto/ecdh"
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rsa"
@@ -637,16 +638,18 @@ func (policy *encryptionPolicy) keyTransportFor(method EncryptionMethod) (xmlenc
 	return encrypter, true
 }
 
-// DecryptionKey is a key pair that the identity provider decrypts with: an RSA key of at least 2048 bits, and
-// the certificate that a service provider encrypted to. See IdentityProvider.DecryptionKeys.
+// DecryptionKey is a key pair that the identity provider decrypts with: an RSA key of at least 2048 bits, or an
+// elliptic curve key on P-256, P-384 or P-521, and the certificate that a service provider encrypted to. See
+// IdentityProvider.DecryptionKeys.
 type DecryptionKey struct {
 	// Certificate is the certificate of Key. Nothing but its key and, if it has the extension, its key usage is
 	// looked at, so it may have expired.
 	Certificate *x509.Certificate
 
-	// Key is the private key, which is an *rsa.PrivateKey or a key held elsewhere, such as in a hardware security
-	// module. See IdentityProvider.EncryptionKey.
-	Key crypto.Decrypter
+	// Key is the private key: an *rsa.PrivateKey or another crypto.Decrypter for an RSA key, and an
+	// *ecdsa.PrivateKey, an *ecdh.PrivateKey or another xmlenc.KeyAgreer for an elliptic curve key. See
+	// IdentityProvider.EncryptionKey.
+	Key crypto.PrivateKey
 }
 
 // decryptionKey is a key pair that an entity decrypts with.
@@ -655,7 +658,20 @@ type decryptionKey struct {
 	// when the entity has none for the key.
 	certificate *x509.Certificate
 
-	key crypto.Decrypter
+	// key is a crypto.Decrypter for an RSA key, or for an elliptic curve key an *ecdsa.PrivateKey or an
+	// xmlenc.KeyAgreer, which a key is agreed with by ECDH-ES.
+	key crypto.PrivateKey
+}
+
+// agreesKeys reports whether the key is an elliptic curve key, which a key is agreed with by ECDH-ES, rather than
+// an RSA key, which decrypts a key that was transported to it.
+func (k decryptionKey) agreesKeys() bool {
+	switch k.key.(type) {
+	case *ecdsa.PrivateKey, xmlenc.KeyAgreer:
+		return true
+	}
+
+	return false
 }
 
 const (
@@ -670,8 +686,9 @@ const (
 )
 
 // CheckEncryptionKeys returns an error unless EncryptionCertificate, EncryptionKey and DecryptionKeys are valid:
-// each certificate has its private key and the other way round, the key is an RSA key of at least 2048 bits, the
-// private key is that of the certificate, and the certificate allows key encipherment if it has a key usage
+// each certificate has its private key and the other way round, the key is an RSA key of at least 2048 bits or an
+// elliptic curve key on P-256, P-384 or P-521, the private key is that of the certificate, and the certificate
+// allows key encipherment for an RSA key, or key agreement for an elliptic curve key, if it has a key usage
 // extension. The validity period of a certificate is not checked. There are no more than four DecryptionKeys.
 //
 // An identity provider with keys that are not valid publishes no encryption key, serves no metadata and decrypts
@@ -688,7 +705,7 @@ func (idp *IdentityProvider) CheckEncryptionKeys() error {
 // The published key is EncryptionCertificate and EncryptionKey, or else Certificate and Key when Key is an RSA
 // private key that the certificate does not rule out for key encipherment. A Signer can't decrypt.
 func (idp *IdentityProvider) encryptionKeys() (published *decryptionKey, keys []decryptionKey, err error) {
-	switch hasCertificate, hasKey := idp.EncryptionCertificate != nil, !isNilDecrypter(idp.EncryptionKey); {
+	switch hasCertificate, hasKey := idp.EncryptionCertificate != nil, !isNilPrivateKey(idp.EncryptionKey); {
 	case hasCertificate != hasKey:
 		return nil, nil, errors.New("IdentityProvider.EncryptionCertificate and EncryptionKey must be set together")
 	case hasCertificate:
@@ -713,7 +730,7 @@ func (idp *IdentityProvider) encryptionKeys() (published *decryptionKey, keys []
 	for i, pair := range idp.DecryptionKeys {
 		field := fmt.Sprintf("DecryptionKeys[%d]", i)
 
-		if pair.Certificate == nil || isNilDecrypter(pair.Key) {
+		if pair.Certificate == nil || isNilPrivateKey(pair.Key) {
 			return nil, nil, fmt.Errorf("IdentityProvider.%s: the certificate and the key must both be set", field)
 		}
 
@@ -761,15 +778,27 @@ func (idp *IdentityProvider) signingKeyForDecryption() (decryptionKey, bool) {
 	return decryptionKey{certificate: idp.Certificate, key: key}, true
 }
 
-// isNilDecrypter returns whether key is nil, or a nil *[rsa.PrivateKey], which is not nil as an interface.
-func isNilDecrypter(key crypto.Decrypter) bool {
-	if key == nil {
+// isNilPrivateKey returns whether key is nil, or a nil *[rsa.PrivateKey], *[ecdsa.PrivateKey] or
+// *[ecdh.PrivateKey], which is not nil as an interface.
+func isNilPrivateKey(key crypto.PrivateKey) bool {
+	switch k := key.(type) {
+	case nil:
 		return true
+	case *rsa.PrivateKey:
+		return k == nil
+	case *ecdsa.PrivateKey:
+		return k == nil
+	case *ecdh.PrivateKey:
+		return k == nil
 	}
 
-	rsaKey, ok := key.(*rsa.PrivateKey)
+	return false
+}
 
-	return ok && rsaKey == nil
+// allowsKeyAgreement returns whether cert may be used for key agreement: it has no key usage extension, or one with
+// keyAgreement, the usage of ECDH (RFC 5280 §4.2.1.3).
+func allowsKeyAgreement(cert *x509.Certificate) bool {
+	return !hasKeyUsageExtension(cert) || cert.KeyUsage&x509.KeyUsageKeyAgreement != 0
 }
 
 // allowsKeyEncipherment returns whether cert may be used to encrypt keys to: it has no key usage extension, or
@@ -780,12 +809,19 @@ func allowsKeyEncipherment(cert *x509.Certificate) bool {
 
 // checkEncryptionKeyPair returns an error unless cert and key are a key pair that the identity provider can be
 // encrypted to. The errors name the field of the IdentityProvider that the certificate or the key is in.
-func checkEncryptionKeyPair(cert *x509.Certificate, key crypto.Decrypter, certificateField, keyField string) error {
-	public, ok := cert.PublicKey.(*rsa.PublicKey)
-	if !ok {
-		return fmt.Errorf("IdentityProvider.%s: the certificate does not have an RSA key", certificateField)
+func checkEncryptionKeyPair(cert *x509.Certificate, key crypto.PrivateKey, certificateField, keyField string) error {
+	switch public := cert.PublicKey.(type) {
+	case *rsa.PublicKey:
+		return checkRSAEncryptionKeyPair(cert, public, key, certificateField, keyField)
+	case *ecdsa.PublicKey:
+		return checkECEncryptionKeyPair(cert, public, key, certificateField, keyField)
+	default:
+		return fmt.Errorf("IdentityProvider.%s: the certificate has neither an RSA nor an elliptic curve key", certificateField)
 	}
+}
 
+// checkRSAEncryptionKeyPair is checkEncryptionKeyPair for a certificate with an RSA key.
+func checkRSAEncryptionKeyPair(cert *x509.Certificate, public *rsa.PublicKey, key crypto.PrivateKey, certificateField, keyField string) error {
 	if bits := public.N.BitLen(); bits < minimumEncryptionKeySize {
 		return fmt.Errorf("IdentityProvider.%s: the RSA key has %d bits, which is fewer than %d", certificateField, bits, minimumEncryptionKeySize)
 	}
@@ -794,11 +830,56 @@ func checkEncryptionKeyPair(cert *x509.Certificate, key crypto.Decrypter, certif
 		return fmt.Errorf("IdentityProvider.%s: the key usage of the certificate does not include key encipherment", certificateField)
 	}
 
-	if private, ok := key.Public().(*rsa.PublicKey); !ok || !private.Equal(public) {
+	decrypter, ok := key.(crypto.Decrypter)
+	if !ok {
+		return fmt.Errorf("IdentityProvider.%s: the private key of an RSA certificate must be a crypto.Decrypter", keyField)
+	}
+
+	if private, ok := decrypter.Public().(*rsa.PublicKey); !ok || !private.Equal(public) {
 		return fmt.Errorf("IdentityProvider.%s: the private key is not that of the certificate", keyField)
 	}
 
 	return nil
+}
+
+// checkECEncryptionKeyPair is checkEncryptionKeyPair for a certificate with an elliptic curve key.
+func checkECEncryptionKeyPair(cert *x509.Certificate, public *ecdsa.PublicKey, key crypto.PrivateKey, certificateField, keyField string) error {
+	if !isEncryptableKey(public) {
+		return fmt.Errorf("IdentityProvider.%s: the elliptic curve key is not on P-256, P-384 or P-521", certificateField)
+	}
+
+	if !allowsKeyAgreement(cert) {
+		return fmt.Errorf("IdentityProvider.%s: the key usage of the certificate does not include key agreement", certificateField)
+	}
+
+	publicECDH, err := public.ECDH()
+	if err != nil {
+		return fmt.Errorf("IdentityProvider.%s: %w", certificateField, err)
+	}
+
+	var private crypto.PublicKey
+
+	switch k := key.(type) {
+	case *ecdsa.PrivateKey:
+		private = k.Public()
+	case xmlenc.KeyAgreer:
+		private = k.Public()
+	default:
+		return fmt.Errorf("IdentityProvider.%s: the private key of an elliptic curve certificate must be an *ecdsa.PrivateKey or an xmlenc.KeyAgreer", keyField)
+	}
+
+	switch p := private.(type) {
+	case *ecdsa.PublicKey:
+		if p.Equal(public) {
+			return nil
+		}
+	case *ecdh.PublicKey:
+		if p.Equal(publicECDH) {
+			return nil
+		}
+	}
+
+	return fmt.Errorf("IdentityProvider.%s: the private key is not that of the certificate", keyField)
 }
 
 // encryptionKeyDescriptor returns the KeyDescriptor which publishes the encryption key of the identity provider,
@@ -838,7 +919,8 @@ func (idp *IdentityProvider) encryptionKeyDescriptor() (KeyDescriptor, bool) {
 // transport algorithm states its digest and mask generation function only when the default of SHA-1 isn't
 // accepted.
 func (idp *IdentityProvider) encryptionMethods() []EncryptionMethod {
-	if published, _, err := idp.encryptionKeys(); err != nil || published == nil {
+	published, _, err := idp.encryptionKeys()
+	if err != nil || published == nil {
 		return nil
 	}
 
@@ -859,6 +941,18 @@ func (idp *IdentityProvider) encryptionMethods() []EncryptionMethod {
 	}
 
 	methods := slices.Concat(gcm, cbc)
+
+	// An elliptic curve key agrees a key by ECDH-ES, with ConcatKDF and the key wraps that the identity provider
+	// accepts, and no key is transported to it.
+	if published.agreesKeys() {
+		methods = append(methods, EncryptionMethod{Algorithm: algorithmECDHES})
+
+		for _, keyWrap := range policy.keyWraps {
+			methods = append(methods, EncryptionMethod{Algorithm: keyWrap.Algorithm()})
+		}
+
+		return methods
+	}
 
 	_, sha1 := lookupKeyTransportDigest(policy.digests, keyTransportDigests[0].method.Algorithm())
 

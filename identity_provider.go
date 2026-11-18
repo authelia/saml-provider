@@ -519,19 +519,28 @@ type IdentityProvider struct {
 	// or NameIDMappingRequest and the NewEncryptedID of a ManageNameIDRequest. The signing keys are published for
 	// signing only, whatever these are.
 	//
-	// The key must be an RSA key of at least 2048 bits, as the only key transport algorithms are those of
-	// RSA-OAEP. It may be an *rsa.PrivateKey or any other crypto.Decrypter, such as a key in a hardware security
+	// The key is an RSA key of at least 2048 bits, whose key is transported to it with RSA-OAEP, or an elliptic
+	// curve key on P-256, P-384 or P-521, with which a key is agreed by ECDH-ES (XML Encryption 1.1 §5.6.4).
+	//
+	// An RSA key may be an *rsa.PrivateKey or any other crypto.Decrypter, such as a key in a hardware security
 	// module, which is given *rsa.OAEPOptions with the digest and the hash of the MGF1 mask generation function
 	// that the sender chose, and no label. The two hashes differ for RSA-OAEP-MGF1P with a digest other than
 	// SHA-1. If the key can't decrypt with every combination, set KeyTransportMethods and
 	// KeyTransportDigestMethods to those it can, so that the metadata lists no other.
 	//
+	// An elliptic curve key may be an *ecdsa.PrivateKey, an *ecdh.PrivateKey, or any other xmlenc.KeyAgreer, such
+	// as a key in a hardware security module, which is given the ephemeral public key of the sender. The metadata
+	// lists ECDH-ES and the KeyWrapMethods for it, and the identity provider accepts ConcatKDF with SHA-256,
+	// SHA-384 or SHA-512, and no other key derivation.
+	//
 	// If they are nil, Certificate and Key are used, when Key is an RSA private key and the certificate either
-	// has no key usage extension or allows key encipherment. Otherwise, such as with an ECDSA key or with only a
-	// Signer, the metadata lists no encryption key, and a service provider must identify the principal in
-	// plaintext. See CheckEncryptionKeys for what is required of them, and DecryptionKeys for how to change them.
+	// has no key usage extension or allows key encipherment. An elliptic curve signing key is never used to
+	// decrypt, so that a key is not used both to sign and to agree keys. Without a key, such as with only an ECDSA
+	// signing key or a Signer, the metadata lists no encryption key, and a service provider must identify the
+	// principal in plaintext. See CheckEncryptionKeys for what is required of them, and DecryptionKeys for how to
+	// change them.
 	EncryptionCertificate *x509.Certificate
-	EncryptionKey         crypto.Decrypter
+	EncryptionKey         crypto.PrivateKey
 
 	// DecryptionKeys are further key pairs which the identity provider decrypts with, and which the metadata never
 	// publishes. They allow the encryption key to be changed without downtime, also when several instances serve
@@ -551,8 +560,10 @@ type IdentityProvider struct {
 	// When the signing key is also the encryption key, because EncryptionCertificate is nil, and it is replaced,
 	// the previous certificate and its RSA key belong here in the same way, for as long as in step 3.
 	//
-	// The key of an EncryptedKey is chosen by its KeyInfo, when that identifies the certificate of one or more of
-	// these keys or of the encryption key: by the certificate, its subject key identifier, its digest, its
+	// Only the keys of the type that an EncryptedKey is for are tried: elliptic curve keys for one with an
+	// AgreementMethod, and RSA keys otherwise. Of those, the key is chosen by its KeyInfo, or the RecipientKeyInfo of
+	// its AgreementMethod, when that identifies the certificate of one or more of these keys or of the encryption
+	// key: by the certificate, its subject key identifier, its digest, its
 	// subject, or its RSA key, or by a KeyName that is its subject or the common name of its subject. Otherwise
 	// each key is tried. Every key that is chosen is used, also after one has decrypted, so that the time taken
 	// doesn't depend on which key a message was encrypted to or on whether it was encrypted to any of them. There
@@ -1027,7 +1038,7 @@ func (idp *IdentityProvider) Metadata() *EntityDescriptor {
 
 	// What is encrypted to the identity provider is the EncryptedID or NewEncryptedID of a request (SAMLProfiles
 	// §4.4.5), which it can only decrypt with a private key it holds: EncryptionKey, or else an RSA Key. A key
-	// that is only a Signer, or of another type, is not advertised for encryption.
+	// that is only a Signer, or an elliptic curve signing key, is not advertised for encryption.
 	if keyDescriptor, ok := idp.encryptionKeyDescriptor(); ok {
 		keyDescriptors = append(keyDescriptors, keyDescriptor)
 	}
