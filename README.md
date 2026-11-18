@@ -92,6 +92,7 @@ least the subset of SAML known as [interoperable SAML](https://kantarainitiative
 | Multiple assertions in a single `Response`        | N/A | ⚠️  |
 | Replay detection                                  | ✅  | ⚠️  |
 | Protocol `Extensions`[^protoext]                  | ✅  | ⚠️  |
+| Attribute Extensions (`ext:OriginalIssuer`, `ext:LastModified`)[^attrext] | ✅  | ✅  |
 
 #### Signing and Encryption
 
@@ -138,6 +139,12 @@ without acting on it. See **`Scoping` and `ProxyRestriction`** below.
     covered by it, which signs the `Response` even if only the assertion is otherwise. Each must be in a namespace
     other than the SAML assertion and protocol namespaces (SAMLCore §3.2.1), or nothing is sent. The SP parses them
     on what it receives, and doesn't send any.
+
+[^attrext]: `Attribute.OriginalIssuer` and `Attribute.LastModified` are the XML attributes of the SAML V2.0 Attribute
+    Extensions, marshalled with the prefix `ext`, and `Attribute.Attrs` keeps any other XML attribute, such as
+    `x500:Encoding`, with its namespace. They are kept in assertions, metadata (`RequestedAttribute` and
+    `mdattr:EntityAttributes`) and queries. An attribute of the `Session` with them is released with them. A
+    `LastModified` that isn't a time is kept in `Attrs` rather than refused.
 
 [^ecp]: The base profile of SAMLProfiles §4.2. The channel bindings, holder-of-key confirmation and delegation of the
     ECP v2.0 extension are not supported, see the notes below.

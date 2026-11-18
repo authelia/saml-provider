@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/beevik/etree"
 	"gotest.tools/assert"
@@ -144,4 +145,37 @@ func TestIssuanceRefusesInvalidResponseExtensions(t *testing.T) {
 			assert.Check(t, is.Contains(logs.String(), "ResponseExtensions"))
 		})
 	}
+}
+
+func TestIssuanceReleasesAttributeExtensions(t *testing.T) {
+	test := issuanceTestIDP(t)
+	test.IDP.AttributeReleasePolicy = releaseEveryAttribute
+	issuanceMetadata(test, issuanceUnencrypted)
+
+	lastModified := time.Date(2008, 10, 31, 12, 46, 2, 0, time.UTC)
+
+	test.IDP.SessionProvider = &mockSessionProvider{
+		GetSessionFunc: func(http.ResponseWriter, *http.Request, *IdpAuthnRequest) *Session {
+			return &Session{ID: "f00f00", UserName: "alice", NameID: "alice", CustomAttributes: []Attribute{attributeExtValue()}}
+		},
+	}
+
+	_, responseXML, requestID := issuanceSSO(t, test)
+
+	assertion := issuanceAccept(t, &test.SP, responseXML, []string{requestID})
+
+	var found *Attribute
+
+	for _, statement := range assertion.AttributeStatements {
+		for i := range statement.Attributes {
+			if statement.Attributes[i].Name == "urn:oid:2.5.4.42" {
+				found = &statement.Attributes[i]
+			}
+		}
+	}
+
+	assert.Assert(t, found != nil, "the attribute was not released")
+	assert.Check(t, is.Equal(found.OriginalIssuer, "https://idp.example.com/saml"))
+	assert.Check(t, found.LastModified.Equal(lastModified))
+	assert.Check(t, is.DeepEqual(found.Attrs, attributeExtValue().Attrs))
 }

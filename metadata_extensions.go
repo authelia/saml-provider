@@ -474,6 +474,9 @@ func (m *EntityAttributes) write(w *extensionWriter) {
 			attrs = append(attrs, extAttr("FriendlyName", attribute.FriendlyName))
 		}
 
+		attrs = append(attrs, attribute.attributeExtensionAttrs(true)...)
+		attrs = append(attrs, attribute.Attrs...)
+
 		w.open("saml:Attribute", attrs...)
 
 		for _, value := range attribute.Values {
