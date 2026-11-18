@@ -50,7 +50,7 @@ func (idp *IdentityProvider) sendSOAPLogoutRequest(r *http.Request, state *Logou
 
 	request, err := idp.makeLogoutRequest(r, state, participant, metadata, endpoint)
 	if err != nil {
-		skipLogoutParticipant(participant, err)
+		idp.skipLogoutParticipant(r, state, participant, err)
 
 		return
 	}
@@ -61,40 +61,46 @@ func (idp *IdentityProvider) sendSOAPLogoutRequest(r *http.Request, state *Logou
 		state.Current, state.PendingRequestID = -1, ""
 	}()
 
-	if err := idp.exchangeSOAPLogoutRequest(r, state, request, metadata, endpoint); err != nil {
-		idp.logger().Printf("failed to log %s out over SOAP: %s", participant.ServiceProviderEntityID, err)
-
+	resp, err := idp.exchangeSOAPLogoutRequest(r, state, request, metadata, endpoint)
+	if err != nil {
 		participant.Outcome, participant.Reason = LogoutOutcomeFailed, err.Error()
+
+		idp.observeLogoutParticipant(r, state, participant, false,
+			ErrInvalidResponse.WithDebugf("failed to log the session participant out over SOAP: %s", err).WithWrap(err))
+
+		return
 	}
+
+	idp.observeLogoutParticipant(r, state, participant, true, resp.statusError())
 }
 
 // exchangeSOAPLogoutRequest signs request, posts it to endpoint in a SOAP envelope, validates the LogoutResponse
-// that comes back against the outstanding request of state, and records its outcome.
-func (idp *IdentityProvider) exchangeSOAPLogoutRequest(r *http.Request, state *LogoutState, request *LogoutRequest, metadata *EntityDescriptor, endpoint *Endpoint) error {
+// that comes back against the outstanding request of state, records its outcome, and returns it.
+func (idp *IdentityProvider) exchangeSOAPLogoutRequest(r *http.Request, state *LogoutState, request *LogoutRequest, metadata *EntityDescriptor, endpoint *Endpoint) (*IdpLogoutResponse, error) {
 	signingContext, err := idp.signingContextFor(r, metadata)
 	if err != nil {
-		return fmt.Errorf("cannot sign the logout request: %w", err)
+		return nil, fmt.Errorf("cannot sign the logout request: %w", err)
 	}
 
 	el, err := signLogoutRequestEnveloped(signingContext, request)
 	if err != nil {
-		return fmt.Errorf("cannot sign the logout request: %w", err)
+		return nil, fmt.Errorf("cannot sign the logout request: %w", err)
 	}
 
 	message, overTLS, err := idp.postSOAPMessage(r, endpoint.Location, el, "logout")
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	resp := newSOAPLogoutResponse(idp, r, message, overTLS)
 
 	if err = resp.Validate(state); err != nil {
-		return fmt.Errorf("invalid logout response: %w", err)
+		return nil, fmt.Errorf("invalid logout response: %w", err)
 	}
 
 	resp.outcome(state)
 
-	return nil
+	return resp, nil
 }
 
 // postSOAPMessage posts the signed message el to location in a SOAP envelope with HTTPClient, and returns the
@@ -187,78 +193,75 @@ func soapResponseMessage(body []byte, kind string) ([]byte, error) {
 // or of another version gets the matching error status, as does a replay of a request that was already verified,
 // which is Requester/RequestDenied (SAMLSec §6.1.2). Its session is not ended. A request that is not a POST gets
 // StatusMethodNotAllowed, one that is not a SOAP 1.1 envelope gets a Client fault, and a failure to sign or write
-// the response gets a Server fault.
+// the response gets a Server fault. This is the rule of SAMLBind §3.2.3.3: a fault is for an error of SOAP, and a
+// SAML processing error is a status in a response. A request whose sender is not verified gets the status codes of
+// its error and nothing else, as IdpLogoutRequest.Respondable describes.
+//
+// Each request is reported to the Observer as one EventLogout, as for ServeSLO.
 func (idp *IdentityProvider) ServeSOAPLogout(w http.ResponseWriter, r *http.Request) {
-	soap, ok := idp.receiveSOAPRequest(w, r)
+	soap, ok := idp.receiveSOAPRequest(w, r, EventLogout)
 	if !ok {
 		return
 	}
 
 	req := newSOAPLogoutRequest(idp, r, soap)
 
-	var status Status
-
 	if soap.Message.Tag != "LogoutRequest" || soap.Message.NamespaceURI() != samlProtocolNS {
-		idp.logger().Printf("failed to handle SOAP logout request: the message is not a LogoutRequest")
-
 		// MakeResponse answers it only if the ID is valid.
 		req.Request.ID = soap.Message.SelectAttrValue("ID", "")
-		status = Status{StatusCode: StatusCode{Value: StatusRequester, StatusCode: &StatusCode{Value: StatusRequestUnsupported}}}
-	} else if err := req.Validate(); err != nil {
-		idp.logger().Printf("failed to validate SOAP logout request: %s", err)
 
-		if status, ok = RequestStatus(err); !ok {
-			status = Status{StatusCode: StatusCode{Value: StatusRequester, StatusCode: &StatusCode{Value: StatusRequestDenied}}}
-		}
-	} else {
-		status = idp.soapLogoutStatus(r, req)
+		req.fail(w, ErrRequestUnsupported.WithDebug("failed to handle SOAP logout request: the message is not a LogoutRequest"))
+
+		return
 	}
 
-	if err := req.WriteResponse(w, status); err != nil {
-		idp.logger().Printf("failed to write SOAP logout response: %s", err)
-		writeSOAPFault(w, &soapFault{Code: "Server", String: soapFaultStringProcessing})
+	if err := req.Validate(); err != nil {
+		req.fail(w, err)
+
+		return
 	}
+
+	status, reason := idp.soapLogoutStatus(r, req)
+
+	req.answer(w, status, reason)
 }
 
-// soapLogoutStatus ends the sessions that the verified req names, and returns the status of its LogoutResponse. If
-// the SessionProvider implements SessionParticipantProvider, the other participants of the sessions are first logged
-// out over SOAP; the state of that logout is never saved.
-func (idp *IdentityProvider) soapLogoutStatus(r *http.Request, req *IdpLogoutRequest) Status {
+// soapLogoutStatus ends the sessions that the verified req names, and returns the status of its LogoutResponse,
+// with the reason for one that is not a plain success if it is known. If the SessionProvider implements
+// SessionParticipantProvider, the other participants of the sessions are first logged out over SOAP; the state of
+// that logout is never saved.
+func (idp *IdentityProvider) soapLogoutStatus(r *http.Request, req *IdpLogoutRequest) (Status, error) {
 	provider, ok := idp.SessionProvider.(LogoutSessionProvider)
 	if !ok {
-		idp.logger().Printf("cannot terminate session: the session provider does not implement LogoutSessionProvider")
-
-		return Status{StatusCode: StatusCode{Value: StatusResponder}}
+		return Status{StatusCode: StatusCode{Value: StatusResponder}},
+			ErrServerError.WithDebug("cannot terminate session: the session provider does not implement LogoutSessionProvider")
 	}
 
 	sessions, err := req.logoutSessions(r, provider)
 	if err != nil {
-		idp.logger().Printf("cannot find sessions to terminate: %s", err)
-
-		return Status{StatusCode: StatusCode{Value: StatusResponder}}
+		return Status{StatusCode: StatusCode{Value: StatusResponder}},
+			ErrServerError.WithDebugf("cannot find sessions to terminate: %s", err).WithWrap(err)
 	}
 
 	w := &discardResponseWriter{header: http.Header{}}
 
 	participantProvider, ok := idp.SessionProvider.(SessionParticipantProvider)
 	if !ok || len(sessions) == 0 {
-		return idp.terminateSessions(w, r, provider, sessions)
+		return idp.terminateSessions(w, r, provider, sessions, req.state()), nil
 	}
 
 	participants, err := closeSessionParticipants(r, participantProvider, sessions)
 	if err != nil {
-		idp.logger().Printf("cannot begin logout: %s", err)
-
 		// The sessions are still ended, but the other participants were not told, so a Success is partial.
-		return withPartialLogout(idp.terminateSessions(w, r, provider, sessions))
+		return withPartialLogout(idp.terminateSessions(w, r, provider, sessions, req.state())), fmt.Errorf("cannot begin logout: %w", err)
 	}
 
 	state := newLogoutState(idp, participants, req.ServiceProviderMetadata.EntityID)
 
-	idp.terminateLogoutSessions(w, r, provider, sessions, state)
+	idp.terminateLogoutSessions(w, r, provider, sessions, state, req.state())
 	idp.backChannelLogout(r, state)
 
-	return state.status()
+	return state.status(), nil
 }
 
 // backChannelLogout logs every pending participant of state out over SOAP; one without a usable SOAP endpoint, or
@@ -276,14 +279,14 @@ func (idp *IdentityProvider) backChannelLogout(r *http.Request, state *LogoutSta
 
 		metadata, err := idp.serviceProvider(r, participant.ServiceProviderEntityID)
 		if err != nil {
-			skipLogoutParticipant(participant, err)
+			idp.skipLogoutParticipant(r, state, participant, err)
 
 			continue
 		}
 
 		endpoint, err := idp.logoutRequestEndpoint(metadata, backChannelLogoutBindings...)
 		if err != nil {
-			skipLogoutParticipant(participant, err)
+			idp.skipLogoutParticipant(r, state, participant, err)
 
 			continue
 		}

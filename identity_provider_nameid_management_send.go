@@ -33,27 +33,13 @@ type NameIDChange struct {
 	Encrypt bool
 }
 
-// ManageNameIDStatusError is the error of IdentityProvider.SendManageNameIDRequest when the service provider
-// answered with a status other than Success, such as UnknownPrincipal.
-type ManageNameIDStatusError struct {
-	// Status is the status of the ManageNameIDResponse.
-	Status Status
-}
-
-// Error implements error.
-func (e *ManageNameIDStatusError) Error() string {
-	if second := e.Status.StatusCode.StatusCode; second != nil {
-		return fmt.Sprintf("the service provider answered with the status %s %s", e.Status.StatusCode.Value, second.Value)
-	}
-
-	return fmt.Sprintf("the service provider answered with the status %s", e.Status.StatusCode.Value)
-}
-
 // SendManageNameIDRequest tells the service provider that the identity provider has changed the identifier of
 // a principal, or will no longer use it, with a signed ManageNameIDRequest on the SOAP binding (SAMLCore §3.6,
 // SAMLProfiles §4.5.3.1), and returns nil once the service provider has answered with Success. It is for the
 // application to call when it changes or retires an identifier that it issues; nothing in the identity provider
-// calls it. A status other than Success is a *ManageNameIDStatusError.
+// calls it. A status other than Success is the StatusError that StatusErrorFromStatus returns, which matches
+// ErrReceivedStatus and has the status codes of the service provider, such as StatusUnknownPrincipal, as its
+// TopLevelField and SecondLevelField. What else the service provider said is in its debug message.
 //
 // The request is sent with HTTPClient to the ManageNameIDService of the service provider which is on the SOAP
 // binding and passes CheckServiceProviderBackChannelEndpoint, and is only cancelled with r. The response is
@@ -132,7 +118,7 @@ func (idp *IdentityProvider) SendManageNameIDRequest(r *http.Request, servicePro
 	}
 
 	if code := response.Status.StatusCode; code.Value != StatusSuccess {
-		return &ManageNameIDStatusError{Status: response.Status}
+		return StatusErrorFromStatus(response.Status)
 	}
 
 	return nil

@@ -167,7 +167,7 @@ func TestServeSSOUsesConfiguredAuthnContextEnforcer(t *testing.T) {
 		assertNoAuthnContext(t, response)
 		assert.Check(t, is.DeepEqual(classes, []string{transportClass, strongClass}))
 		assert.Check(t, is.Equal(nameID, "alice"))
-		assert.Check(t, response.Status.StatusMessage == nil)
+		assert.Check(t, statusSaysNothingOfTheRequest(response.Status))
 	})
 
 	t.Run("not called without a requested context", func(t *testing.T) {

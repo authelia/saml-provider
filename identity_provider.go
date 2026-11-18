@@ -33,7 +33,6 @@ import (
 	xrv "github.com/mattermost/xml-roundtrip-validator"
 
 	"authelia.com/provider/saml/internal/dsig"
-	"authelia.com/provider/saml/logger"
 )
 
 // maxAuthnRequestSize is the largest decoded AuthnRequest that the identity provider will process.
@@ -144,7 +143,7 @@ type ECPSessionProvider interface {
 	// authenticated freshly from the credentials in r.
 	//
 	// To refuse the principal with a SAML status that the service provider receives, such as for a disabled
-	// account, call req.WriteErrorResponse with StatusResponder and StatusAuthnFailed and return nil.
+	// account, call req.WriteErrorResponse with ErrAuthnFailed and return nil.
 	//
 	// It is called once req is valid, so req.ServiceProviderMetadata is the service provider that the assertion is
 	// for. The client is not the service provider and r isn't authenticated by req, even when req is signed: the
@@ -441,12 +440,32 @@ func (e DefaultAuthnContextEnforcer) compare(a, b string) int {
 // handles the actual authentication (i.e. prompting for a username
 // and password).
 //
-// Logger receives the reasons that requests fail, and defaults to
-// logger.DefaultLogger.
+// Nothing is logged by the identity provider. Every request that it has finished with, and everything that
+// goes wrong on the way, is reported to the Observer as an Event.
 type IdentityProvider struct {
-	Key           crypto.PrivateKey
-	Signer        crypto.Signer
-	Logger        logger.Interface
+	Key    crypto.PrivateKey
+	Signer crypto.Signer
+
+	// Observer is told of each operation that completes and of each warning, as Observer describes. If it is
+	// nil the events are logged with [slog.Default], so that a failure is never silent.
+	Observer Observer
+
+	// ExposeDebug adds the debug message of a StatusError to the SAML response that reports it, as a Debug
+	// element in the namespace StatusDetailDebugNamespace within the StatusDetail. It is off by default and is
+	// for finding a fault with a service provider that is being set up, not for production: the debug message
+	// holds text of the request, and the response is signed by the identity provider and carried by the
+	// browser of the user, so whoever can send a request can have text of their choosing signed. The debug
+	// message is never added for a requester that is not established, and is always given to the Observer.
+	ExposeDebug bool
+
+	// HTTPErrorHandler, if it is not nil, answers a request that failed and can't be answered with a SAML
+	// response, because it failed before the endpoint for one was chosen from the metadata of the service
+	// provider. It must write the response, for which err.HTTPStatus is the status, and is where an application
+	// renders its own error page. The debug message of err is untrusted text and must not be shown as it is.
+	// The default writes the HTTP status and its text, and nothing of the error. It is not used on the SOAP
+	// binding, where such a request gets a SOAP fault.
+	HTTPErrorHandler func(w http.ResponseWriter, r *http.Request, err *StatusError)
+
 	Certificate   *x509.Certificate
 	Intermediates []*x509.Certificate
 
@@ -945,16 +964,6 @@ func (idp *IdentityProvider) maxAuthnRequestAge() time.Duration {
 	return idp.MaxAuthnRequestAge
 }
 
-// logger returns the Logger of the identity provider, or logger.DefaultLogger if it has none, so an
-// identity provider embedded without a Logger doesn't panic when it logs a failure.
-func (idp *IdentityProvider) logger() logger.Interface {
-	if idp.Logger == nil {
-		return logger.DefaultLogger
-	}
-
-	return idp.Logger
-}
-
 // Metadata returns the metadata structure for this identity provider.
 func (idp *IdentityProvider) Metadata() *EntityDescriptor {
 	certStr := base64.StdEncoding.EncodeToString(idp.Certificate.Raw)
@@ -1172,26 +1181,28 @@ func checkSigningKeySize(public crypto.PublicKey) error {
 
 // ServeMetadata is an [http.HandlerFunc] that serves the IDP metadata, signed by the key of the identity provider
 // (see SignedMetadata). It responds with StatusInternalServerError if the entity ID is not valid, or if the
-// encryption keys are not (see CheckEncryptionKeys).
-func (idp *IdentityProvider) ServeMetadata(w http.ResponseWriter, _ *http.Request) {
+// encryption keys are not (see CheckEncryptionKeys), which is reported to the Observer as an EventMetadata.
+func (idp *IdentityProvider) ServeMetadata(w http.ResponseWriter, r *http.Request) {
+	fail := func(err error) {
+		idp.observe(r, requestState{}.event(EventMetadata, err))
+		idp.writeHTTPError(w, r, err)
+	}
+
 	if err := idp.checkEntityID(); err != nil {
-		idp.logger().Printf("ERROR: %s", err)
-		http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
+		fail(ErrServerError.WithDebugError(err))
 
 		return
 	}
 
 	if err := idp.CheckEncryptionKeys(); err != nil {
-		idp.logger().Printf("ERROR: %s", err)
-		http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
+		fail(ErrServerError.WithDebugError(err))
 
 		return
 	}
 
 	buf, err := idp.SignedMetadata()
 	if err != nil {
-		idp.logger().Printf("ERROR: cannot sign the metadata: %s", err)
-		http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
+		fail(ErrServerError.WithDebugf("cannot sign the metadata: %s", err).WithWrap(err))
 
 		return
 	}
@@ -1199,8 +1210,8 @@ func (idp *IdentityProvider) ServeMetadata(w http.ResponseWriter, _ *http.Reques
 	w.Header().Set("Content-Type", "application/samlmetadata+xml")
 
 	if _, err := w.Write(buf); err != nil {
-		idp.logger().Printf("ERROR: %s", err)
-		http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
+		// The body may have started, so nothing more is written.
+		idp.observe(r, requestState{}.event(EventMetadata, ErrServerError.WithDebugError(err)))
 	}
 }
 
@@ -1218,54 +1229,109 @@ func (idp *IdentityProvider) ServeMetadata(w http.ResponseWriter, _ *http.Reques
 // which sends the browser there with an artifact that the service provider
 // resolves with ServeArtifactResolution.
 //
-// If the SAML request is invalid or cannot be verified a simple StatusBadRequest
-// response is sent. Once the ACS endpoint has been resolved from the metadata of the
-// service provider, a request with an unsupported version, that is too old or new, or that
-// has the wrong destination is answered with a SAML error status instead.
+// If the SAML request is invalid or cannot be verified, the response is the HTTP status of the
+// error, which is StatusBadRequest, or StatusInternalServerError if the service provider could
+// not be looked up, written by the HTTPErrorHandler if there is one. Once the ACS endpoint has
+// been resolved from the metadata of the service provider, a request with an unsupported version,
+// that is too old or new, or that has the wrong destination is answered with a SAML error status
+// instead. IdpAuthnRequest.Respondable describes the rule.
 //
 // A request is used up once it is answered for a session: its ID is recorded in the ReplayStore until
 // the request expires, and the same request presented again is answered with Requester and
 // RequestDenied, without an assertion (SAMLSec §6.1.2). A request that a login form re-presents before
 // then is not a replay. If the store fails the request is answered with Responder.
 //
-// If the assertion cannot be created or encrypted, a Responder error status is sent, or
-// Requester with InvalidNameIDPolicy if the failure is ErrInvalidNameIDPolicy. A failure after
-// the body has started is only logged.
+// If the assertion cannot be created or encrypted, the status of the error is sent: that of the
+// StatusError which the AssertionMaker returned, such as Requester with InvalidNameIDPolicy for
+// ErrInvalidNameIDPolicy, and Responder for any other error. A failure after the body has started
+// is only reported.
+//
+// Each request that is answered, with an assertion or with an error, is reported to the Observer
+// as one EventSSO. That includes a request that the SessionProvider refuses with WriteErrorResponse,
+// which is reported with the error that it was answered with. A request for which the SessionProvider
+// completes the HTTP request in any other way, such as with a login form, reports nothing.
 func (idp *IdentityProvider) ServeSSO(w http.ResponseWriter, r *http.Request) {
 	req, err := NewIdpAuthnRequest(idp, r)
 	if err != nil {
-		idp.logger().Printf("failed to parse request: %s", err)
-		http.Error(w, http.StatusText(http.StatusBadRequest), http.StatusBadRequest)
+		idp.observe(r, requestState{}.event(EventSSO, err))
+		idp.writeHTTPError(w, r, err)
 
 		return
 	}
 
 	if err := req.Validate(); err != nil {
-		idp.logger().Printf("failed to validate request: %s", err)
-
-		if top, second, ok := requestStatus(err); ok {
-			req.writeErrorStatus(w, top, second)
-
-			return
-		}
-
-		http.Error(w, http.StatusText(http.StatusBadRequest), http.StatusBadRequest)
+		req.fail(w, EventSSO, err)
 
 		return
 	}
 
-	session := req.getSession(w, r)
+	session := req.getSession(w, r, EventSSO)
 	if session == nil {
 		return
 	}
 
-	req.respond(w, session)
+	req.respond(w, session, EventSSO)
+}
+
+// Respondable reports whether a failure of the request may be answered with a SAML response, which is once
+// ACSEndpoint is set: the service provider was found, the signature of the request was verified if it has one
+// or must have one, and the endpoint for the response was chosen from the metadata of the service provider.
+//
+// This is the rule for how a failure is reported, and it depends on how far the request got and not on the
+// error, as the same error can occur before and after. If Validate returns an error and the request is not
+// respondable, it must not be answered with a SAML response at all, as there is nowhere that one may be sent:
+// the answer is an HTTP error, with the HTTPStatus of the error. If it is respondable, that error and any later
+// one, such as of CheckReplay or of an AssertionMaker, is answered with WriteErrorResponse, which sends the
+// status of the error to the service provider. ServeSSO and ServeECP do this.
+func (req *IdpAuthnRequest) Respondable() bool {
+	return req.ACSEndpoint != nil
+}
+
+// state returns what is established of the request. The requester is established once the signature of the
+// request is verified, or once the metadata is found of a service provider that the identity provider chose.
+func (req *IdpAuthnRequest) state() requestState {
+	state := requestState{
+		respondable: req.Respondable(),
+		verified:    req.requestAuthenticated || (req.serviceProviderChosen && req.ServiceProviderMetadata != nil),
+	}
+
+	if isValidAuthnRequestID(req.Request.ID) {
+		state.requestID = req.Request.ID
+	}
+
+	switch {
+	case req.ServiceProviderMetadata != nil:
+		state.serviceProvider = req.ServiceProviderMetadata.EntityID
+	case req.Request.Issuer != nil:
+		state.serviceProvider = req.Request.Issuer.Value
+	}
+
+	return state
+}
+
+// fail completes the HTTP request for a request that failed with err, as writeError describes, and reports the
+// failure as the one event of the operation.
+func (req *IdpAuthnRequest) fail(w http.ResponseWriter, kind EventKind, err error) {
+	state := req.state()
+
+	if writeErr := req.writeError(w, err); writeErr != nil {
+		err = ErrServerError.WithDebugf("cannot answer the request: %s", writeErr).WithWrap(ToStatusError(err))
+	}
+
+	req.IDP.observe(req.HTTPRequest, state.event(kind, err))
+}
+
+// warn reports something that went wrong for the request without failing it.
+func (req *IdpAuthnRequest) warn(kind EventKind, err error) {
+	if req.IDP != nil {
+		req.IDP.observe(req.HTTPRequest, req.state().warning(kind, err))
+	}
 }
 
 // respond answers a valid request with an assertion about the principal of session, or with the error status of
 // the request that the assertion can't satisfy. It is the same for every binding the request can arrive on; the
 // binding decides how WriteResponse delivers the Response.
-func (req *IdpAuthnRequest) respond(w http.ResponseWriter, session *Session) {
+func (req *IdpAuthnRequest) respond(w http.ResponseWriter, session *Session, kind EventKind) {
 	idp := req.IDP
 
 	req.Session = session
@@ -1273,13 +1339,41 @@ func (req *IdpAuthnRequest) respond(w http.ResponseWriter, session *Session) {
 	// The request is used up here, once it is about to be answered for a session, and not when it is
 	// validated: a SessionProvider that shows a login form re-presents the same request (SAMLSec §6.1.2).
 	if err := req.CheckReplay(); err != nil {
-		idp.logger().Printf("refused request: %s", err)
-
-		top, second, _ := requestStatus(err)
-		req.writeErrorStatus(w, top, second)
+		req.fail(w, kind, err)
 
 		return
 	}
+
+	if err := req.makeAssertion(session); err != nil {
+		req.fail(w, kind, err)
+
+		return
+	}
+
+	if err := req.WriteResponse(w); err != nil {
+		err = ErrServerError.WithDebugf("failed to write response: %s", err).WithWrap(err)
+
+		// Once the body has started there is nothing sensible left to send.
+		if !errors.Is(err, ErrResponseNotBuilt) {
+			idp.observe(req.HTTPRequest, req.state().event(kind, err))
+
+			return
+		}
+
+		req.fail(w, kind, err)
+
+		return
+	}
+
+	idp.observe(req.HTTPRequest, req.state().event(kind, nil))
+}
+
+// makeAssertion has the AssertionMaker make the assertion for session, and checks that it satisfies the Subject,
+// the NameIDPolicy and the RequestedAuthnContext of the request. The error is the StatusError that the request
+// is answered with. An error of an enforcer that is not a StatusError is AuthnFailed for the Subject,
+// InvalidNameIDPolicy for the NameIDPolicy and NoAuthnContext for the RequestedAuthnContext.
+func (req *IdpAuthnRequest) makeAssertion(session *Session) error {
+	idp := req.IDP
 
 	assertionMaker := idp.AssertionMaker
 	if assertionMaker == nil {
@@ -1287,16 +1381,7 @@ func (req *IdpAuthnRequest) respond(w http.ResponseWriter, session *Session) {
 	}
 
 	if err := assertionMaker.MakeAssertion(req, session); err != nil {
-		idp.logger().Printf("failed to make assertion: %s", err)
-
-		top, second, ok := requestStatus(err)
-		if !ok {
-			top, second = StatusResponder, ""
-		}
-
-		req.writeErrorStatus(w, top, second)
-
-		return
+		return ToStatusError(err)
 	}
 
 	if req.Request.Subject != nil {
@@ -1306,11 +1391,7 @@ func (req *IdpAuthnRequest) respond(w http.ResponseWriter, session *Session) {
 		}
 
 		if err := subjectEnforcer.EnforceSubject(req, session); err != nil {
-			idp.logger().Printf("cannot match the request subject: %s", err)
-
-			req.writeErrorStatus(w, StatusResponder, StatusAuthnFailed)
-
-			return
+			return statusErrorOr(err, ErrAuthnFailed)
 		}
 	}
 
@@ -1321,40 +1402,23 @@ func (req *IdpAuthnRequest) respond(w http.ResponseWriter, session *Session) {
 		}
 
 		if err := nameIDPolicyEnforcer.EnforceNameIDPolicy(req, session); err != nil {
-			idp.logger().Printf("cannot satisfy name id policy: %s", err)
-
-			req.writeErrorStatus(w, StatusRequester, StatusInvalidNameIDPolicy)
-
-			return
+			return statusErrorOr(err, ErrInvalidNameIDPolicy)
 		}
 	}
 
 	if req.Request.RequestedAuthnContext != nil {
 		if err := idp.satisfiesAuthnContext(req.Request.RequestedAuthnContext, req.Assertion, session); err != nil {
-			idp.logger().Printf("cannot satisfy requested authn context: %s", err)
-
-			req.writeErrorStatus(w, StatusResponder, StatusNoAuthnContext)
-
-			return
+			return statusErrorOr(err, ErrNoAuthnContext)
 		}
 	}
 
-	if err := req.WriteResponse(w); err != nil {
-		idp.logger().Printf("failed to write response: %s", err)
-
-		// Once the body has started there is nothing sensible left to send.
-		if !errors.Is(err, ErrResponseNotBuilt) {
-			return
-		}
-
-		req.writeErrorStatus(w, StatusResponder, "")
-	}
+	return nil
 }
 
 // getSession returns the session for the request, following its IsPassive and ForceAuthn attributes.
 // If it returns nil then the HTTP request has been completed. IsPassive comes first, as SAMLCore
 // §3.4.1 requires that ForceAuthn doesn't cause any authentication that it would forbid.
-func (req *IdpAuthnRequest) getSession(w http.ResponseWriter, r *http.Request) *Session {
+func (req *IdpAuthnRequest) getSession(w http.ResponseWriter, r *http.Request, kind EventKind) *Session {
 	idp := req.IDP
 
 	if req.Request.IsPassive != nil && *req.Request.IsPassive {
@@ -1364,7 +1428,7 @@ func (req *IdpAuthnRequest) getSession(w http.ResponseWriter, r *http.Request) *
 		}
 
 		if session == nil {
-			req.writeErrorStatus(w, StatusResponder, StatusNoPassive)
+			req.fail(w, kind, ErrNoPassive)
 		}
 
 		return session
@@ -1373,39 +1437,75 @@ func (req *IdpAuthnRequest) getSession(w http.ResponseWriter, r *http.Request) *
 	if req.Request.ForceAuthn != nil && *req.Request.ForceAuthn {
 		provider, ok := idp.SessionProvider.(ForceAuthnSessionProvider)
 		if !ok {
-			req.writeErrorStatus(w, StatusResponder, StatusAuthnFailed)
+			req.fail(w, kind, ErrAuthnFailed.WithDebug("the request has ForceAuthn and the session provider does not implement ForceAuthnSessionProvider"))
+
 			return nil
 		}
 
-		return provider.GetForcedSession(w, r, req)
+		return req.observeRefusal(kind, provider.GetForcedSession(w, r, req))
 	}
 
-	return idp.SessionProvider.GetSession(w, r, req)
+	return req.observeRefusal(kind, idp.SessionProvider.GetSession(w, r, req))
 }
 
-// writeErrorStatus completes the HTTP request with an error Response carrying the given top-level and
-// second-level status. If that Response can't be written, it completes it with an internal server error, or with a
-// Server fault on the SOAP binding. Nothing more is written if the body had already started.
-func (req *IdpAuthnRequest) writeErrorStatus(w http.ResponseWriter, topLevelStatus, secondLevelStatus string) {
-	err := req.MakeErrorResponse(topLevelStatus, secondLevelStatus, "")
-	started := false
+// observeRefusal returns session, which the SessionProvider returned. If it is nil and the SessionProvider
+// answered the request with WriteErrorResponse, that is reported as the event of the kind with the error it
+// was answered with. Any other way of completing the HTTP request, such as a login form, reports nothing.
+func (req *IdpAuthnRequest) observeRefusal(kind EventKind, session *Session) *Session {
+	if refusal := req.refusal; session == nil && refusal != nil {
+		req.refusal = nil
 
-	if err == nil {
-		if err = req.WriteResponse(w); err == nil {
-			return
+		req.IDP.observe(req.HTTPRequest, req.state().event(kind, refusal))
+	}
+
+	return session
+}
+
+// writeError completes the HTTP request for a request that failed with err. This is where the failure of an
+// AuthnRequest is given its form, by how far the request got.
+//
+// A request that is not Respondable is never answered with a SAML response: on a browser binding it gets the
+// HTTP status of the error, from the HTTPErrorHandler if there is one, and for the Enhanced Client or Proxy
+// profile a SOAP fault, as SAMLBind §3.2.2 has a responder that can't process a request do, which is a Client
+// fault unless the error is a failure of the identity provider. A request that is Respondable gets a signed
+// Response with the status of the error.
+//
+// If that Response can't be written, the request is completed with an internal server error, or with a Server
+// fault on the SOAP binding, and the reason is returned. Nothing more is written if the body had already started.
+func (req *IdpAuthnRequest) writeError(w http.ResponseWriter, err error) error {
+	if !req.Respondable() {
+		switch e := ToStatusError(err); {
+		case req.binding != SOAPBinding:
+			req.IDP.writeHTTPError(w, req.HTTPRequest, e)
+		case e.HTTPStatus() >= http.StatusInternalServerError:
+			writeSOAPFault(w, &soapFault{Code: "Server", String: soapFaultStringProcessing})
+		default:
+			writeSOAPFault(w, &soapFault{Code: "Client", String: soapFaultStringAuthnRequest})
 		}
 
-		started = !errors.Is(err, ErrResponseNotBuilt)
+		return nil
 	}
 
-	req.IDP.logger().Printf("failed to write response: %s", err)
+	writeErr := req.MakeErrorResponse(err)
+	started := false
+
+	if writeErr == nil {
+		if writeErr = req.WriteResponse(w); writeErr == nil {
+			return nil
+		}
+
+		started = !errors.Is(writeErr, ErrResponseNotBuilt)
+	}
 
 	switch {
+	case started:
 	case req.binding != SOAPBinding:
-		http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
-	case !started:
+		req.IDP.writeHTTPError(w, req.HTTPRequest, ErrServerError.WithDebugError(writeErr))
+	default:
 		writeSOAPFault(w, &soapFault{Code: "Server", String: soapFaultStringProcessing})
 	}
+
+	return writeErr
 }
 
 // ServeIDPInitiated handes an IDP-initiated authorization request. Requests of this
@@ -1413,10 +1513,11 @@ func (req *IdpAuthnRequest) writeErrorStatus(w http.ResponseWriter, topLevelStat
 // that will be passed to the application.
 func (idp *IdentityProvider) ServeIDPInitiated(w http.ResponseWriter, r *http.Request, serviceProviderID string, relayState string) {
 	req := &IdpAuthnRequest{
-		IDP:         idp,
-		HTTPRequest: r,
-		RelayState:  relayState,
-		Now:         TimeNow(),
+		IDP:                   idp,
+		HTTPRequest:           r,
+		RelayState:            relayState,
+		Now:                   TimeNow(),
+		serviceProviderChosen: true,
 	}
 
 	session := idp.SessionProvider.GetSession(w, r, req)
@@ -1428,17 +1529,28 @@ func (idp *IdentityProvider) ServeIDPInitiated(w http.ResponseWriter, r *http.Re
 
 	req.Session = session
 
+	// There is no request to answer, so every failure is an HTTP error and nothing is sent to the service
+	// provider. The service provider is the choice of the identity provider, so it is established once its
+	// metadata is found.
+	state := func() requestState {
+		return requestState{serviceProvider: serviceProviderID, verified: req.ServiceProviderMetadata != nil}
+	}
+
+	fail := func(err *StatusError) {
+		idp.observe(r, state().event(EventIDPInitiatedSSO, err))
+		idp.writeHTTPError(w, r, err)
+	}
+
 	var err error
 
 	req.ServiceProviderMetadata, err = idp.serviceProvider(r, serviceProviderID)
 	if err == os.ErrNotExist {
-		idp.logger().Printf("cannot find service provider: %s", serviceProviderID)
-		http.Error(w, http.StatusText(http.StatusNotFound), http.StatusNotFound)
+		fail(ErrUnknownServiceProvider.WithHTTPStatus(http.StatusNotFound).
+			WithDebugf("cannot find service provider: %s", serviceProviderID))
 
 		return
 	} else if err != nil {
-		idp.logger().Printf("cannot find service provider %s: %v", serviceProviderID, err)
-		http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
+		fail(ErrServerError.WithDebugf("cannot find service provider %s: %v", serviceProviderID, err).WithWrap(err))
 
 		return
 	}
@@ -1446,8 +1558,8 @@ func (idp *IdentityProvider) ServeIDPInitiated(w http.ResponseWriter, r *http.Re
 	// Find an ACS endpoint that we can use. Insecure endpoints are skipped, and if there is no other
 	// the request fails here, before any assertion is made.
 	if err := req.useDefaultACSEndpoint(); err != nil {
-		idp.logger().Printf("cannot find assertion consumer service for %s: %v", serviceProviderID, err)
-		http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
+		fail(ErrNoResponseEndpoint.WithHTTPStatus(http.StatusInternalServerError).
+			WithDebugf("cannot find assertion consumer service for %s: %v", serviceProviderID, err).WithWrap(err))
 
 		return
 	}
@@ -1458,18 +1570,28 @@ func (idp *IdentityProvider) ServeIDPInitiated(w http.ResponseWriter, r *http.Re
 	}
 
 	if err := assertionMaker.MakeAssertion(req, session); err != nil {
-		idp.logger().Printf("failed to make assertion: %s", err)
-		http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
+		fail(ToStatusError(err).
+			WithHTTPStatus(http.StatusInternalServerError))
 
 		return
 	}
 
 	if err := req.WriteResponse(w); err != nil {
-		idp.logger().Printf("failed to write response: %s", err)
-		http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
+		e := ErrServerError.WithDebugf("failed to write response: %s", err).WithWrap(err)
+
+		// Once the body has started there is nothing sensible left to send.
+		if !errors.Is(err, ErrResponseNotBuilt) {
+			idp.observe(r, state().event(EventIDPInitiatedSSO, e))
+
+			return
+		}
+
+		fail(e)
 
 		return
 	}
+
+	idp.observe(r, state().event(EventIDPInitiatedSSO, nil))
 }
 
 // IdpAuthnRequest is used by IdentityProvider to handle a single authentication request.
@@ -1512,8 +1634,17 @@ type IdpAuthnRequest struct {
 	// requestAuthenticated is set by Validate if the request has a signature, which was verified.
 	requestAuthenticated bool
 
-	// algorithmFallbackLogged is set by Issuance once it has logged that an algorithm was not negotiated with the
-	// service provider, so that it is logged once for the response and not for each of its parts.
+	// serviceProviderChosen is set when there is no AuthnRequest and the service provider was not chosen by
+	// the sender of one: by the identity provider for ServeIDPInitiated, or by the authenticated requester of a
+	// query that the assertion answers.
+	serviceProviderChosen bool
+
+	// refusal is the error that WriteErrorResponse last answered the request with, which getSession reports if
+	// the SessionProvider returns no session.
+	refusal error
+
+	// algorithmFallbackLogged is set by Issuance once it has reported that an algorithm was not negotiated with the
+	// service provider, so that it is reported once for the response and not for each of its parts.
 	algorithmFallbackLogged bool
 }
 
@@ -1537,8 +1668,18 @@ func (req *IdpAuthnRequest) ResumeFormValues() url.Values {
 }
 
 // NewIdpAuthnRequest returns a new IdpAuthnRequest for the given HTTP request to the authorization
-// service.
+// service. The error is ErrMalformedRequest, and such a request is never answered with a SAML response.
 func NewIdpAuthnRequest(idp *IdentityProvider, r *http.Request) (*IdpAuthnRequest, error) {
+	req, err := newIdpAuthnRequest(idp, r)
+	if err != nil {
+		return nil, statusErrorOr(err, ErrMalformedRequest)
+	}
+
+	return req, nil
+}
+
+// newIdpAuthnRequest is NewIdpAuthnRequest with the errors of what it reads.
+func newIdpAuthnRequest(idp *IdentityProvider, r *http.Request) (*IdpAuthnRequest, error) {
 	req := &IdpAuthnRequest{
 		IDP:         idp,
 		HTTPRequest: r,
@@ -1635,24 +1776,30 @@ func readRedirectMessage(rawQuery, parameter string) (buf []byte, relayState, si
 // Validate checks that the authentication request is valid and assigns
 // the AuthnRequest and Metadata properties. Returns a non-nil error if the
 // request is not valid.
+//
+// The error is a StatusError: ErrMalformedRequest for a request that can't be read,
+// ErrUnknownServiceProvider, ErrSignatureRequired or ErrInvalidSignature, ErrNoResponseEndpoint, and
+// ErrServerError if the service provider could not be looked up, and then the errors of the content of
+// the request, such as ErrRequestNotCurrent. How it must be answered depends on whether the request
+// is Respondable, and not on which error it is.
 func (req *IdpAuthnRequest) Validate() error {
 	// This must come first: this code runs before any authentication, and the cost of the XML
 	// parsing below is proportional to the size of the request.
 	if err := checkAuthnRequestSize(req.RequestBuffer); err != nil {
-		return err
+		return ErrMalformedRequest.WithDebugError(err)
 	}
 
 	if err := xrv.Validate(bytes.NewReader(req.RequestBuffer)); err != nil {
-		return err
+		return ErrMalformedRequest.WithDebugError(err)
 	}
 
 	//nolint:gosec // The request is size limited and passed XML round trip validation above.
 	if err := xml.Unmarshal(req.RequestBuffer, &req.Request); err != nil {
-		return err
+		return ErrMalformedRequest.WithDebugError(err)
 	}
 
 	if err := req.checkTrust(); err != nil {
-		return err
+		return ErrMalformedRequest.WithDebugError(err)
 	}
 
 	// find the service provider.
@@ -1660,20 +1807,20 @@ func (req *IdpAuthnRequest) Validate() error {
 
 	serviceProvider, err := req.IDP.serviceProvider(req.HTTPRequest, serviceProviderID)
 	if err == os.ErrNotExist {
-		return fmt.Errorf("cannot handle request from unknown service provider %s", serviceProviderID)
+		return ErrUnknownServiceProvider.WithDebugf("cannot handle request from unknown service provider %s", serviceProviderID)
 	} else if err != nil {
-		return fmt.Errorf("cannot find service provider %s: %v", serviceProviderID, err)
+		return ErrServerError.WithDebugf("cannot find service provider %s: %v", serviceProviderID, err).WithWrap(err)
 	}
 
 	req.ServiceProviderMetadata = serviceProvider
 
 	if err := req.verifyAuthnRequestSignature(); err != nil {
-		return err
+		return statusErrorOr(err, ErrInvalidSignature)
 	}
 
 	// Check that the ACS URL matches an ACS endpoint in the SP metadata.
 	if err := req.getACSEndpoint(); err != nil {
-		return fmt.Errorf("cannot find assertion consumer service: %w", err)
+		return ErrNoResponseEndpoint.WithDebugf("cannot find assertion consumer service: %s", err).WithWrap(err)
 	}
 
 	return req.checkRequestStage()
@@ -1684,7 +1831,7 @@ func (req *IdpAuthnRequest) Validate() error {
 // sent for a request that fails them.
 func (req *IdpAuthnRequest) checkTrust() error {
 	if !isValidAuthnRequestID(req.Request.ID) {
-		// The value is not included because this error is logged without authentication.
+		// The value is not included: it is arbitrary text of a request that is not authenticated.
 		return fmt.Errorf("invalid request ID")
 	}
 
@@ -1697,14 +1844,14 @@ func (req *IdpAuthnRequest) checkTrust() error {
 
 // checkRequestStage makes the checks on the content of the request that are reported to the service
 // provider as a SAML status. It must only run once the ACS endpoint has been resolved from metadata,
-// and on the content that the signature covers if the request is signed. The error is a *statusError.
+// and on the content that the signature covers if the request is signed. The error is a StatusError.
 func (req *IdpAuthnRequest) checkRequestStage() error {
-	if statusErr := versionStatus(req.Request.Version); statusErr != nil {
-		return statusErr
+	if err := versionError(req.Request.Version); err != nil {
+		return err
 	}
 
 	if err := checkIssueInstant("request", req.Request.IssueInstant, req.Now, req.IDP.maxAuthnRequestAge()); err != nil {
-		return &statusError{StatusRequester, StatusRequestDenied, err}
+		return ErrRequestNotCurrent.WithDebugError(err)
 	}
 
 	// In http://docs.oasis-open.org/security/saml/v2.0/saml-bindings-2.0-os.pdf §3.4.5.2
@@ -1729,14 +1876,12 @@ func (req *IdpAuthnRequest) checkRequestStage() error {
 
 	if required || req.Request.Destination != "" {
 		if req.Request.Destination != destination {
-			return &statusError{StatusRequester, StatusRequestDenied,
-				fmt.Errorf("expected destination to be %q, not %q", destination, req.Request.Destination)}
+			return ErrDestinationMismatch.WithDebugf("expected destination to be %q, not %q", destination, req.Request.Destination)
 		}
 	}
 
 	if !req.supportedProtocolBinding() {
-		return &statusError{StatusResponder, StatusUnsupportedBinding,
-			fmt.Errorf("the response can't be sent with the requested binding %q", req.Request.ProtocolBinding)}
+		return ErrUnsupportedBinding.WithDebugf("the response can't be sent with the requested binding %q", req.Request.ProtocolBinding)
 	}
 
 	return nil
@@ -2135,10 +2280,10 @@ func (DefaultAssertionMaker) MakeAssertion(req *IdpAuthnRequest, session *Sessio
 
 	// The index is not included because the request may not be authenticated.
 	if service == nil && req.Request.AttributeConsumingServiceIndex != "" && req.IDP != nil {
-		req.IDP.logger().Printf("releasing no attributes: the AttributeConsumingServiceIndex of the request names no service")
+		req.warn(EventAttributeRelease, ErrInvalidRequest.WithDebug("releasing no attributes: the AttributeConsumingServiceIndex of the request names no service"))
 	}
 
-	attributes, err := req.IDP.principalAttributes(req.HTTPRequest, req.ServiceProviderMetadata, service, session)
+	attributes, err := req.IDP.principalAttributes(req.HTTPRequest, req.state(), req.ServiceProviderMetadata, service, session)
 	if err != nil {
 		return fmt.Errorf("cannot collect attributes: %w", err)
 	}
@@ -3177,39 +3322,31 @@ func (req *IdpAuthnRequest) MakeResponse() error {
 	return nil
 }
 
-// MakeErrorResponse creates and assigns a new signed SAML response in ResponseEl which reports a
-// failure and carries no assertion, replacing any response made earlier. The topLevelStatus must be
-// one of StatusRequester, StatusResponder or StatusVersionMismatch, as required by SAMLCore §3.2.2.2.
-// The secondLevelStatus and message are optional, and message is sent to the service provider as is.
+// MakeErrorResponse creates and assigns a new signed SAML response in ResponseEl which reports failure
+// and carries no assertion, replacing any response made earlier. The status is that of the StatusError
+// in failure, such as ErrAuthnFailed, as IdentityProvider.ErrorStatus encodes it: its status codes, its
+// StatusMessage and its StatusDetail, and its debug message if ExposeDebug is set. Any other error is
+// reported as ErrServerError, which is Responder, and nothing of its text is sent.
 //
-// It returns an error if ACSEndpoint is not set, because a response must only be sent to an endpoint
-// that has been checked against the metadata of the service provider. Requests which fail before
-// that point, such as any for which Validate returns an error, can't be answered with a SAML response.
-func (req *IdpAuthnRequest) MakeErrorResponse(topLevelStatus, secondLevelStatus, message string) error {
+// It returns an error if the request is not Respondable, because a response must only be sent to an
+// endpoint that has been checked against the metadata of the service provider. Requests which fail
+// before that point can't be answered with a SAML response.
+func (req *IdpAuthnRequest) MakeErrorResponse(failure error) error {
 	req.ResponseEl, req.responseParticipant = nil, nil
 
-	if req.ACSEndpoint == nil {
+	if !req.Respondable() {
 		return fmt.Errorf("cannot make an error response without a validated assertion consumer service")
+	}
+
+	if failure == nil {
+		return errors.New("cannot make an error response without an error")
 	}
 
 	if err := req.IDP.CheckServiceProviderEndpoint(req.ACSEndpoint.Location); err != nil {
 		return err
 	}
 
-	switch topLevelStatus {
-	case StatusRequester, StatusResponder, StatusVersionMismatch:
-	default:
-		return fmt.Errorf("invalid top-level status %q for an error response", topLevelStatus)
-	}
-
-	status := Status{StatusCode: StatusCode{Value: topLevelStatus}}
-	if secondLevelStatus != "" {
-		status.StatusCode.StatusCode = &StatusCode{Value: secondLevelStatus}
-	}
-
-	if message != "" {
-		status.StatusMessage = &StatusMessage{Value: message}
-	}
+	status := req.IDP.status(req.HTTPRequest, failure, req.state())
 
 	responseEl, err := req.signResponse(req.newResponse(status), nil)
 	if err != nil {
@@ -3221,15 +3358,24 @@ func (req *IdpAuthnRequest) MakeErrorResponse(topLevelStatus, secondLevelStatus,
 	return nil
 }
 
-// WriteErrorResponse writes a signed SAML response which reports a failure to the assertion consumer
-// service of the service provider. See MakeErrorResponse for the arguments and when it can be used.
-// Nothing is written to w if it returns an error from MakeErrorResponse.
-func (req *IdpAuthnRequest) WriteErrorResponse(w http.ResponseWriter, topLevelStatus, secondLevelStatus, message string) error {
-	if err := req.MakeErrorResponse(topLevelStatus, secondLevelStatus, message); err != nil {
+// WriteErrorResponse writes a signed SAML response which reports failure to the assertion consumer
+// service of the service provider. See MakeErrorResponse for the status and when it can be used.
+// Nothing is written to w if it returns an error from MakeErrorResponse. A SessionProvider which refuses
+// a request of ServeSSO with it has the refusal reported as its EventSSO.
+func (req *IdpAuthnRequest) WriteErrorResponse(w http.ResponseWriter, failure error) error {
+	if err := req.MakeErrorResponse(failure); err != nil {
 		return err
 	}
 
-	return req.WriteResponse(w)
+	req.refusal = failure
+
+	if err := req.WriteResponse(w); err != nil {
+		req.refusal = ErrServerError.WithDebugf("failed to write error response: %s", err).WithWrap(errors.Join(err, failure))
+
+		return err
+	}
+
+	return nil
 }
 
 // newResponse returns the Response for this request with the given status.

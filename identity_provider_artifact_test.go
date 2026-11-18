@@ -11,7 +11,6 @@ import (
 	"errors"
 	"html"
 	"io"
-	"log"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -50,7 +49,7 @@ func artifactTestIDP(t *testing.T) (*IdentityProviderTest, *bytes.Buffer) {
 	logs := &bytes.Buffer{}
 
 	test.IDP.ArtifactResolutionURL = mustParseURL(artifactTestURL)
-	test.IDP.Logger = log.New(logs, "", 0)
+	test.IDP.Observer = logObserver(logs)
 	test.SP.IDPMetadata = test.IDP.Metadata()
 
 	return test, logs
@@ -210,7 +209,7 @@ func artifactResponse(t *testing.T, w *httptest.ResponseRecorder) (*ArtifactResp
 	assert.Check(t, is.Equal(response.Version, "2.0"))
 	assert.Assert(t, response.Issuer != nil)
 	assert.Check(t, is.Equal(response.Issuer.Value, "https://idp.example.com/saml/metadata"))
-	assert.Check(t, response.Status.StatusMessage == nil)
+	assert.Check(t, statusSaysNothingOfTheRequest(response.Status))
 	assert.Check(t, is.Equal(verified.SelectAttrValue("Destination", ""), ""))
 
 	var message *etree.Element
@@ -701,13 +700,15 @@ func TestArtifactACSSelection(t *testing.T) {
 					assert.Assert(t, err != nil)
 					assert.Check(t, req.ACSEndpoint == nil)
 
-					_, ok := RequestStatus(err)
-					assert.Check(t, !ok, "a request with no endpoint can't be answered with a status")
+					assert.Check(t, !req.Respondable(), "a request with no endpoint can't be answered with a status")
+					assert.Check(t, errors.Is(err, ErrNoResponseEndpoint), "error: %v", err)
 
 					return
 				case expected.unsupported:
-					status, ok := RequestStatus(err)
-					assert.Assert(t, ok, "error: %v", err)
+					assert.Assert(t, req.Respondable(), "error: %v", err)
+					assert.Assert(t, errors.Is(err, ErrUnsupportedBinding), "error: %v", err)
+
+					status := test.IDP.ErrorStatus(err)
 					assert.Check(t, is.Equal(status.StatusCode.Value, StatusResponder))
 					assert.Check(t, is.Equal(status.StatusCode.StatusCode.Value, StatusUnsupportedBinding))
 				default:
@@ -900,7 +901,7 @@ func TestServeSSOArtifactStoreFailure(t *testing.T) {
 func TestWriteResponseDeletesArtifactThatIsNotSent(t *testing.T) {
 	f := newPropagationFixture(t)
 	f.test.IDP.ArtifactResolutionURL = mustParseURL(artifactTestURL)
-	f.test.IDP.Logger = log.New(io.Discard, "", 0)
+	f.test.IDP.Observer = logObserver(io.Discard)
 
 	store := &failingArtifactStore{MemoryArtifactStore: NewMemoryArtifactStore(0)}
 	f.test.IDP.ArtifactStore = store

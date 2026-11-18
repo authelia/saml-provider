@@ -9,7 +9,6 @@ import (
 	"crypto/x509"
 	"crypto/x509/pkix"
 	"encoding/xml"
-	"log"
 	"math/big"
 	"net/http"
 	"net/http/httptest"
@@ -240,7 +239,7 @@ func algorithmsListed(signing []SigningMethod, digests []DigestMethod) func(*Ent
 func algorithmLog(test *IdentityProviderTest) *bytes.Buffer {
 	var buf bytes.Buffer
 
-	test.IDP.Logger = log.New(&buf, "", 0)
+	test.IDP.Observer = logObserver(&buf)
 
 	return &buf
 }

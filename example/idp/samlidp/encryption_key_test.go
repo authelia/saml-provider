@@ -16,7 +16,6 @@ import (
 	"gotest.tools/golden"
 
 	"authelia.com/provider/saml"
-	"authelia.com/provider/saml/logger"
 )
 
 func newEncryptionKeyPair(t *testing.T) saml.DecryptionKey {
@@ -45,7 +44,6 @@ func TestServerPublishesEncryptionKey(t *testing.T) {
 	options := Options{
 		Certificate: mustParseCertificate(golden.Get(t, "idp_cert.pem")),
 		Key:         mustParsePrivateKey(golden.Get(t, "idp_key.pem")),
-		Logger:      logger.DefaultLogger,
 		Store:       &MemoryStore{},
 		URL:         url.URL{Scheme: "https", Host: "idp.example.com"},
 

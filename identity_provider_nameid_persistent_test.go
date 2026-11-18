@@ -3,7 +3,6 @@ package saml
 import (
 	"bytes"
 	"errors"
-	"log"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -1186,7 +1185,7 @@ func TestSubjectIDRelease(t *testing.T) {
 
 			var logged bytes.Buffer
 
-			test.IDP.Logger = log.New(&logged, "", 0)
+			test.IDP.Observer = logObserver(&logged)
 
 			attributes := releasedAttributes(t, attributeReleaseRequest(t, test, "", wanted), &Session{ID: "s", NameID: "alice", SubjectID: value})
 			assert.Check(t, is.Len(attributes, 0), value)

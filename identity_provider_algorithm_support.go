@@ -4,6 +4,7 @@ import (
 	"crypto/ecdsa"
 	"crypto/rsa"
 	"fmt"
+	"net/http"
 	"slices"
 	"strings"
 
@@ -113,7 +114,7 @@ func algorithmRole(req IssuanceRequest) *RoleDescriptor {
 // of defaults. If the service provider lists none of a type, §2.5 leaves the choice to the identity provider, and
 // defaults is left as it is.
 //
-// If it lists some and none can be used, defaults is also left as it is, which is logged. This differs from the
+// If it lists some and none can be used, defaults is also left as it is, which is reported to the Observer. This differs from the
 // encryption of an assertion, which fails rather than use an algorithm the service provider doesn't list. The
 // profile does not make what is listed a policy (§2.4), the message is signed no weaker than the operator set for
 // every service provider, and it is what such a service provider was sent before its metadata was read for this,
@@ -190,13 +191,17 @@ func describeSigningMethods(methods []SigningMethod) string {
 	return strings.Join(described, ", ")
 }
 
-// logAlgorithmFallback logs each of notes, which negotiateAlgorithms returned for the service provider.
-func (idp *IdentityProvider) logAlgorithmFallback(metadata *EntityDescriptor, notes []negotiationNote) {
+// observeAlgorithmFallback reports each of notes, which negotiateAlgorithms returned for the service provider, as
+// an EventAlgorithmFallback of the request r, which may be nil, in the state of the request that the message
+// answers.
+func (idp *IdentityProvider) observeAlgorithmFallback(r *http.Request, state requestState, metadata *EntityDescriptor, notes []negotiationNote) {
 	if metadata == nil {
 		return
 	}
 
 	for _, note := range notes {
-		idp.logger().Printf("signing for service provider %s: %s", metadata.EntityID, note.text)
+		idp.observe(r, state.warning(EventAlgorithmFallback,
+			ErrServerError.WithStatusMessage("an algorithm was not negotiated with the service provider").
+				WithDebugf("signing for service provider %s: %s", metadata.EntityID, note.text)))
 	}
 }

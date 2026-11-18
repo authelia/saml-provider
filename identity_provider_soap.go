@@ -246,11 +246,13 @@ func soapHeaderAttrIsTrue(header *etree.Element, local string) bool {
 	return v == "1" || v == "true"
 }
 
-// receiveSOAPRequest answers a non-POST with 405 and a bad envelope with a fault, logging the reason, and
-// returns false in both cases.
-func (idp *IdentityProvider) receiveSOAPRequest(w http.ResponseWriter, r *http.Request, understood ...xml.Name) (*soapRequest, bool) {
+// receiveSOAPRequest answers a non-POST with 405 and a bad envelope with a fault, and returns false in both
+// cases, which it reports as the failure of the operation of the kind. These are the errors of SOAP itself,
+// which SAMLBind §3.2.3.3 has answered with a fault, before there is a SAML message to answer with a status.
+func (idp *IdentityProvider) receiveSOAPRequest(w http.ResponseWriter, r *http.Request, kind EventKind, understood ...xml.Name) (*soapRequest, bool) {
 	if r.Method != http.MethodPost {
-		idp.logger().Printf("failed to read SOAP request: %s", "the method is not POST")
+		idp.observe(r, requestState{}.event(kind, ErrMalformedRequest.WithHTTPStatus(http.StatusMethodNotAllowed).
+			WithDebug("failed to read SOAP request: the method is not POST")))
 
 		w.Header().Set("Allow", http.MethodPost)
 		http.Error(w, http.StatusText(http.StatusMethodNotAllowed), http.StatusMethodNotAllowed)
@@ -260,7 +262,8 @@ func (idp *IdentityProvider) receiveSOAPRequest(w http.ResponseWriter, r *http.R
 
 	req, fault := readSOAPRequest(r, understood...)
 	if fault != nil {
-		idp.logger().Printf("failed to read SOAP request: %s", fault.String)
+		// The faultstring is one of the constants of this file, and holds nothing of the request.
+		idp.observe(r, requestState{}.event(kind, ErrMalformedRequest.WithDebug("failed to read SOAP request: "+fault.String)))
 
 		writeSOAPFault(w, fault)
 
@@ -335,47 +338,49 @@ func writeSOAPFault(w http.ResponseWriter, fault *soapFault) {
 }
 
 // verifySOAPRequester looks up the service provider issuer and verifies message's enveloped signature against
-// its signing keys. It returns the metadata and the element the signature covers. Every error is a *statusError:
-// unknown issuer, no signature or a bad one is Requester/RequestDenied; any other lookup failure is Responder.
+// its signing keys. It returns the metadata and the element the signature covers. Every error is a StatusError:
+// ErrUnknownServiceProvider, ErrSignatureRequired or ErrInvalidSignature, which are all Requester with
+// RequestDenied, and ErrServerError, which is Responder, for any other failure.
 //
 // A message on the SOAP binding must be signed, as SAMLProfiles §4.4.4.1 requires a LogoutRequest to be
-// authenticated and the binding offers nothing else. The errors don't include the issuer, which is not verified.
+// authenticated and the binding offers nothing else. The requester is not established when one of these errors is
+// returned, so the answer has its status codes and nothing else, as requestState describes: the three errors of
+// the requester are then the same answer, and nothing tells whether an entity ID is that of a service provider.
 func (idp *IdentityProvider) verifySOAPRequester(r *http.Request, message *etree.Element, issuer string) (*EntityDescriptor, *etree.Element, error) {
 	metadata, err := idp.serviceProvider(r, issuer)
 	if errors.Is(err, os.ErrNotExist) {
-		return nil, nil, &statusError{StatusRequester, StatusRequestDenied, errors.New("the service provider is unknown")}
+		return nil, nil, ErrUnknownServiceProvider.WithDebug("the service provider is unknown")
 	} else if err != nil {
-		return nil, nil, &statusError{StatusResponder, "", fmt.Errorf("cannot find the service provider: %w", err)}
+		return nil, nil, ErrServerError.WithDebugf("cannot find the service provider: %s", err).WithWrap(err)
 	}
 
 	signatureEl, err := findChild(message, "http://www.w3.org/2000/09/xmldsig#", "Signature")
 	if err != nil {
-		return nil, nil, &statusError{StatusRequester, StatusRequestDenied, err}
+		return nil, nil, ErrInvalidSignature.WithDebugError(err)
 	}
 
 	if signatureEl == nil {
-		return nil, nil, &statusError{StatusRequester, StatusRequestDenied, errors.New("the message is not signed")}
+		return nil, nil, ErrSignatureRequired.WithDebug("the message is not signed")
 	}
 
 	certificates, err := serviceProviderSigningCertificates(metadata)
 	if err != nil {
-		return nil, nil, &statusError{StatusResponder, "", err}
+		return nil, nil, ErrServerError.WithDebugError(err)
 	}
 
 	if len(certificates) == 0 {
-		return nil, nil, &statusError{StatusRequester, StatusRequestDenied,
-			errors.New("the message is signed but the service provider has no signing certificate")}
+		return nil, nil, ErrInvalidSignature.WithDebug("the message is signed but the service provider has no signing certificate")
 	}
 
 	// A list that can't be used is a fault of the identity provider, and not of the requester.
 	policy, err := idp.signaturePolicy()
 	if err != nil {
-		return nil, nil, &statusError{StatusResponder, "", err}
+		return nil, nil, ErrServerError.WithDebugError(err)
 	}
 
 	verified, err := verifyEnvelopedSignature(message, certificates, policy)
 	if err != nil {
-		return nil, nil, &statusError{StatusRequester, StatusRequestDenied, fmt.Errorf("invalid message signature: %w", err)}
+		return nil, nil, ErrInvalidSignature.WithDebugf("invalid message signature: %s", err).WithWrap(err)
 	}
 
 	return metadata, verified, nil

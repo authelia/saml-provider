@@ -86,11 +86,6 @@ func NewIdpLogoutResponse(idp *IdentityProvider, r *http.Request) (*IdpLogoutRes
 	return resp, nil
 }
 
-// ErrLogoutResponseUncorrelated is wrapped by the error of IdpLogoutResponse.Validate when the response can't be read,
-// or is not an answer from the current participant to the outstanding request, such as a stale or replayed response
-// to an earlier participant. Such a response says nothing of the current participant.
-var ErrLogoutResponseUncorrelated = errors.New("the response is not to the outstanding logout request")
-
 // Validate checks the response against the outstanding request of state and returns nil only if it is a valid,
 // signed answer from that participant. A response on the SOAP binding may be unsigned when it comes back over TLS
 // on the connection to the service provider (see verifySignature). Its status is not checked here. On the front channel an
@@ -230,6 +225,18 @@ func (resp *IdpLogoutResponse) outcome(state *LogoutState) {
 	default:
 		participant.Outcome, participant.Reason = LogoutOutcomeSuccess, ""
 	}
+}
+
+// statusError returns nil if the status of the response is a plain success, and otherwise the error for the status
+// that the participant answered with, as StatusErrorFromStatus makes it, which includes a partial logout.
+func (resp *IdpLogoutResponse) statusError() *StatusError {
+	code := resp.Response.Status.StatusCode
+
+	if code.Value == StatusSuccess && (code.StatusCode == nil || code.StatusCode.Value != StatusPartialLogout) {
+		return nil
+	}
+
+	return StatusErrorFromStatus(resp.Response.Status)
 }
 
 // checkUnsigned returns nil if the response may be unsigned, which is only on SOAP over TLS.

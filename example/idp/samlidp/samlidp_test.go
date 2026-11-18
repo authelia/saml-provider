@@ -17,7 +17,6 @@ import (
 	"gotest.tools/golden"
 
 	"authelia.com/provider/saml"
-	"authelia.com/provider/saml/logger"
 )
 
 type testRandomReader struct {
@@ -101,7 +100,6 @@ func NewServerTest(t *testing.T) *ServerTest {
 	test.Server, err = New(Options{
 		Certificate: test.Certificate,
 		Key:         test.Key,
-		Logger:      logger.DefaultLogger,
 		Store:       &test.Store,
 		URL:         url.URL{Scheme: "https", Host: "idp.example.com"},
 	})

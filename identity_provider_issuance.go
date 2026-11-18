@@ -345,7 +345,18 @@ func (idp *IdentityProvider) issuance(req IssuanceRequest) (Issuance, error) {
 		return Issuance{}, err
 	}
 
-	idp.logAlgorithmFallback(req.ServiceProviderMetadata, notes)
+	// A message that answers no AuthnRequest is one that the identity provider chose to send to the service
+	// provider of the metadata.
+	state := requestState{verified: true}
+	if req.AuthnRequest != nil {
+		state = req.AuthnRequest.state()
+	}
+
+	if req.ServiceProviderMetadata != nil {
+		state.serviceProvider = req.ServiceProviderMetadata.EntityID
+	}
+
+	idp.observeAlgorithmFallback(req.HTTPRequest, state, req.ServiceProviderMetadata, notes)
 
 	return issuance, nil
 }
@@ -555,11 +566,11 @@ func (req *IdpAuthnRequest) Issuance(session *Session) (Issuance, error) {
 		return Issuance{}, err
 	}
 
-	// The policy is asked for each part of a response, and what was not negotiated is logged for the first.
+	// The policy is asked for each part of a response, and what was not negotiated is reported for the first.
 	if len(notes) != 0 && !req.algorithmFallbackLogged {
 		req.algorithmFallbackLogged = true
 
-		req.IDP.logAlgorithmFallback(req.ServiceProviderMetadata, notes)
+		req.IDP.observeAlgorithmFallback(req.HTTPRequest, req.state(), req.ServiceProviderMetadata, notes)
 	}
 
 	return issuance, nil

@@ -3,7 +3,6 @@ package saml
 import (
 	"bytes"
 	"errors"
-	"log"
 	"slices"
 	"strings"
 	"testing"
@@ -59,8 +58,7 @@ func assertRequiredAttributeUnavailable(t *testing.T, err error) {
 
 	assert.Check(t, errors.Is(err, ErrRequiredAttributeUnavailable), "%v", err)
 
-	status, ok := RequestStatus(err)
-	assert.Assert(t, ok)
+	status := (&IdentityProvider{}).ErrorStatus(err)
 	assert.Check(t, is.Equal(status.StatusCode.Value, StatusResponder))
 	assert.Check(t, status.StatusCode.StatusCode == nil)
 }
@@ -155,7 +153,7 @@ func TestDefaultAttributeReleasePolicySubjectIDRequirement(t *testing.T) {
 			if tc.unmet {
 				err := releaseError(t, req, session)
 				assertRequiredAttributeUnavailable(t, err)
-				assert.Check(t, is.ErrorContains(err, tc.requirement))
+				assert.Check(t, is.Contains(errorText(err), tc.requirement))
 
 				return
 			}
@@ -192,7 +190,7 @@ func TestDefaultAttributeReleasePolicyLogsUnmetSubjectIDRequirement(t *testing.T
 
 	var logged bytes.Buffer
 
-	test.IDP.Logger = log.New(&logged, "", 0)
+	test.IDP.Observer = logObserver(&logged)
 
 	req := signal(attributeReleaseRequest(t, test, ""), entityAttribute(SubjectIDRequirementAttributeName, "pairwise-id"))
 	assert.Check(t, is.Len(releasedAttributes(t, req, attributeReleaseSession()), 0))
@@ -529,7 +527,7 @@ func TestDefaultAttributeReleasePolicyIsRequired(t *testing.T) {
 			assertRequiredAttributeUnavailable(t, err)
 
 			for _, name := range tc.missing {
-				assert.Check(t, is.ErrorContains(err, name))
+				assert.Check(t, is.Contains(errorText(err), name))
 			}
 
 			// The error names attributes and holds no value of the principal.
@@ -645,7 +643,7 @@ func TestDefaultAttributeReleasePolicyFederationFixture(t *testing.T) {
 
 		err := releaseError(t, setup(policy, true), session)
 		assertRequiredAttributeUnavailable(t, err)
-		assert.Check(t, is.ErrorContains(err, eppn))
+		assert.Check(t, is.Contains(errorText(err), eppn))
 	})
 }
 

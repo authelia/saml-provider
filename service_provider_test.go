@@ -6,6 +6,7 @@ import (
 	"crypto/x509"
 	"encoding/base64"
 	"encoding/xml"
+	"errors"
 	"html"
 	"net/http"
 	"net/url"
@@ -2532,8 +2533,13 @@ func TestSPInvalidResponses(t *testing.T) {
 
 	req.PostForm.Set("SAMLResponse", base64.StdEncoding.EncodeToString(test.SamlResponse))
 	_, err = s.ParseResponse(&req, []string{"id-9e61753d64e928af5a7a341a97f420c9"})
-	assert.Check(t, is.Error(err.(*InvalidResponseError).PrivateErr,
-		"urn:oasis:names:tc:SAML:2.0:status:Success"))
+	// The status of the identity provider is exposed as a StatusError, which the InvalidResponseError wraps.
+	var statusErr *StatusError
+
+	assert.Assert(t, errors.As(err, &statusErr), "%v", err)
+	assert.Check(t, errors.Is(err, ErrReceivedStatus))
+	assert.Check(t, is.Equal(statusErr.TopLevelField, "urn:oasis:names:tc:SAML:2.0:status:Success"))
+	assert.Check(t, is.Equal(err.Error(), "Authentication failed"))
 
 	StatusSuccess = oldSpStatusSuccess
 

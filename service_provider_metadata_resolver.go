@@ -16,8 +16,6 @@ import (
 	"time"
 
 	"github.com/jonboulle/clockwork"
-
-	"authelia.com/provider/saml/logger"
 )
 
 // The defaults of a ServiceProviderMetadataResolver.
@@ -96,8 +94,9 @@ type ServiceProviderMetadataResolverOptions struct {
 	// is, so a test that sets a Clock points TimeNow at it.
 	Clock clockwork.Clock
 
-	// Logger is where a failed refresh is logged. If it is nil, logger.DefaultLogger is used.
-	Logger logger.Interface
+	// Observer is told of each refresh in the background that fails, as an EventMetadataRefresh. If it is nil
+	// the failure is logged with [slog.Default].
+	Observer Observer
 
 	// MinRefreshInterval and MaxRefreshInterval bound the time between two requests to a source. The metadata
 	// is refreshed when its cacheDuration has passed, and before its validUntil, within these. Zero means
@@ -147,10 +146,10 @@ type MetadataSourceStatus struct {
 //
 // Refresh loads every source once. Start refreshes them in the background, until Close.
 type ServiceProviderMetadataResolver struct {
-	sources []*metadataSource
-	client  *http.Client
-	clock   clockwork.Clock
-	log     logger.Interface
+	sources  []*metadataSource
+	client   *http.Client
+	clock    clockwork.Clock
+	observer Observer
 
 	minInterval time.Duration
 	maxInterval time.Duration
@@ -215,7 +214,7 @@ func NewServiceProviderMetadataResolver(opts ServiceProviderMetadataResolverOpti
 	r := &ServiceProviderMetadataResolver{
 		client:      opts.HTTPClient,
 		clock:       opts.Clock,
-		log:         opts.Logger,
+		observer:    opts.Observer,
 		minInterval: opts.MinRefreshInterval,
 		maxInterval: opts.MaxRefreshInterval,
 		jitter:      opts.RefreshJitter,
@@ -261,10 +260,6 @@ func (r *ServiceProviderMetadataResolver) setDefaults() {
 
 	if r.clock == nil {
 		r.clock = timeNowClock{Clock: clockwork.NewRealClock()}
-	}
-
-	if r.log == nil {
-		r.log = logger.DefaultLogger
 	}
 
 	if r.minInterval == 0 {
@@ -473,7 +468,9 @@ func (r *ServiceProviderMetadataResolver) run(ctx context.Context, s *metadataSo
 		}
 
 		if err := r.refresh(ctx, s); err != nil && ctx.Err() == nil {
-			r.log.Printf("ERROR: %s", err)
+			// The text of the error has the URL or the file of the source, and what the source answered.
+			observe(ctx, r.observer, requestState{}.event(EventMetadataRefresh,
+				ErrServerError.WithStatusMessage("the metadata of a source could not be refreshed").WithDebugError(err)))
 		}
 	}
 }

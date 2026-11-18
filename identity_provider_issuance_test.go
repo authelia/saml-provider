@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"log"
 	"net/http"
 	"net/http/httptest"
 	"slices"
@@ -361,7 +360,7 @@ func TestIssuanceRefusesWhatCannotBeDone(t *testing.T) {
 			issuanceFor(test, issuance)
 
 			logs := &bytes.Buffer{}
-			test.IDP.Logger = log.New(logs, "", 0)
+			test.IDP.Observer = logObserver(logs)
 
 			w := serveSSO(test, replayPostRequest(signedPostBody(t, &test.SP, nil), nil))
 			assert.Check(t, is.Equal(w.Code, http.StatusInternalServerError))

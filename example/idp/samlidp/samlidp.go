@@ -3,9 +3,11 @@
 package samlidp
 
 import (
+	"context"
 	"crypto"
 	"crypto/x509"
 	"html/template"
+	"log"
 	"net/http"
 	"net/url"
 	"strings"
@@ -13,7 +15,6 @@ import (
 	"time"
 
 	"authelia.com/provider/saml"
-	"authelia.com/provider/saml/logger"
 )
 
 // Options represent the parameters to New() for creating a new IDP server
@@ -21,9 +22,16 @@ type Options struct {
 	URL         url.URL
 	Key         crypto.PrivateKey
 	Signer      crypto.Signer
-	Logger      logger.Interface
 	Certificate *x509.Certificate
-	Store       Store
+
+	// Logger is where the server logs what its own handlers do, and what the identity provider reports if
+	// Observer is nil. Defaults to the standard logger.
+	Logger *log.Logger
+
+	// Observer is told of what the identity provider does. Defaults to one that logs each event to Logger on
+	// one line, with the untrusted parts quoted. See saml.IdentityProvider.Observer.
+	Observer saml.Observer
+	Store    Store
 
 	// EntityID is the entity identifier of the identity provider. Defaults to the URL of the
 	// metadata, which is URL with /metadata appended. See saml.IdentityProvider.EntityID.
@@ -106,7 +114,7 @@ type Server struct {
 	usersMu           sync.Mutex   // serializes changes to users, so that emails stay unique
 	participantsMu    sync.Mutex   // serializes changes to the participants of a session, and its end.
 	logoutStatesMu    sync.Mutex   // serializes the conditional saves of logout states.
-	logger            logger.Interface
+	logger            *log.Logger
 	serviceProviders  map[string]*saml.EntityDescriptor
 	serviceIDs        map[string]string
 	IDP               saml.IdentityProvider // the underlying IDP
@@ -144,7 +152,15 @@ func New(opts Options) (*Server, error) {
 	logoutURL.Path += "/logout"
 	logr := opts.Logger
 	if logr == nil {
-		logr = logger.DefaultLogger
+		logr = log.Default()
+	}
+
+	observer := opts.Observer
+	if observer == nil {
+		// Event.String quotes whatever came from a request, so it can't forge a line of the log.
+		observer = saml.ObserverFunc(func(_ context.Context, event saml.Event) {
+			logr.Printf("%s", event)
+		})
 	}
 
 	s := &Server{
@@ -153,7 +169,7 @@ func New(opts Options) (*Server, error) {
 		IDP: saml.IdentityProvider{
 			Key:                  opts.Key,
 			Signer:               opts.Signer,
-			Logger:               logr,
+			Observer:             observer,
 			Certificate:          opts.Certificate,
 			RolloverCertificates: opts.RolloverCertificates,
 

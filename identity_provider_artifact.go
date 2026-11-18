@@ -151,7 +151,7 @@ type ArtifactStore interface {
 	GetArtifact(ctx context.Context, key string) (*ArtifactEntry, error)
 
 	// DeleteArtifact removes the entry stored under key, if there is one. It is called once the artifact was
-	// consumed, whether or not the message was given out. An error is only logged, as the artifact can't be
+	// consumed, whether or not the message was given out. An error is only reported to the Observer, as the artifact can't be
 	// resolved again in any case.
 	DeleteArtifact(ctx context.Context, key string) error
 }
@@ -411,7 +411,7 @@ func (req *IdpAuthnRequest) writeArtifactResponse(w http.ResponseWriter) error {
 	// The message of an artifact that was never sent is of no use to anyone.
 	discard := func(err error) error {
 		if deleteErr := req.IDP.artifactStore().DeleteArtifact(requestContext(req.HTTPRequest), delivery.key); deleteErr != nil {
-			req.IDP.logger().Printf("failed to delete the message of an artifact that was not sent: %s", deleteErr)
+			req.warn(EventStore, ErrServerError.WithDebugf("failed to delete the message of an artifact that was not sent: %s", deleteErr).WithWrap(deleteErr))
 		}
 
 		return fmt.Errorf("%w: %w", ErrResponseNotBuilt, err)
@@ -465,7 +465,8 @@ func (req *IdpAuthnRequest) writeArtifactResponse(w http.ResponseWriter) error {
 }
 
 // errArtifactNotResolved is the error for an ArtifactResolve that is answered with an empty response: an
-// ArtifactResponse with a Success status and no message (SAMLCore §3.5.3). The Err is for logs.
+// ArtifactResponse with a Success status and no message (SAMLCore §3.5.3). It is a result and not a failure, so it
+// is not a StatusError: the Err is the reason, which the Observer is given with a warning.
 type errArtifactNotResolved struct{ Err error }
 
 func (e *errArtifactNotResolved) Error() string { return e.Err.Error() }
@@ -506,7 +507,7 @@ type artifactResolveRequest struct {
 // status whether or not it is given the message. So a request whose sender can't be authenticated, that is too
 // old or for another destination, or whose artifact is malformed, unknown, expired, already resolved or issued
 // for another service provider gets an ArtifactResponse with Success and no message. Nothing in it says which,
-// and the reason is logged. An artifact is used up by the first authenticated request that names it, even one
+// and the reason is reported to the Observer. An artifact is used up by the first authenticated request that names it, even one
 // from another service provider than it was issued for, as it is then known to be in the wrong hands (SAMLSec
 // §6.5.3).
 //
@@ -515,6 +516,10 @@ type artifactResolveRequest struct {
 // either store gets Responder. A request that is not a POST gets StatusMethodNotAllowed, one that is not a SOAP
 // 1.1 envelope gets a Client fault, and a failure to sign or write the response gets a Server fault. If
 // ArtifactResolutionURL is not set the answer is StatusNotFound.
+//
+// Each request is reported to the Observer as one EventArtifactResolve: OutcomeSuccess if it was given the
+// message, OutcomeWarning with the reason if it was answered with success and no message, and OutcomeFailure if
+// it was answered with an error status.
 func (idp *IdentityProvider) ServeArtifactResolution(w http.ResponseWriter, r *http.Request) {
 	if !idp.artifactEnabled() {
 		http.NotFound(w, r)
@@ -522,7 +527,7 @@ func (idp *IdentityProvider) ServeArtifactResolution(w http.ResponseWriter, r *h
 		return
 	}
 
-	soap, ok := idp.receiveSOAPRequest(w, r)
+	soap, ok := idp.receiveSOAPRequest(w, r, EventArtifactResolve)
 	if !ok {
 		return
 	}
@@ -536,33 +541,49 @@ func (idp *IdentityProvider) ServeArtifactResolution(w http.ResponseWriter, r *h
 		message *etree.Element
 		status  = Status{StatusCode: StatusCode{Value: StatusSuccess}}
 		empty   *errArtifactNotResolved
+		event   Event
 	)
 
 	if soap.Message.Tag != "ArtifactResolve" || soap.Message.NamespaceURI() != samlProtocolNS {
-		idp.logger().Printf("failed to handle artifact resolution request: the message is not an ArtifactResolve")
+		err := ErrRequestUnsupported.WithDebug("failed to handle artifact resolution request: the message is not an ArtifactResolve")
 
-		status = Status{StatusCode: StatusCode{Value: StatusRequester, StatusCode: &StatusCode{Value: StatusRequestUnsupported}}}
+		status, event = idp.status(r, err, req.state()), req.state().event(EventArtifactResolve, err)
 	} else if resolved, err := req.resolve(); errors.As(err, &empty) {
-		idp.logger().Printf("artifact not resolved: %s", err)
+		event = req.state().warning(EventArtifactResolve, ErrRequestDenied.WithDebugf("artifact not resolved: %s", err).WithWrap(err))
 	} else if err != nil {
-		idp.logger().Printf("failed to resolve artifact: %s", err)
-
-		if status, ok = RequestStatus(err); !ok {
-			status = Status{StatusCode: StatusCode{Value: StatusRequester}}
-		}
+		status, event = idp.status(r, err, req.state()), req.state().event(EventArtifactResolve, err)
 	} else {
-		message = resolved
+		message, event = resolved, req.state().event(EventArtifactResolve, nil)
 	}
 
 	if err := req.writeResponse(w, status, message); err != nil {
-		idp.logger().Printf("failed to write artifact response: %s", err)
+		event = req.state().event(EventArtifactResolve, ErrServerError.WithDebugf("failed to write artifact response: %s", err).WithWrap(err))
+
 		writeSOAPFault(w, &soapFault{Code: "Server", String: soapFaultStringProcessing})
 	}
+
+	idp.observe(r, event)
+}
+
+// state returns what is established of the request. The requester is established once its signature is verified.
+func (req *artifactResolveRequest) state() requestState {
+	state := requestState{serviceProvider: req.requester, verified: req.requester != "", respondable: req.requester != ""}
+
+	if isValidAuthnRequestID(req.Request.ID) {
+		state.requestID = req.Request.ID
+	}
+
+	if state.serviceProvider == "" && req.Request.Issuer != nil {
+		state.serviceProvider = req.Request.Issuer.Value
+	}
+
+	return state
 }
 
 // resolve validates the request and returns the message of its artifact, which is then used up. The error is an
-// *errArtifactNotResolved if the request is to be answered with an empty response, a *statusError if it is to be
-// answered with that status, and otherwise means that the request could not be understood.
+// *errArtifactNotResolved if the request is to be answered with an empty response, and otherwise a StatusError
+// with the status that it is to be answered with: ErrMalformedRequest without its second-level status, which is
+// Requester, for a request that could not be understood.
 func (req *artifactResolveRequest) resolve() (*etree.Element, error) {
 	if err := req.validate(); err != nil {
 		return nil, err
@@ -584,7 +605,7 @@ func (req *artifactResolveRequest) resolve() (*etree.Element, error) {
 
 	entry, err := idp.artifactStore().GetArtifact(ctx, key)
 	if err != nil {
-		return nil, &statusError{StatusResponder, "", fmt.Errorf("cannot look up the artifact: %w", err)}
+		return nil, ErrServerError.WithDebugf("cannot look up the artifact: %s", err).WithWrap(err)
 	}
 
 	// SAMLSec §6.5.4 asks that requests for artifacts which don't exist are noticed, which the log allows.
@@ -600,11 +621,12 @@ func (req *artifactResolveRequest) resolve() (*etree.Element, error) {
 	case errors.Is(err, ErrReplayed):
 		return nil, artifactNotResolved("%s sent an artifact that is already resolved: %w", req.requester, err)
 	case err != nil:
-		return nil, &statusError{StatusResponder, "", fmt.Errorf("cannot check whether the artifact is already resolved: %w", err)}
+		return nil, ErrServerError.WithDebugf("cannot check whether the artifact is already resolved: %s", err).WithWrap(err)
 	}
 
 	if err = idp.artifactStore().DeleteArtifact(ctx, key); err != nil {
-		idp.logger().Printf("failed to delete the message of a resolved artifact: %s", err)
+		idp.observe(req.HTTPRequest, req.state().warning(EventStore,
+			ErrServerError.WithDebugf("failed to delete the message of a resolved artifact: %s", err).WithWrap(err)))
 	}
 
 	// SAMLCore §3.5.3, SAMLProf §4.1.4.4 and SAMLSec §6.5.3: only the intended recipient is given the message.
@@ -620,7 +642,7 @@ func (req *artifactResolveRequest) resolve() (*etree.Element, error) {
 
 	doc := etree.NewDocument()
 	if err = doc.ReadFromBytes(entry.Message); err != nil || doc.Root() == nil {
-		return nil, &statusError{StatusResponder, "", errors.New("the stored message of the artifact is not XML")}
+		return nil, ErrServerError.WithDebug("the stored message of the artifact is not XML")
 	}
 
 	return doc.Root(), nil
@@ -630,27 +652,31 @@ func (req *artifactResolveRequest) resolve() (*etree.Element, error) {
 // content that the signature covers. The errors are those of resolve. They don't include anything from the
 // request until its signature is verified.
 func (req *artifactResolveRequest) validate() error {
+	// SAMLCore §3.5.3 has a request that is understood answered with success, so one that is not is Requester
+	// with no second-level status, and not the RequestDenied of a requester that is refused.
+	malformed := ErrMalformedRequest.WithSecondLevel("")
+
 	// This code runs before any authentication, and the cost of the XML parsing below is proportional to the
 	// size of the request.
 	if err := checkAuthnRequestSize(req.RequestBuffer); err != nil {
-		return err
+		return malformed.WithDebugError(err)
 	}
 
 	if err := xrv.Validate(bytes.NewReader(req.RequestBuffer)); err != nil {
-		return err
+		return malformed.WithDebugError(err)
 	}
 
 	if err := xml.Unmarshal(req.RequestBuffer, &req.Request); err != nil {
-		return err
+		return malformed.WithDebugError(err)
 	}
 
 	if err := req.checkTrust(); err != nil {
-		return err
+		return malformed.WithDebugError(err)
 	}
 
 	doc := etree.NewDocument()
 	if err := doc.ReadFromBytes(req.RequestBuffer); err != nil || doc.Root() == nil {
-		return errors.New("request has no root element")
+		return malformed.WithDebug("request has no root element")
 	}
 
 	issuer := req.Request.Issuer.Value
@@ -660,24 +686,24 @@ func (req *artifactResolveRequest) validate() error {
 	// the intended recipient gets an empty response.
 	metadata, verified, err := req.IDP.verifySOAPRequester(req.HTTPRequest, doc.Root(), issuer)
 	if err != nil {
-		if top, _, _ := requestStatus(err); top == StatusResponder {
+		if errors.Is(err, ErrServerError) {
 			return err
 		}
 
-		return &errArtifactNotResolved{Err: fmt.Errorf("the requester is not authenticated: %w", err)}
+		return &errArtifactNotResolved{Err: fmt.Errorf("the requester is not authenticated: %s", ToStatusError(err).Debug())}
 	}
 
 	req.Request = ArtifactResolve{}
 	if err = unmarshalElement(verified, &req.Request); err != nil {
-		return err
+		return malformed.WithDebugError(err)
 	}
 
 	if err = req.checkTrust(); err != nil {
-		return err
+		return malformed.WithDebugError(err)
 	}
 
 	if req.Request.Issuer.Value != issuer {
-		return errors.New("signed request has a different issuer")
+		return malformed.WithDebug("signed request has a different issuer")
 	}
 
 	req.requester, req.metadata = issuer, metadata
@@ -686,12 +712,12 @@ func (req *artifactResolveRequest) validate() error {
 }
 
 // checkRequestStage makes the checks on the content of the request that its signature covers, once its sender is
-// authenticated. A version that is not supported is a *statusError, and anything else an empty response.
+// authenticated. A version that is not supported is a StatusError, and anything else an empty response.
 func (req *artifactResolveRequest) checkRequestStage() error {
 	issuer := req.requester
 
-	if statusErr := versionStatus(req.Request.Version); statusErr != nil {
-		return statusErr
+	if err := versionError(req.Request.Version); err != nil {
+		return err
 	}
 
 	if err := checkIssueInstant("request", req.Request.IssueInstant, req.Now, MaxIssueDelay); err != nil {
@@ -710,7 +736,7 @@ func (req *artifactResolveRequest) checkRequestStage() error {
 // looked up, as IdpLogoutRequest.checkTrust does. SAMLProf §5.4.1 requires the Issuer.
 func (req *artifactResolveRequest) checkTrust() error {
 	if !isValidAuthnRequestID(req.Request.ID) {
-		// The value is not included because this error is logged without authentication.
+		// The value is not included: it is arbitrary text of a request that is not authenticated.
 		return errors.New("invalid request ID")
 	}
 

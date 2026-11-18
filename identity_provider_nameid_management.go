@@ -144,16 +144,47 @@ type IdpManageNameIDRequest struct {
 
 // NewIdpManageNameIDRequest returns a new IdpManageNameIDRequest for the given HTTP request to the name
 // identifier management service, on the HTTP-Redirect or HTTP-POST binding.
+//
+// The error is ErrMalformedRequest, and such a request is never answered with a SAML response.
 func NewIdpManageNameIDRequest(idp *IdentityProvider, r *http.Request) (*IdpManageNameIDRequest, error) {
 	req := &IdpManageNameIDRequest{IDP: idp, HTTPRequest: r, Now: TimeNow()}
 
 	var err error
 
 	if req.RequestBuffer, req.RelayState, req.RedirectQuery, req.binding, err = readFrontChannelRequest(r); err != nil {
-		return nil, err
+		return nil, ErrMalformedRequest.WithDebugf("failed to parse name identifier management request: %s", err).WithWrap(err)
 	}
 
 	return req, nil
+}
+
+// Respondable reports whether a failure of the request may be answered with a ManageNameIDResponse that says what
+// failed: on the front channel once ResponseEndpoint is set, and on the SOAP binding once the signature of the
+// request is verified, as IdpLogoutRequest.Respondable describes.
+func (req *IdpManageNameIDRequest) Respondable() bool {
+	if req.binding == SOAPBinding {
+		return req.verifiedEl != nil
+	}
+
+	return req.ResponseEndpoint != nil
+}
+
+// state returns what is established of the request.
+func (req *IdpManageNameIDRequest) state() requestState {
+	state := requestState{respondable: req.Respondable(), verified: req.verifiedEl != nil}
+
+	if isValidAuthnRequestID(req.Request.ID) {
+		state.requestID = req.Request.ID
+	}
+
+	switch {
+	case req.ServiceProviderMetadata != nil:
+		state.serviceProvider = req.ServiceProviderMetadata.EntityID
+	case req.Request.Issuer != nil:
+		state.serviceProvider = req.Request.Issuer.Value
+	}
+
+	return state
 }
 
 func (req *IdpManageNameIDRequest) header() protocolRequestHeader {
@@ -171,10 +202,10 @@ func (req *IdpManageNameIDRequest) header() protocolRequestHeader {
 // SAMLProfiles §4.5.3.1 requires it on HTTP-Redirect and HTTP-POST, and on SOAP it is the only way that the
 // requester can authenticate itself (§4.5.4.1).
 //
-// An error which carries a status, as RequestStatus reports, is answered with it. On the front channel any
-// other error means that the request must not be answered with a SAML response at all, because it failed before
-// the requester was verified and the endpoint to answer it at was established from metadata. On the SOAP
-// binding, where the answer goes back to the caller, such an error is answered with Requester and RequestDenied.
+// The error is a StatusError. On the front channel the error of a request that is not Respondable means that the
+// request must not be answered with a SAML response at all, because it failed before the requester was verified
+// and the endpoint to answer it at was established from metadata. On the SOAP binding, where the answer goes back
+// to the caller, such an error is answered with its status codes, which are Requester and RequestDenied.
 //
 // The EncryptedID and NewEncryptedID are decrypted once the signature is verified. A NewEncryptedID that can't
 // be decrypted is an error; an EncryptedID that can't be marks the request Unidentified.
@@ -188,30 +219,30 @@ func (req *IdpManageNameIDRequest) Validate() error {
 	// This code runs before any authentication, and the cost of the XML parsing below is proportional to the
 	// size of the request.
 	if err := checkAuthnRequestSize(req.RequestBuffer); err != nil {
-		return err
+		return ErrMalformedRequest.WithDebugError(err)
 	}
 
 	if err := xrv.Validate(bytes.NewReader(req.RequestBuffer)); err != nil {
-		return err
+		return ErrMalformedRequest.WithDebugError(err)
 	}
 
 	root, err := parseRequestRoot(req.RequestBuffer, "ManageNameIDRequest")
 	if err != nil {
-		return err
+		return ErrMalformedRequest.WithDebugError(err)
 	}
 
 	//nolint:gosec // G709: the size is limited and the XML validated above, as for a LogoutRequest, into a fixed type.
 	if err = xml.Unmarshal(req.RequestBuffer, &req.Request); err != nil {
-		return err
+		return ErrMalformedRequest.WithDebugError(err)
 	}
 
 	if err = req.header().checkTrust(); err != nil {
-		return err
+		return ErrMalformedRequest.WithDebugError(err)
 	}
 
 	endpoint, err := req.verifyRequester(root)
 	if err != nil {
-		return err
+		return statusErrorOr(err, ErrInvalidSignature)
 	}
 
 	if err = req.header().checkRequestStage(req.Now, endpoint); err != nil {
@@ -261,7 +292,7 @@ func (req *IdpManageNameIDRequest) verifyRequester(root *etree.Element) (string,
 	}
 
 	if req.ResponseEndpoint, err = req.IDP.manageNameIDResponseEndpoint(req.ServiceProviderMetadata, req.binding); err != nil {
-		return "", err
+		return "", ErrNoResponseEndpoint.WithDebugError(err)
 	}
 
 	return req.IDP.ManageNameIDURL.String(), nil
@@ -300,7 +331,7 @@ func (req *IdpManageNameIDRequest) useVerifiedRequest() error {
 // that holds anything but a NewID, and every failure is answered alike.
 func (req *IdpManageNameIDRequest) readNewID() error {
 	denied := func(err error) error {
-		return &statusError{StatusRequester, StatusRequestDenied, err}
+		return ErrRequestDenied.WithDebugError(err)
 	}
 
 	var count [3]int
@@ -423,7 +454,7 @@ func (req *IdpManageNameIDRequest) WriteResponse(w http.ResponseWriter, status S
 //
 // A request that is invalid, can't be verified, or comes from a service provider with no ManageNameIDService
 // for a supported binding gets a StatusBadRequest response. A verified request from a service provider with
-// such an endpoint is answered there:
+// such an endpoint is answered there, and the request is reported to the Observer as one EventNameIDManagement:
 //
 //   - Requester with RequestDenied if it is expired, for another destination, or doesn't have exactly one
 //     identifier and one of NewID, NewEncryptedID and Terminate, or its NewEncryptedID can't be used;
@@ -439,32 +470,48 @@ func (req *IdpManageNameIDRequest) WriteResponse(w http.ResponseWriter, status S
 func (idp *IdentityProvider) ServeManageNameID(w http.ResponseWriter, r *http.Request) {
 	req, err := NewIdpManageNameIDRequest(idp, r)
 	if err != nil {
-		idp.logger().Printf("failed to parse name identifier management request: %s", err)
-		http.Error(w, http.StatusText(http.StatusBadRequest), http.StatusBadRequest)
+		idp.observe(r, requestState{}.event(EventNameIDManagement, err))
+		idp.writeHTTPError(w, r, err)
 
 		return
 	}
 
-	var status Status
+	if err = req.Validate(); err == nil {
+		err = idp.manageNameID(r, req)
+	}
 
-	if err = req.Validate(); err != nil {
-		idp.logger().Printf("failed to validate name identifier management request: %s", err)
+	req.answer(w, err)
+}
 
-		var ok bool
+// answer completes the HTTP request for a request that was done, if err is nil, or that failed with err, and
+// reports it as the event of the operation. On the front channel a request that is not Respondable gets an HTTP
+// error, and any other a ManageNameIDResponse with success or with the status of the error.
+func (req *IdpManageNameIDRequest) answer(w http.ResponseWriter, err error) {
+	idp, state := req.IDP, req.state()
 
-		if status, ok = RequestStatus(err); !ok {
-			http.Error(w, http.StatusText(http.StatusBadRequest), http.StatusBadRequest)
+	if err != nil && req.binding != SOAPBinding && !state.respondable {
+		idp.observe(req.HTTPRequest, state.event(EventNameIDManagement, err))
+		idp.writeHTTPError(w, req.HTTPRequest, err)
 
-			return
+		return
+	}
+
+	status := Status{StatusCode: StatusCode{Value: StatusSuccess}}
+	if err != nil {
+		status = idp.status(req.HTTPRequest, err, state)
+	}
+
+	if writeErr := req.WriteResponse(w, status); writeErr != nil {
+		err = ErrServerError.WithDebugf("failed to write name identifier management response: %s", writeErr).WithWrap(writeErr)
+
+		if req.binding == SOAPBinding {
+			writeSOAPFault(w, &soapFault{Code: "Server", String: soapFaultStringProcessing})
+		} else {
+			idp.writeHTTPError(w, req.HTTPRequest, err)
 		}
-	} else {
-		status = idp.manageNameIDStatus(r, req)
 	}
 
-	if err = req.WriteResponse(w, status); err != nil {
-		idp.logger().Printf("failed to write name identifier management response: %s", err)
-		http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
-	}
+	idp.observe(req.HTTPRequest, state.event(EventNameIDManagement, err))
 }
 
 // ServeSOAPManageNameID handles a SAML ManageNameIDRequest from a service provider on the SOAP binding, at
@@ -476,45 +523,34 @@ func (idp *IdentityProvider) ServeManageNameID(w http.ResponseWriter, r *http.Re
 // Every SAML message gets a ManageNameIDResponse: one that is not a ManageNameIDRequest gets Requester with
 // RequestUnsupported, and one that can't be verified Requester with RequestDenied. A request that is not a POST
 // gets StatusMethodNotAllowed, one that is not a SOAP 1.1 envelope gets a Client fault, and a failure to sign or
-// write the response gets a Server fault.
+// write the response gets a Server fault, which is the rule of SAMLBind §3.2.3.3.
 func (idp *IdentityProvider) ServeSOAPManageNameID(w http.ResponseWriter, r *http.Request) {
-	soap, ok := idp.receiveSOAPRequest(w, r)
+	soap, ok := idp.receiveSOAPRequest(w, r, EventNameIDManagement)
 	if !ok {
 		return
 	}
 
 	req := &IdpManageNameIDRequest{IDP: idp, HTTPRequest: r, RequestBuffer: soap.Body, Now: TimeNow(), binding: SOAPBinding}
 
-	var status Status
+	var err error
 
 	if soap.Message.Tag != "ManageNameIDRequest" || soap.Message.NamespaceURI() != samlProtocolNS {
-		idp.logger().Printf("failed to handle SOAP name identifier management request: the message is not a ManageNameIDRequest")
-
 		// MakeResponse answers it only if the ID is valid.
 		req.Request.ID = soap.Message.SelectAttrValue("ID", "")
-		status = requesterStatus(StatusRequestUnsupported)
-	} else if err := req.Validate(); err != nil {
-		idp.logger().Printf("failed to validate SOAP name identifier management request: %s", err)
-
-		status = errorStatus(err)
-	} else {
-		status = idp.manageNameIDStatus(r, req)
+		err = ErrRequestUnsupported.WithDebug("failed to handle SOAP name identifier management request: the message is not a ManageNameIDRequest")
+	} else if err = req.Validate(); err == nil {
+		err = idp.manageNameID(r, req)
 	}
 
-	if err := req.WriteResponse(w, status); err != nil {
-		idp.logger().Printf("failed to write SOAP name identifier management response: %s", err)
-		writeSOAPFault(w, &soapFault{Code: "Server", String: soapFaultStringProcessing})
-	}
+	req.answer(w, err)
 }
 
-// manageNameIDStatus has the NameIDProvider do what the verified req asks, and returns the status of its
-// ManageNameIDResponse.
-func (idp *IdentityProvider) manageNameIDStatus(r *http.Request, req *IdpManageNameIDRequest) Status {
+// manageNameID has the NameIDProvider do what the verified req asks, and returns nil if it was done, or the error
+// whose status the ManageNameIDResponse has.
+func (idp *IdentityProvider) manageNameID(r *http.Request, req *IdpManageNameIDRequest) error {
 	provider, ok := idp.nameIDProvider().(NameIDManagementProvider)
 	if !ok {
-		idp.logger().Printf("cannot manage name identifier: the name identifier provider does not implement NameIDManagementProvider")
-
-		return Status{StatusCode: StatusCode{Value: StatusResponder, StatusCode: &StatusCode{Value: StatusRequestUnsupported}}}
+		return ErrNotImplemented.WithDebug("cannot manage name identifier: the name identifier provider does not implement NameIDManagementProvider")
 	}
 
 	// A request that names nobody is refused without asking the provider, whose methods change what is stored
@@ -522,7 +558,7 @@ func (idp *IdentityProvider) manageNameIDStatus(r *http.Request, req *IdpManageN
 	// requester's. SAMLCore §3.6.3: an identifier that isn't recognized MUST be answered with an error status,
 	// and this is the status of every such identifier, so the answer doesn't tell them apart (errata E93).
 	if req.Unidentified {
-		return requesterStatus(StatusUnknownPrincipal)
+		return ErrUnknownPrincipal.WithDebug("the principal of the request is not identified")
 	}
 
 	var err error
@@ -534,14 +570,14 @@ func (idp *IdentityProvider) manageNameIDStatus(r *http.Request, req *IdpManageN
 	}
 
 	switch {
+	case err == nil:
+		return nil
 	case errors.Is(err, ErrUnknownPrincipal):
-		// SAMLCore §3.6.3: an identifier that isn't recognized MUST be answered with an error status.
-		return requesterStatus(StatusUnknownPrincipal)
-	case err != nil:
-		idp.logger().Printf("cannot manage name identifier: %s", err)
-
-		return Status{StatusCode: StatusCode{Value: StatusResponder}}
+		// SAMLCore §3.6.3: an identifier that isn't recognized MUST be answered with an error status. Whatever
+		// else the error of the provider says is not sent, so that every such identifier is answered alike.
+		return ErrUnknownPrincipal.WithDebugError(err)
 	default:
-		return Status{StatusCode: StatusCode{Value: StatusSuccess}}
+		// The error of a provider is a failure of the identity provider, whatever status it carries.
+		return ErrServerError.WithDebugf("cannot manage name identifier: %s", err).WithWrap(err)
 	}
 }

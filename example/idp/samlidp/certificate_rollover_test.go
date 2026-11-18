@@ -15,8 +15,6 @@ import (
 	"gotest.tools/assert"
 	is "gotest.tools/assert/cmp"
 	"gotest.tools/golden"
-
-	"authelia.com/provider/saml/logger"
 )
 
 func TestServerPublishesRolloverCertificates(t *testing.T) {
@@ -38,7 +36,6 @@ func TestServerPublishesRolloverCertificates(t *testing.T) {
 		Certificate:          current,
 		RolloverCertificates: []*x509.Certificate{next},
 		Key:                  mustParsePrivateKey(golden.Get(t, "idp_key.pem")),
-		Logger:               logger.DefaultLogger,
 		Store:                &MemoryStore{},
 		URL:                  url.URL{Scheme: "https", Host: "idp.example.com"},
 	})

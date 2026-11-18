@@ -260,7 +260,7 @@ func TestServeSSOUsesConfiguredSubjectEnforcer(t *testing.T) {
 		w := serveSSOWithSubject(t, test, session, &Subject{NameID: &NameID{Value: "alice"}})
 		response := subjectResponse(t, w)
 		assertAuthnFailed(t, response)
-		assert.Check(t, response.Status.StatusMessage == nil)
+		assert.Check(t, statusSaysNothingOfTheRequest(response.Status))
 		assert.Check(t, seen == session)
 	})
 

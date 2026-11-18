@@ -5,7 +5,6 @@ import (
 	"crypto/x509"
 	"errors"
 	"io"
-	"log"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -27,7 +26,7 @@ func soapLogoutTestIDP(t *testing.T) (*IdentityProviderTest, *logoutSessionProvi
 
 	test, provider := logoutTestIDP(t)
 	test.IDP.SOAPLogoutURL = mustParseURL(soapLogoutTestURL)
-	test.IDP.Logger = log.New(io.Discard, "", 0)
+	test.IDP.Observer = logObserver(io.Discard)
 
 	return test, provider
 }
@@ -312,7 +311,7 @@ func TestServeSOAPLogoutRejects(t *testing.T) {
 
 			response := soapLogoutResponse(t, serveSOAPLogout(test, r))
 			assertLogoutStatus(t, response, tc.top, tc.second)
-			assert.Check(t, response.Status.StatusMessage == nil)
+			assert.Check(t, statusSaysNothingOfTheRequest(response.Status))
 			assert.Check(t, is.Equal(response.Destination, ""))
 
 			if tc.noInResponseTo {
@@ -370,7 +369,7 @@ func TestServeSOAPLogoutTerminationFails(t *testing.T) {
 
 		response := soapLogoutResponse(t, serveSOAPLogout(test, r))
 		assertLogoutStatus(t, response, StatusResponder, "")
-		assert.Check(t, response.Status.StatusMessage == nil)
+		assert.Check(t, statusSaysNothingOfTheRequest(response.Status))
 	})
 
 	t.Run("partial", func(t *testing.T) {

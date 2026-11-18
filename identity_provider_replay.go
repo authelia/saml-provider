@@ -7,17 +7,12 @@ import (
 	"encoding/binary"
 	"encoding/hex"
 	"errors"
-	"fmt"
 	"net/http"
 	"sync"
 	"sync/atomic"
 	"time"
 	"unsafe"
 )
-
-// ErrReplayed is returned by ReplayStore.Consume when the key has already been consumed and has not yet expired,
-// and wrapped by the error of the identity provider for a message that is refused as a replay.
-var ErrReplayed = errors.New("the message has already been used")
 
 // ErrReplayStoreFull is returned by MemoryReplayStore.Consume when the store holds its capacity of keys that
 // have not yet expired. The identity provider treats it like any other failure of the store, and refuses the
@@ -107,8 +102,9 @@ func (idp *IdentityProvider) replayStore() ReplayStore {
 // IdpAuthnRequest.CheckReplay, IdpLogoutRequest.Validate, the assertion query and request services, and the
 // Validate of the name identifier management and mapping requests.
 //
-// The error is a *statusError. A replay is Requester with RequestDenied and wraps ErrReplayed. A failure of the
-// store is Responder, as the message is refused although nothing is known to be wrong with it.
+// The error is a StatusError. A replay is ErrReplayed, which is Requester with RequestDenied. A failure of the
+// store is ErrServerError, which is Responder, as the message is refused although nothing is known to be wrong
+// with it.
 func (idp *IdentityProvider) checkReplay(ctx context.Context, kind, issuer, id string, expires time.Time) error {
 	key := replayKey(kind, idp.entityID(), issuer, id)
 
@@ -118,11 +114,9 @@ func (idp *IdentityProvider) checkReplay(ctx context.Context, kind, issuer, id s
 	case err == nil:
 		return nil
 	case errors.Is(err, ErrReplayed):
-		return &statusError{StatusRequester, StatusRequestDenied,
-			fmt.Errorf("%s %s of %s is a replay: %w", kind, id, issuer, err)}
+		return ErrReplayed.WithDebugf("%s %s of %s is a replay", kind, id, issuer).WithWrap(err)
 	default:
-		return &statusError{StatusResponder, "",
-			fmt.Errorf("cannot check whether %s %s of %s is a replay: %w", kind, id, issuer, err)}
+		return ErrServerError.WithDebugf("cannot check whether %s %s of %s is a replay: %s", kind, id, issuer, err).WithWrap(err)
 	}
 }
 
@@ -251,9 +245,9 @@ func (q *memoryReplayQueue) Pop() any {
 // AuthnRequest need not be signed. The ID is recorded for the issuer until the request would be refused for its
 // age, which is MaxAuthnRequestAge and MaxClockSkew after its IssueInstant, and MaxClockSkew longer.
 //
-// It must only be called after Validate has returned nil. The error carries a status for RequestStatus: Requester
-// with RequestDenied for a replay, which wraps ErrReplayed, and Responder if the store failed, in which case the
-// request must not be answered with an assertion either.
+// It must only be called after Validate has returned nil. The error is a StatusError: ErrReplayed for a replay,
+// which is Requester with RequestDenied, and ErrServerError if the store failed, which is Responder, in which
+// case the request must not be answered with an assertion either.
 func (req *IdpAuthnRequest) CheckReplay() error {
 	return req.IDP.checkReplay(requestContext(req.HTTPRequest), replayKindAuthnRequest, req.Request.Issuer.Value,
 		req.Request.ID, req.Request.IssueInstant.Add(req.IDP.maxAuthnRequestAge()))

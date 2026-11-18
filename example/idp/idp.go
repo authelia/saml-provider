@@ -7,13 +7,13 @@ import (
 	"crypto/x509"
 	"encoding/pem"
 	"flag"
+	"log"
 	"net/http"
 	"net/url"
 
 	"golang.org/x/crypto/bcrypt"
 
 	"authelia.com/provider/saml/example/idp/samlidp"
-	"authelia.com/provider/saml/logger"
 )
 
 var key = func() crypto.PrivateKey {
@@ -73,7 +73,7 @@ UzreO96WzlBBMtY=
 }()
 
 func main() {
-	logr := logger.DefaultLogger
+	logr := log.Default()
 	baseURLstr := flag.String("idp", "", "The URL to the IDP")
 	adminToken := flag.String("admin-token", "", "Bearer token for the RESTful interfaces, which are refused if this is empty")
 	flag.Parse()

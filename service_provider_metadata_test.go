@@ -85,7 +85,7 @@ func TestIDPRefusesExpiredServiceProviderMetadata(t *testing.T) {
 		test := signatureTestIDP(t)
 		expire(test)
 		u := signedRedirectURL(t, test)
-		assert.Check(t, is.ErrorContains(validateURL(t, test, u.String()), "cannot handle request from unknown service provider "+test.SP.MetadataURL.String()))
+		assert.Check(t, is.Contains(errorText(validateURL(t, test, u.String())), "cannot handle request from unknown service provider "+test.SP.MetadataURL.String()))
 	})
 
 	t.Run("idp-initiated", func(t *testing.T) {

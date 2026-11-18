@@ -11,7 +11,6 @@ import (
 	"crypto/x509/pkix"
 	"encoding/base64"
 	"errors"
-	"log"
 	"math/big"
 	"net/http"
 	"net/http/httptest"
@@ -234,7 +233,7 @@ func TestIDPServeSSORefusesRejectedEncryptionCertificate(t *testing.T) {
 
 	var logs bytes.Buffer
 
-	test.IDP.Logger = log.New(&logs, "", 0)
+	test.IDP.Observer = logObserver(&logs)
 	test.IDP.SessionProvider = &mockSessionProvider{
 		GetSessionFunc: func(_ http.ResponseWriter, _ *http.Request, _ *IdpAuthnRequest) *Session {
 			return &Session{ID: "f00df00df00d", NameID: "alice", UserName: "alice"}

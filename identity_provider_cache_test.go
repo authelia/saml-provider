@@ -21,7 +21,7 @@ func TestWriteResponseIsNotCached(t *testing.T) {
 			return req.WriteResponse(w)
 		},
 		"error status": func(req *IdpAuthnRequest, w http.ResponseWriter) error {
-			return req.WriteErrorResponse(w, StatusResponder, StatusNoAuthnContext, "")
+			return req.WriteErrorResponse(w, ErrNoAuthnContext)
 		},
 	} {
 		t.Run(name, func(t *testing.T) {

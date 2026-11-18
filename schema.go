@@ -860,6 +860,65 @@ func (sm StatusDetail) Element() *etree.Element {
 	return el
 }
 
+// UnmarshalXML implements [xml.Unmarshaler]. The children of a StatusDetail are any elements at all (SAMLCore
+// §3.2.2.4), so they are kept as elements. Each is rebuilt from what the decoder read, with the namespace of
+// every element declared as a default namespace where it changes and the namespace of an attribute given a
+// prefix of its own, which says the same as what was sent although it may be spelled differently. The detail
+// of a status that was received is text of the other party, and is not to be trusted with anything.
+func (sm *StatusDetail) UnmarshalXML(d *xml.Decoder, _ xml.StartElement) error {
+	var stack []*etree.Element
+
+	// spaces is the namespace that is in effect as the default at each level of the stack.
+	spaces := []string{""}
+
+	for {
+		token, err := d.Token()
+		if err != nil {
+			return err
+		}
+
+		switch t := token.(type) {
+		case xml.StartElement:
+			el := etree.NewElement(t.Name.Local)
+
+			if t.Name.Space != spaces[len(spaces)-1] {
+				el.CreateAttr("xmlns", t.Name.Space)
+			}
+
+			for i, attr := range t.Attr {
+				switch {
+				case attr.Name.Space == "xmlns", attr.Name.Space == "" && attr.Name.Local == "xmlns":
+				case attr.Name.Space == "":
+					el.CreateAttr(attr.Name.Local, attr.Value)
+				default:
+					prefix := fmt.Sprintf("a%d", i)
+
+					el.CreateAttr("xmlns:"+prefix, attr.Name.Space)
+					el.CreateAttr(prefix+":"+attr.Name.Local, attr.Value)
+				}
+			}
+
+			if len(stack) == 0 {
+				sm.Children = append(sm.Children, el)
+			} else {
+				stack[len(stack)-1].AddChild(el)
+			}
+
+			stack, spaces = append(stack, el), append(spaces, t.Name.Space)
+		case xml.EndElement:
+			if len(stack) == 0 {
+				return nil
+			}
+
+			stack, spaces = stack[:len(stack)-1], spaces[:len(spaces)-1]
+		case xml.CharData:
+			if len(stack) != 0 {
+				stack[len(stack)-1].CreateText(string(t))
+			}
+		}
+	}
+}
+
 // Assertion represents the SAML element Assertion.
 //
 // See http://docs.oasis-open.org/security/saml/v2.0/saml-core-2.0-os.pdf §2.3.3.

@@ -2,6 +2,7 @@ package saml
 
 import (
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -262,18 +263,28 @@ func TestSendManageNameIDRequestInvalidChange(t *testing.T) {
 func TestSendManageNameIDRequestStatus(t *testing.T) {
 	test, sp, _ := sendManageNameIDFixture(t)
 	sp.respond = func(_ http.ResponseWriter, response *ManageNameIDResponse) bool {
-		response.Status = requesterStatus(StatusUnknownPrincipal)
+		response.Status = Status{
+			StatusCode:    StatusCode{Value: StatusRequester, StatusCode: &StatusCode{Value: StatusUnknownPrincipal}},
+			StatusMessage: &StatusMessage{Value: "who is this\nFAKE LOG LINE"},
+		}
 
 		return true
 	}
 
 	err := sendManageNameID(test, NameIDChange{NameID: *testNameID(test, &test.SP), Terminate: true})
 
-	var statusErr *ManageNameIDStatusError
+	var statusErr *StatusError
 
 	assert.Assert(t, errors.As(err, &statusErr), "%v", err)
-	checkStatus(t, statusErr.Status, StatusRequester, StatusUnknownPrincipal)
-	assert.Check(t, is.ErrorContains(err, StatusUnknownPrincipal))
+	assert.Check(t, errors.Is(err, ErrReceivedStatus))
+	assert.Check(t, is.Equal(statusErr.TopLevelField, StatusRequester))
+	assert.Check(t, is.Equal(statusErr.SecondLevelField, StatusUnknownPrincipal))
+
+	// What the service provider said is text of another party, so it is only in the debug message.
+	assert.Check(t, is.Equal(statusErr.StatusMessageField, ErrReceivedStatus.StatusMessageField))
+	assert.Check(t, is.Len(statusErr.StatusDetailField, 0))
+	assert.Check(t, is.Contains(statusErr.Debug(), "who is this\nFAKE LOG LINE"))
+	assert.Check(t, !strings.ContainsAny(fmt.Sprintf("%+v", err), "\n"))
 }
 
 // The response is only believed if it is an answer of the service provider to the request.
@@ -355,8 +366,7 @@ func TestSendManageNameIDRequestInvalidResponse(t *testing.T) {
 			err := sendManageNameID(test, NameIDChange{NameID: *testNameID(test, &test.SP), Terminate: true})
 			assert.Check(t, is.ErrorContains(err, tc.err))
 
-			var statusErr *ManageNameIDStatusError
-			assert.Check(t, !errors.As(err, &statusErr))
+			assert.Check(t, !errors.Is(err, ErrReceivedStatus))
 		})
 	}
 }

@@ -49,7 +49,9 @@ func (idp *IdentityProvider) serviceProvider(r *http.Request, serviceProviderID 
 
 	current := CurrentMetadata(metadata, TimeNow())
 	if current == nil {
-		idp.logger().Printf("ERROR: the metadata of service provider %q has expired", serviceProviderID)
+		idp.observe(r, requestState{serviceProvider: serviceProviderID}.warning(EventMetadataExpired,
+			ErrUnknownServiceProvider.WithDebugf("the metadata of service provider %q has expired", serviceProviderID)))
+
 		return nil, os.ErrNotExist
 	}
 

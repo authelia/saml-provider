@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"errors"
 	"io"
-	"log"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -141,7 +140,7 @@ func newECPEndToEnd(t *testing.T) (*IdentityProviderTest, *ecpSessionProvider, *
 	t.Helper()
 
 	test := signatureTestIDP(t)
-	test.IDP.Logger = log.New(io.Discard, "", 0)
+	test.IDP.Observer = logObserver(io.Discard)
 
 	sp := test.SP
 	sp.AcsURL = mustParseURL(ecpTestPAOSURL)

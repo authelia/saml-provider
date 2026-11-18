@@ -76,7 +76,7 @@ func TestIDPValidateRequestSizeLimit(t *testing.T) {
 	assert.Check(t, err)
 
 	_, err = hardeningValidate(test, pad(maxAuthnRequestSize+1))
-	assert.Check(t, is.ErrorContains(err, "exceeds"))
+	assert.Check(t, is.Contains(errorText(err), "exceeds"))
 }
 
 func TestIDPServeSSORejectsOversizedRequestsBeforeParsing(t *testing.T) {
@@ -145,7 +145,7 @@ func TestIDPValidateIssueInstantBounds(t *testing.T) {
 				return
 			}
 
-			assert.Check(t, is.ErrorContains(err, tc.errMsg))
+			assert.Check(t, is.Contains(errorText(err), tc.errMsg))
 		})
 	}
 }
@@ -200,7 +200,7 @@ func TestIDPValidateRequestID(t *testing.T) {
 				return
 			}
 
-			assert.Check(t, is.ErrorContains(err, "request ID"))
+			assert.Check(t, is.Contains(errorText(err), "request ID"))
 		})
 	}
 }
@@ -209,7 +209,7 @@ func TestIDPValidateErrorOmitsRequestID(t *testing.T) {
 	// The error is logged without authentication, so it must not grow with the request.
 	test := NewIdentityProviderTest(t, applyKey)
 	_, err := hardeningValidate(test, hardeningRequest(`ID="`+strings.Repeat("x y", 1000)+`"`, TimeNow(), hardeningIssuer))
-	assert.Check(t, is.ErrorContains(err, "request ID"))
+	assert.Check(t, is.Contains(errorText(err), "request ID"))
 	assert.Check(t, !strings.Contains(err.Error(), "x y"), err.Error())
 }
 
@@ -313,7 +313,7 @@ func TestNewIdpAuthnRequestLimitsPostBody(t *testing.T) {
 		r, err := http.NewRequest("POST", "https://idp.example.com/saml/sso", nil)
 		assert.NilError(t, err)
 		_, err = NewIdpAuthnRequest(&test.IDP, r)
-		assert.Check(t, is.Error(err, "missing form body"))
+		assert.Check(t, is.Equal(errorDebug(err), "missing form body"))
 	})
 }
 

@@ -3,7 +3,6 @@ package saml
 import (
 	"encoding/xml"
 	"io"
-	"log"
 	"mime"
 	"net/http"
 	"net/http/httptest"
@@ -183,12 +182,12 @@ func TestReadSOAPRequestInheritedNamespaces(t *testing.T) {
 
 func TestReceiveSOAPRequestMethod(t *testing.T) {
 	test := NewIdentityProviderTest(t, applyKey)
-	test.IDP.Logger = log.New(io.Discard, "", 0)
+	test.IDP.Observer = logObserver(io.Discard)
 
 	w := httptest.NewRecorder()
 	r := httptest.NewRequest(http.MethodGet, "https://idp.example.com/slo", nil)
 
-	req, ok := test.IDP.receiveSOAPRequest(w, r)
+	req, ok := test.IDP.receiveSOAPRequest(w, r, EventLogout)
 	assert.Assert(t, !ok)
 	assert.Assert(t, req == nil)
 	assert.Equal(t, w.Code, http.StatusMethodNotAllowed)
@@ -196,13 +195,13 @@ func TestReceiveSOAPRequestMethod(t *testing.T) {
 
 func TestReceiveSOAPRequestFault(t *testing.T) {
 	test := NewIdentityProviderTest(t, applyKey)
-	test.IDP.Logger = log.New(io.Discard, "", 0)
+	test.IDP.Observer = logObserver(io.Discard)
 
 	w := httptest.NewRecorder()
 	r := httptest.NewRequest(http.MethodPost, "https://idp.example.com/slo", strings.NewReader("<bad"))
 	r.Header.Set("Content-Type", "text/xml")
 
-	_, ok := test.IDP.receiveSOAPRequest(w, r)
+	_, ok := test.IDP.receiveSOAPRequest(w, r, EventLogout)
 	assert.Assert(t, !ok)
 	assert.Equal(t, w.Code, http.StatusInternalServerError)
 	assert.Assert(t, strings.Contains(w.Body.String(), "soapenv:Client"))
