@@ -134,12 +134,17 @@ least the subset of SAML known as [interoperable SAML](https://kantarainitiative
 | Consume `EntitiesDescriptor` | ✅  | ⚠️ |
 | Sign published metadata      | ✅  | ❌ |
 | Verify metadata signatures   | ✅  | ❌ |
+| Load metadata from a URL or a file, and refresh it[^mdrefresh] | ✅  | ⚠️ |
+| Refuse metadata with no `validUntil`, or one too far ahead (SAML2Int SDP-MD03)[^mdrefresh] | ✅  | ❌ |
 | Publish UI, organization, contacts, scopes, entity attributes[^mdext] | ✅  | ❌ |
 | Consume metadata extensions[^mdext] | ✅  | ⚠️ |
 
 [^mdext]: `mdui:UIInfo` and `mdui:DiscoHints`, `mdattr:EntityAttributes`, `shibmd:Scope`, `mdrpi:RegistrationInfo`
     and `mdrpi:PublicationInfo`, `alg:DigestMethod` and `alg:SigningMethod` are typed, and every other extension is kept as it was parsed. The SP parses them
     with the metadata of an IdP but doesn't act on them, see the notes below.
+
+[^mdrefresh]: `ServiceProviderMetadataResolver` for the IdP, see the notes below. The SP fetches the metadata of its
+    IdP once, with `samlsp.FetchMetadata`, and neither refreshes it nor checks its `validUntil`.
 
 ### Identity Provider Limitations
 
@@ -635,9 +640,68 @@ least the subset of SAML known as [interoperable SAML](https://kantarainitiative
     groups within it, each expiring with the earliest `validUntil` around it (SAMLMeta §2.3.1), and each with the
     entity attributes of the groups around it after its own, as those are bound to every entity within the group
     (SAML V2.0 Metadata Extension for Entity Attributes §2.3).
-    `ParseServiceProviderMetadata` returns the first. Neither fetches or refreshes metadata, which is for the
-    `ServiceProviderProvider`. `samlidp.Options.ServiceProviderMetadataVerifier` verifies the metadata of a service
+    `ParseServiceProviderMetadata` returns the first. Neither fetches or refreshes metadata, and neither refuses
+    metadata for its `validUntil`: they are parsers, also for metadata that an operator configured by hand, which
+    usually has none. `samlidp.Options.ServiceProviderMetadataVerifier` verifies the metadata of a service
     before it is registered.
+  - **Metadata that refreshes itself:** `ServiceProviderMetadataResolver` is a `ServiceProviderProvider` that loads
+    the metadata of service providers from one or more `MetadataSource`s, each a `URL` or a `File` that holds an
+    `EntityDescriptor` or an `EntitiesDescriptor`, and keeps it fresh, which is what SAML2Int asks of a deployment
+    (SDP-MD01, SDP-MD02, SDP-MD03).
+
+    ```go
+    resolver, err := saml.NewServiceProviderMetadataResolver(saml.ServiceProviderMetadataResolverOptions{
+        Sources: []saml.MetadataSource{
+            {File: "/etc/idp/service-providers.xml", AllowMissingValidUntil: true},
+            {URL: "https://md.federation.example/aggregate.xml", Verifier: &saml.MetadataVerifier{Certificates: anchors}},
+        },
+    })
+    if err != nil { /* the options can't be used */ }
+    if err = resolver.Refresh(ctx); err != nil { /* a source couldn't be loaded: stop, or go on without it */ }
+    if err = resolver.Start(ctx); err != nil { /* started twice */ }
+    defer resolver.Close()
+
+    idp.ServiceProviderProvider = resolver
+    ```
+
+    - **Lifecycle:** `NewServiceProviderMetadataResolver` only checks the options. `Refresh` loads every source now
+      and returns the errors of those that failed. `Start` refreshes each source in the background, and one that was
+      never loaded at once. `Close`, or the end of the context given to `Start`, stops that, including a request
+      that is being made, and `Close` waits until it has stopped. `Status` reports for each source the number of
+      entities, the `validUntil`, the last attempt and success, the next refresh and the last error. Lookups take
+      no lock, and the `EntityDescriptor` that is returned is shared and must not be changed.
+    - **Sources in order:** a service provider that several sources have is served from the first that has it and
+      has not expired, so local metadata is listed before a federation. `MetadataSource.Filter` chooses which of the
+      service providers of a source are served; the aggregate of a federation names all of them.
+    - **Signature (SDP-MD02):** a `URL` must have a `Verifier`, a `MetadataVerifier` with the certificates that may
+      sign the metadata, and only the element that the signature covers is parsed, checked and served. The opt-out
+      is `AllowUnsigned`, which requires an https URL, as the certificate of the server is then all that
+      authenticates the metadata. A `File` needs no signature, and is verified if it has a `Verifier`.
+    - **Validity (SDP-MD03):** metadata whose root element has no `validUntil`, one that has passed, or one further
+      ahead than `MetadataSource.MaxValidity` is refused, from a URL and from a file. `MaxValidity` defaults to 14
+      days (`DefaultMetadataMaxValidity`), which is what large federations publish and is how long a key that was
+      withdrawn can still be used by replaying old metadata. `AllowMissingValidUntil` accepts metadata with no
+      `validUntil`, against SDP-MD03, for the metadata of a service provider that is maintained by hand; it then
+      never expires. A `validUntil` that is present is always checked. Metadata that reaches the IdP in another way,
+      through `ParseServiceProvidersMetadata` or a `ServiceProviderProvider` of the application, is not checked
+      for this, and `MetadataVerifier.MaxValidity` is there for it.
+    - **Schedule:** a source is asked again after the `cacheDuration` of the root element (SAMLMeta §4.3.1), and
+      after no more than three quarters of the time until its `validUntil`, within `MinRefreshInterval` (5 minutes)
+      and `MaxRefreshInterval` (4 hours), less a random part of up to `RefreshJitter` (a tenth). The minimum wins
+      over a shorter `cacheDuration`. After a failure it is asked again after the minimum, doubled for each failure
+      in a row up to the maximum. Requests are conditional (`If-None-Match`, `If-Modified-Since`), and a 304 keeps
+      the copy and its `validUntil`. A file is read again when its modification time or size has changed.
+    - **Failure:** when a refresh fails, for the network, the signature, the validity or the content, the last
+      copy that was accepted is served until its `validUntil` passes, and then nothing is. A document with no
+      service provider in it is a failure.
+    - **Bounds:** `MaxSize` (128 MiB) limits the document that is read, and `FetchTimeout` (1 minute) the whole
+      request. `HTTPClient` makes the requests, and decides about redirects and which servers are trusted. `Clock`
+      is a `clockwork.Clock` for tests; without it the time is that of `TimeNow`.
+    - **Not supported:** the Metadata Query Protocol (MDQ), where the metadata of each entity is fetched when it is
+      first needed, and keeping the cache across a restart. The tolerance of three to five minutes for clock skew
+      that SDP-G01 asks for on `validUntil` isn't applied to metadata, here or elsewhere in the IdP.
+    - `samlidp.Options.ServiceProviderProvider` takes a resolver for the service providers that aren't registered
+      with the demo IdP.
 - **Accepted signature algorithms:** `IdentityProvider.SignatureMethods` and `DigestMethods` list the identifiers of
   the signature and digest algorithms the IdP accepts on every signature it verifies: the `SigAlg` of the HTTP Redirect
   binding and the XML signature of an `AuthnRequest`, a `LogoutRequest`, a `LogoutResponse`, a `ManageNameIDRequest` or
