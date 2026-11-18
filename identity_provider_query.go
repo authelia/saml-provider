@@ -131,9 +131,9 @@ type queryHeader struct {
 // more than it does for single sign-on to the default AttributeConsumingService of the metadata of the service
 // provider, so a query is not answered with anything that single sign-on would withhold. A query that
 // names no attributes asks for all of them. The answer is one assertion with one AttributeStatement, whose Subject
-// is the identifier of the query with no SubjectConfirmation, signed, and encrypted as for single sign-on if the
-// service provider has an encryption key. If nothing is released the answer is Success with no assertion
-// (SAMLCore §3.3.4).
+// is the identifier of the query with no SubjectConfirmation, signed, and encrypted as for single sign-on: if the
+// service provider has an encryption key, unless the IssuancePolicy gives NoAssertionEncryption for it. If nothing
+// is released the answer is Success with no assertion (SAMLCore §3.3.4).
 //
 // The Subject of the query may name the principal with an EncryptedID, which is decrypted with the encryption key
 // of the identity provider, and the assertion then carries the identifier as an EncryptedID to the service
@@ -179,7 +179,9 @@ func (idp *IdentityProvider) ServeAuthnQuery(w http.ResponseWriter, r *http.Requ
 //
 // An assertion is only returned to the service provider it was issued to, which is stricter than SAMLCore
 // requires, so that a service provider can't fetch the assertions of another by their IDs. It is returned as it
-// was signed, and encrypted again as for single sign-on if the service provider has an encryption key. An ID that
+// was signed, and encrypted again as for single sign-on: if the service provider has an encryption key, unless the
+// IssuancePolicy gives NoAssertionEncryption for it, as it does now and not as it did when the assertion was
+// issued. An ID that
 // is unknown, expired or of an assertion issued to another service provider is left out, and if none is left the
 // answer is Success with no assertion (SAMLCore §3.3.4). A request for more than 32 assertions gets
 // Responder/TooManyResponses.
@@ -766,7 +768,8 @@ func sessionSubjectLocality(session *Session) *SubjectLocality {
 }
 
 // answerAssertionIDRequest returns the assertions that an AssertionIDRequest names and that were issued to its
-// service provider, each as it was signed, and encrypted again if the service provider has an encryption key.
+// service provider, each as it was signed, and encrypted again if the service provider has an encryption key and
+// the IssuancePolicy doesn't give NoAssertionEncryption for it.
 func (req *IdpQueryRequest) answerAssertionIDRequest() ([]*etree.Element, error) {
 	store := req.IDP.AssertionStore
 	if store == nil {
@@ -874,8 +877,8 @@ func (req *IdpQueryRequest) newAssertion(nameID *NameID) *Assertion {
 }
 
 // issueAssertion signs assertion, saves it in the AssertionStore, and encrypts it if the service provider has
-// an encryption key, as single sign-on does. The NameID of its Subject is sent as an EncryptedID if encryptedID,
-// which is when the query named the principal with one.
+// an encryption key and the IssuancePolicy allows, as single sign-on does. The NameID of its Subject is sent as an
+// EncryptedID if encryptedID, which is when the query named the principal with one.
 func (req *IdpQueryRequest) issueAssertion(assertion *Assertion, encryptedID bool) ([]*etree.Element, error) {
 	shell := req.authnRequest()
 	shell.Assertion = assertion
