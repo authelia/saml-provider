@@ -131,18 +131,25 @@ type queryHeader struct {
 // more than it does for single sign-on to the default AttributeConsumingService of the metadata of the service
 // provider, so a query is not answered with anything that single sign-on would withhold. A query that
 // names no attributes asks for all of them. The answer is one assertion with one AttributeStatement, whose Subject
-// is the NameID of the query with no SubjectConfirmation, signed, and encrypted as for single sign-on if the
+// is the identifier of the query with no SubjectConfirmation, signed, and encrypted as for single sign-on if the
 // service provider has an encryption key. If nothing is released the answer is Success with no assertion
 // (SAMLCore §3.3.4).
+//
+// The Subject of the query may name the principal with an EncryptedID, which is decrypted with the encryption key
+// of the identity provider, and the assertion then carries the identifier as an EncryptedID to the service
+// provider. A service provider with no encryption key gets Requester/RequestUnsupported for one. An EncryptedID
+// that can't be decrypted, or that holds an identifier the identity provider doesn't share with the service
+// provider, is answered as a principal that is not found, and the reason is only reported to the Observer as
+// EventPrincipalUnidentified.
 //
 // The request must carry an enveloped signature by its issuer, as there is nothing else on the binding to
 // authenticate it with. Every SAML message gets a Response: one that is not an AttributeQuery gets
 // Requester/RequestUnsupported, one that can't be verified gets Requester/RequestDenied, and one that is verified
-// but expired, for another destination or of another version gets the matching error status. A Subject that is an
-// EncryptedID or BaseID, or that has a SubjectConfirmation, gets Requester/RequestUnsupported; a NameID whose
-// SPNameQualifier is not the service provider or an affiliation it is a member of gets Requester/RequestDenied;
-// and a principal that is not found gets Success with no assertion, as when nothing is released, so that the
-// answer doesn't tell which principals exist. A request that was already answered gets Requester/RequestDenied
+// but expired, for another destination or of another version gets the matching error status. A Subject that is a
+// BaseID, or that has a SubjectConfirmation, gets Requester/RequestUnsupported; one with more than one identifier,
+// or a NameID whose SPNameQualifier is not the service provider or an affiliation it is a member of, gets
+// Requester/RequestDenied; and a principal that is not found gets Success with no assertion, as when nothing is
+// released, so that the answer doesn't tell which principals exist. A request that was already answered gets Requester/RequestDenied
 // (SAMLSec §6.1.2), and a failure of the ReplayStore Responder. A request that is not a POST gets
 // StatusMethodNotAllowed, one that is not a SOAP 1.1 envelope gets a Client fault, and a failure to sign or write
 // the response gets a Server fault.
@@ -452,27 +459,54 @@ func (req *IdpQueryRequest) checkRequestStage() error {
 	return nil
 }
 
-// subjectNameID returns a copy of the NameID that the Subject of a query names the principal with, which the
-// assertions in answer to it must carry unchanged (SAMLCore §3.3.4). The error is a StatusError, or means
-// Responder.
-func (req *IdpQueryRequest) subjectNameID(subject *Subject) (*NameID, error) {
+// querySubject is the principal that the Subject of a query names.
+type querySubject struct {
+	// NameID is a copy of the identifier, decrypted if the query held an EncryptedID, which the assertions in
+	// answer to it must carry (SAMLCore §3.3.4). It is nil when the principal is not identified.
+	NameID *NameID
+
+	// Encrypted is whether the query held an EncryptedID, so that the assertions in answer to it carry one.
+	Encrypted bool
+}
+
+// subject returns the principal that the Subject of a query names with a NameID or an EncryptedID. The error is a
+// StatusError, or means Responder.
+//
+// An EncryptedID is only decrypted for a service provider that has an encryption key, as the identifier is sent
+// back encrypted, and otherwise the query gets Requester/RequestUnsupported. One that can't be decrypted, or holds
+// an identifier that the identity provider doesn't share with the service provider, leaves the principal not
+// identified, which is answered like a principal that is not found: a Success with no assertion. The reason is
+// only reported to the Observer, as an answer which tells the requester that an EncryptedID was decrypted, or what
+// it held, would let it use the identity provider to learn about a ciphertext that it didn't make (errata E93). The
+// signature of the query, which covers the EncryptedID, is verified first (SAMLCore §6.2).
+func (req *IdpQueryRequest) subject(subject *Subject) (querySubject, error) {
 	// SAMLCore §3.3.2.1 requires the Subject.
 	if subject == nil {
-		return nil, ErrInvalidRequest.WithDebug("the query has no Subject")
+		return querySubject{}, ErrInvalidRequest.WithDebug("the query has no Subject")
 	}
 
-	if identifier := unsupportedSubjectIdentifier(req.verified); identifier != "" {
-		return nil, ErrRequestUnsupported.WithDebugf("the Subject of the query has a %s, which is not supported", identifier)
+	identifiers := querySubjectIdentifiers(req.verified)
+
+	if len(identifiers) > 1 {
+		return querySubject{}, ErrRequestDenied.WithDebug("the Subject of the query has more than one identifier")
+	}
+
+	if len(identifiers) == 1 && identifiers[0].Tag == "BaseID" {
+		return querySubject{}, ErrRequestUnsupported.WithDebug("the Subject of the query has a BaseID, which is not supported")
 	}
 
 	// SAMLCore §3.3.4 requires the Subject of the assertion to be confirmable in a manner that the query
 	// lists, and the assertions made here have no SubjectConfirmation at all.
 	if len(subject.SubjectConfirmations) != 0 {
-		return nil, ErrRequestUnsupported.WithDebug("the Subject of the query has a SubjectConfirmation, which is not supported")
+		return querySubject{}, ErrRequestUnsupported.WithDebug("the Subject of the query has a SubjectConfirmation, which is not supported")
+	}
+
+	if len(identifiers) == 1 && identifiers[0].Tag == "EncryptedID" {
+		return req.encryptedSubject(identifiers[0])
 	}
 
 	if subject.NameID == nil || subject.NameID.Value == "" {
-		return nil, ErrUnknownPrincipal.WithDebug("the Subject of the query has no NameID")
+		return querySubject{}, ErrUnknownPrincipal.WithDebug("the Subject of the query has no NameID")
 	}
 
 	nameID := *subject.NameID
@@ -486,32 +520,68 @@ func (req *IdpQueryRequest) subjectNameID(subject *Subject) (*NameID, error) {
 
 		switch {
 		case errors.Is(err, ErrInvalidNameIDPolicy):
-			return nil, ErrRequestDenied.WithDebugf("the SPNameQualifier of the NameID is not the service provider or an affiliation it is a member of: %s", err)
+			return querySubject{}, ErrRequestDenied.WithDebugf("the SPNameQualifier of the NameID is not the service provider or an affiliation it is a member of: %s", err)
 		case err != nil:
-			return nil, err
+			return querySubject{}, err
 		}
 	}
 
-	return &nameID, nil
+	return querySubject{NameID: &nameID}, nil
 }
 
-// unsupportedSubjectIdentifier returns the local name of a BaseID or EncryptedID in the Subject of the query
-// element, or "" if it has neither. Subject doesn't hold these identifiers, so they are looked for in the content
-// that was verified.
-func unsupportedSubjectIdentifier(query *etree.Element) string {
+// encryptedSubject returns the principal that the EncryptedID element of the Subject of a query names, as subject
+// describes.
+func (req *IdpQueryRequest) encryptedSubject(encryptedIDEl *etree.Element) (querySubject, error) {
+	if req.authnRequest().spEncryptionKeyDescriptor() == nil {
+		return querySubject{}, ErrRequestUnsupported.WithDebug("the Subject of the query has an EncryptedID, and the service provider has no encryption key to send it back to")
+	}
+
+	decrypter, err := req.IDP.elementDecrypter()
+
+	var nameID *NameID
+	if err == nil {
+		nameID, err = decrypter.decryptNameID(encryptedIDEl)
+	}
+
+	if err != nil {
+		err = fmt.Errorf("cannot decrypt the EncryptedID: %w", err)
+	} else {
+		err = req.IDP.checkSubjectNameID(req.HTTPRequest, nameID, req.ServiceProviderMetadata, true)
+	}
+
+	if err != nil {
+		req.IDP.observe(req.HTTPRequest, req.state().warning(EventPrincipalUnidentified,
+			ErrUnknownPrincipal.WithDebugf("the principal of the query is not identified: %s", err).WithWrap(err)))
+
+		return querySubject{Encrypted: true}, nil
+	}
+
+	return querySubject{NameID: nameID, Encrypted: true}, nil
+}
+
+// querySubjectIdentifiers returns the NameID, EncryptedID and BaseID elements of the Subject of the query element.
+// Subject doesn't hold the EncryptedID or BaseID, so they are looked for in the content that was verified.
+func querySubjectIdentifiers(query *etree.Element) []*etree.Element {
+	var identifiers []*etree.Element
+
 	for _, child := range query.ChildElements() {
 		if child.Tag != "Subject" || child.NamespaceURI() != samlAssertionNS {
 			continue
 		}
 
 		for _, identifier := range child.ChildElements() {
-			if identifier.NamespaceURI() == samlAssertionNS && (identifier.Tag == "BaseID" || identifier.Tag == "EncryptedID") {
-				return identifier.Tag
+			if identifier.NamespaceURI() != samlAssertionNS {
+				continue
+			}
+
+			switch identifier.Tag {
+			case "NameID", "EncryptedID", "BaseID":
+				identifiers = append(identifiers, identifier)
 			}
 		}
 	}
 
-	return ""
+	return identifiers
 }
 
 // answerAttributeQuery returns the assertion that states the attributes an AttributeQuery asks for, or none if
@@ -528,19 +598,19 @@ func (req *IdpQueryRequest) answerAttributeQuery() ([]*etree.Element, error) {
 		return nil, err
 	}
 
-	nameID, err := req.subjectNameID(query.Subject)
-	if err != nil {
+	subject, err := req.subject(query.Subject)
+	if err != nil || subject.NameID == nil {
 		return nil, err
 	}
 
-	session, err := provider.GetQuerySubject(req.HTTPRequest, req, nameID)
+	session, err := provider.GetQuerySubject(req.HTTPRequest, req, subject.NameID)
 	if err != nil {
 		return nil, fmt.Errorf("cannot find the subject of the query: %w", err)
 	}
 
 	// SAMLCore §3.3.4: there is nothing to state about a principal that is not known, so the response has no
-	// assertion and is a Success, as for an AuthnQuery. UnknownPrincipal would tell the service provider which
-	// principals exist.
+	// assertion and is a Success, as for an AuthnQuery, and as for one that is not identified. UnknownPrincipal
+	// would tell the service provider which principals exist.
 	if session == nil {
 		return nil, nil
 	}
@@ -574,10 +644,10 @@ func (req *IdpQueryRequest) answerAttributeQuery() ([]*etree.Element, error) {
 		return nil, nil
 	}
 
-	assertion := req.newAssertion(nameID)
+	assertion := req.newAssertion(subject.NameID)
 	assertion.AttributeStatements = []AttributeStatement{{Attributes: released}}
 
-	return req.issueAssertion(assertion)
+	return req.issueAssertion(assertion, subject.Encrypted)
 }
 
 // checkQueriedAttributes returns an error if the attributes that a query lists are not valid: SAMLCore §2.7.3.1
@@ -637,12 +707,12 @@ func (req *IdpQueryRequest) answerAuthnQuery() ([]*etree.Element, error) {
 
 	query := req.AuthnQuery
 
-	nameID, err := req.subjectNameID(query.Subject)
-	if err != nil {
+	subject, err := req.subject(query.Subject)
+	if err != nil || subject.NameID == nil {
 		return nil, err
 	}
 
-	sessions, err := provider.GetAuthnSessions(req.HTTPRequest, req, nameID)
+	sessions, err := provider.GetAuthnSessions(req.HTTPRequest, req, subject.NameID)
 	if err != nil {
 		return nil, fmt.Errorf("cannot find the sessions of the subject of the query: %w", err)
 	}
@@ -677,10 +747,10 @@ func (req *IdpQueryRequest) answerAuthnQuery() ([]*etree.Element, error) {
 		return nil, nil
 	}
 
-	assertion := req.newAssertion(nameID)
+	assertion := req.newAssertion(subject.NameID)
 	assertion.AuthnStatements = statements
 
-	return req.issueAssertion(assertion)
+	return req.issueAssertion(assertion, subject.Encrypted)
 }
 
 // sessionSubjectLocality returns the SubjectLocality of the ClientAddress of session, or nil if it has none. The
@@ -803,10 +873,12 @@ func (req *IdpQueryRequest) newAssertion(nameID *NameID) *Assertion {
 }
 
 // issueAssertion signs assertion, saves it in the AssertionStore, and encrypts it if the service provider has
-// an encryption key, as single sign-on does.
-func (req *IdpQueryRequest) issueAssertion(assertion *Assertion) ([]*etree.Element, error) {
+// an encryption key, as single sign-on does. The NameID of its Subject is sent as an EncryptedID if encryptedID,
+// which is when the query named the principal with one.
+func (req *IdpQueryRequest) issueAssertion(assertion *Assertion, encryptedID bool) ([]*etree.Element, error) {
 	shell := req.authnRequest()
 	shell.Assertion = assertion
+	shell.encryptedIDRequested = encryptedID
 
 	// What the service provider may not do with the assertion of single sign-on, it may not do with this one.
 	issuance, err := shell.Issuance(nil)
