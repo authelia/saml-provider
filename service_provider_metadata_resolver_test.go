@@ -15,7 +15,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jonboulle/clockwork"
 	"gotest.tools/assert"
 	is "gotest.tools/assert/cmp"
 	"gotest.tools/golden"
@@ -27,14 +26,14 @@ var _ ServiceProviderProvider = (*ServiceProviderMetadataResolver)(nil)
 // negotiationKey, the key that signMetadataXML signs with.
 type resolverTest struct {
 	t        *testing.T
-	clock    *clockwork.FakeClock
+	clock    *fakeClock
 	verifier *MetadataVerifier
 }
 
 func newResolverTest(t *testing.T) *resolverTest {
 	t.Helper()
 
-	clock := clockwork.NewFakeClockAt(time.Date(2015, 12, 1, 1, 57, 9, 0, time.UTC))
+	clock := newFakeClockAt(time.Date(2015, 12, 1, 1, 57, 9, 0, time.UTC))
 
 	previous := TimeNow
 	TimeNow = clock.Now

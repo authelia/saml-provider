@@ -14,8 +14,6 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
-
-	"github.com/jonboulle/clockwork"
 )
 
 // The defaults of a ServiceProviderMetadataResolver.
@@ -92,7 +90,7 @@ type ServiceProviderMetadataResolverOptions struct {
 	// Clock gives the time and the timers. If it is nil, the timers are real and the time is that of TimeNow,
 	// as everywhere else in this package. The signature is verified at the time of TimeNow whatever the Clock
 	// is, so a test that sets a Clock points TimeNow at it.
-	Clock clockwork.Clock
+	Clock MetadataClock
 
 	// Observer is told of each refresh in the background that fails, as an EventMetadataRefresh. If it is nil
 	// the failure is logged with [slog.Default].
@@ -148,7 +146,7 @@ type MetadataSourceStatus struct {
 type ServiceProviderMetadataResolver struct {
 	sources  []*metadataSource
 	client   *http.Client
-	clock    clockwork.Clock
+	clock    MetadataClock
 	observer Observer
 
 	minInterval time.Duration
@@ -198,14 +196,45 @@ type metadataValidators struct {
 	size         int64
 }
 
-// timeNowClock is the real clock, but for the time, which is that of TimeNow.
-type timeNowClock struct {
-	clockwork.Clock
+// MetadataClock gives a ServiceProviderMetadataResolver the time and the timers that wait for each refresh.
+type MetadataClock interface {
+	// Now returns the time.
+	Now() time.Time
+
+	// NewTimer returns a timer which sends the time on its channel once d has passed.
+	NewTimer(d time.Duration) MetadataTimer
 }
+
+// MetadataTimer is a timer of a MetadataClock.
+type MetadataTimer interface {
+	// Chan returns the channel the time is sent on when the timer fires.
+	Chan() <-chan time.Time
+
+	// Stop prevents the timer from firing. It returns false if the timer had already fired or been stopped.
+	Stop() bool
+}
+
+// timeNowClock is the real clock, but for the time, which is that of TimeNow.
+type timeNowClock struct{}
 
 // Now returns the time of TimeNow.
 func (timeNowClock) Now() time.Time {
 	return TimeNow()
+}
+
+// NewTimer returns a timer of the time package.
+func (timeNowClock) NewTimer(d time.Duration) MetadataTimer {
+	return realTimer{time.NewTimer(d)}
+}
+
+// realTimer is a MetadataTimer of the time package.
+type realTimer struct {
+	*time.Timer
+}
+
+// Chan returns the channel of the timer.
+func (t realTimer) Chan() <-chan time.Time {
+	return t.C
 }
 
 // NewServiceProviderMetadataResolver returns a resolver for the sources of opts, or an error if opts can't be
@@ -259,7 +288,7 @@ func (r *ServiceProviderMetadataResolver) setDefaults() {
 	}
 
 	if r.clock == nil {
-		r.clock = timeNowClock{Clock: clockwork.NewRealClock()}
+		r.clock = timeNowClock{}
 	}
 
 	if r.minInterval == 0 {

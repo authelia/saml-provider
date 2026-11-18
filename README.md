@@ -928,7 +928,7 @@ without acting on it. See **`Scoping` and `ProxyRestriction`** below.
       service provider in it is a failure.
     - **Bounds:** `MaxSize` (128 MiB) limits the document that is read, and `FetchTimeout` (1 minute) the whole
       request. `HTTPClient` makes the requests, and decides about redirects and which servers are trusted. `Clock`
-      is a `clockwork.Clock` for tests; without it the time is that of `TimeNow`.
+      is a `MetadataClock` for tests; without it the time is that of `TimeNow`.
     - **Not supported:** the Metadata Query Protocol (MDQ), where the metadata of each entity is fetched when it is
       first needed, and keeping the cache across a restart.
     - `samlidp.Options.ServiceProviderProvider` takes a resolver for the service providers that aren't registered
