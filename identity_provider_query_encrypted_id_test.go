@@ -5,8 +5,8 @@ import (
 	"testing"
 
 	"github.com/beevik/etree"
-	"gotest.tools/assert"
-	is "gotest.tools/assert/cmp"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 // encryptQuerySubject replaces the NameID of the Subject of message with an EncryptedID of nameID, made by
@@ -15,10 +15,10 @@ func encryptQuerySubject(t *testing.T, encrypter *elementEncrypter, message *etr
 	t.Helper()
 
 	encryptedID, err := encrypter.encryptNameID(nameID)
-	assert.NilError(t, err)
+	require.NoError(t, err)
 
 	subject := message.FindElement("./Subject")
-	assert.Assert(t, subject != nil)
+	require.NotNil(t, subject)
 
 	if el := subject.FindElement("./NameID"); el != nil {
 		subject.RemoveChild(el)
@@ -56,28 +56,28 @@ func TestServeQueryEncryptedID(t *testing.T) {
 			nameID := f.subject().NameID
 			message := service.message(f)
 			encryptQuerySubject(t, idpEncrypter(t, f.test), message, nameID)
-			assert.Check(t, !strings.Contains(elementToString(message), queryTestPersistentNameID))
+			assert.False(t, strings.Contains(elementToString(message), queryTestPersistentNameID))
 
 			response := f.query(t, service, message)
 			assertQueryStatus(t, response, StatusSuccess, "")
-			assert.Assert(t, is.Len(response.Assertions, 1))
-			assert.Check(t, is.Equal(response.Encrypted, 1))
+			require.Len(t, response.Assertions, 1)
+			assert.Equal(t, response.Encrypted, 1)
 
 			// The provider is asked about the identifier that was encrypted.
-			assert.Check(t, is.DeepEqual(f.provider.nameIDs, []NameID{*nameID}))
+			assert.Equal(t, f.provider.nameIDs, []NameID{*nameID})
 
 			// The assertion names the principal as the query did, with an EncryptedID, which is encrypted to the
 			// service provider (SAMLCore §3.3.4).
 			subjectEl := response.AssertionEls[0].FindElement("./Subject")
-			assert.Assert(t, subjectEl != nil)
-			assert.Check(t, subjectEl.FindElement("./NameID") == nil)
+			require.NotNil(t, subjectEl)
+			assert.Nil(t, subjectEl.FindElement("./NameID"))
 
 			encryptedID := subjectEl.FindElement("./EncryptedID")
-			assert.Assert(t, encryptedID != nil)
+			require.NotNil(t, encryptedID)
 
 			decrypted, err := f.test.SP.DecryptNameID(encryptedID)
-			assert.NilError(t, err)
-			assert.Check(t, is.DeepEqual(*decrypted, *nameID))
+			require.NoError(t, err)
+			assert.Equal(t, *decrypted, *nameID)
 		})
 	}
 }
@@ -140,12 +140,12 @@ func TestServeQueryUnidentifiedEncryptedID(t *testing.T) {
 
 				response := f.query(t, service, message)
 				assertQueryStatus(t, response, StatusSuccess, "")
-				assert.Check(t, is.Len(response.Assertions, 0))
-				assert.Check(t, is.Len(f.provider.nameIDs, 0), "the session provider must not be asked")
+				assert.Len(t, response.Assertions, 0)
+				assert.Len(t, f.provider.nameIDs, 0, "the session provider must not be asked")
 
 				log := f.log.String()
-				assert.Check(t, is.Contains(log, string(EventPrincipalUnidentified)))
-				assert.Check(t, is.Contains(log, tc.reason))
+				assert.Contains(t, log, string(EventPrincipalUnidentified))
+				assert.Contains(t, log, tc.reason)
 			})
 		}
 	}
@@ -165,8 +165,8 @@ func TestServeQueryEncryptedIDWithoutEncryptionKey(t *testing.T) {
 
 			response := f.query(t, service, message)
 			assertQueryStatus(t, response, StatusRequester, StatusRequestUnsupported)
-			assert.Check(t, is.Len(f.provider.nameIDs, 0))
-			assert.Check(t, !strings.Contains(f.log.String(), string(EventPrincipalUnidentified)))
+			assert.Len(t, f.provider.nameIDs, 0)
+			assert.False(t, strings.Contains(f.log.String(), string(EventPrincipalUnidentified)))
 		})
 	}
 }

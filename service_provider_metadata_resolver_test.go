@@ -15,9 +15,10 @@ import (
 	"testing"
 	"time"
 
-	"gotest.tools/assert"
-	is "gotest.tools/assert/cmp"
-	"gotest.tools/golden"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+
+	"authelia.com/provider/saml/internal/golden"
 )
 
 var _ ServiceProviderProvider = (*ServiceProviderMetadataResolver)(nil)
@@ -55,9 +56,9 @@ func (rt *resolverTest) resolver(opts ServiceProviderMetadataResolverOptions) *S
 	}
 
 	resolver, err := NewServiceProviderMetadataResolver(opts)
-	assert.NilError(rt.t, err)
+	require.NoError(rt.t, err)
 
-	rt.t.Cleanup(func() { assert.Check(rt.t, resolver.Close()) })
+	rt.t.Cleanup(func() { assert.NoError(rt.t, resolver.Close()) })
 
 	return resolver
 }
@@ -70,7 +71,7 @@ func (rt *resolverTest) waitTimers(n int) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	assert.NilError(rt.t, rt.clock.BlockUntilContext(ctx, n))
+	require.NoError(rt.t, rt.clock.BlockUntilContext(ctx, n))
 }
 
 // in returns the attribute for a validUntil that is d after the time of the fake clock.
@@ -193,15 +194,15 @@ func isNotExist(t *testing.T, resolver *ServiceProviderMetadataResolver, entityI
 	t.Helper()
 
 	_, err := resolver.GetServiceProvider(nil, entityID)
-	assert.Check(t, errors.Is(err, os.ErrNotExist), "%s: %v", entityID, err)
+	assert.True(t, errors.Is(err, os.ErrNotExist), "%s: %v", entityID, err)
 }
 
 func isServed(t *testing.T, resolver *ServiceProviderMetadataResolver, entityID string) {
 	t.Helper()
 
 	metadata, err := resolver.GetServiceProvider(nil, entityID)
-	if assert.Check(t, err, entityID) {
-		assert.Check(t, is.Equal(entityID, metadata.EntityID))
+	if assert.NoError(t, err, entityID) {
+		assert.Equal(t, entityID, metadata.EntityID)
 	}
 }
 
@@ -218,7 +219,7 @@ func TestMetadataResolverLoadsASignedAggregate(t *testing.T) {
 	// Nothing is served before the first load.
 	isNotExist(t, resolver, sp1)
 
-	assert.NilError(t, resolver.Refresh(context.Background()))
+	require.NoError(t, resolver.Refresh(context.Background()))
 
 	isServed(t, resolver, sp1)
 	isServed(t, resolver, sp2)
@@ -228,19 +229,19 @@ func TestMetadataResolverLoadsASignedAggregate(t *testing.T) {
 
 	// An entity in a group expires with the group.
 	metadata, err := resolver.GetServiceProvider(nil, sp2)
-	assert.NilError(t, err)
-	assert.Check(t, metadata.ValidUntil.Equal(rt.clock.Now().Add(7*24*time.Hour)))
-	assert.Check(t, is.Len(metadata.SPSSODescriptors, 1))
+	require.NoError(t, err)
+	assert.True(t, metadata.ValidUntil.Equal(rt.clock.Now().Add(7*24*time.Hour)))
+	assert.Len(t, metadata.SPSSODescriptors, 1)
 
 	status := resolver.Status()
-	assert.Assert(t, is.Len(status, 1))
-	assert.Check(t, is.Equal(server.URL, status[0].Source))
-	assert.Check(t, is.Equal(3, status[0].Entities))
-	assert.Check(t, status[0].Err)
-	assert.Check(t, status[0].LastSuccess.Equal(rt.clock.Now()))
-	assert.Check(t, status[0].ValidUntil.Equal(rt.clock.Now().Add(7*24*time.Hour)))
+	require.Len(t, status, 1)
+	assert.Equal(t, server.URL, status[0].Source)
+	assert.Equal(t, 3, status[0].Entities)
+	assert.NoError(t, status[0].Err)
+	assert.True(t, status[0].LastSuccess.Equal(rt.clock.Now()))
+	assert.True(t, status[0].ValidUntil.Equal(rt.clock.Now().Add(7*24*time.Hour)))
 
-	assert.Check(t, is.Contains(server.headers[0].Get("Accept"), "application/samlmetadata+xml"))
+	assert.Contains(t, server.headers[0].Get("Accept"), "application/samlmetadata+xml")
 }
 
 func TestMetadataResolverLoadsASingleEntity(t *testing.T) {
@@ -251,7 +252,7 @@ func TestMetadataResolverLoadsASingleEntity(t *testing.T) {
 		Sources: []MetadataSource{{URL: server.URL, Verifier: rt.verifier}},
 	})
 
-	assert.NilError(t, resolver.Refresh(context.Background()))
+	require.NoError(t, resolver.Refresh(context.Background()))
 	isServed(t, resolver, sp1)
 }
 
@@ -259,29 +260,29 @@ func TestMetadataResolverLoadsAFile(t *testing.T) {
 	rt := newResolverTest(t)
 	path := filepath.Join(t.TempDir(), "metadata.xml")
 
-	assert.NilError(t, os.WriteFile(path, []byte(testGroup(rt.in(24*time.Hour), sp1)), 0o600))
+	require.NoError(t, os.WriteFile(path, []byte(testGroup(rt.in(24*time.Hour), sp1)), 0o600))
 
 	// A file needs no signature.
 	resolver := rt.resolver(ServiceProviderMetadataResolverOptions{Sources: []MetadataSource{{File: path}}})
 
-	assert.NilError(t, resolver.Refresh(context.Background()))
+	require.NoError(t, resolver.Refresh(context.Background()))
 	isServed(t, resolver, sp1)
 	isNotExist(t, resolver, sp2)
 
 	// A file that didn't change is not read again, as a 304 is not.
 	loaded := resolver.sources[0].snapshot.Load()
 
-	assert.NilError(t, resolver.Refresh(context.Background()))
-	assert.Check(t, loaded == resolver.sources[0].snapshot.Load())
+	require.NoError(t, resolver.Refresh(context.Background()))
+	assert.True(t, loaded == resolver.sources[0].snapshot.Load())
 
-	assert.NilError(t, os.WriteFile(path, []byte(testGroup(rt.in(24*time.Hour), sp1, sp2)), 0o600))
-	assert.NilError(t, os.Chtimes(path, time.Now().Add(time.Minute), time.Now().Add(time.Minute)))
-	assert.NilError(t, resolver.Refresh(context.Background()))
+	require.NoError(t, os.WriteFile(path, []byte(testGroup(rt.in(24*time.Hour), sp1, sp2)), 0o600))
+	require.NoError(t, os.Chtimes(path, time.Now().Add(time.Minute), time.Now().Add(time.Minute)))
+	require.NoError(t, resolver.Refresh(context.Background()))
 	isServed(t, resolver, sp2)
 
 	// A file that is removed is a failed refresh.
-	assert.NilError(t, os.Remove(path))
-	assert.Check(t, is.ErrorContains(resolver.Refresh(context.Background()), path))
+	require.NoError(t, os.Remove(path))
+	assert.ErrorContains(t, resolver.Refresh(context.Background()), path)
 	isServed(t, resolver, sp2)
 }
 
@@ -289,11 +290,11 @@ func TestMetadataResolverVerifiesAFileThatHasAVerifier(t *testing.T) {
 	rt := newResolverTest(t)
 	path := filepath.Join(t.TempDir(), "metadata.xml")
 
-	assert.NilError(t, os.WriteFile(path, []byte(testGroup(rt.in(24*time.Hour), sp1)), 0o600))
+	require.NoError(t, os.WriteFile(path, []byte(testGroup(rt.in(24*time.Hour), sp1)), 0o600))
 
 	resolver := rt.resolver(ServiceProviderMetadataResolverOptions{Sources: []MetadataSource{{File: path, Verifier: rt.verifier}}})
 
-	assert.Check(t, is.ErrorContains(resolver.Refresh(context.Background()), "metadata is not signed"))
+	assert.ErrorContains(t, resolver.Refresh(context.Background()), "metadata is not signed")
 	isNotExist(t, resolver, sp1)
 }
 
@@ -334,8 +335,8 @@ func TestMetadataResolverSchedule(t *testing.T) {
 				MaxRefreshInterval: maxInterval,
 			})
 
-			assert.NilError(t, resolver.Refresh(context.Background()))
-			assert.Check(t, is.Equal(tc.expected, resolver.Status()[0].NextRefresh.Sub(rt.clock.Now())))
+			require.NoError(t, resolver.Refresh(context.Background()))
+			assert.Equal(t, tc.expected, resolver.Status()[0].NextRefresh.Sub(rt.clock.Now()))
 		})
 	}
 }
@@ -348,13 +349,13 @@ func TestMetadataResolverDefaultIntervals(t *testing.T) {
 		Sources: []MetadataSource{{URL: server.URL, Verifier: rt.verifier}},
 	})
 
-	assert.NilError(t, resolver.Refresh(context.Background()))
-	assert.Check(t, is.Equal(DefaultMetadataMaxRefreshInterval, resolver.Status()[0].NextRefresh.Sub(rt.clock.Now())))
+	require.NoError(t, resolver.Refresh(context.Background()))
+	assert.Equal(t, DefaultMetadataMaxRefreshInterval, resolver.Status()[0].NextRefresh.Sub(rt.clock.Now()))
 
 	server.set(func(s *metadataServer) { s.status = http.StatusBadGateway })
 
-	assert.Check(t, resolver.Refresh(context.Background()) != nil)
-	assert.Check(t, is.Equal(DefaultMetadataMinRefreshInterval, resolver.Status()[0].NextRefresh.Sub(rt.clock.Now())))
+	assert.NotNil(t, resolver.Refresh(context.Background()))
+	assert.Equal(t, DefaultMetadataMinRefreshInterval, resolver.Status()[0].NextRefresh.Sub(rt.clock.Now()))
 }
 
 func TestMetadataResolverJitterOnlyShortensTheInterval(t *testing.T) {
@@ -372,15 +373,15 @@ func TestMetadataResolverJitterOnlyShortensTheInterval(t *testing.T) {
 	})
 
 	// The most that the jitter can take off, then the least.
-	assert.NilError(t, resolver.Refresh(context.Background()))
+	require.NoError(t, resolver.Refresh(context.Background()))
 
 	interval := resolver.Status()[0].NextRefresh.Sub(rt.clock.Now())
-	assert.Check(t, interval >= 30*time.Minute && interval < 31*time.Minute, "%s", interval)
+	assert.True(t, interval >= 30*time.Minute && interval < 31*time.Minute, "%s", interval)
 
 	RandReader = strings.NewReader(strings.Repeat("\x00", 64))
 
-	assert.NilError(t, resolver.Refresh(context.Background()))
-	assert.Check(t, is.Equal(time.Hour, resolver.Status()[0].NextRefresh.Sub(rt.clock.Now())))
+	require.NoError(t, resolver.Refresh(context.Background()))
+	assert.Equal(t, time.Hour, resolver.Status()[0].NextRefresh.Sub(rt.clock.Now()))
 }
 
 func TestMetadataResolverRefreshesInTheBackground(t *testing.T) {
@@ -392,12 +393,12 @@ func TestMetadataResolverRefreshesInTheBackground(t *testing.T) {
 	})
 
 	// A source that was never loaded is loaded as soon as the resolver starts.
-	assert.NilError(t, resolver.Start(context.Background()))
+	require.NoError(t, resolver.Start(context.Background()))
 	rt.waitTimers(1)
 	isServed(t, resolver, sp1)
 
 	hits, _ := server.count()
-	assert.Check(t, is.Equal(1, hits))
+	assert.Equal(t, 1, hits)
 
 	server.set(func(s *metadataServer) {
 		s.body = signMetadataXML(t, testGroup(rt.in(7*24*time.Hour)+` cacheDuration="PT1H"`, sp1, sp2))
@@ -407,21 +408,21 @@ func TestMetadataResolverRefreshesInTheBackground(t *testing.T) {
 	rt.clock.Advance(59 * time.Minute)
 
 	hits, _ = server.count()
-	assert.Check(t, is.Equal(1, hits))
+	assert.Equal(t, 1, hits)
 	isNotExist(t, resolver, sp2)
 
 	rt.clock.Advance(time.Minute)
 	rt.waitTimers(1)
 
 	hits, _ = server.count()
-	assert.Check(t, is.Equal(2, hits))
+	assert.Equal(t, 2, hits)
 	isServed(t, resolver, sp2)
 
 	rt.clock.Advance(time.Hour)
 	rt.waitTimers(1)
 
 	hits, _ = server.count()
-	assert.Check(t, is.Equal(3, hits))
+	assert.Equal(t, 3, hits)
 }
 
 func TestMetadataResolverStartKeepsTheScheduleOfRefresh(t *testing.T) {
@@ -432,29 +433,29 @@ func TestMetadataResolverStartKeepsTheScheduleOfRefresh(t *testing.T) {
 		Sources: []MetadataSource{{URL: server.URL, Verifier: rt.verifier}},
 	})
 
-	assert.NilError(t, resolver.Refresh(context.Background()))
-	assert.NilError(t, resolver.Start(context.Background()))
+	require.NoError(t, resolver.Refresh(context.Background()))
+	require.NoError(t, resolver.Start(context.Background()))
 	rt.waitTimers(1)
 
 	// The source was loaded by Refresh, so Start doesn't load it again.
 	hits, _ := server.count()
-	assert.Check(t, is.Equal(1, hits))
+	assert.Equal(t, 1, hits)
 
 	// A call to Refresh moves the time that the source is due.
 	rt.clock.Advance(30 * time.Minute)
-	assert.NilError(t, resolver.Refresh(context.Background()))
+	require.NoError(t, resolver.Refresh(context.Background()))
 
 	rt.clock.Advance(30 * time.Minute)
 	rt.waitTimers(1)
 
 	hits, _ = server.count()
-	assert.Check(t, is.Equal(2, hits))
+	assert.Equal(t, 2, hits)
 
 	rt.clock.Advance(30 * time.Minute)
 	rt.waitTimers(1)
 
 	hits, _ = server.count()
-	assert.Check(t, is.Equal(3, hits))
+	assert.Equal(t, 3, hits)
 }
 
 func TestMetadataResolverConditionalGet(t *testing.T) {
@@ -477,27 +478,27 @@ func TestMetadataResolverConditionalGet(t *testing.T) {
 				Sources: []MetadataSource{{URL: server.URL, Verifier: rt.verifier}},
 			})
 
-			assert.NilError(t, resolver.Refresh(context.Background()))
-			assert.Check(t, is.Equal("", server.headers[0].Get(tc.header)))
+			require.NoError(t, resolver.Refresh(context.Background()))
+			assert.Equal(t, "", server.headers[0].Get(tc.header))
 
 			loaded := resolver.sources[0].snapshot.Load()
 
 			rt.clock.Advance(time.Hour)
-			assert.NilError(t, resolver.Refresh(context.Background()))
+			require.NoError(t, resolver.Refresh(context.Background()))
 
 			hits, notModified := server.count()
-			assert.Check(t, is.Equal(2, hits))
-			assert.Check(t, is.Equal(1, notModified))
-			assert.Check(t, is.Equal(tc.value, server.headers[1].Get(tc.header)))
+			assert.Equal(t, 2, hits)
+			assert.Equal(t, 1, notModified)
+			assert.Equal(t, tc.value, server.headers[1].Get(tc.header))
 
 			// The copy is kept as it is, counts as a success, and is scheduled from the time of the 304.
-			assert.Check(t, loaded == resolver.sources[0].snapshot.Load())
+			assert.True(t, loaded == resolver.sources[0].snapshot.Load())
 			isServed(t, resolver, sp1)
 
 			status := resolver.Status()[0]
-			assert.Check(t, status.Err)
-			assert.Check(t, status.LastSuccess.Equal(rt.clock.Now()))
-			assert.Check(t, is.Equal(time.Hour, status.NextRefresh.Sub(rt.clock.Now())))
+			assert.NoError(t, status.Err)
+			assert.True(t, status.LastSuccess.Equal(rt.clock.Now()))
+			assert.Equal(t, time.Hour, status.NextRefresh.Sub(rt.clock.Now()))
 
 			// A changed document replaces it.
 			server.set(func(s *metadataServer) {
@@ -505,7 +506,7 @@ func TestMetadataResolverConditionalGet(t *testing.T) {
 				s.body = signMetadataXML(t, testGroup(rt.in(24*time.Hour), sp2))
 			})
 
-			assert.NilError(t, resolver.Refresh(context.Background()))
+			require.NoError(t, resolver.Refresh(context.Background()))
 			isServed(t, resolver, sp2)
 			isNotExist(t, resolver, sp1)
 		})
@@ -522,16 +523,16 @@ func TestMetadataResolverNotModifiedDoesNotExtendValidity(t *testing.T) {
 		Sources: []MetadataSource{{URL: server.URL, Verifier: rt.verifier}},
 	})
 
-	assert.NilError(t, resolver.Refresh(context.Background()))
+	require.NoError(t, resolver.Refresh(context.Background()))
 
 	rt.clock.Advance(2 * time.Hour)
-	assert.Check(t, is.ErrorContains(resolver.Refresh(context.Background()), "expired"))
+	assert.ErrorContains(t, resolver.Refresh(context.Background()), "expired")
 	isNotExist(t, resolver, sp1)
 
 	// The next request is not conditional.
 	_ = resolver.Refresh(context.Background())
 
-	assert.Check(t, is.Equal("", server.headers[2].Get("If-None-Match")))
+	assert.Equal(t, "", server.headers[2].Get("If-None-Match"))
 }
 
 func TestMetadataResolverKeepsTheLastGoodCopyUntilItExpires(t *testing.T) {
@@ -556,7 +557,7 @@ func TestMetadataResolverKeepsTheLastGoodCopyUntilItExpires(t *testing.T) {
 				Sources: []MetadataSource{{URL: server.URL, Verifier: rt.verifier}},
 			})
 
-			assert.NilError(t, resolver.Refresh(context.Background()))
+			require.NoError(t, resolver.Refresh(context.Background()))
 
 			loaded := rt.clock.Now()
 
@@ -565,14 +566,14 @@ func TestMetadataResolverKeepsTheLastGoodCopyUntilItExpires(t *testing.T) {
 			// Each failure in a row doubles the wait, up to the maximum.
 			for _, wait := range []time.Duration{5 * time.Minute, 10 * time.Minute, 20 * time.Minute, 40 * time.Minute, 80 * time.Minute, 160 * time.Minute, 4 * time.Hour, 4 * time.Hour} {
 				err := resolver.Refresh(context.Background())
-				assert.Check(t, is.ErrorContains(err, server.URL))
+				assert.ErrorContains(t, err, server.URL)
 
 				status := resolver.Status()[0]
-				assert.Check(t, status.Err != nil)
-				assert.Check(t, status.LastSuccess.Equal(loaded))
-				assert.Check(t, status.LastAttempt.Equal(rt.clock.Now()))
-				assert.Check(t, is.Equal(wait, status.NextRefresh.Sub(rt.clock.Now())))
-				assert.Check(t, is.Equal(1, status.Entities))
+				assert.NotNil(t, status.Err)
+				assert.True(t, status.LastSuccess.Equal(loaded))
+				assert.True(t, status.LastAttempt.Equal(rt.clock.Now()))
+				assert.Equal(t, wait, status.NextRefresh.Sub(rt.clock.Now()))
+				assert.Equal(t, 1, status.Entities)
 
 				isServed(t, resolver, sp1)
 				isNotExist(t, resolver, sp2)
@@ -589,9 +590,9 @@ func TestMetadataResolverKeepsTheLastGoodCopyUntilItExpires(t *testing.T) {
 			isNotExist(t, resolver, sp1)
 
 			// The next failed refresh drops it.
-			assert.Check(t, resolver.Refresh(context.Background()) != nil)
-			assert.Check(t, is.Equal(0, resolver.Status()[0].Entities))
-			assert.Check(t, resolver.sources[0].snapshot.Load() == nil)
+			assert.NotNil(t, resolver.Refresh(context.Background()))
+			assert.Equal(t, 0, resolver.Status()[0].Entities)
+			assert.Nil(t, resolver.sources[0].snapshot.Load())
 		})
 	}
 }
@@ -605,18 +606,18 @@ func TestMetadataResolverRecoversAfterAFailure(t *testing.T) {
 		Sources: []MetadataSource{{URL: server.URL, Verifier: rt.verifier}},
 	})
 
-	assert.NilError(t, resolver.Start(context.Background()))
+	require.NoError(t, resolver.Start(context.Background()))
 	rt.waitTimers(1)
 	isNotExist(t, resolver, sp1)
-	assert.Check(t, is.ErrorContains(resolver.Status()[0].Err, "503"))
+	assert.ErrorContains(t, resolver.Status()[0].Err, "503")
 
 	server.set(func(s *metadataServer) { s.status = 0 })
 
 	rt.clock.Advance(5 * time.Minute)
 	rt.waitTimers(1)
 	isServed(t, resolver, sp1)
-	assert.Check(t, resolver.Status()[0].Err)
-	assert.Check(t, is.Equal(DefaultMetadataMaxRefreshInterval, resolver.Status()[0].NextRefresh.Sub(rt.clock.Now())))
+	assert.NoError(t, resolver.Status()[0].Err)
+	assert.Equal(t, DefaultMetadataMaxRefreshInterval, resolver.Status()[0].NextRefresh.Sub(rt.clock.Now()))
 }
 
 func TestMetadataResolverSignature(t *testing.T) {
@@ -629,7 +630,7 @@ func TestMetadataResolverSignature(t *testing.T) {
 	// The signature of the entity, moved to a new root that has the ID it refers to, next to the entity it was
 	// made for.
 	signature := signed[strings.Index(signed, "<ds:Signature") : strings.Index(signed, "</ds:Signature>")+len("</ds:Signature>")]
-	assert.Assert(t, strings.Contains(signature, `URI="#e"`))
+	require.True(t, strings.Contains(signature, `URI="#e"`))
 
 	moved := `<md:EntitiesDescriptor` + resolverTestNamespace + ` ID="e"` + rt.in(time.Hour) + `>` + signature + evil +
 		strings.Replace(strings.Replace(signed, signature, "", 1), ` ID="e"`, ` ID="f"`, 1) + `</md:EntitiesDescriptor>`
@@ -684,13 +685,13 @@ func TestMetadataResolverSignature(t *testing.T) {
 			isNotExist(t, resolver, "https://evil.example.org")
 
 			if tc.err == "" {
-				assert.Check(t, err)
+				assert.NoError(t, err)
 				isServed(t, resolver, sp1)
 
 				return
 			}
 
-			assert.Check(t, is.ErrorContains(err, tc.err))
+			assert.ErrorContains(t, err, tc.err)
 			isNotExist(t, resolver, sp1)
 		})
 	}
@@ -707,13 +708,13 @@ func TestMetadataResolverUsesOnlyTheSignedElement(t *testing.T) {
 		Sources: []MetadataSource{{URL: server.URL, Verifier: rt.verifier}},
 	})
 
-	assert.NilError(t, resolver.Refresh(context.Background()))
+	require.NoError(t, resolver.Refresh(context.Background()))
 	isServed(t, resolver, sp1)
 	isNotExist(t, resolver, "https://evil.example.org")
 
 	metadata, err := resolver.GetServiceProvider(nil, sp1)
-	assert.NilError(t, err)
-	assert.Check(t, metadata.Signature == nil)
+	require.NoError(t, err)
+	assert.Nil(t, metadata.Signature)
 }
 
 func TestMetadataResolverUnsignedURL(t *testing.T) {
@@ -729,7 +730,7 @@ func TestMetadataResolverUnsignedURL(t *testing.T) {
 		HTTPClient: server.Client(),
 	})
 
-	assert.NilError(t, resolver.Refresh(context.Background()))
+	require.NoError(t, resolver.Refresh(context.Background()))
 	isServed(t, resolver, sp1)
 
 	// The certificate of the server is what authenticates the metadata, so one that isn't trusted is a failure.
@@ -737,7 +738,7 @@ func TestMetadataResolverUnsignedURL(t *testing.T) {
 		Sources: []MetadataSource{{URL: server.URL, AllowUnsigned: true}},
 	})
 
-	assert.Check(t, is.ErrorContains(resolver.Refresh(context.Background()), "certificate"))
+	assert.ErrorContains(t, resolver.Refresh(context.Background()), "certificate")
 	isNotExist(t, resolver, sp1)
 }
 
@@ -855,7 +856,7 @@ func TestMetadataResolverValidity(t *testing.T) {
 				source := tc.source
 				source.File = filepath.Join(t.TempDir(), "metadata.xml")
 
-				assert.NilError(t, os.WriteFile(source.File, []byte(body), 0o600))
+				require.NoError(t, os.WriteFile(source.File, []byte(body), 0o600))
 
 				resolver := rt.resolver(ServiceProviderMetadataResolverOptions{Sources: []MetadataSource{source}})
 				checkValidity(t, resolver, tc.err)
@@ -870,13 +871,13 @@ func checkValidity(t *testing.T, resolver *ServiceProviderMetadataResolver, expe
 	err := resolver.Refresh(context.Background())
 
 	if expected == "" {
-		assert.Check(t, err)
+		assert.NoError(t, err)
 		isServed(t, resolver, sp1)
 
 		return
 	}
 
-	assert.Check(t, is.ErrorContains(err, expected))
+	assert.ErrorContains(t, err, expected)
 	isNotExist(t, resolver, sp1)
 }
 
@@ -889,13 +890,13 @@ func TestMetadataResolverWithoutValidUntilIsServedUntilReplaced(t *testing.T) {
 		Sources: []MetadataSource{{URL: server.URL, Verifier: rt.verifier, AllowMissingValidUntil: true}},
 	})
 
-	assert.NilError(t, resolver.Refresh(context.Background()))
-	assert.Check(t, resolver.Status()[0].ValidUntil.IsZero())
+	require.NoError(t, resolver.Refresh(context.Background()))
+	assert.True(t, resolver.Status()[0].ValidUntil.IsZero())
 
 	server.set(func(s *metadataServer) { s.status = http.StatusInternalServerError })
 	rt.clock.Advance(365 * 24 * time.Hour)
 
-	assert.Check(t, resolver.Refresh(context.Background()) != nil)
+	assert.NotNil(t, resolver.Refresh(context.Background()))
 	isServed(t, resolver, sp1)
 }
 
@@ -906,7 +907,7 @@ func TestMetadataResolverSourcesInOrder(t *testing.T) {
 	second := newMetadataServer(t, signMetadataXML(t, strings.Replace(testGroup(rt.in(2*time.Hour), sp2, sp3), sp2+"/acs", sp2+"/second", 1)))
 	path := filepath.Join(t.TempDir(), "metadata.xml")
 
-	assert.NilError(t, os.WriteFile(path, []byte(testSPRoot("https://local.example.org", "")), 0o600))
+	require.NoError(t, os.WriteFile(path, []byte(testSPRoot("https://local.example.org", "")), 0o600))
 
 	resolver := rt.resolver(ServiceProviderMetadataResolverOptions{
 		Sources: []MetadataSource{
@@ -916,7 +917,7 @@ func TestMetadataResolverSourcesInOrder(t *testing.T) {
 		},
 	})
 
-	assert.NilError(t, resolver.Refresh(context.Background()))
+	require.NoError(t, resolver.Refresh(context.Background()))
 
 	for _, entityID := range []string{sp1, sp2, sp3, "https://local.example.org"} {
 		isServed(t, resolver, entityID)
@@ -924,27 +925,27 @@ func TestMetadataResolverSourcesInOrder(t *testing.T) {
 
 	acs := func() string {
 		metadata, err := resolver.GetServiceProvider(nil, sp2)
-		assert.NilError(t, err)
+		require.NoError(t, err)
 
 		return metadata.SPSSODescriptors[0].AssertionConsumerServices[0].Location
 	}
 
 	// An entity that two sources have comes from the first.
-	assert.Check(t, is.Equal(sp2+"/acs", acs()))
+	assert.Equal(t, sp2+"/acs", acs())
 
 	// One source that fails doesn't stop the others, and the error names it.
 	first.set(func(s *metadataServer) { s.status = http.StatusInternalServerError })
 	second.set(func(s *metadataServer) { s.body = signMetadataXML(t, testGroup(rt.in(2*time.Hour), sp2)) })
 
 	err := resolver.Refresh(context.Background())
-	assert.Check(t, is.ErrorContains(err, first.URL))
-	assert.Check(t, !strings.Contains(err.Error(), second.URL))
+	assert.ErrorContains(t, err, first.URL)
+	assert.False(t, strings.Contains(err.Error(), second.URL))
 	isNotExist(t, resolver, sp3)
 
 	// When the first has expired, the second is what is left.
 	rt.clock.Advance(time.Hour + MaxClockSkew)
 	isNotExist(t, resolver, sp1)
-	assert.Check(t, is.Equal(sp2+"/acs", acs()))
+	assert.Equal(t, sp2+"/acs", acs())
 	isServed(t, resolver, "https://local.example.org")
 }
 
@@ -958,11 +959,11 @@ func TestMetadataResolverFilter(t *testing.T) {
 		}}},
 	})
 
-	assert.NilError(t, resolver.Refresh(context.Background()))
+	require.NoError(t, resolver.Refresh(context.Background()))
 	isServed(t, resolver, sp2)
 	isNotExist(t, resolver, sp1)
 	isNotExist(t, resolver, sp3)
-	assert.Check(t, is.Equal(1, resolver.Status()[0].Entities))
+	assert.Equal(t, 1, resolver.Status()[0].Entities)
 }
 
 func TestMetadataResolverLimitsTheSize(t *testing.T) {
@@ -972,17 +973,17 @@ func TestMetadataResolverLimitsTheSize(t *testing.T) {
 	server := newMetadataServer(t, body)
 	path := filepath.Join(t.TempDir(), "metadata.xml")
 
-	assert.NilError(t, os.WriteFile(path, []byte(body), 0o600))
+	require.NoError(t, os.WriteFile(path, []byte(body), 0o600))
 
 	for _, source := range []MetadataSource{{URL: server.URL, Verifier: rt.verifier}, {File: path}} {
 		resolver := rt.resolver(ServiceProviderMetadataResolverOptions{Sources: []MetadataSource{source}, MaxSize: int64(len(body)) - 1})
 
-		assert.Check(t, is.ErrorContains(resolver.Refresh(context.Background()), fmt.Sprintf("larger than %d bytes", len(body)-1)))
+		assert.ErrorContains(t, resolver.Refresh(context.Background()), fmt.Sprintf("larger than %d bytes", len(body)-1))
 		isNotExist(t, resolver, sp1)
 
 		resolver = rt.resolver(ServiceProviderMetadataResolverOptions{Sources: []MetadataSource{source}, MaxSize: int64(len(body))})
 
-		assert.Check(t, resolver.Refresh(context.Background()))
+		assert.NoError(t, resolver.Refresh(context.Background()))
 		isServed(t, resolver, sp1)
 	}
 }
@@ -1000,7 +1001,7 @@ func TestMetadataResolverFetchTimeout(t *testing.T) {
 		FetchTimeout: 50 * time.Millisecond,
 	})
 
-	assert.Check(t, is.ErrorContains(resolver.Refresh(context.Background()), "deadline exceeded"))
+	assert.ErrorContains(t, resolver.Refresh(context.Background()), "deadline exceeded")
 
 	// The context of the caller bounds it as well.
 	resolver = rt.resolver(ServiceProviderMetadataResolverOptions{
@@ -1010,7 +1011,7 @@ func TestMetadataResolverFetchTimeout(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 
-	assert.Check(t, is.ErrorContains(resolver.Refresh(ctx), "context canceled"))
+	assert.ErrorContains(t, resolver.Refresh(ctx), "context canceled")
 }
 
 func TestMetadataResolverConcurrentUse(t *testing.T) {
@@ -1023,7 +1024,7 @@ func TestMetadataResolverConcurrentUse(t *testing.T) {
 	server := newMetadataServer(t, bodies[0])
 	path := filepath.Join(t.TempDir(), "metadata.xml")
 
-	assert.NilError(t, os.WriteFile(path, []byte(testSPRoot("https://local.example.org", rt.in(time.Hour))), 0o600))
+	require.NoError(t, os.WriteFile(path, []byte(testSPRoot("https://local.example.org", rt.in(time.Hour))), 0o600))
 
 	resolver := rt.resolver(ServiceProviderMetadataResolverOptions{
 		Sources:            []MetadataSource{{URL: server.URL, Verifier: rt.verifier}, {File: path}},
@@ -1031,8 +1032,8 @@ func TestMetadataResolverConcurrentUse(t *testing.T) {
 		MaxRefreshInterval: time.Millisecond,
 	})
 
-	assert.NilError(t, resolver.Refresh(context.Background()))
-	assert.NilError(t, resolver.Start(context.Background()))
+	require.NoError(t, resolver.Refresh(context.Background()))
+	require.NoError(t, resolver.Start(context.Background()))
 
 	var wg sync.WaitGroup
 
@@ -1071,7 +1072,7 @@ func TestMetadataResolverConcurrentUse(t *testing.T) {
 	})
 
 	wg.Wait()
-	assert.Check(t, resolver.Close())
+	assert.NoError(t, resolver.Close())
 }
 
 func TestMetadataResolverLifecycle(t *testing.T) {
@@ -1101,35 +1102,35 @@ func TestMetadataResolverLifecycle(t *testing.T) {
 	// Close stops every goroutine, whether the resolver waits or not.
 	resolver := rt.resolver(options)
 
-	assert.NilError(t, resolver.Start(context.Background()))
+	require.NoError(t, resolver.Start(context.Background()))
 	rt.waitTimers(3)
-	assert.Check(t, goroutines() >= before+3)
+	assert.True(t, goroutines() >= before+3)
 
-	assert.Check(t, is.ErrorContains(resolver.Start(context.Background()), "already started"))
+	assert.ErrorContains(t, resolver.Start(context.Background()), "already started")
 
-	assert.NilError(t, resolver.Close())
-	assert.NilError(t, resolver.Close())
+	require.NoError(t, resolver.Close())
+	require.NoError(t, resolver.Close())
 	assertGoroutines(t, goroutines, before)
 
-	assert.Check(t, is.ErrorContains(resolver.Start(context.Background()), "closed"))
+	assert.ErrorContains(t, resolver.Start(context.Background()), "closed")
 
 	// What was loaded is still served, and Refresh still works.
 	isServed(t, resolver, sp1)
-	assert.Check(t, resolver.Refresh(context.Background()))
+	assert.NoError(t, resolver.Refresh(context.Background()))
 
 	// So does the end of the context it was started with.
 	resolver = rt.resolver(options)
 
 	ctx, cancel := context.WithCancel(context.Background())
 
-	assert.NilError(t, resolver.Start(ctx))
+	require.NoError(t, resolver.Start(ctx))
 	rt.waitTimers(3)
 	cancel()
 	assertGoroutines(t, goroutines, before)
-	assert.NilError(t, resolver.Close())
+	require.NoError(t, resolver.Close())
 
 	// A resolver that was never started can be closed.
-	assert.NilError(t, rt.resolver(options).Close())
+	require.NoError(t, rt.resolver(options).Close())
 }
 
 func assertGoroutines(t *testing.T, goroutines func() int, expected int) {
@@ -1141,7 +1142,7 @@ func assertGoroutines(t *testing.T, goroutines func() int, expected int) {
 		time.Sleep(time.Millisecond)
 	}
 
-	assert.Check(t, goroutines() <= expected, "%d goroutines, expected %d", goroutines(), expected)
+	assert.True(t, goroutines() <= expected, "%d goroutines, expected %d", goroutines(), expected)
 }
 
 // Close doesn't wait for a publisher that doesn't answer.
@@ -1160,7 +1161,7 @@ func TestMetadataResolverCloseAbortsAFetch(t *testing.T) {
 		Sources: []MetadataSource{{URL: server.URL, Verifier: rt.verifier}},
 	})
 
-	assert.NilError(t, resolver.Start(context.Background()))
+	require.NoError(t, resolver.Start(context.Background()))
 	<-started
 
 	closed := make(chan error, 1)
@@ -1169,12 +1170,12 @@ func TestMetadataResolverCloseAbortsAFetch(t *testing.T) {
 
 	select {
 	case err := <-closed:
-		assert.Check(t, err)
+		assert.NoError(t, err)
 	case <-time.After(10 * time.Second):
 		t.Fatal("Close didn't return")
 	}
 
-	assert.Check(t, is.ErrorContains(resolver.Status()[0].Err, "context canceled"))
+	assert.ErrorContains(t, resolver.Status()[0].Err, "context canceled")
 }
 
 func TestNewServiceProviderMetadataResolverRefuses(t *testing.T) {
@@ -1244,7 +1245,7 @@ func TestNewServiceProviderMetadataResolverRefuses(t *testing.T) {
 	for name, tc := range testCases {
 		t.Run(name, func(t *testing.T) {
 			_, err := NewServiceProviderMetadataResolver(tc.opts)
-			assert.Check(t, is.ErrorContains(err, tc.err))
+			assert.ErrorContains(t, err, tc.err)
 		})
 	}
 }
@@ -1259,21 +1260,21 @@ func TestMetadataResolverAsTheProviderOfAnIdentityProvider(t *testing.T) {
 		Sources: []MetadataSource{{URL: server.URL, Verifier: rt.verifier}},
 	})
 
-	assert.NilError(t, resolver.Refresh(context.Background()))
+	require.NoError(t, resolver.Refresh(context.Background()))
 
 	test.IDP.ServiceProviderProvider = resolver
 
 	metadata, err := test.IDP.serviceProvider(httptest.NewRequest(http.MethodGet, "/", nil), sp1)
-	assert.NilError(t, err)
-	assert.Check(t, is.Equal(sp1, metadata.EntityID))
+	require.NoError(t, err)
+	assert.Equal(t, sp1, metadata.EntityID)
 
 	_, err = test.IDP.serviceProvider(httptest.NewRequest(http.MethodGet, "/", nil), sp2)
-	assert.Check(t, errors.Is(err, os.ErrNotExist))
+	assert.True(t, errors.Is(err, os.ErrNotExist))
 
 	rt.clock.Advance(time.Hour + MaxClockSkew)
 
 	_, err = test.IDP.serviceProvider(httptest.NewRequest(http.MethodGet, "/", nil), sp1)
-	assert.Check(t, errors.Is(err, os.ErrNotExist))
+	assert.True(t, errors.Is(err, os.ErrNotExist))
 }
 
 // Without a Clock, the time is that of TimeNow, as for the rest of the package.
@@ -1281,14 +1282,14 @@ func TestMetadataResolverDefaultClockFollowsTimeNow(t *testing.T) {
 	rt := newResolverTest(t)
 	path := filepath.Join(t.TempDir(), "metadata.xml")
 
-	assert.NilError(t, os.WriteFile(path, []byte(testSPRoot(sp1, rt.in(time.Hour))), 0o600))
+	require.NoError(t, os.WriteFile(path, []byte(testSPRoot(sp1, rt.in(time.Hour))), 0o600))
 
 	resolver, err := NewServiceProviderMetadataResolver(ServiceProviderMetadataResolverOptions{Sources: []MetadataSource{{File: path}}})
-	assert.NilError(t, err)
+	require.NoError(t, err)
 
-	assert.NilError(t, resolver.Refresh(context.Background()))
+	require.NoError(t, resolver.Refresh(context.Background()))
 	isServed(t, resolver, sp1)
-	assert.Check(t, resolver.Status()[0].LastSuccess.Equal(rt.clock.Now()))
+	assert.True(t, resolver.Status()[0].LastSuccess.Equal(rt.clock.Now()))
 
 	rt.clock.Advance(time.Hour + MaxClockSkew)
 	isNotExist(t, resolver, sp1)

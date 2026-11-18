@@ -9,8 +9,8 @@ import (
 	"io"
 	"testing"
 
-	"gotest.tools/assert"
-	is "gotest.tools/assert/cmp"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 // opaqueDecrypter is a key which is not an *rsa.PrivateKey, as one in a hardware security module is not. It records
@@ -44,20 +44,20 @@ func TestDecryptWithOpaqueDecrypter(t *testing.T) {
 	} {
 		t.Run(name, func(t *testing.T) {
 			el, err := tc.encrypter.Encrypt(cert, []byte("plaintext"), nil)
-			assert.NilError(t, err)
+			require.NoError(t, err)
 
 			decrypter := &opaqueDecrypter{key: key, public: key.Public()}
 
 			plaintext, err := Decrypt(decrypter, el)
-			assert.NilError(t, err)
-			assert.Check(t, is.Equal("plaintext", string(plaintext)))
+			require.NoError(t, err)
+			assert.Equal(t, "plaintext", string(plaintext))
 
-			assert.Assert(t, is.Len(decrypter.opts, 1))
+			require.Len(t, decrypter.opts, 1)
 			opts, ok := decrypter.opts[0].(*rsa.OAEPOptions)
-			assert.Assert(t, ok)
-			assert.Check(t, is.Equal(tc.hash, opts.Hash))
-			assert.Check(t, is.Equal(tc.mgfHash, opts.MGFHash))
-			assert.Check(t, is.Len(opts.Label, 0))
+			require.True(t, ok)
+			assert.Equal(t, tc.hash, opts.Hash)
+			assert.Equal(t, tc.mgfHash, opts.MGFHash)
+			assert.Len(t, opts.Label, 0)
 		})
 	}
 }
@@ -67,10 +67,10 @@ func TestDecryptRefusesKeyThatIsNotRSA(t *testing.T) {
 	key, cert := newDigestTestKey(t)
 
 	el, err := OAEP().Encrypt(cert, []byte("plaintext"), nil)
-	assert.NilError(t, err)
+	require.NoError(t, err)
 
 	ecdsaKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
-	assert.NilError(t, err)
+	require.NoError(t, err)
 
 	var nilKey *rsa.PrivateKey
 
@@ -82,10 +82,10 @@ func TestDecryptRefusesKeyThatIsNotRSA(t *testing.T) {
 	} {
 		t.Run(name, func(t *testing.T) {
 			_, err := Decrypt(k, el)
-			assert.Check(t, is.Error(err, "expected key to be a *rsa.PrivateKey"))
+			assert.EqualError(t, err, "expected key to be a *rsa.PrivateKey")
 
 			if decrypter, ok := k.(*opaqueDecrypter); ok {
-				assert.Check(t, is.Len(decrypter.opts, 0))
+				assert.Len(t, decrypter.opts, 0)
 			}
 		})
 	}

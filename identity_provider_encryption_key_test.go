@@ -22,8 +22,8 @@ import (
 	"time"
 
 	"github.com/beevik/etree"
-	"gotest.tools/assert"
-	is "gotest.tools/assert/cmp"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 // encryptionTestKeys are RSA-2048 keys which the tests of the encryption keys share, as they are slow to make.
@@ -57,9 +57,9 @@ func encryptionTestCertificate(t *testing.T, key crypto.Signer, commonName strin
 	}
 
 	der, err := x509.CreateCertificate(rand.Reader, template, template, key.Public(), key)
-	assert.NilError(t, err)
+	require.NoError(t, err)
 	cert, err := x509.ParseCertificate(der)
-	assert.NilError(t, err)
+	require.NoError(t, err)
 
 	return cert
 }
@@ -117,7 +117,7 @@ func metadataString(t *testing.T, idp *IdentityProvider) string {
 	t.Helper()
 
 	buf, err := xml.Marshal(idp.Metadata())
-	assert.NilError(t, err)
+	require.NoError(t, err)
 
 	return string(buf)
 }
@@ -128,29 +128,29 @@ func TestIDPMetadataPublishesSeparateEncryptionKey(t *testing.T) {
 	test := NewIdentityProviderTest(t, applyKey)
 	test.IDP.EncryptionCertificate, test.IDP.EncryptionKey = current.Certificate, current.Key
 
-	assert.NilError(t, test.IDP.CheckEncryptionKeys())
+	require.NoError(t, test.IDP.CheckEncryptionKeys())
 
 	descriptors := test.IDP.Metadata().IDPSSODescriptors[0].KeyDescriptors
-	assert.Assert(t, is.DeepEqual([]string{"signing", "encryption"}, keyDescriptorUses(descriptors)))
+	require.Equal(t, []string{"signing", "encryption"}, keyDescriptorUses(descriptors))
 
 	// The signing key is only for signing, and the encryption key is the only key to encrypt to.
-	assert.Check(t, is.Equal(encodeCertificate(test.Certificate), descriptors[0].KeyInfo.X509Data.X509Certificates[0].Data))
-	assert.Check(t, is.Len(descriptors[0].EncryptionMethods, 0))
-	assert.Assert(t, is.Len(descriptors[1].KeyInfo.X509Data.X509Certificates, 1))
-	assert.Check(t, is.Equal(encodeCertificate(current.Certificate), descriptors[1].KeyInfo.X509Data.X509Certificates[0].Data))
-	assert.Check(t, is.DeepEqual(test.IDP.encryptionMethods(), descriptors[1].EncryptionMethods))
-	assert.Check(t, len(descriptors[1].EncryptionMethods) != 0)
+	assert.Equal(t, encodeCertificate(test.Certificate), descriptors[0].KeyInfo.X509Data.X509Certificates[0].Data)
+	assert.Len(t, descriptors[0].EncryptionMethods, 0)
+	require.Len(t, descriptors[1].KeyInfo.X509Data.X509Certificates, 1)
+	assert.Equal(t, encodeCertificate(current.Certificate), descriptors[1].KeyInfo.X509Data.X509Certificates[0].Data)
+	assert.Equal(t, test.IDP.encryptionMethods(), descriptors[1].EncryptionMethods)
+	assert.True(t, len(descriptors[1].EncryptionMethods) != 0)
 }
 
 // Without an encryption key of its own, the identity provider is encrypted to with its RSA signing key, as before.
 func TestIDPMetadataEncryptionKeyFallsBackToSigningKey(t *testing.T) {
 	test := NewIdentityProviderTest(t, applyKey)
 
-	assert.NilError(t, test.IDP.CheckEncryptionKeys())
+	require.NoError(t, test.IDP.CheckEncryptionKeys())
 
 	descriptors := test.IDP.Metadata().IDPSSODescriptors[0].KeyDescriptors
-	assert.Assert(t, is.DeepEqual([]string{"signing", "encryption"}, keyDescriptorUses(descriptors)))
-	assert.Check(t, is.Equal(encodeCertificate(test.Certificate), descriptors[1].KeyInfo.X509Data.X509Certificates[0].Data))
+	require.Equal(t, []string{"signing", "encryption"}, keyDescriptorUses(descriptors))
+	assert.Equal(t, encodeCertificate(test.Certificate), descriptors[1].KeyInfo.X509Data.X509Certificates[0].Data)
 }
 
 // A signing certificate which states what its key is for, and not that it is for encrypting keys, is not
@@ -170,7 +170,7 @@ func TestIDPMetadataFallbackRespectsKeyUsage(t *testing.T) {
 			test.IDP.Key = key
 			test.IDP.Certificate = encryptionTestCertificate(t, key, "idp", func(c *x509.Certificate) { c.KeyUsage = tc.usage })
 
-			assert.Check(t, is.DeepEqual(tc.expected, keyDescriptorUses(test.IDP.Metadata().IDPSSODescriptors[0].KeyDescriptors)))
+			assert.Equal(t, tc.expected, keyDescriptorUses(test.IDP.Metadata().IDPSSODescriptors[0].KeyDescriptors))
 		})
 	}
 }
@@ -192,14 +192,14 @@ func TestIDPMetadataEncryptionKeyWithSigningKeyThatCannotDecrypt(t *testing.T) {
 			test := NewIdentityProviderTest(t, applyKey)
 			configure(t, test)
 
-			assert.Check(t, is.DeepEqual([]string{"signing"}, keyDescriptorUses(test.IDP.Metadata().IDPSSODescriptors[0].KeyDescriptors)))
+			assert.Equal(t, []string{"signing"}, keyDescriptorUses(test.IDP.Metadata().IDPSSODescriptors[0].KeyDescriptors))
 
 			test.IDP.EncryptionCertificate, test.IDP.EncryptionKey = current.Certificate, &countingDecrypter{key: encryptionTestKeys()[0]}
 
 			descriptors := test.IDP.Metadata().IDPSSODescriptors[0].KeyDescriptors
-			assert.Assert(t, is.DeepEqual([]string{"signing", "encryption"}, keyDescriptorUses(descriptors)))
-			assert.Check(t, is.Equal(encodeCertificate(test.IDP.Certificate), descriptors[0].KeyInfo.X509Data.X509Certificates[0].Data))
-			assert.Check(t, is.Equal(encodeCertificate(current.Certificate), descriptors[1].KeyInfo.X509Data.X509Certificates[0].Data))
+			require.Equal(t, []string{"signing", "encryption"}, keyDescriptorUses(descriptors))
+			assert.Equal(t, encodeCertificate(test.IDP.Certificate), descriptors[0].KeyInfo.X509Data.X509Certificates[0].Data)
+			assert.Equal(t, encodeCertificate(current.Certificate), descriptors[1].KeyInfo.X509Data.X509Certificates[0].Data)
 		})
 	}
 }
@@ -221,18 +221,18 @@ func TestIDPMetadataDoesNotPublishDecryptionKeys(t *testing.T) {
 				expected = current.Certificate
 			}
 
-			assert.NilError(t, idp.CheckEncryptionKeys())
+			require.NoError(t, idp.CheckEncryptionKeys())
 
 			metadata := idp.Metadata()
 
 			encryption := encryptionKeyDescriptors(metadata.IDPSSODescriptors[0].KeyDescriptors)
-			assert.Assert(t, is.Len(encryption, 1))
-			assert.Check(t, is.Equal(encodeCertificate(expected), encryption[0].KeyInfo.X509Data.X509Certificates[0].Data))
-			assert.Check(t, !strings.Contains(metadataString(t, idp), encodeCertificate(previous.Certificate)))
+			require.Len(t, encryption, 1)
+			assert.Equal(t, encodeCertificate(expected), encryption[0].KeyInfo.X509Data.X509Certificates[0].Data)
+			assert.False(t, strings.Contains(metadataString(t, idp), encodeCertificate(previous.Certificate)))
 
 			// Nothing is encrypted to the authorities that answer queries.
-			assert.Check(t, is.Len(encryptionKeyDescriptors(metadata.AttributeAuthorityDescriptors[0].KeyDescriptors), 0))
-			assert.Check(t, is.Len(encryptionKeyDescriptors(metadata.AuthnAuthorityDescriptors[0].KeyDescriptors), 0))
+			assert.Len(t, encryptionKeyDescriptors(metadata.AttributeAuthorityDescriptors[0].KeyDescriptors), 0)
+			assert.Len(t, encryptionKeyDescriptors(metadata.AuthnAuthorityDescriptors[0].KeyDescriptors), 0)
 		})
 	}
 }
@@ -361,20 +361,20 @@ func TestIDPCheckEncryptionKeys(t *testing.T) {
 			test.IDP.ServeMetadata(w, httptest.NewRequest(http.MethodGet, "https://idp.example.com/saml/metadata", nil))
 
 			if tc.err == "" {
-				assert.NilError(t, err)
-				assert.Check(t, is.Equal(http.StatusOK, w.Code))
+				require.NoError(t, err)
+				assert.Equal(t, http.StatusOK, w.Code)
 
 				return
 			}
 
-			assert.Check(t, is.Error(err, tc.err))
+			assert.EqualError(t, err, tc.err)
 
 			// Keys that are not valid are neither published nor decrypted with, and no other key takes their place.
-			assert.Check(t, is.Equal(http.StatusInternalServerError, w.Code))
-			assert.Check(t, is.DeepEqual([]string{"signing"}, keyDescriptorUses(test.IDP.Metadata().IDPSSODescriptors[0].KeyDescriptors)))
+			assert.Equal(t, http.StatusInternalServerError, w.Code)
+			assert.Equal(t, []string{"signing"}, keyDescriptorUses(test.IDP.Metadata().IDPSSODescriptors[0].KeyDescriptors))
 
 			_, err = test.IDP.elementDecrypter()
-			assert.Check(t, is.Error(err, tc.err))
+			assert.EqualError(t, err, tc.err)
 		})
 	}
 }
@@ -440,17 +440,17 @@ func TestServeLogoutRequestWithEncryptedIDToEachKey(t *testing.T) {
 						SPNameQualifier: test.SP.MetadataURL.String(),
 						Value:           "alice",
 					})
-					assert.NilError(t, err)
+					require.NoError(t, err)
 
 					request.NameID, request.EncryptedID = nil, encryptedID
 				})
-				assert.Check(t, is.Equal(StatusSuccess, status.StatusCode.Value))
+				assert.Equal(t, StatusSuccess, status.StatusCode.Value)
 
-				assert.Assert(t, is.Len(provider.lookups, 1))
-				assert.Check(t, provider.lookups[0].NameIDEncrypted)
-				assert.Check(t, !provider.lookups[0].Unidentified)
-				assert.Check(t, is.Equal("alice", provider.lookups[0].Request.NameID.Value))
-				assert.Check(t, is.Len(provider.terminated, 1))
+				require.Len(t, provider.lookups, 1)
+				assert.True(t, provider.lookups[0].NameIDEncrypted)
+				assert.False(t, provider.lookups[0].Unidentified)
+				assert.Equal(t, "alice", provider.lookups[0].Request.NameID.Value)
+				assert.Len(t, provider.terminated, 1)
 			})
 		}
 	}
@@ -469,19 +469,19 @@ func TestManageNameIDEncryptedToEachKey(t *testing.T) {
 					var err error
 
 					request.EncryptedID, err = encrypter.encryptNameID(request.NameID)
-					assert.NilError(t, err)
+					require.NoError(t, err)
 					request.NewEncryptedID, err = encrypter.encryptNewID("sp-secret-alias")
-					assert.NilError(t, err)
+					require.NoError(t, err)
 				}})
-				assert.Assert(t, result.Response != nil, "HTTP status %d", result.Code)
+				require.True(t, result.Response != nil, "HTTP status %d", result.Code)
 				checkStatus(t, result.Response.Status, StatusSuccess, "")
 
-				assert.Assert(t, is.Len(provider.calls, 1))
-				assert.Check(t, is.Equal(provider.calls[0].SPProvidedID, "sp-secret-alias"))
-				assert.Check(t, is.DeepEqual(provider.calls[0].NameID, *testNameID(test, &test.SP)))
-				assert.Check(t, provider.calls[0].Request.NameIDEncrypted)
-				assert.Check(t, provider.calls[0].Request.NewIDEncrypted)
-				assert.Check(t, !provider.calls[0].Request.Unidentified)
+				require.Len(t, provider.calls, 1)
+				assert.Equal(t, provider.calls[0].SPProvidedID, "sp-secret-alias")
+				assert.Equal(t, provider.calls[0].NameID, *testNameID(test, &test.SP))
+				assert.True(t, provider.calls[0].Request.NameIDEncrypted)
+				assert.True(t, provider.calls[0].Request.NewIDEncrypted)
+				assert.False(t, provider.calls[0].Request.Unidentified)
 			})
 		}
 	}
@@ -497,13 +497,13 @@ func TestNameIDMappingWithEncryptedIDToEachKey(t *testing.T) {
 				var err error
 
 				request.EncryptedID, err = encrypterToCertificate(t, f.test, cert).encryptNameID(request.NameID)
-				assert.NilError(t, err)
+				require.NoError(t, err)
 			}})
 			checkStatus(t, result.Response.Status, StatusSuccess, "")
 
-			assert.Assert(t, is.Len(f.provider.calls, 1))
-			assert.Check(t, f.provider.calls[0].NameIDEncrypted)
-			assert.Check(t, is.DeepEqual(*f.provider.calls[0].Request.NameID, *testNameID(f.test, f.a)))
+			require.Len(t, f.provider.calls, 1)
+			assert.True(t, f.provider.calls[0].NameIDEncrypted)
+			assert.Equal(t, *f.provider.calls[0].Request.NameID, *testNameID(f.test, f.a))
 		})
 	}
 }
@@ -524,16 +524,16 @@ func TestManagedPersistentNameIDProviderWithDecryptionKey(t *testing.T) {
 			request.NameID = issued
 			request.NameIDPolicy = &NameIDPolicy{SPNameQualifier: &target, AllowCreate: &allow}
 			request.EncryptedID, err = encrypterToCertificate(t, f.test, cert).encryptNameID(issued)
-			assert.NilError(t, err)
+			require.NoError(t, err)
 		}})
 		checkStatus(t, result.Response.Status, StatusSuccess, "")
 
 		mapped, err := f.b.DecryptNameID(reparse(t, result.Element.FindElement("./EncryptedID")))
-		assert.NilError(t, err)
+		require.NoError(t, err)
 
 		want, err := provider.NameID(nil, persistentRequest(target, false), &Session{UserName: "alice"})
-		assert.NilError(t, err)
-		assert.Check(t, is.DeepEqual(mapped, want))
+		require.NoError(t, err)
+		assert.Equal(t, mapped, want)
 	})
 
 	for binding, send := range manageNameIDBindings {
@@ -548,16 +548,16 @@ func TestManagedPersistentNameIDProviderWithDecryptionKey(t *testing.T) {
 
 				request.NameID = issued
 				request.EncryptedID, err = encrypter.encryptNameID(issued)
-				assert.NilError(t, err)
+				require.NoError(t, err)
 				request.NewEncryptedID, err = encrypter.encryptNewID("sp-secret-alias")
-				assert.NilError(t, err)
+				require.NoError(t, err)
 			}})
-			assert.Assert(t, result.Response != nil, "HTTP status %d", result.Code)
+			require.True(t, result.Response != nil, "HTTP status %d", result.Code)
 			checkStatus(t, result.Response.Status, StatusSuccess, "")
 
 			alias, err := provider.SPProvidedID(nil, test.SP.MetadataURL.String(), issued)
-			assert.NilError(t, err)
-			assert.Check(t, is.Equal(alias, "sp-secret-alias"))
+			require.NoError(t, err)
+			assert.Equal(t, alias, "sp-secret-alias")
 		})
 	}
 }
@@ -580,7 +580,7 @@ func TestServeLogoutRequestUndecryptableWithSeveralKeys(t *testing.T) {
 
 				status := send(t, test, func(request *LogoutRequest) {
 					encryptedID, err := encrypterToCertificate(t, test, stranger).encryptNameID(&NameID{Value: "alice"})
-					assert.NilError(t, err)
+					require.NoError(t, err)
 
 					if !hint {
 						keyInfo := encryptedID.FindElement("./EncryptedData/KeyInfo/EncryptedKey/KeyInfo")
@@ -589,13 +589,13 @@ func TestServeLogoutRequestUndecryptableWithSeveralKeys(t *testing.T) {
 
 					request.NameID, request.EncryptedID = nil, encryptedID
 				})
-				assert.Check(t, is.DeepEqual(unknown, status))
-				assert.Check(t, statusSaysNothingOfTheRequest(status))
-				assert.Check(t, status.StatusDetail == nil)
+				assert.Equal(t, unknown, status)
+				assert.True(t, statusSaysNothingOfTheRequest(status))
+				assert.Nil(t, status.StatusDetail)
 
-				assert.Assert(t, is.Len(provider.lookups, 1))
-				assert.Check(t, provider.lookups[0].Unidentified)
-				assert.Check(t, is.Len(provider.terminated, 0))
+				require.Len(t, provider.lookups, 1)
+				assert.True(t, provider.lookups[0].Unidentified)
+				assert.Len(t, provider.terminated, 0)
 			})
 		}
 	}
@@ -635,10 +635,10 @@ func encryptWithKeyInfo(t *testing.T, cert *x509.Certificate, keyInfo func(paren
 	encrypter.certificate = cert
 
 	el, err := encrypter.encryptNameID(&testEncryptedNameID)
-	assert.NilError(t, err)
+	require.NoError(t, err)
 
 	keyInfoEl := el.FindElement("./EncryptedData/KeyInfo/EncryptedKey/KeyInfo")
-	assert.Assert(t, keyInfoEl != nil)
+	require.NotNil(t, keyInfoEl)
 
 	if keyInfo == nil {
 		keyInfoEl.Parent().RemoveChild(keyInfoEl)
@@ -773,9 +773,9 @@ func TestElementDecrypterSelectsKeyByKeyInfo(t *testing.T) {
 			decrypter, counters, certs := countedKeys(t, commonNames...)
 
 			nameID, err := decrypter.decryptNameID(encryptWithKeyInfo(t, certs[1], tc.keyInfo(certs[1])))
-			assert.NilError(t, err)
-			assert.Check(t, is.DeepEqual(testEncryptedNameID, *nameID))
-			assert.Check(t, is.DeepEqual(tc.expected, calls(counters)))
+			require.NoError(t, err)
+			assert.Equal(t, testEncryptedNameID, *nameID)
+			assert.Equal(t, tc.expected, calls(counters))
 		})
 	}
 }
@@ -804,13 +804,13 @@ func TestElementDecrypterTriesEveryCandidateKey(t *testing.T) {
 
 			nameID, err := decrypter.decryptNameID(encryptWithKeyInfo(t, cert, nil))
 			if tc.err {
-				assert.Check(t, is.Error(err, "failed to decrypt key from response: crypto/rsa: decryption error"))
+				assert.EqualError(t, err, "failed to decrypt key from response: crypto/rsa: decryption error")
 			} else {
-				assert.NilError(t, err)
-				assert.Check(t, is.DeepEqual(testEncryptedNameID, *nameID))
+				require.NoError(t, err)
+				assert.Equal(t, testEncryptedNameID, *nameID)
 			}
 
-			assert.Check(t, is.DeepEqual([]int{1, 1}, calls(counters)))
+			assert.Equal(t, []int{1, 1}, calls(counters))
 		})
 	}
 
@@ -819,11 +819,11 @@ func TestElementDecrypterTriesEveryCandidateKey(t *testing.T) {
 		decrypter, counters, _ := countedKeys(t, "first", "second")
 
 		el, err := testElementEncrypter(t, method(aes128GCM)).encryptNameID(&testEncryptedNameID)
-		assert.NilError(t, err)
+		require.NoError(t, err)
 
 		_, err = decrypter.decryptNameID(reparse(t, el))
-		assert.Check(t, is.Error(err, "failed to decrypt key from response: certificate does not match provided key"))
-		assert.Check(t, is.DeepEqual([]int{0, 0}, calls(counters)))
+		assert.EqualError(t, err, "failed to decrypt key from response: certificate does not match provided key")
+		assert.Equal(t, []int{0, 0}, calls(counters))
 	})
 }
 
@@ -839,10 +839,10 @@ func TestIDPEncryptionKeyRollover(t *testing.T) {
 	published := func() string {
 		t.Helper()
 
-		assert.NilError(t, test.IDP.CheckEncryptionKeys())
+		require.NoError(t, test.IDP.CheckEncryptionKeys())
 
 		encryption := encryptionKeyDescriptors(test.IDP.Metadata().IDPSSODescriptors[0].KeyDescriptors)
-		assert.Assert(t, is.Len(encryption, 1))
+		require.Len(t, encryption, 1)
 
 		return encryption[0].KeyInfo.X509Data.X509Certificates[0].Data
 	}
@@ -854,47 +854,47 @@ func TestIDPEncryptionKeyRollover(t *testing.T) {
 
 		before := len(provider.lookups)
 		status := encryptedLogoutBindings["post"](t, test, func(request *LogoutRequest) {
-			assert.Assert(t, request.EncryptedID != nil)
+			require.NotNil(t, request.EncryptedID)
 		})
-		assert.Check(t, is.Equal(StatusSuccess, status.StatusCode.Value))
-		assert.Assert(t, is.Len(provider.lookups, before+1))
+		assert.Equal(t, StatusSuccess, status.StatusCode.Value)
+		require.Len(t, provider.lookups, before+1)
 
 		return !provider.lookups[before].Unidentified
 	}
 
-	assert.Check(t, is.Equal(encodeCertificate(old.Certificate), published()))
-	assert.Check(t, logout())
+	assert.Equal(t, encodeCertificate(old.Certificate), published())
+	assert.True(t, logout())
 
 	// 1. The next key is loaded. It is not published, and what is encrypted to it is already decrypted, as another
 	// instance of the identity provider may publish it first.
 	test.IDP.DecryptionKeys = []DecryptionKey{next}
 	stale := test.SP.IDPMetadata
 
-	assert.Check(t, is.Equal(encodeCertificate(old.Certificate), published()))
-	assert.Check(t, !strings.Contains(metadataString(t, &test.IDP), encodeCertificate(next.Certificate)))
-	assert.Check(t, logout())
+	assert.Equal(t, encodeCertificate(old.Certificate), published())
+	assert.False(t, strings.Contains(metadataString(t, &test.IDP), encodeCertificate(next.Certificate)))
+	assert.True(t, logout())
 
 	// 2. The switch. The service provider still holds the old metadata, and is still understood.
 	test.IDP.EncryptionCertificate, test.IDP.EncryptionKey = next.Certificate, next.Key
 	test.IDP.DecryptionKeys = []DecryptionKey{old}
 
-	assert.Check(t, is.Equal(encodeCertificate(next.Certificate), published()))
-	assert.Check(t, !strings.Contains(metadataString(t, &test.IDP), encodeCertificate(old.Certificate)))
-	assert.Check(t, logout())
+	assert.Equal(t, encodeCertificate(next.Certificate), published())
+	assert.False(t, strings.Contains(metadataString(t, &test.IDP), encodeCertificate(old.Certificate)))
+	assert.True(t, logout())
 
 	// It refreshes the metadata, and encrypts to the next key.
 	test.SP.IDPMetadata = test.IDP.Metadata()
 
-	assert.Check(t, logout())
+	assert.True(t, logout())
 
 	// 3. The old key is retired. A service provider with the current metadata is not affected, and one which
 	// still encrypts to the old key no longer names anybody.
 	test.IDP.DecryptionKeys = nil
 
-	assert.Check(t, is.Equal(encodeCertificate(next.Certificate), published()))
-	assert.Check(t, logout())
+	assert.Equal(t, encodeCertificate(next.Certificate), published())
+	assert.True(t, logout())
 
 	test.SP.IDPMetadata = stale
 
-	assert.Check(t, !logout())
+	assert.False(t, logout())
 }

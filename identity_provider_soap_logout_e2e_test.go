@@ -7,8 +7,8 @@ import (
 	"testing"
 	"time"
 
-	"gotest.tools/assert"
-	is "gotest.tools/assert/cmp"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 // newSOAPPropagationFixture is newSOAPLogoutFixture with the SOAP logout URL set, so that A can log out over SOAP.
@@ -38,7 +38,7 @@ func (f *propagationFixture) serveSOAPLogoutFromA(t *testing.T) *LogoutResponse 
 	r, id := soapLogoutRequest(t, f.a, nil)
 
 	response := soapLogoutResponse(t, serveSOAPLogout(f.test, r))
-	assert.Check(t, is.Equal(response.InResponseTo, id))
+	assert.Equal(t, response.InResponseTo, id)
 
 	return response
 }
@@ -50,17 +50,17 @@ func TestServeSOAPLogoutPropagatesToSOAPParticipant(t *testing.T) {
 	assertLogoutStatus(t, response, StatusSuccess, "")
 
 	received := recorder.Received()
-	assert.Assert(t, is.Len(received, 1))
-	assert.Assert(t, received[0].Request != nil)
-	assert.Assert(t, received[0].Request.NameID != nil)
-	assert.Check(t, is.Equal(received[0].Request.NameID.Value, "alice"))
-	assert.Check(t, is.Equal(received[0].Request.NameID.SPNameQualifier, f.b.MetadataURL.String()))
-	assert.Check(t, is.DeepEqual(received[0].Request.SessionIndexes, []SessionIndex{{Value: "index-one"}}))
+	require.Len(t, received, 1)
+	require.NotNil(t, received[0].Request)
+	require.NotNil(t, received[0].Request.NameID)
+	assert.Equal(t, received[0].Request.NameID.Value, "alice")
+	assert.Equal(t, received[0].Request.NameID.SPNameQualifier, f.b.MetadataURL.String())
+	assert.Equal(t, received[0].Request.SessionIndexes, []SessionIndex{{Value: "index-one"}})
 
-	assert.Check(t, is.DeepEqual(f.provider.calls, []string{"participants session-one", "terminate session-one", "logout B"}))
-	assert.Check(t, is.DeepEqual(f.provider.terminated, []*Session{f.session}))
-	assert.Check(t, is.Len(f.provider.states, 0))
-	assert.Check(t, f.provider.result == nil, "the service provider is answered, not the result handler")
+	assert.Equal(t, f.provider.calls, []string{"participants session-one", "terminate session-one", "logout B"})
+	assert.Equal(t, f.provider.terminated, []*Session{f.session})
+	assert.Len(t, f.provider.states, 0)
+	assert.True(t, f.provider.result == nil, "the service provider is answered, not the result handler")
 }
 
 func TestServeSOAPLogoutSkipsFrontChannelParticipant(t *testing.T) {
@@ -70,8 +70,8 @@ func TestServeSOAPLogoutSkipsFrontChannelParticipant(t *testing.T) {
 	response := f.serveSOAPLogoutFromA(t)
 	assertLogoutStatus(t, response, StatusSuccess, StatusPartialLogout)
 
-	assert.Check(t, is.Len(recorder.Received(), 0))
-	assert.Check(t, is.DeepEqual(f.provider.terminated, []*Session{f.session}))
+	assert.Len(t, recorder.Received(), 0)
+	assert.Equal(t, f.provider.terminated, []*Session{f.session})
 }
 
 func TestServeSOAPLogoutParticipantFails(t *testing.T) {
@@ -84,8 +84,8 @@ func TestServeSOAPLogoutParticipantFails(t *testing.T) {
 	response := f.serveSOAPLogoutFromA(t)
 	assertLogoutStatus(t, response, StatusSuccess, StatusPartialLogout)
 
-	assert.Check(t, is.Len(recorder.Received(), 1))
-	assert.Check(t, is.DeepEqual(f.provider.terminated, []*Session{f.session}))
+	assert.Len(t, recorder.Received(), 1)
+	assert.Equal(t, f.provider.terminated, []*Session{f.session})
 }
 
 func TestServeSOAPLogoutWithoutLogoutStateProvider(t *testing.T) {
@@ -95,8 +95,8 @@ func TestServeSOAPLogoutWithoutLogoutStateProvider(t *testing.T) {
 	response := f.serveSOAPLogoutFromA(t)
 	assertLogoutStatus(t, response, StatusSuccess, "")
 
-	assert.Check(t, is.Len(recorder.Received(), 1))
-	assert.Check(t, is.DeepEqual(f.provider.terminated, []*Session{f.session}))
+	assert.Len(t, recorder.Received(), 1)
+	assert.Equal(t, f.provider.terminated, []*Session{f.session})
 }
 
 func TestServeSOAPLogoutParticipantsError(t *testing.T) {
@@ -106,8 +106,8 @@ func TestServeSOAPLogoutParticipantsError(t *testing.T) {
 	response := f.serveSOAPLogoutFromA(t)
 	assertLogoutStatus(t, response, StatusSuccess, StatusPartialLogout)
 
-	assert.Check(t, is.Len(recorder.Received(), 0))
-	assert.Check(t, is.DeepEqual(f.provider.terminated, []*Session{f.session}))
+	assert.Len(t, recorder.Received(), 0)
+	assert.Equal(t, f.provider.terminated, []*Session{f.session})
 }
 
 func TestServeSOAPLogoutTerminationFailsStillPropagates(t *testing.T) {
@@ -117,8 +117,8 @@ func TestServeSOAPLogoutTerminationFailsStillPropagates(t *testing.T) {
 	response := f.serveSOAPLogoutFromA(t)
 	assertLogoutStatus(t, response, StatusResponder, "")
 
-	assert.Check(t, is.Len(recorder.Received(), 1))
-	assert.Check(t, is.DeepEqual(f.provider.calls, []string{"participants session-one", "terminate session-one", "logout B"}))
+	assert.Len(t, recorder.Received(), 1)
+	assert.Equal(t, f.provider.calls, []string{"participants session-one", "terminate session-one", "logout B"})
 }
 
 func TestServeSOAPLogoutPropagatesToSOAPParticipantsInOrder(t *testing.T) {
@@ -149,7 +149,7 @@ func TestServeSOAPLogoutPropagatesToSOAPParticipantsInOrder(t *testing.T) {
 
 	// C joined the session before B, so it is logged out first.
 	participants := f.provider.participants[f.session.ID]
-	assert.Assert(t, is.Len(participants, 2))
+	require.Len(t, participants, 2)
 
 	participantC := participants[1]
 	participantC.ServiceProviderEntityID = c.MetadataURL.String()
@@ -160,13 +160,13 @@ func TestServeSOAPLogoutPropagatesToSOAPParticipantsInOrder(t *testing.T) {
 	response := f.serveSOAPLogoutFromA(t)
 	assertLogoutStatus(t, response, StatusSuccess, "")
 
-	assert.Check(t, is.DeepEqual(f.provider.calls, []string{"participants session-one", "terminate session-one", "logout C", "logout B"}))
-	assert.Check(t, is.Len(recorder.Received(), 1))
+	assert.Equal(t, f.provider.calls, []string{"participants session-one", "terminate session-one", "logout C", "logout B"})
+	assert.Len(t, recorder.Received(), 1)
 
 	receivedC := recorderC.Received()
-	assert.Assert(t, is.Len(receivedC, 1))
-	assert.Assert(t, receivedC[0].Request != nil)
-	assert.Check(t, is.Equal(receivedC[0].Request.Destination, c.SloURL.String()))
-	assert.Assert(t, receivedC[0].Request.NameID != nil)
-	assert.Check(t, is.Equal(receivedC[0].Request.NameID.SPNameQualifier, c.MetadataURL.String()))
+	require.Len(t, receivedC, 1)
+	require.NotNil(t, receivedC[0].Request)
+	assert.Equal(t, receivedC[0].Request.Destination, c.SloURL.String())
+	require.NotNil(t, receivedC[0].Request.NameID)
+	assert.Equal(t, receivedC[0].Request.NameID.SPNameQualifier, c.MetadataURL.String())
 }

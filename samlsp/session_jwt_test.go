@@ -3,8 +3,8 @@ package samlsp
 import (
 	"testing"
 
-	"gotest.tools/assert"
-	is "gotest.tools/assert/cmp"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"authelia.com/provider/jose"
 
@@ -15,8 +15,8 @@ func TestJWTSessionCodecRoundTrip(t *testing.T) {
 	codec := newTestSessionCodec(t)
 
 	session, err := codec.Decode(encodeTestSession(t, codec))
-	assert.NilError(t, err)
-	assert.Check(t, is.Equal("alice", session.(JWTSessionClaims).Subject))
+	require.NoError(t, err)
+	assert.Equal(t, "alice", session.(JWTSessionClaims).Subject)
 }
 
 func TestJWTSessionCodecDecodeRejects(t *testing.T) {
@@ -61,7 +61,7 @@ func TestJWTSessionCodecDecodeRejects(t *testing.T) {
 			name: "tracked request",
 			encode: func(t *testing.T, codec JWTSessionCodec) string {
 				token, err := JWTTrackedRequestCodec(codec).Encode(TrackedRequest{Index: "alice", SAMLRequestID: "id-1", URI: "/"})
-				assert.NilError(t, err)
+				require.NoError(t, err)
 
 				return token
 			},
@@ -74,7 +74,7 @@ func TestJWTSessionCodecDecodeRejects(t *testing.T) {
 			codec := newTestSessionCodec(t)
 
 			_, err := codec.Decode(tc.encode(t, codec))
-			assert.Check(t, is.Error(err, tc.err))
+			assert.EqualError(t, err, tc.err)
 		})
 	}
 }
@@ -90,9 +90,9 @@ func newTestSessionCodec(t *testing.T) JWTSessionCodec {
 
 func encodeTestSession(t *testing.T, codec JWTSessionCodec) string {
 	session, err := codec.New(&saml.Assertion{Subject: &saml.Subject{NameID: &saml.NameID{Value: "alice"}}})
-	assert.NilError(t, err)
+	require.NoError(t, err)
 	token, err := codec.Encode(session)
-	assert.NilError(t, err)
+	require.NoError(t, err)
 
 	return token
 }

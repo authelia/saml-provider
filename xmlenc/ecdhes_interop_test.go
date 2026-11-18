@@ -12,8 +12,8 @@ import (
 	"testing"
 
 	"github.com/beevik/etree"
-	"gotest.tools/assert"
-	is "gotest.tools/assert/cmp"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 // xmlsec1ECDHOptions are the options of xmlsec1 for ECDH-ES, which it only reads from key data that is enabled, and
@@ -37,7 +37,7 @@ func writePEM(t *testing.T, dir, name, blockType string, der []byte) string {
 	t.Helper()
 
 	path := filepath.Join(dir, name)
-	assert.NilError(t, os.WriteFile(path, pem.EncodeToMemory(&pem.Block{Type: blockType, Bytes: der}), 0o600))
+	require.NoError(t, os.WriteFile(path, pem.EncodeToMemory(&pem.Block{Type: blockType, Bytes: der}), 0o600))
 
 	return path
 }
@@ -55,14 +55,14 @@ func TestXMLSec1DecryptsECDHES(t *testing.T) {
 					key, cert := ecTestCertificate(t, curve)
 
 					der, err := x509.MarshalPKCS8PrivateKey(key)
-					assert.NilError(t, err)
+					require.NoError(t, err)
 
 					dir := t.TempDir()
 					keyPath := writePEM(t, dir, "key.pem", "PRIVATE KEY", der)
 					certPath := writePEM(t, dir, "cert.pem", "CERTIFICATE", cert.Raw)
 
 					el, err := ECDHES{BlockCipher: cipher, KeyWrap: wrap}.Encrypt(cert, []byte(`<secret xmlns="urn:example">alice</secret>`), nil)
-					assert.NilError(t, err)
+					require.NoError(t, err)
 
 					el.CreateAttr("Type", "http://www.w3.org/2001/04/xmlenc#Element")
 
@@ -73,15 +73,15 @@ func TestXMLSec1DecryptsECDHES(t *testing.T) {
 					doc.SetRoot(root)
 
 					path := filepath.Join(dir, "encrypted.xml")
-					assert.NilError(t, doc.WriteToFile(path))
+					require.NoError(t, doc.WriteToFile(path))
 
 					args := append([]string{"--decrypt"}, xmlsec1ECDHOptions...)
 					args = append(args, "--lax-key-search", "--privkey-pem", keyPath+","+certPath, path)
 
 					out, err := exec.Command(xmlsec1, args...).CombinedOutput()
-					assert.NilError(t, err, "xmlsec1: %s", out)
-					assert.Check(t, is.Contains(string(out), `>alice</secret>`))
-					assert.Check(t, !strings.Contains(string(out), "EncryptedData"))
+					require.NoError(t, err, "xmlsec1: %s", out)
+					assert.Contains(t, string(out), `>alice</secret>`)
+					assert.False(t, strings.Contains(string(out), "EncryptedData"))
 				})
 			}
 		}
@@ -112,39 +112,39 @@ func TestDecryptsECDHESOfXMLSec1(t *testing.T) {
 	originator, _ := ecTestCertificate(t, elliptic.P256())
 
 	originatorDER, err := x509.MarshalPKCS8PrivateKey(originator)
-	assert.NilError(t, err)
+	require.NoError(t, err)
 
 	recipientDER, err := x509.MarshalPKIXPublicKey(&recipient.PublicKey)
-	assert.NilError(t, err)
+	require.NoError(t, err)
 
 	dir := t.TempDir()
 	originatorPath := writePEM(t, dir, "originator.pem", "PRIVATE KEY", originatorDER)
 	recipientPath := writePEM(t, dir, "recipient.pem", "PUBLIC KEY", recipientDER)
 
 	templatePath, dataPath, outPath := filepath.Join(dir, "template.xml"), filepath.Join(dir, "data.xml"), filepath.Join(dir, "out.xml")
-	assert.NilError(t, os.WriteFile(templatePath, []byte(xmlsec1ECDHTemplate), 0o600))
-	assert.NilError(t, os.WriteFile(dataPath, []byte(`<secret xmlns="urn:example">bob</secret>`), 0o600))
+	require.NoError(t, os.WriteFile(templatePath, []byte(xmlsec1ECDHTemplate), 0o600))
+	require.NoError(t, os.WriteFile(dataPath, []byte(`<secret xmlns="urn:example">bob</secret>`), 0o600))
 
 	args := append([]string{"--encrypt"}, xmlsec1ECDHOptions...)
 	args = append(args, "--session-key", "aes-128", "--privkey-pem:originator", originatorPath,
 		"--pubkey-pem:recipient", recipientPath, "--xml-data", dataPath, "--output", outPath, templatePath)
 
 	out, err := exec.Command(xmlsec1, args...).CombinedOutput()
-	assert.NilError(t, err, "xmlsec1: %s", out)
+	require.NoError(t, err, "xmlsec1: %s", out)
 
 	doc := etree.NewDocument()
-	assert.NilError(t, doc.ReadFromFile(outPath))
+	require.NoError(t, doc.ReadFromFile(outPath))
 
 	encryptedData := doc.FindElement("//EncryptedData")
-	assert.Assert(t, encryptedData != nil)
+	require.NotNil(t, encryptedData)
 
 	plaintext, err := Decrypt(recipient, encryptedData)
-	assert.NilError(t, err)
-	assert.Check(t, is.Equal(string(plaintext), `<secret xmlns="urn:example">bob</secret>`))
+	require.NoError(t, err)
+	assert.Equal(t, string(plaintext), `<secret xmlns="urn:example">bob</secret>`)
 
 	// The ConcatKDF parameters are part of the key: one that is changed derives another.
 	encryptedData.FindElement(".//ConcatKDFParams").CreateAttr("PartyUInfo", "00")
 
 	_, err = Decrypt(recipient, encryptedData)
-	assert.Check(t, is.ErrorContains(err, "integrity"))
+	assert.ErrorContains(t, err, "integrity")
 }

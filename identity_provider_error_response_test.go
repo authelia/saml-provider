@@ -10,8 +10,8 @@ import (
 	"testing"
 
 	"github.com/beevik/etree"
-	"gotest.tools/assert"
-	is "gotest.tools/assert/cmp"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"authelia.com/provider/saml/internal/dsig"
 )
@@ -21,7 +21,7 @@ func errorResponseRequest(t *testing.T) (*IdentityProviderTest, *IdpAuthnRequest
 	t.Helper()
 	test := NewIdentityProviderTest(t, applyKey)
 	req, err := hardeningValidate(test, hardeningRequest(`ID="id-request"`, TimeNow(), hardeningIssuer))
-	assert.NilError(t, err)
+	require.NoError(t, err)
 
 	req.RelayState = "relay-<state>"
 
@@ -35,16 +35,16 @@ func postedResponse(t *testing.T, body string) (*etree.Document, Response) {
 	const marker = `name="SAMLResponse" value="`
 
 	start := strings.Index(body, marker)
-	assert.Assert(t, start >= 0, "no SAMLResponse in %q", body)
+	require.True(t, start >= 0, "no SAMLResponse in %q", body)
 	encoded, _, _ := strings.Cut(body[start+len(marker):], `"`)
 	buf, err := base64.StdEncoding.DecodeString(html.UnescapeString(encoded))
-	assert.NilError(t, err)
+	require.NoError(t, err)
 
 	doc := etree.NewDocument()
-	assert.NilError(t, doc.ReadFromBytes(buf))
+	require.NoError(t, doc.ReadFromBytes(buf))
 
 	var response Response
-	assert.NilError(t, xml.Unmarshal(buf, &response))
+	require.NoError(t, xml.Unmarshal(buf, &response))
 
 	return doc, response
 }
@@ -53,20 +53,20 @@ func TestWriteErrorResponseWritesSignedStatus(t *testing.T) {
 	test, req := errorResponseRequest(t)
 
 	w := httptest.NewRecorder()
-	assert.NilError(t, req.WriteErrorResponse(w, ErrNoPassive.WithStatusMessage("cannot <authenticate> passively")))
+	require.NoError(t, req.WriteErrorResponse(w, ErrNoPassive.WithStatusMessage("cannot <authenticate> passively")))
 
-	assert.Check(t, is.Contains(w.Body.String(), `action="https://sp.example.com/saml2/acs"`))
-	assert.Check(t, is.Contains(w.Body.String(), `name="RelayState" value="relay-&lt;state&gt;"`))
+	assert.Contains(t, w.Body.String(), `action="https://sp.example.com/saml2/acs"`)
+	assert.Contains(t, w.Body.String(), `name="RelayState" value="relay-&lt;state&gt;"`)
 
 	doc, response := postedResponse(t, w.Body.String())
-	assert.Check(t, is.Equal(response.InResponseTo, "id-request"))
-	assert.Check(t, is.Equal(response.Destination, "https://sp.example.com/saml2/acs"))
-	assert.Check(t, is.Equal(response.Issuer.Value, test.IDP.MetadataURL.String()))
-	assert.Check(t, is.Equal(response.Status.StatusCode.Value, StatusResponder))
-	assert.Assert(t, response.Status.StatusCode.StatusCode != nil)
-	assert.Check(t, is.Equal(response.Status.StatusCode.StatusCode.Value, StatusNoPassive))
-	assert.Assert(t, response.Status.StatusMessage != nil)
-	assert.Check(t, is.Equal(response.Status.StatusMessage.Value, "cannot <authenticate> passively"))
+	assert.Equal(t, response.InResponseTo, "id-request")
+	assert.Equal(t, response.Destination, "https://sp.example.com/saml2/acs")
+	assert.Equal(t, response.Issuer.Value, test.IDP.MetadataURL.String())
+	assert.Equal(t, response.Status.StatusCode.Value, StatusResponder)
+	require.NotNil(t, response.Status.StatusCode.StatusCode)
+	assert.Equal(t, response.Status.StatusCode.StatusCode.Value, StatusNoPassive)
+	require.NotNil(t, response.Status.StatusMessage)
+	assert.Equal(t, response.Status.StatusMessage.Value, "cannot <authenticate> passively")
 
 	test.SP.IDPMetadata = test.IDP.Metadata()
 	// The certificate of the test identity provider has expired by the time that the tests use.
@@ -75,24 +75,24 @@ func TestWriteErrorResponseWritesSignedStatus(t *testing.T) {
 	t.Cleanup(func() { Clock = previousClock })
 
 	Clock = dsig.NewFakeClockAt(test.Certificate.NotBefore)
-	assert.Check(t, test.SP.validateSignature(doc.Root()))
+	assert.NoError(t, test.SP.validateSignature(doc.Root()))
 
 	// The signature must cover the status, which is what the service provider acts on.
 	doc.Root().FindElement("./Status/StatusCode").CreateAttr("Value", StatusSuccess)
-	assert.Check(t, test.SP.validateSignature(doc.Root()) != nil)
+	assert.NotNil(t, test.SP.validateSignature(doc.Root()))
 }
 
 func TestWriteErrorResponseOmitsOptionalStatusParts(t *testing.T) {
 	_, req := errorResponseRequest(t)
 
 	w := httptest.NewRecorder()
-	assert.NilError(t, req.WriteErrorResponse(w, ErrInvalidRequest.WithStatusMessage("").WithDebug("never sent")))
+	require.NoError(t, req.WriteErrorResponse(w, ErrInvalidRequest.WithStatusMessage("").WithDebug("never sent")))
 
 	doc, response := postedResponse(t, w.Body.String())
-	assert.Check(t, is.Equal(response.Status.StatusCode.Value, StatusRequester))
-	assert.Check(t, response.Status.StatusCode.StatusCode == nil)
-	assert.Check(t, response.Status.StatusMessage == nil)
-	assert.Check(t, doc.Root().FindElement("./Status/StatusDetail") == nil)
+	assert.Equal(t, response.Status.StatusCode.Value, StatusRequester)
+	assert.Nil(t, response.Status.StatusCode.StatusCode)
+	assert.Nil(t, response.Status.StatusMessage)
+	assert.Nil(t, doc.Root().FindElement("./Status/StatusDetail"))
 }
 
 // An error that is not a StatusError is a failure of the identity provider, and nothing of its text is sent.
@@ -100,35 +100,35 @@ func TestWriteErrorResponseOfPlainError(t *testing.T) {
 	_, req := errorResponseRequest(t)
 
 	w := httptest.NewRecorder()
-	assert.NilError(t, req.WriteErrorResponse(w, errors.New("the database at 10.0.0.1 is down")))
+	require.NoError(t, req.WriteErrorResponse(w, errors.New("the database at 10.0.0.1 is down")))
 
 	doc, response := postedResponse(t, w.Body.String())
-	assert.Check(t, is.Equal(response.Status.StatusCode.Value, StatusResponder))
-	assert.Check(t, response.Status.StatusCode.StatusCode == nil)
-	assert.Check(t, is.Equal(response.Status.StatusMessage.Value, ErrServerError.StatusMessageField))
+	assert.Equal(t, response.Status.StatusCode.Value, StatusResponder)
+	assert.Nil(t, response.Status.StatusCode.StatusCode)
+	assert.Equal(t, response.Status.StatusMessage.Value, ErrServerError.StatusMessageField)
 
 	decoded, err := doc.WriteToString()
-	assert.NilError(t, err)
-	assert.Check(t, !strings.Contains(decoded, "10.0.0.1"))
+	require.NoError(t, err)
+	assert.False(t, strings.Contains(decoded, "10.0.0.1"))
 
-	assert.Check(t, is.ErrorContains(req.WriteErrorResponse(httptest.NewRecorder(), nil), "without an error"))
+	assert.ErrorContains(t, req.WriteErrorResponse(httptest.NewRecorder(), nil), "without an error")
 }
 
 // An assertion made before the failure was found must not reach the service provider.
 func TestWriteErrorResponseDropsExistingAssertion(t *testing.T) {
 	_, req := errorResponseRequest(t)
-	assert.NilError(t, DefaultAssertionMaker{}.MakeAssertion(req, &Session{ID: "session", NameID: "alice"}))
-	assert.NilError(t, req.MakeResponse())
+	require.NoError(t, DefaultAssertionMaker{}.MakeAssertion(req, &Session{ID: "session", NameID: "alice"}))
+	require.NoError(t, req.MakeResponse())
 
 	w := httptest.NewRecorder()
-	assert.NilError(t, req.WriteErrorResponse(w, ErrServerError.WithSecondLevel(StatusRequestDenied)))
+	require.NoError(t, req.WriteErrorResponse(w, ErrServerError.WithSecondLevel(StatusRequestDenied)))
 
 	doc, response := postedResponse(t, w.Body.String())
-	assert.Check(t, is.Equal(response.Status.StatusCode.Value, StatusResponder))
-	assert.Check(t, response.Assertion == nil)
-	assert.Check(t, response.EncryptedAssertion == nil)
-	assert.Check(t, doc.Root().FindElement("./Assertion") == nil)
-	assert.Check(t, doc.Root().FindElement("./EncryptedAssertion") == nil)
+	assert.Equal(t, response.Status.StatusCode.Value, StatusResponder)
+	assert.Nil(t, response.Assertion)
+	assert.Nil(t, response.EncryptedAssertion)
+	assert.Nil(t, doc.Root().FindElement("./Assertion"))
+	assert.Nil(t, doc.Root().FindElement("./EncryptedAssertion"))
 }
 
 // Sending a response to an endpoint that was not validated would let an unauthenticated client
@@ -141,9 +141,9 @@ func TestWriteErrorResponseRequiresValidatedACS(t *testing.T) {
 	w := httptest.NewRecorder()
 	err := req.WriteErrorResponse(w, ErrInvalidRequest)
 
-	assert.Check(t, is.ErrorContains(err, "assertion consumer service"))
-	assert.Check(t, is.Equal(w.Body.Len(), 0))
-	assert.Check(t, !req.Respondable())
+	assert.ErrorContains(t, err, "assertion consumer service")
+	assert.Equal(t, w.Body.Len(), 0)
+	assert.False(t, req.Respondable())
 }
 
 // SAMLCore §3.2.2.2 allows three top-level codes for a failure. An error with another one, which Validate
@@ -154,14 +154,14 @@ func TestWriteErrorResponseNeverSendsInvalidTopLevelStatus(t *testing.T) {
 			_, req := errorResponseRequest(t)
 
 			failure := &StatusError{ErrorField: "custom", TopLevelField: status, SecondLevelField: StatusNoPassive, HTTPStatusField: 400}
-			assert.Check(t, is.ErrorContains(failure.Validate(), "top-level status"))
+			assert.ErrorContains(t, failure.Validate(), "top-level status")
 
 			w := httptest.NewRecorder()
-			assert.NilError(t, req.WriteErrorResponse(w, failure))
+			require.NoError(t, req.WriteErrorResponse(w, failure))
 
 			_, response := postedResponse(t, w.Body.String())
-			assert.Check(t, is.Equal(response.Status.StatusCode.Value, StatusResponder))
-			assert.Check(t, response.Status.StatusCode.StatusCode == nil)
+			assert.Equal(t, response.Status.StatusCode.Value, StatusResponder)
+			assert.Nil(t, response.Status.StatusCode.StatusCode)
 		})
 	}
 }

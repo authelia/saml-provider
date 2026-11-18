@@ -15,8 +15,8 @@ import (
 	"time"
 
 	"github.com/beevik/etree"
-	"gotest.tools/assert"
-	is "gotest.tools/assert/cmp"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 // recordingTransport records the outbound request and fails it, so nothing leaves the test.
@@ -61,26 +61,26 @@ func TestArtifactResolutionOnlyContactsLocationInMetadata(t *testing.T) {
 				IDPMetadata: &EntityDescriptor{},
 				HTTPClient:  &http.Client{Transport: transport},
 			}
-			assert.NilError(t, xml.Unmarshal(test.IDPMetadata, sp.IDPMetadata))
+			require.NoError(t, xml.Unmarshal(test.IDPMetadata, sp.IDPMetadata))
 			sp.IDPMetadata.IDPSSODescriptors[0].ArtifactResolutionServices = []IndexedEndpoint{
 				{Binding: SOAPBinding, Location: location},
 			}
 
 			req, err := http.NewRequest(http.MethodPost, sp.AcsURL.String(), strings.NewReader(url.Values{"SAMLart": {artifact}}.Encode()))
-			assert.NilError(t, err)
+			require.NoError(t, err)
 			req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-			assert.NilError(t, req.ParseForm())
+			require.NoError(t, req.ParseForm())
 
 			_, err = sp.ParseResponse(req, nil)
-			assert.Assert(t, err != nil)
-			assert.Check(t, is.Equal(location, transport.url))
+			require.NotNil(t, err)
+			assert.Equal(t, location, transport.url)
 
 			doc := etree.NewDocument()
-			assert.NilError(t, doc.ReadFromString(transport.body))
+			require.NoError(t, doc.ReadFromString(transport.body))
 			artifacts := doc.FindElements("//Artifact")
-			assert.Assert(t, is.Len(artifacts, 1))
-			assert.Check(t, is.Equal(artifact, artifacts[0].Text()))
-			assert.Check(t, is.Len(doc.FindElements("//y"), 0))
+			require.Len(t, artifacts, 1)
+			assert.Equal(t, artifact, artifacts[0].Text())
+			assert.Len(t, doc.FindElements("//y"), 0)
 		})
 	}
 }
@@ -120,18 +120,18 @@ func TestArtifactResolutionDoesNotFollowRedirects(t *testing.T) {
 						IDPMetadata: &EntityDescriptor{},
 						HTTPClient:  client,
 					}
-					assert.NilError(t, xml.Unmarshal(test.IDPMetadata, sp.IDPMetadata))
+					require.NoError(t, xml.Unmarshal(test.IDPMetadata, sp.IDPMetadata))
 					sp.IDPMetadata.IDPSSODescriptors[0].ArtifactResolutionServices = []IndexedEndpoint{{Binding: SOAPBinding, Location: idp.URL}}
 
 					req, err := http.NewRequest(http.MethodPost, sp.AcsURL.String(), strings.NewReader(url.Values{"SAMLart": {"artifact"}}.Encode()))
-					assert.NilError(t, err)
+					require.NoError(t, err)
 					req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-					assert.NilError(t, req.ParseForm())
+					require.NoError(t, req.ParseForm())
 
 					_, err = sp.ParseResponse(req, nil)
-					assert.Assert(t, err != nil)
-					assert.Check(t, is.Equal(int32(0), hits.Load()))
-					assert.Check(t, is.ErrorContains(err.(*InvalidResponseError).PrivateErr, "HTTP status"))
+					require.NotNil(t, err)
+					assert.Equal(t, int32(0), hits.Load())
+					assert.ErrorContains(t, err.(*InvalidResponseError).PrivateErr, "HTTP status")
 				})
 			}
 		})
@@ -148,11 +148,11 @@ func TestArtifactResolutionDoesNotFollowRedirects(t *testing.T) {
 			IDPMetadata: &EntityDescriptor{},
 			HTTPClient:  client,
 		}
-		assert.NilError(t, xml.Unmarshal(test.IDPMetadata, sp.IDPMetadata))
+		require.NoError(t, xml.Unmarshal(test.IDPMetadata, sp.IDPMetadata))
 		_, _ = sp.handleArtifactRequest(context.Background(), "artifact", nil)
 
-		assert.Check(t, client.CheckRedirect == nil)
-		assert.Check(t, http.DefaultClient.CheckRedirect == nil)
+		assert.Nil(t, client.CheckRedirect)
+		assert.Nil(t, http.DefaultClient.CheckRedirect)
 	})
 }
 
@@ -168,13 +168,13 @@ func artifactRequestTo(t *testing.T, location string) (*ServiceProvider, *http.R
 		AcsURL:      mustParseURL("https://sp.example.com/saml2/acs"),
 		IDPMetadata: &EntityDescriptor{},
 	}
-	assert.NilError(t, xml.Unmarshal(test.IDPMetadata, sp.IDPMetadata))
+	require.NoError(t, xml.Unmarshal(test.IDPMetadata, sp.IDPMetadata))
 	sp.IDPMetadata.IDPSSODescriptors[0].ArtifactResolutionServices = []IndexedEndpoint{{Binding: SOAPBinding, Location: location}}
 
 	req, err := http.NewRequest(http.MethodPost, sp.AcsURL.String(), strings.NewReader(url.Values{"SAMLart": {"artifact"}}.Encode()))
-	assert.NilError(t, err)
+	require.NoError(t, err)
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-	assert.NilError(t, req.ParseForm())
+	require.NoError(t, req.ParseForm())
 
 	return sp, req
 }
@@ -202,13 +202,13 @@ func TestArtifactResolutionLimitsResponseSize(t *testing.T) {
 
 			sp, req := artifactRequestTo(t, idp.URL)
 			_, err := sp.ParseResponse(req, nil)
-			assert.Assert(t, err != nil)
+			require.NotNil(t, err)
 
 			reason := err.(*InvalidResponseError).PrivateErr
 			if tc.tooMuch {
-				assert.Check(t, is.ErrorContains(reason, "too large"))
+				assert.ErrorContains(t, reason, "too large")
 			} else {
-				assert.Check(t, !strings.Contains(reason.Error(), "too large"), reason.Error())
+				assert.False(t, strings.Contains(reason.Error(), "too large"), reason.Error())
 			}
 		})
 	}
@@ -229,9 +229,9 @@ func TestArtifactResolutionTimeout(t *testing.T) {
 		sp, req := artifactRequestTo(t, idp.URL)
 		start := time.Now()
 		_, err := sp.ParseResponse(req, nil)
-		assert.Assert(t, err != nil)
-		assert.Check(t, is.ErrorContains(err.(*InvalidResponseError).PrivateErr, "cannot resolve artifact"))
-		assert.Check(t, time.Since(start) < 5*time.Second)
+		require.NotNil(t, err)
+		assert.ErrorContains(t, err.(*InvalidResponseError).PrivateErr, "cannot resolve artifact")
+		assert.True(t, time.Since(start) < 5*time.Second)
 	})
 
 	t.Run("the client of the caller decides", func(t *testing.T) {
@@ -243,7 +243,7 @@ func TestArtifactResolutionTimeout(t *testing.T) {
 
 		start := time.Now()
 		_, err := sp.ParseResponse(req.WithContext(ctx), nil)
-		assert.Assert(t, err != nil)
-		assert.Check(t, time.Since(start) >= 400*time.Millisecond, "took %s", time.Since(start))
+		require.NotNil(t, err)
+		assert.True(t, time.Since(start) >= 400*time.Millisecond, "took %s", time.Since(start))
 	})
 }

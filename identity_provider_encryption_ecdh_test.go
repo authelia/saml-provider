@@ -18,8 +18,8 @@ import (
 	"time"
 
 	"github.com/beevik/etree"
-	"gotest.tools/assert"
-	is "gotest.tools/assert/cmp"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"authelia.com/provider/saml/xmlenc"
 )
@@ -76,23 +76,23 @@ func ecdhNegotiatedAssertion(t *testing.T, configure func(*IdentityProvider), is
 	}
 
 	req, err := hardeningValidate(test, hardeningRequest(`ID="id-1"`, TimeNow(), hardeningIssuer))
-	assert.NilError(t, err)
-	assert.NilError(t, DefaultAssertionMaker{}.MakeAssertion(req, &Session{ID: "f00d", NameID: sessionFor, NameIDFormat: string(EmailAddressNameIDFormat)}))
+	require.NoError(t, err)
+	require.NoError(t, DefaultAssertionMaker{}.MakeAssertion(req, &Session{ID: "f00d", NameID: sessionFor, NameIDFormat: string(EmailAddressNameIDFormat)}))
 
 	descriptor := KeyDescriptor{Use: "encryption", EncryptionMethods: methods}
 	descriptor.KeyInfo.X509Data.X509Certificates = []X509Certificate{{Data: base64.StdEncoding.EncodeToString(cert.Raw)}}
 
 	req.SPSSODescriptor.KeyDescriptors = []KeyDescriptor{descriptor}
 	if err := req.MakeAssertionEl(); err != nil {
-		assert.Check(t, req.AssertionEl == nil, "no assertion may be sent when negotiation fails")
+		assert.True(t, req.AssertionEl == nil, "no assertion may be sent when negotiation fails")
 
 		return nil, err
 	}
 
-	assert.Check(t, is.Equal("EncryptedAssertion", req.AssertionEl.Tag))
+	assert.Equal(t, "EncryptedAssertion", req.AssertionEl.Tag)
 
 	encryptedData := req.AssertionEl.FindElement("./EncryptedData")
-	assert.Assert(t, encryptedData != nil)
+	require.NotNil(t, encryptedData)
 
 	return encryptedData, nil
 }
@@ -102,23 +102,23 @@ func ecdhNegotiatedAssertion(t *testing.T, configure func(*IdentityProvider), is
 func checkECDHNegotiated(t *testing.T, encryptedData *etree.Element, content, keyWrap string) {
 	t.Helper()
 
-	assert.Check(t, is.Equal(encryptedData.FindElement("./EncryptionMethod").SelectAttrValue("Algorithm", ""), content))
+	assert.Equal(t, encryptedData.FindElement("./EncryptionMethod").SelectAttrValue("Algorithm", ""), content)
 
 	encryptedKey := encryptedData.FindElement("./KeyInfo/EncryptedKey")
-	assert.Assert(t, encryptedKey != nil)
-	assert.Check(t, is.Equal(encryptedKey.FindElement("./EncryptionMethod").SelectAttrValue("Algorithm", ""), keyWrap))
-	assert.Check(t, encryptedKey.SelectAttr("Recipient") == nil, "the assertion is not encrypted to a named recipient")
+	require.NotNil(t, encryptedKey)
+	assert.Equal(t, encryptedKey.FindElement("./EncryptionMethod").SelectAttrValue("Algorithm", ""), keyWrap)
+	assert.True(t, encryptedKey.SelectAttr("Recipient") == nil, "the assertion is not encrypted to a named recipient")
 
 	agreement := encryptedKey.FindElement("./KeyInfo/AgreementMethod")
-	assert.Assert(t, agreement != nil)
-	assert.Check(t, is.Equal(agreement.SelectAttrValue("Algorithm", ""), ecdhES))
-	assert.Check(t, is.Equal(agreement.FindElement("./KeyDerivationMethod/ConcatKDFParams/DigestMethod").SelectAttrValue("Algorithm", ""), digestSHA256))
+	require.NotNil(t, agreement)
+	assert.Equal(t, agreement.SelectAttrValue("Algorithm", ""), ecdhES)
+	assert.Equal(t, agreement.FindElement("./KeyDerivationMethod/ConcatKDFParams/DigestMethod").SelectAttrValue("Algorithm", ""), digestSHA256)
 
 	key, _ := ecdhKey()
 
 	plaintext, err := xmlenc.Decrypt(key, encryptedData)
-	assert.NilError(t, err)
-	assert.Check(t, strings.Contains(string(plaintext), sessionFor))
+	require.NoError(t, err)
+	assert.True(t, strings.Contains(string(plaintext), sessionFor))
 }
 
 func TestIDPNegotiatesECDHWithServiceProvider(t *testing.T) {
@@ -137,7 +137,7 @@ func TestIDPNegotiatesECDHWithServiceProvider(t *testing.T) {
 	} {
 		t.Run(name, func(t *testing.T) {
 			encryptedData, err := ecdhNegotiatedAssertion(t, nil, nil, tc.methods...)
-			assert.NilError(t, err)
+			require.NoError(t, err)
 			checkECDHNegotiated(t, encryptedData, tc.content, tc.keyWrap)
 		})
 	}
@@ -154,7 +154,7 @@ func TestIDPRefusesECDHWithAnAlgorithmTheServiceProviderDoesNotList(t *testing.T
 	} {
 		t.Run(name, func(t *testing.T) {
 			_, err := ecdhNegotiatedAssertion(t, nil, nil, tc.methods...)
-			assert.Check(t, is.ErrorContains(err, tc.err))
+			assert.ErrorContains(t, err, tc.err)
 		})
 	}
 }
@@ -162,26 +162,26 @@ func TestIDPRefusesECDHWithAnAlgorithmTheServiceProviderDoesNotList(t *testing.T
 func TestIDPECDHConfiguration(t *testing.T) {
 	// KeyWrapMethods restricts and orders the key wraps.
 	encryptedData, err := ecdhNegotiatedAssertion(t, func(idp *IdentityProvider) { idp.KeyWrapMethods = []string{kwAES128, kwAES256} }, nil)
-	assert.NilError(t, err)
+	require.NoError(t, err)
 	checkECDHNegotiated(t, encryptedData, aes128GCM, kwAES128)
 
 	_, err = ecdhNegotiatedAssertion(t, func(idp *IdentityProvider) { idp.KeyWrapMethods = []string{kwAES128} }, nil, method(kwAES256))
-	assert.Check(t, is.ErrorContains(err, "lists no key wrap algorithm"))
+	assert.ErrorContains(t, err, "lists no key wrap algorithm")
 
 	_, err = ecdhNegotiatedAssertion(t, func(idp *IdentityProvider) { idp.KeyWrapMethods = []string{kwTripleDES} }, nil)
-	assert.Check(t, is.ErrorContains(err, "IdentityProvider.KeyWrapMethods"))
+	assert.ErrorContains(t, err, "IdentityProvider.KeyWrapMethods")
 
 	// KeyTransportMethods and KeyTransportDigestMethods are for RSA, and don't restrict ECDH-ES.
 	encryptedData, err = ecdhNegotiatedAssertion(t, func(idp *IdentityProvider) {
 		idp.KeyTransportMethods = []string{rsaOAEP11}
 		idp.KeyTransportDigestMethods = []string{digestSHA512}
 	}, nil)
-	assert.NilError(t, err)
+	require.NoError(t, err)
 	checkECDHNegotiated(t, encryptedData, aes128GCM, kwAES256)
 
 	// ContentEncryptionMethods applies as it does for RSA.
 	encryptedData, err = ecdhNegotiatedAssertion(t, func(idp *IdentityProvider) { idp.ContentEncryptionMethods = []string{aes256CBC} }, nil)
-	assert.NilError(t, err)
+	require.NoError(t, err)
 	checkECDHNegotiated(t, encryptedData, aes256CBC, kwAES256)
 }
 
@@ -190,32 +190,32 @@ func TestIssuanceChoosesECDH(t *testing.T) {
 	encryptedData, err := ecdhNegotiatedAssertion(t, nil,
 		&ServiceProviderIssuance{KeyTransportMethod: ecdhES, KeyWrapMethod: kwAES128, ContentEncryptionMethod: aes256GCM},
 		method(kwAES256), method(aes128CBC))
-	assert.NilError(t, err)
+	require.NoError(t, err)
 	checkECDHNegotiated(t, encryptedData, aes256GCM, kwAES128)
 
 	// Without KeyTransportMethod the key agreement is still that of an elliptic curve key.
 	encryptedData, err = ecdhNegotiatedAssertion(t, nil, &ServiceProviderIssuance{KeyWrapMethod: kwAES192}, method(rsaOAEP), method(ecdhES))
-	assert.NilError(t, err)
+	require.NoError(t, err)
 	checkECDHNegotiated(t, encryptedData, aes128GCM, kwAES192)
 
 	// A key transport chosen for an elliptic curve key, and ECDH-ES for an RSA key, can't be used.
 	_, err = ecdhNegotiatedAssertion(t, nil, &ServiceProviderIssuance{KeyTransportMethod: rsaOAEP})
-	assert.Check(t, is.ErrorContains(err, "can't encrypt to an elliptic curve key"))
+	assert.ErrorContains(t, err, "can't encrypt to an elliptic curve key")
 
 	test := NewIdentityProviderTest(t, applyKey)
 	issuanceFor(test, ServiceProviderIssuance{KeyTransportMethod: ecdhES})
 
 	req := issuanceAssertion(t, test, &Session{ID: "f00d", NameID: "alice"})
-	assert.Check(t, is.ErrorContains(req.MakeAssertionEl(), "needs an elliptic curve key"))
-	assert.Check(t, req.AssertionEl == nil)
+	assert.ErrorContains(t, req.MakeAssertionEl(), "needs an elliptic curve key")
+	assert.Nil(t, req.AssertionEl)
 
 	// The key wrap of the policy is not used for an RSA key, so a policy for every service provider may set it.
 	issuanceFor(test, ServiceProviderIssuance{KeyWrapMethod: kwAES128})
 
 	req = issuanceAssertion(t, test, &Session{ID: "f00d", NameID: "alice"})
-	assert.NilError(t, req.MakeAssertionEl())
-	assert.Check(t, is.Equal(req.AssertionEl.Tag, "EncryptedAssertion"))
-	assert.Check(t, req.AssertionEl.FindElement("./EncryptedData/KeyInfo/EncryptedKey/KeyInfo/AgreementMethod") == nil)
+	require.NoError(t, req.MakeAssertionEl())
+	assert.Equal(t, req.AssertionEl.Tag, "EncryptedAssertion")
+	assert.Nil(t, req.AssertionEl.FindElement("./EncryptedData/KeyInfo/EncryptedKey/KeyInfo/AgreementMethod"))
 }
 
 // An EncryptedID and an EncryptedAttribute are encrypted to an elliptic curve key as an assertion is.
@@ -223,19 +223,19 @@ func TestElementEncrypterECDH(t *testing.T) {
 	key, cert := ecdhKey()
 
 	policy, err := (&IdentityProvider{}).encryptionPolicy()
-	assert.NilError(t, err)
+	require.NoError(t, err)
 
 	encrypter, err := policy.encrypterFor(nil, Issuance{}, cert.PublicKey)
-	assert.NilError(t, err)
+	require.NoError(t, err)
 
 	e := &elementEncrypter{certificate: cert, publicKey: cert.PublicKey, encrypter: encrypter, recipient: "https://sp.example.com/saml2/metadata"}
 
 	encryptedID, err := e.encryptNameID(&testEncryptedNameID)
-	assert.NilError(t, err)
+	require.NoError(t, err)
 
 	plaintext, err := xmlenc.Decrypt(key, encryptedID.FindElement("./EncryptedData"))
-	assert.NilError(t, err)
-	assert.Check(t, is.Contains(string(plaintext), ">p-1234</saml:NameID>"))
+	require.NoError(t, err)
+	assert.Contains(t, string(plaintext), ">p-1234</saml:NameID>")
 }
 
 // What the identity provider encrypts to an elliptic curve key, xmlsec1 decrypts.
@@ -248,27 +248,27 @@ func TestXMLSec1DecryptsECDHAssertion(t *testing.T) {
 	key, cert := ecdhKey()
 
 	der, err := x509.MarshalPKCS8PrivateKey(key)
-	assert.NilError(t, err)
+	require.NoError(t, err)
 
 	dir := t.TempDir()
 	keyPath, certPath := filepath.Join(dir, "key.pem"), filepath.Join(dir, "cert.pem")
-	assert.NilError(t, os.WriteFile(keyPath, pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: der}), 0o600))
-	assert.NilError(t, os.WriteFile(certPath, pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: cert.Raw}), 0o600))
+	require.NoError(t, os.WriteFile(keyPath, pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: der}), 0o600))
+	require.NoError(t, os.WriteFile(certPath, pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: cert.Raw}), 0o600))
 
 	encryptedData, err := ecdhNegotiatedAssertion(t, nil, nil)
-	assert.NilError(t, err)
+	require.NoError(t, err)
 
 	doc := etree.NewDocument()
 	doc.SetRoot(encryptedData)
 
 	path := filepath.Join(dir, "encrypted.xml")
-	assert.NilError(t, doc.WriteToFile(path))
+	require.NoError(t, doc.WriteToFile(path))
 
 	out, err := exec.Command(xmlsec1, "--decrypt", "--enabled-key-data", "agreement-method,enc-key,key-value,key-name,ec,x509",
 		"--max-encrypted-key-level", "3", "--lax-key-search", "--privkey-pem", keyPath+","+certPath, path).CombinedOutput()
-	assert.NilError(t, err, "xmlsec1: %s", out)
-	assert.Check(t, is.Contains(string(out), sessionFor))
-	assert.Check(t, !strings.Contains(string(out), "EncryptedData"))
+	require.NoError(t, err, "xmlsec1: %s", out)
+	assert.Contains(t, string(out), sessionFor)
+	assert.False(t, strings.Contains(string(out), "EncryptedData"))
 }
 
 // A service provider with an elliptic curve encryption key is sent an EncryptedAssertion by single sign-on, which
@@ -290,15 +290,15 @@ func TestIssuanceECDHEndToEnd(t *testing.T) {
 	responseEl, _, _ := issuanceSSO(t, test)
 
 	encryptedData := responseEl.FindElement("./EncryptedAssertion/EncryptedData")
-	assert.Assert(t, encryptedData != nil)
+	require.NotNil(t, encryptedData)
 
 	key, _ := ecdhKey()
 
 	plaintext, err := xmlenc.Decrypt(key, encryptedData)
-	assert.NilError(t, err)
+	require.NoError(t, err)
 
 	assertionDoc := etree.NewDocument()
-	assert.NilError(t, assertionDoc.ReadFromBytes(plaintext))
-	assert.Check(t, is.Equal(assertionDoc.Root().Tag, "Assertion"))
-	assert.NilError(t, test.SP.validateSignature(assertionDoc.Root()))
+	require.NoError(t, assertionDoc.ReadFromBytes(plaintext))
+	assert.Equal(t, assertionDoc.Root().Tag, "Assertion")
+	require.NoError(t, test.SP.validateSignature(assertionDoc.Root()))
 }

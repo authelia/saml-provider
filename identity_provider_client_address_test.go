@@ -3,8 +3,8 @@ package saml
 import (
 	"testing"
 
-	"gotest.tools/assert"
-	is "gotest.tools/assert/cmp"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 // assertedAddresses returns the Address of the subject confirmation data and of the subject
@@ -13,16 +13,16 @@ func assertedAddresses(t *testing.T, remoteAddr string, session *Session) (strin
 	t.Helper()
 	test := NewIdentityProviderTest(t, applyKey)
 	req, err := hardeningValidate(test, hardeningRequest(`ID="id-1"`, TimeNow(), hardeningIssuer))
-	assert.NilError(t, err)
+	require.NoError(t, err)
 
 	req.HTTPRequest.RemoteAddr = remoteAddr
-	assert.NilError(t, DefaultAssertionMaker{}.MakeAssertion(req, session))
+	require.NoError(t, DefaultAssertionMaker{}.MakeAssertion(req, session))
 
 	confirmations := req.Assertion.Subject.SubjectConfirmations
-	assert.Assert(t, is.Len(confirmations, 1))
-	assert.Assert(t, confirmations[0].SubjectConfirmationData != nil)
-	assert.Assert(t, is.Len(req.Assertion.AuthnStatements, 1))
-	assert.Assert(t, req.Assertion.AuthnStatements[0].SubjectLocality != nil)
+	require.Len(t, confirmations, 1)
+	require.NotNil(t, confirmations[0].SubjectConfirmationData)
+	require.Len(t, req.Assertion.AuthnStatements, 1)
+	require.NotNil(t, req.Assertion.AuthnStatements[0].SubjectLocality)
 
 	return confirmations[0].SubjectConfirmationData.Address, req.Assertion.AuthnStatements[0].SubjectLocality.Address
 }
@@ -43,8 +43,8 @@ func TestAssertionAddressIsClientIP(t *testing.T) {
 	} {
 		t.Run(name, func(t *testing.T) {
 			confirmation, locality := assertedAddresses(t, tc.remoteAddr, &Session{ID: "s", NameID: "alice", ClientAddress: tc.sessionAddress})
-			assert.Check(t, is.Equal(confirmation, tc.asserted))
-			assert.Check(t, is.Equal(locality, tc.asserted))
+			assert.Equal(t, confirmation, tc.asserted)
+			assert.Equal(t, locality, tc.asserted)
 		})
 	}
 }
@@ -59,5 +59,5 @@ func TestServeSSOMatchesConfirmationAddress(t *testing.T) {
 			SubjectConfirmationData: &SubjectConfirmationData{Address: "192.0.2.1"},
 		}},
 	})
-	assert.Check(t, is.Equal(subjectResponse(t, w).Status.StatusCode.Value, StatusSuccess))
+	assert.Equal(t, subjectResponse(t, w).Status.StatusCode.Value, StatusSuccess)
 }

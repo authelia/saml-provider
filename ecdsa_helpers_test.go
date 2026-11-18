@@ -11,7 +11,7 @@ import (
 	"testing"
 	"time"
 
-	"gotest.tools/assert"
+	"github.com/stretchr/testify/require"
 
 	"authelia.com/provider/saml/internal/dsig"
 )
@@ -36,7 +36,7 @@ func newECDSATestKey(t *testing.T, curve elliptic.Curve) (*ecdsa.PrivateKey, *x5
 	t.Helper()
 
 	key, err := ecdsa.GenerateKey(curve, rand.Reader)
-	assert.NilError(t, err)
+	require.NoError(t, err)
 
 	template := &x509.Certificate{
 		SerialNumber: big.NewInt(1),
@@ -45,9 +45,9 @@ func newECDSATestKey(t *testing.T, curve elliptic.Curve) (*ecdsa.PrivateKey, *x5
 		NotAfter:     time.Now().Add(time.Hour),
 	}
 	der, err := x509.CreateCertificate(rand.Reader, template, template, key.Public(), key)
-	assert.NilError(t, err)
+	require.NoError(t, err)
 	cert, err := x509.ParseCertificate(der)
-	assert.NilError(t, err)
+	require.NoError(t, err)
 
 	return key, cert
 }

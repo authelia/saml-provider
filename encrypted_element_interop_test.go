@@ -10,8 +10,8 @@ import (
 	"testing"
 
 	"github.com/beevik/etree"
-	"gotest.tools/assert"
-	is "gotest.tools/assert/cmp"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 // xmlsec1Keys returns the path of xmlsec1 and of the negotiation key and its certificate in PEM, or skips the test
@@ -28,11 +28,11 @@ func xmlsec1Keys(t *testing.T) (xmlsec1, keyPath, certPath string) {
 	dir := t.TempDir()
 
 	der, err := x509.MarshalPKCS8PrivateKey(key)
-	assert.NilError(t, err)
+	require.NoError(t, err)
 
 	keyPath, certPath = filepath.Join(dir, "key.pem"), filepath.Join(dir, "cert.pem")
-	assert.NilError(t, os.WriteFile(keyPath, pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: der}), 0o600))
-	assert.NilError(t, os.WriteFile(certPath, pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: cert.Raw}), 0o600))
+	require.NoError(t, os.WriteFile(keyPath, pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: der}), 0o600))
+	require.NoError(t, os.WriteFile(certPath, pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: cert.Raw}), 0o600))
 
 	return xmlsec1, keyPath, certPath
 }
@@ -60,24 +60,24 @@ func TestXMLSec1DecryptsEncryptedElements(t *testing.T) {
 			encrypter := testElementEncrypter(t, methods...)
 
 			encryptedID, err := encrypter.encryptNameID(&testEncryptedNameID)
-			assert.NilError(t, err)
+			require.NoError(t, err)
 
 			encryptedAttribute, err := encrypter.encryptAttribute(&attribute)
-			assert.NilError(t, err)
+			require.NoError(t, err)
 
 			for want, el := range map[string]*etree.Element{">p-1234</saml:NameID>": encryptedID, ">alice@example.com</saml:AttributeValue>": encryptedAttribute} {
 				doc := etree.NewDocument()
 				doc.SetRoot(el)
 
 				path := filepath.Join(t.TempDir(), "encrypted.xml")
-				assert.NilError(t, doc.WriteToFile(path))
+				require.NoError(t, doc.WriteToFile(path))
 
 				out, err := exec.Command(xmlsec1, "--decrypt", "--lax-key-search", "--privkey-pem", keyPath, path).CombinedOutput()
-				assert.NilError(t, err, "xmlsec1: %s", out)
+				require.NoError(t, err, "xmlsec1: %s", out)
 
 				// xmlsec1 puts the element in the place of its EncryptedData (SAMLCore §6.1).
-				assert.Check(t, is.Contains(string(out), want))
-				assert.Check(t, !strings.Contains(string(out), "EncryptedData"))
+				assert.Contains(t, string(out), want)
+				assert.False(t, strings.Contains(string(out), "EncryptedData"))
 			}
 		})
 	}
@@ -88,7 +88,7 @@ func TestDecryptsElementsEncryptedByXMLSec1(t *testing.T) {
 	xmlsec1, _, certPath := xmlsec1Keys(t)
 
 	policy, err := (&IdentityProvider{}).encryptionPolicy()
-	assert.NilError(t, err)
+	require.NoError(t, err)
 
 	sessionKeys := map[string]string{aes128GCM: "aes-128", aes192GCM: "aes-192", aes256GCM: "aes-256", aes128CBC: "aes-128", aes256CBC: "aes-256"}
 
@@ -113,16 +113,16 @@ func TestDecryptsElementsEncryptedByXMLSec1(t *testing.T) {
 
 			dir := t.TempDir()
 			templatePath, dataPath := filepath.Join(dir, "template.xml"), filepath.Join(dir, "nameid.xml")
-			assert.NilError(t, os.WriteFile(templatePath, []byte(template), 0o600))
-			assert.NilError(t, os.WriteFile(dataPath, []byte(`<saml:NameID xmlns:saml="urn:oasis:names:tc:SAML:2.0:assertion" `+
+			require.NoError(t, os.WriteFile(templatePath, []byte(template), 0o600))
+			require.NoError(t, os.WriteFile(dataPath, []byte(`<saml:NameID xmlns:saml="urn:oasis:names:tc:SAML:2.0:assertion" `+
 				`Format="urn:oasis:names:tc:SAML:2.0:nameid-format:persistent" SPNameQualifier="https://sp.example.com/saml2/metadata">p-1234</saml:NameID>`), 0o600))
 
 			out, err := exec.Command(xmlsec1, "--encrypt", "--pubkey-cert-pem:sp", certPath, "--session-key", sessionKeys[methods[0].Algorithm],
 				"--xml-data", dataPath, templatePath).CombinedOutput()
-			assert.NilError(t, err, "xmlsec1: %s", out)
+			require.NoError(t, err, "xmlsec1: %s", out)
 
 			encrypted := etree.NewDocument()
-			assert.NilError(t, encrypted.ReadFromBytes(out))
+			require.NoError(t, encrypted.ReadFromBytes(out))
 
 			encryptedID := etree.NewElement("saml:EncryptedID")
 			encryptedID.CreateAttr("xmlns:saml", samlAssertionNamespace)
@@ -132,12 +132,12 @@ func TestDecryptsElementsEncryptedByXMLSec1(t *testing.T) {
 			decrypter.policy = policy
 
 			nameID, err := decrypter.decryptNameID(reparse(t, encryptedID))
-			assert.NilError(t, err)
-			assert.Check(t, is.DeepEqual(NameID{
+			require.NoError(t, err)
+			assert.Equal(t, NameID{
 				Format:          string(PersistentNameIDFormat),
 				SPNameQualifier: "https://sp.example.com/saml2/metadata",
 				Value:           "p-1234",
-			}, *nameID))
+			}, *nameID)
 		})
 	}
 }

@@ -8,12 +8,12 @@ import (
 	"testing"
 	"time"
 
-	"gotest.tools/assert"
-	is "gotest.tools/assert/cmp"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestCurrentMetadataNil(t *testing.T) {
-	assert.Check(t, CurrentMetadata(nil, time.Now()) == nil)
+	assert.True(t, CurrentMetadata(nil, time.Now()) == nil)
 }
 
 func TestCurrentMetadata(t *testing.T) {
@@ -51,21 +51,21 @@ func TestCurrentMetadata(t *testing.T) {
 
 			current := CurrentMetadata(metadata, now)
 			// The input is not modified.
-			assert.Check(t, is.Len(metadata.SPSSODescriptors, original))
+			assert.Len(t, metadata.SPSSODescriptors, original)
 
 			if tc.locations == nil {
-				assert.Check(t, is.Nil(current))
+				assert.Nil(t, current)
 				return
 			}
 
-			assert.Assert(t, current != nil)
+			require.NotNil(t, current)
 
 			var locations []string
 			for _, d := range current.SPSSODescriptors {
 				locations = append(locations, d.AssertionConsumerServices[0].Location)
 			}
 
-			assert.Check(t, is.DeepEqual(locations, tc.locations))
+			assert.Equal(t, locations, tc.locations)
 		})
 	}
 }
@@ -85,7 +85,7 @@ func TestIDPRefusesExpiredServiceProviderMetadata(t *testing.T) {
 		test := signatureTestIDP(t)
 		expire(test)
 		u := signedRedirectURL(t, test)
-		assert.Check(t, is.Contains(errorText(validateURL(t, test, u.String())), "cannot handle request from unknown service provider "+test.SP.MetadataURL.String()))
+		assert.Contains(t, errorText(validateURL(t, test, u.String())), "cannot handle request from unknown service provider "+test.SP.MetadataURL.String())
 	})
 
 	t.Run("idp-initiated", func(t *testing.T) {
@@ -99,15 +99,15 @@ func TestIDPRefusesExpiredServiceProviderMetadata(t *testing.T) {
 		w := httptest.NewRecorder()
 		r := httptest.NewRequest(http.MethodGet, "https://idp.example.com/saml/idp-initiated", nil)
 		test.IDP.ServeIDPInitiated(w, r, test.SP.MetadataURL.String(), "")
-		assert.Check(t, is.Equal(w.Code, http.StatusNotFound))
+		assert.Equal(t, w.Code, http.StatusNotFound)
 	})
 
 	t.Run("logout", func(t *testing.T) {
 		test, provider := logoutTestIDP(t)
 		expire(test)
 		r, _ := redirectLogoutRequest(t, &test.SP, nil)
-		assert.Check(t, is.Equal(serveSLO(test, r).Code, http.StatusBadRequest))
-		assert.Check(t, is.Len(provider.terminated, 0))
+		assert.Equal(t, serveSLO(test, r).Code, http.StatusBadRequest)
+		assert.Len(t, provider.terminated, 0)
 	})
 }
 
@@ -116,27 +116,27 @@ func TestParseServiceProviderMetadata(t *testing.T) {
 		"<EntityDescriptor xmlns=\"urn:oasis:names:tc:SAML:2.0:metadata\" validUntil=\"2013-03-10T00:32:19.104Z\" cacheDuration=\"PT1H\" entityID=\"http://localhost:5000/e087a985171710fb9fb30f30f41384f9/saml2/metadata/\">\n" +
 		"</EntityDescriptor>"
 	_, err := ParseServiceProviderMetadata([]byte(good))
-	assert.Check(t, err)
+	assert.NoError(t, err)
 
 	bad := "" +
 		"<EntityDescriptor xmlns=\"urn:oasis:names:tc:SAML:2.0:metadata\" ::attr=\"foo\" validUntil=\"2013-03-10T00:32:19.104Z\" cacheDuration=\"PT1H\" entityID=\"http://localhost:5000/e087a985171710fb9fb30f30f41384f9/saml2/metadata/\">]]>\n" +
 		"</EntityDescriptor>"
 	_, err = ParseServiceProviderMetadata([]byte(bad))
-	assert.Check(t, err != nil)
+	assert.NotNil(t, err)
 
 	group := "<EntitiesDescriptor xmlns=\"urn:oasis:names:tc:SAML:2.0:metadata\">" +
 		"<EntityDescriptor entityID=\"idp\"><IDPSSODescriptor protocolSupportEnumeration=\"urn:oasis:names:tc:SAML:2.0:protocol\"></IDPSSODescriptor></EntityDescriptor>" +
 		"<EntityDescriptor entityID=\"sp\"><SPSSODescriptor protocolSupportEnumeration=\"urn:oasis:names:tc:SAML:2.0:protocol\"></SPSSODescriptor></EntityDescriptor>" +
 		"</EntitiesDescriptor>"
 	metadata, err := ParseServiceProviderMetadata([]byte(group))
-	assert.NilError(t, err)
-	assert.Check(t, is.Equal(metadata.EntityID, "sp"))
+	require.NoError(t, err)
+	assert.Equal(t, metadata.EntityID, "sp")
 
 	none := "<EntitiesDescriptor xmlns=\"urn:oasis:names:tc:SAML:2.0:metadata\">" +
 		"<EntityDescriptor entityID=\"idp\"><IDPSSODescriptor protocolSupportEnumeration=\"urn:oasis:names:tc:SAML:2.0:protocol\"></IDPSSODescriptor></EntityDescriptor>" +
 		"</EntitiesDescriptor>"
 	_, err = ParseServiceProviderMetadata([]byte(none))
-	assert.Check(t, is.Error(err, "metadata contained no service provider metadata"))
+	assert.EqualError(t, err, "metadata contained no service provider metadata")
 }
 
 func TestParseServiceProviderMetadataGroupValidUntil(t *testing.T) {
@@ -164,16 +164,16 @@ func TestParseServiceProviderMetadataGroupValidUntil(t *testing.T) {
 				"</EntitiesDescriptor>", attr(tc.group), attr(tc.entity))
 
 			metadata, err := ParseServiceProviderMetadata([]byte(data))
-			assert.NilError(t, err)
+			require.NoError(t, err)
 
 			if tc.expected == "" {
-				assert.Check(t, metadata.ValidUntil.IsZero())
+				assert.True(t, metadata.ValidUntil.IsZero())
 				return
 			}
 
 			expected, err := time.Parse(time.RFC3339, tc.expected)
-			assert.NilError(t, err)
-			assert.Check(t, metadata.ValidUntil.Equal(expected), metadata.ValidUntil)
+			require.NoError(t, err)
+			assert.True(t, metadata.ValidUntil.Equal(expected), metadata.ValidUntil)
 		})
 	}
 }
@@ -218,15 +218,15 @@ func TestCheckServiceProviderMetadata(t *testing.T) {
 			err := idp.CheckServiceProviderMetadata(metadata, now)
 			switch {
 			case tc.insecureErr:
-				assert.Check(t, errors.Is(err, ErrInsecureEndpoint), err)
+				assert.True(t, errors.Is(err, ErrInsecureEndpoint), err)
 			case tc.err != "":
-				assert.Check(t, err != nil)
+				assert.NotNil(t, err)
 
 				if err != nil {
-					assert.Check(t, is.Contains(err.Error(), tc.err))
+					assert.Contains(t, err.Error(), tc.err)
 				}
 			default:
-				assert.NilError(t, err)
+				require.NoError(t, err)
 			}
 		})
 	}

@@ -7,8 +7,8 @@ import (
 	"strings"
 	"testing"
 
-	"gotest.tools/assert"
-	is "gotest.tools/assert/cmp"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 const (
@@ -34,11 +34,11 @@ func scopingRequest(t *testing.T, test *IdentityProviderTest, binding string, sc
 	}
 
 	request, err := sp.MakeAuthenticationRequest(signatureTestSSOURL, HTTPRedirectBinding, HTTPPostBinding)
-	assert.NilError(t, err)
+	require.NoError(t, err)
 
 	u, err := request.Redirect("relay", &sp)
-	assert.NilError(t, err)
-	assert.Assert(t, u.Query().Get("Signature") != "")
+	require.NoError(t, err)
+	require.True(t, u.Query().Get("Signature") != "")
 
 	return httptest.NewRequest(http.MethodGet, u.String(), nil), request.ID
 }
@@ -51,13 +51,13 @@ func scopingSSO(t *testing.T, test *IdentityProviderTest, binding string, scopin
 	r, id := scopingRequest(t, test, binding, scoping)
 
 	w := serveSSO(test, r)
-	assert.Assert(t, is.Equal(w.Code, http.StatusOK), "body: %s", w.Body.String())
+	require.Equal(t, w.Code, http.StatusOK, "body: %s", w.Body.String())
 
 	doc, response := postedResponse(t, w.Body.String())
-	assert.Assert(t, is.Equal(response.Status.StatusCode.Value, StatusSuccess))
+	require.Equal(t, response.Status.StatusCode.Value, StatusSuccess)
 
 	buf, err := doc.WriteToBytes()
-	assert.NilError(t, err)
+	require.NoError(t, err)
 
 	return issuanceAccept(t, &test.SP, buf, []string{id})
 }
@@ -101,9 +101,9 @@ func TestServeSSOExposesScoping(t *testing.T) {
 
 			scopingSSO(t, test, binding, sent)
 
-			assert.Check(t, is.DeepEqual(toSessionProvider, sent))
-			assert.Check(t, is.DeepEqual(toIssuancePolicy, sent))
-			assert.Check(t, toSessionProvider.IDPList.Contains(test.IDP.entityID()))
+			assert.Equal(t, toSessionProvider, sent)
+			assert.Equal(t, toIssuancePolicy, sent)
+			assert.True(t, toSessionProvider.IDPList.Contains(test.IDP.entityID()))
 		})
 	}
 }
@@ -117,15 +117,15 @@ func TestServeSSOWithoutScoping(t *testing.T) {
 		GetSessionFunc: func(_ http.ResponseWriter, _ *http.Request, req *IdpAuthnRequest) *Session {
 			called = true
 
-			assert.Check(t, req.Request.Scoping == nil)
+			assert.Nil(t, req.Request.Scoping)
 
 			return &Session{ID: "f00f00", UserName: "alice", NameID: "alice"}
 		},
 	}
 
 	assertion := scopingSSO(t, test, HTTPPostBinding, nil)
-	assert.Check(t, called)
-	assert.Check(t, assertion.Conditions.ProxyRestriction == nil)
+	assert.True(t, called)
+	assert.Nil(t, assertion.Conditions.ProxyRestriction)
 }
 
 // TestServeSSOAuthenticatesWhateverTheScoping checks that an identity provider which authenticates the principal
@@ -159,8 +159,8 @@ func TestServeSSOAuthenticatesWhateverTheScoping(t *testing.T) {
 				test := issuanceTestIDP(t)
 
 				assertion := scopingSSO(t, test, binding, tc.scoping(test))
-				assert.Check(t, is.Equal(assertion.Issuer.Value, test.IDP.entityID()))
-				assert.Check(t, assertion.Conditions.ProxyRestriction == nil)
+				assert.Equal(t, assertion.Issuer.Value, test.IDP.entityID())
+				assert.Nil(t, assertion.Conditions.ProxyRestriction)
 			})
 		}
 	}
@@ -172,16 +172,16 @@ func TestValidateVerifiesSignatureOverScoping(t *testing.T) {
 	body := signedPostBody(t, &test.SP, func(request *AuthnRequest) {
 		request.Scoping = &Scoping{ProxyCount: scopingInt(0), RequesterIDs: []string{scopingBehindSP}}
 	})
-	assert.NilError(t, validatePost(t, test, body))
+	require.NoError(t, validatePost(t, test, body))
 
 	for _, altered := range [][2]string{
 		{`ProxyCount="0"`, `ProxyCount="5"`},
 		{scopingBehindSP, "https://someone-else.example.com/metadata"},
 	} {
-		assert.Assert(t, bytes.Contains(body, []byte(altered[0])))
+		require.True(t, bytes.Contains(body, []byte(altered[0])))
 
 		err := validatePost(t, test, bytes.Replace(body, []byte(altered[0]), []byte(altered[1]), 1))
-		assert.Check(t, is.ErrorContains(err, "signature"), "%s", altered[1])
+		assert.ErrorContains(t, err, "signature", "%s", altered[1])
 	}
 }
 
@@ -194,7 +194,7 @@ func TestSessionProviderRefusesIDPList(t *testing.T) {
 		GetSessionFunc: func(w http.ResponseWriter, _ *http.Request, req *IdpAuthnRequest) *Session {
 			scoping := req.Request.Scoping
 			if scoping != nil && scoping.IDPList != nil && scoping.IDPList.GetComplete == "" && !scoping.IDPList.Contains(req.IDP.entityID()) {
-				assert.Check(t, req.WriteErrorResponse(w, ErrNoSupportedIDP))
+				assert.NoError(t, req.WriteErrorResponse(w, ErrNoSupportedIDP))
 
 				return nil
 			}
@@ -229,8 +229,8 @@ func TestIssuanceProxyRestriction(t *testing.T) {
 
 				// The ProxyCount of the request has no part in it.
 				assertion := scopingSSO(t, test, binding, &Scoping{ProxyCount: scopingInt(7)})
-				assert.Assert(t, assertion.Conditions.ProxyRestriction != nil)
-				assert.Check(t, is.DeepEqual(*assertion.Conditions.ProxyRestriction, tc.restriction))
+				require.NotNil(t, assertion.Conditions.ProxyRestriction)
+				assert.Equal(t, *assertion.Conditions.ProxyRestriction, tc.restriction)
 			})
 		}
 	}
@@ -243,7 +243,7 @@ func TestIssuanceProxyRestrictionIsForOneServiceProvider(t *testing.T) {
 		"https://another.example.com/metadata": {ProxyRestriction: &ProxyRestriction{Count: scopingInt(0)}},
 	}}
 
-	assert.Check(t, scopingSSO(t, test, HTTPPostBinding, nil).Conditions.ProxyRestriction == nil)
+	assert.True(t, scopingSSO(t, test, HTTPPostBinding, nil).Conditions.ProxyRestriction == nil)
 }
 
 func TestIssuanceProxyRestrictionIsCopied(t *testing.T) {
@@ -255,13 +255,13 @@ func TestIssuanceProxyRestrictionIsCopied(t *testing.T) {
 	req := issuanceAssertion(t, test, &Session{ID: "f00f00", NameID: "alice"})
 
 	issued := req.Assertion.Conditions.ProxyRestriction
-	assert.Assert(t, issued != nil)
-	assert.Check(t, is.DeepEqual(issued, configured))
+	require.NotNil(t, issued)
+	assert.Equal(t, issued, configured)
 
 	*issued.Count = 9
 	issued.Audiences[0].Value = "https://changed.example.com/"
 
-	assert.Check(t, is.DeepEqual(configured, &ProxyRestriction{Count: scopingInt(1), Audiences: []Audience{{Value: scopingBehindSP}}}))
+	assert.Equal(t, configured, &ProxyRestriction{Count: scopingInt(1), Audiences: []Audience{{Value: scopingBehindSP}}})
 }
 
 func TestIssuanceRefusesProxyRestrictionThatCannotBeStated(t *testing.T) {
@@ -287,9 +287,9 @@ func TestIssuanceRefusesProxyRestrictionThatCannotBeStated(t *testing.T) {
 			r, _ := scopingRequest(t, test, HTTPPostBinding, nil)
 
 			w := serveSSO(test, r)
-			assert.Check(t, is.Equal(w.Code, http.StatusInternalServerError))
-			assert.Check(t, !strings.Contains(w.Body.String(), "SAMLResponse"))
-			assert.Check(t, is.Contains(logs.String(), "IssuancePolicy: "+tc.err))
+			assert.Equal(t, w.Code, http.StatusInternalServerError)
+			assert.False(t, strings.Contains(w.Body.String(), "SAMLResponse"))
+			assert.Contains(t, logs.String(), "IssuancePolicy: "+tc.err)
 		})
 	}
 }
@@ -303,17 +303,17 @@ func TestIssuanceProxyRestrictionOnQueryAssertion(t *testing.T) {
 	issuanceFor(f.test, ServiceProviderIssuance{ProxyRestriction: &restriction})
 
 	issued := e.sso(t)
-	assert.Assert(t, issued.Conditions.ProxyRestriction != nil)
-	assert.Check(t, is.DeepEqual(*issued.Conditions.ProxyRestriction, restriction))
+	require.NotNil(t, issued.Conditions.ProxyRestriction)
+	assert.Equal(t, *issued.Conditions.ProxyRestriction, restriction)
 
 	query := f.attributeQuery()
 	query.Destination, query.Subject = e.attributeService, &Subject{NameID: issued.Subject.NameID}
 
 	response := e.post(t, sp, e.attributeService, query.Element())
 	assertQueryStatus(t, response, StatusSuccess, "")
-	assert.Assert(t, is.Len(response.Assertions, 1))
-	assert.Assert(t, response.Assertions[0].Conditions.ProxyRestriction != nil)
-	assert.Check(t, is.DeepEqual(*response.Assertions[0].Conditions.ProxyRestriction, restriction))
+	require.Len(t, response.Assertions, 1)
+	require.NotNil(t, response.Assertions[0].Conditions.ProxyRestriction)
+	assert.Equal(t, *response.Assertions[0].Conditions.ProxyRestriction, restriction)
 }
 
 func TestServeSSORefusesMalformedScoping(t *testing.T) {
@@ -329,8 +329,8 @@ func TestServeSSORefusesMalformedScoping(t *testing.T) {
 			test := hardeningIDPWithSessionCheck(t)
 
 			w := serveSSO(test, replayPostRequest(hardeningRequest(`ID="id-1"`, TimeNow(), hardeningIssuer+scoping), nil))
-			assert.Check(t, is.Equal(w.Code, http.StatusBadRequest))
-			assert.Check(t, !strings.Contains(w.Body.String(), "SAMLResponse"))
+			assert.Equal(t, w.Code, http.StatusBadRequest)
+			assert.False(t, strings.Contains(w.Body.String(), "SAMLResponse"))
 		})
 	}
 
@@ -338,8 +338,8 @@ func TestServeSSORefusesMalformedScoping(t *testing.T) {
 	test := NewIdentityProviderTest(t, applyKey)
 
 	req, err := hardeningValidate(test, hardeningRequest(`ID="id-1"`, TimeNow(), hardeningIssuer+`<Scoping ProxyCount="1"><RequesterID>`+scopingBehindSP+`</RequesterID></Scoping>`))
-	assert.NilError(t, err)
-	assert.Check(t, is.DeepEqual(req.Request.Scoping, &Scoping{ProxyCount: scopingInt(1), RequesterIDs: []string{scopingBehindSP}}))
+	require.NoError(t, err)
+	assert.Equal(t, req.Request.Scoping, &Scoping{ProxyCount: scopingInt(1), RequesterIDs: []string{scopingBehindSP}})
 }
 
 // TestScopingIsBoundedByRequestSize pins what the design relies on in place of a limit on the number of
@@ -356,19 +356,19 @@ func TestScopingIsBoundedByRequestSize(t *testing.T) {
 	}
 
 	req, err := hardeningValidate(test, fill(`<Scoping>`, `<RequesterID>a</RequesterID>`, `</Scoping>`))
-	assert.NilError(t, err)
-	assert.Check(t, len(req.Request.Scoping.RequesterIDs) > 500)
-	assert.Check(t, len(req.Request.Scoping.RequesterIDs) < 600)
+	require.NoError(t, err)
+	assert.True(t, len(req.Request.Scoping.RequesterIDs) > 500)
+	assert.True(t, len(req.Request.Scoping.RequesterIDs) < 600)
 
 	req, err = hardeningValidate(test, fill(`<Scoping><IDPList>`, `<IDPEntry ProviderID="a"/>`, `</IDPList></Scoping>`))
-	assert.NilError(t, err)
-	assert.Check(t, len(req.Request.Scoping.IDPList.IDPEntries) > 500)
-	assert.Check(t, len(req.Request.Scoping.IDPList.IDPEntries) < 640)
+	require.NoError(t, err)
+	assert.True(t, len(req.Request.Scoping.IDPList.IDPEntries) > 500)
+	assert.True(t, len(req.Request.Scoping.IDPList.IDPEntries) < 640)
 
 	oversized := hardeningRequest(`ID="id-1"`, TimeNow(), hardeningIssuer+`<Scoping>`+strings.Repeat(`<RequesterID>a</RequesterID>`, 600)+`</Scoping>`)
 
 	_, err = hardeningValidate(test, oversized)
-	assert.Check(t, is.Contains(errorText(err), "exceeds"))
+	assert.Contains(t, errorText(err), "exceeds")
 }
 
 func TestServiceProviderSendsScoping(t *testing.T) {
@@ -376,21 +376,21 @@ func TestServiceProviderSendsScoping(t *testing.T) {
 	sp := test.SP
 
 	request, err := sp.MakeAuthenticationRequest(signatureTestSSOURL, HTTPPostBinding, HTTPPostBinding)
-	assert.NilError(t, err)
-	assert.Check(t, request.Scoping == nil)
+	require.NoError(t, err)
+	assert.Nil(t, request.Scoping)
 
 	sp.Scoping = &Scoping{ProxyCount: scopingInt(1), IDPList: &IDPList{IDPEntries: []IDPEntry{{ProviderID: test.IDP.entityID()}}}}
 
 	request, err = sp.MakeAuthenticationRequest(signatureTestSSOURL, HTTPPostBinding, HTTPPostBinding)
-	assert.NilError(t, err)
-	assert.Check(t, is.DeepEqual(request.Scoping, sp.Scoping))
-	assert.Assert(t, request.Signature != nil)
+	require.NoError(t, err)
+	assert.Equal(t, request.Scoping, sp.Scoping)
+	require.NotNil(t, request.Signature)
 
 	// The signature that MakeAuthenticationRequest made covers the Scoping.
 	body := []byte(scopingXML(t, request.Element()))
-	assert.Assert(t, bytes.Contains(body, []byte(`<samlp:Scoping ProxyCount="1">`)))
-	assert.NilError(t, validatePost(t, test, body))
+	require.True(t, bytes.Contains(body, []byte(`<samlp:Scoping ProxyCount="1">`)))
+	require.NoError(t, validatePost(t, test, body))
 
 	err = validatePost(t, test, bytes.Replace(body, []byte(`ProxyCount="1"`), []byte(`ProxyCount="2"`), 1))
-	assert.Check(t, is.ErrorContains(err, "signature"))
+	assert.ErrorContains(t, err, "signature")
 }

@@ -5,21 +5,21 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"gotest.tools/assert"
-	is "gotest.tools/assert/cmp"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestCookieRequestTrackerGetTrackedRequestRejectsIndexMismatch(t *testing.T) {
 	tracker, req := newIndexMismatchRequest(t)
 
 	_, err := tracker.GetTrackedRequest(req, "mine")
-	assert.Check(t, is.Error(err, `expected index "mine", got "theirs"`))
+	assert.EqualError(t, err, `expected index "mine", got "theirs"`)
 }
 
 func TestCookieRequestTrackerGetTrackedRequestsSkipsIndexMismatch(t *testing.T) {
 	tracker, req := newIndexMismatchRequest(t)
 
-	assert.Check(t, is.Len(tracker.GetTrackedRequests(req), 0))
+	assert.Len(t, tracker.GetTrackedRequests(req), 0)
 }
 
 func newIndexMismatchRequest(t *testing.T) (CookieRequestTracker, *http.Request) {
@@ -27,7 +27,7 @@ func newIndexMismatchRequest(t *testing.T) (CookieRequestTracker, *http.Request)
 	tracker := test.Middleware.RequestTracker.(CookieRequestTracker)
 
 	token, err := tracker.Codec.Encode(TrackedRequest{Index: "theirs", SAMLRequestID: "id-1", URI: "/"})
-	assert.NilError(t, err)
+	require.NoError(t, err)
 
 	req := httptest.NewRequest(http.MethodPost, "https://15661444.ngrok.io/saml2/acs", nil)
 	req.Header.Set("Cookie", tracker.NamePrefix+"mine="+token)

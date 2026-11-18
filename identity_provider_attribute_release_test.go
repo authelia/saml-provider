@@ -11,8 +11,8 @@ import (
 	"testing"
 
 	"github.com/beevik/etree"
-	"gotest.tools/assert"
-	is "gotest.tools/assert/cmp"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 const (
@@ -99,13 +99,13 @@ func service(index int, isDefault *bool, attributes ...RequestedAttribute) Attri
 // releasedAttributes makes an assertion for req and returns the attributes it releases.
 func releasedAttributes(t *testing.T, req *IdpAuthnRequest, session *Session) []Attribute {
 	t.Helper()
-	assert.NilError(t, DefaultAssertionMaker{}.MakeAssertion(req, session))
+	require.NoError(t, DefaultAssertionMaker{}.MakeAssertion(req, session))
 
 	switch len(req.Assertion.AttributeStatements) {
 	case 0:
 		return nil
 	case 1:
-		assert.Assert(t, len(req.Assertion.AttributeStatements[0].Attributes) != 0, "empty AttributeStatement")
+		require.True(t, len(req.Assertion.AttributeStatements[0].Attributes) != 0, "empty AttributeStatement")
 		return req.Assertion.AttributeStatements[0].Attributes
 	default:
 		t.Fatalf("expected at most one AttributeStatement, got %d", len(req.Assertion.AttributeStatements))
@@ -130,9 +130,9 @@ func TestDefaultAttributeReleasePolicyReleasesNothingUnrequested(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			test := NewIdentityProviderTest(t, applyKey)
 			req := attributeReleaseRequest(t, test, "", services...)
-			assert.Check(t, is.Len(releasedAttributes(t, req, attributeReleaseSession()), 0))
-			assert.Check(t, is.Len(req.Assertion.AttributeStatements, 0))
-			assert.Check(t, is.Equal(req.Assertion.Subject.NameID.Value, "alice"))
+			assert.Len(t, releasedAttributes(t, req, attributeReleaseSession()), 0)
+			assert.Len(t, req.Assertion.AttributeStatements, 0)
+			assert.Equal(t, req.Assertion.Subject.NameID.Value, "alice")
 		})
 	}
 }
@@ -146,19 +146,19 @@ func TestDefaultAttributeReleasePolicyReleasesOnlyRequested(t *testing.T) {
 	))
 
 	attributes := releasedAttributes(t, req, attributeReleaseSession())
-	assert.Check(t, is.DeepEqual(attributeNames(attributes), []string{mailAttributeName, affiliationAttributeName}))
-	assert.Check(t, is.DeepEqual(attributes[0], Attribute{
+	assert.Equal(t, attributeNames(attributes), []string{mailAttributeName, affiliationAttributeName})
+	assert.Equal(t, attributes[0], Attribute{
 		FriendlyName: "mail",
 		Name:         mailAttributeName,
 		NameFormat:   uriAttrNameFormat,
 		Values:       []AttributeValue{{Type: "xs:string", Value: "alice@example.com"}},
-	}))
+	})
 }
 
 func TestDefaultAttributeReleasePolicyReleasesRequestedCustomAttributes(t *testing.T) {
 	test := NewIdentityProviderTest(t, applyKey)
 	req := attributeReleaseRequest(t, test, "", service(0, nil, requested("employeeNumber", "")))
-	assert.Check(t, is.DeepEqual(attributeNames(releasedAttributes(t, req, attributeReleaseSession())), []string{"employeeNumber"}))
+	assert.Equal(t, attributeNames(releasedAttributes(t, req, attributeReleaseSession())), []string{"employeeNumber"})
 }
 
 // TestDefaultAttributeReleasePolicyMatchesNameFormat checks that an omitted NameFormat is unspecified,
@@ -181,9 +181,9 @@ func TestDefaultAttributeReleasePolicyMatchesNameFormat(t *testing.T) {
 
 			attributes := releasedAttributes(t, req, attributeReleaseSession())
 			if tc.released {
-				assert.Check(t, is.DeepEqual(attributeNames(attributes), []string{tc.requested.Name}))
+				assert.Equal(t, attributeNames(attributes), []string{tc.requested.Name})
 			} else {
-				assert.Check(t, is.Len(attributes, 0))
+				assert.Len(t, attributes, 0)
 			}
 		})
 	}
@@ -196,7 +196,7 @@ func TestDefaultAttributeReleasePolicyIgnoresFriendlyName(t *testing.T) {
 	byFriendlyName := requested("urn:example:mail", uriAttrNameFormat)
 	byFriendlyName.FriendlyName = "mail"
 	req := attributeReleaseRequest(t, test, "", service(0, nil, byFriendlyName))
-	assert.Check(t, is.Len(releasedAttributes(t, req, attributeReleaseSession()), 0))
+	assert.Len(t, releasedAttributes(t, req, attributeReleaseSession()), 0)
 }
 
 // TestDefaultAttributeReleasePolicyReleasesRequestedValues checks that only the values listed by a
@@ -206,14 +206,14 @@ func TestDefaultAttributeReleasePolicyReleasesRequestedValues(t *testing.T) {
 		test := NewIdentityProviderTest(t, applyKey)
 		req := attributeReleaseRequest(t, test, "", service(0, nil, requested(affiliationAttributeName, uriAttrNameFormat, "Administrators", "Nobody")))
 		attributes := releasedAttributes(t, req, attributeReleaseSession())
-		assert.Assert(t, is.Len(attributes, 1))
-		assert.Check(t, is.DeepEqual(attributes[0].Values, []AttributeValue{{Type: "xs:string", Value: "Administrators"}}))
+		require.Len(t, attributes, 1)
+		assert.Equal(t, attributes[0].Values, []AttributeValue{{Type: "xs:string", Value: "Administrators"}})
 	})
 
 	t.Run("no matching value", func(t *testing.T) {
 		test := NewIdentityProviderTest(t, applyKey)
 		req := attributeReleaseRequest(t, test, "", service(0, nil, requested(affiliationAttributeName, uriAttrNameFormat, "Nobody")))
-		assert.Check(t, is.Len(releasedAttributes(t, req, attributeReleaseSession()), 0))
+		assert.Len(t, releasedAttributes(t, req, attributeReleaseSession()), 0)
 	})
 }
 
@@ -247,10 +247,10 @@ func TestDefaultAttributeReleasePolicyReleasesRequestedNameIDValues(t *testing.T
 
 			attributes := releasedAttributes(t, req, session)
 			if tc.released {
-				assert.Assert(t, is.Len(attributes, 1))
-				assert.Check(t, is.DeepEqual(attributes[0].Values, []AttributeValue{{NameID: &candidate}}))
+				require.Len(t, attributes, 1)
+				assert.Equal(t, attributes[0].Values, []AttributeValue{{NameID: &candidate}})
 			} else {
-				assert.Check(t, is.Len(attributes, 0))
+				assert.Len(t, attributes, 0)
 			}
 		})
 	}
@@ -279,9 +279,9 @@ func TestDefaultAssertionMakerCopiesCustomAttributes(t *testing.T) {
 		Name:   "urn:oid:1.3.6.1.4.1.5923.1.1.1.10",
 		Values: []AttributeValue{{NameID: &NameID{Value: "alice"}}},
 	})
-	assert.NilError(t, DefaultAssertionMaker{}.MakeAssertion(req, session))
-	assert.Check(t, is.Equal(session.CustomAttributes[0].Values[0].Value, "42"))
-	assert.Check(t, is.Equal(session.CustomAttributes[1].Values[0].NameID.Value, "alice"))
+	require.NoError(t, DefaultAssertionMaker{}.MakeAssertion(req, session))
+	assert.Equal(t, session.CustomAttributes[0].Values[0].Value, "42")
+	assert.Equal(t, session.CustomAttributes[1].Values[0].NameID.Value, "alice")
 }
 
 // TestDefaultAssertionMakerReleasesEmailUnderRequestedName checks the attributes that a service
@@ -307,15 +307,15 @@ func TestDefaultAssertionMakerReleasesEmailUnderRequestedName(t *testing.T) {
 
 			attributes := releasedAttributes(t, req, attributeReleaseSession())
 			if tc.value == "" {
-				assert.Check(t, is.Len(attributes, 0))
+				assert.Len(t, attributes, 0)
 				return
 			}
 
-			assert.Check(t, is.DeepEqual(attributes, []Attribute{{
+			assert.Equal(t, attributes, []Attribute{{
 				Name:       tc.requested.Name,
 				NameFormat: tc.requested.NameFormat,
 				Values:     []AttributeValue{{Type: "xs:string", Value: tc.value}},
-			}}))
+			}})
 		})
 	}
 }
@@ -328,7 +328,7 @@ func TestDefaultAssertionMakerOmitsEmptyRequestedNameAttributes(t *testing.T) {
 		requested("uid", basicAttrNameFormat),
 	))
 	attributes := releasedAttributes(t, req, &Session{ID: "s", NameID: "alice", UserName: "alice"})
-	assert.Check(t, is.DeepEqual(attributeNames(attributes), []string{"uid"}))
+	assert.Equal(t, attributeNames(attributes), []string{"uid"})
 }
 
 func TestDefaultAssertionMakerReleasesRequestedNameOnce(t *testing.T) {
@@ -337,7 +337,7 @@ func TestDefaultAssertionMakerReleasesRequestedNameOnce(t *testing.T) {
 		requested("email", basicAttrNameFormat),
 		requested("email", basicAttrNameFormat),
 	))
-	assert.Check(t, is.Len(releasedAttributes(t, req, attributeReleaseSession()), 1))
+	assert.Len(t, releasedAttributes(t, req, attributeReleaseSession()), 1)
 }
 
 // TestAttributeConsumingServiceDefault checks the default rules of SAMLMeta §2.4.4, as changed by
@@ -358,18 +358,18 @@ func TestAttributeConsumingServiceDefault(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			test := NewIdentityProviderTest(t, applyKey)
 			got := attributeReleaseRequest(t, test, "", tc.services...).AttributeConsumingService()
-			assert.Assert(t, got != nil)
-			assert.Check(t, is.Equal(got.Index, tc.index))
+			require.NotNil(t, got)
+			assert.Equal(t, got.Index, tc.index)
 		})
 	}
 
 	t.Run("none", func(t *testing.T) {
 		test := NewIdentityProviderTest(t, applyKey)
-		assert.Check(t, attributeReleaseRequest(t, test, "").AttributeConsumingService() == nil)
+		assert.True(t, attributeReleaseRequest(t, test, "").AttributeConsumingService() == nil)
 	})
 
 	t.Run("no SPSSODescriptor", func(t *testing.T) {
-		assert.Check(t, (&IdpAuthnRequest{}).AttributeConsumingService() == nil)
+		assert.True(t, (&IdpAuthnRequest{}).AttributeConsumingService() == nil)
 	})
 }
 
@@ -401,13 +401,13 @@ func TestAttributeConsumingServiceIndex(t *testing.T) {
 
 			attributes := releasedAttributes(t, req, attributeReleaseSession())
 			if tc.released == nil {
-				assert.Check(t, is.Len(attributes, 0))
-				assert.Check(t, req.AttributeConsumingService() == nil)
+				assert.Len(t, attributes, 0)
+				assert.Nil(t, req.AttributeConsumingService())
 
 				return
 			}
 
-			assert.Check(t, is.DeepEqual(attributeNames(attributes), tc.released))
+			assert.Equal(t, attributeNames(attributes), tc.released)
 		})
 	}
 }
@@ -424,7 +424,7 @@ func TestDefaultAssertionMakerUsesConfiguredAttributeReleasePolicy(t *testing.T)
 		})
 		req := attributeReleaseRequest(t, test, "")
 		attributes := releasedAttributes(t, req, attributeReleaseSession())
-		assert.Check(t, is.DeepEqual(attributeNames(candidates), []string{
+		assert.Equal(t, attributeNames(candidates), []string{
 			uidAttributeName,
 			mailAttributeName,
 			"urn:oid:1.3.6.1.4.1.5923.1.1.1.6",
@@ -435,8 +435,8 @@ func TestDefaultAssertionMakerUsesConfiguredAttributeReleasePolicy(t *testing.T)
 			"employeeNumber",
 			affiliationAttributeName,
 			"urn:oasis:names:tc:SAML:attribute:subject-id",
-		}))
-		assert.Check(t, is.DeepEqual(attributes, candidates))
+		})
+		assert.Equal(t, attributes, candidates)
 	})
 
 	t.Run("releases nothing", func(t *testing.T) {
@@ -445,7 +445,7 @@ func TestDefaultAssertionMakerUsesConfiguredAttributeReleasePolicy(t *testing.T)
 			return nil, nil
 		})
 		req := attributeReleaseRequest(t, test, "", service(0, nil, requested(mailAttributeName, uriAttrNameFormat)))
-		assert.Check(t, is.Len(releasedAttributes(t, req, attributeReleaseSession()), 0))
+		assert.Len(t, releasedAttributes(t, req, attributeReleaseSession()), 0)
 	})
 
 	t.Run("refuses", func(t *testing.T) {
@@ -454,7 +454,7 @@ func TestDefaultAssertionMakerUsesConfiguredAttributeReleasePolicy(t *testing.T)
 			return nil, errors.New("refused")
 		})
 		req := attributeReleaseRequest(t, test, "")
-		assert.Check(t, is.ErrorContains(DefaultAssertionMaker{}.MakeAssertion(req, attributeReleaseSession()), "refused"))
+		assert.ErrorContains(t, DefaultAssertionMaker{}.MakeAssertion(req, attributeReleaseSession()), "refused")
 	})
 }
 
@@ -488,11 +488,11 @@ func TestServeSSOReleasesAttributesOfRequestedService(t *testing.T) {
 	test.IDP.AttributeReleasePolicy = attributeReleasePolicyFunc(func(req AttributeReleaseRequest, session *Session, candidates []Attribute) ([]Attribute, error) {
 		var err error
 
-		assert.Check(t, req.AuthnRequest != nil)
-		assert.Check(t, req.Query == nil)
-		assert.Check(t, is.Len(req.Requested, 0))
-		assert.Check(t, is.Equal(req.ServiceProviderMetadata.EntityID, test.SP.MetadataURL.String()))
-		assert.Check(t, req.HTTPRequest != nil)
+		assert.NotNil(t, req.AuthnRequest)
+		assert.Nil(t, req.Query)
+		assert.Len(t, req.Requested, 0)
+		assert.Equal(t, req.ServiceProviderMetadata.EntityID, test.SP.MetadataURL.String())
+		assert.NotNil(t, req.HTTPRequest)
 
 		released, err = DefaultAttributeReleasePolicy{}.ReleaseAttributes(req, session, candidates)
 
@@ -500,13 +500,13 @@ func TestServeSSOReleasesAttributesOfRequestedService(t *testing.T) {
 	})
 
 	request, err := test.SP.MakeAuthenticationRequest("https://idp.example.com/saml/sso", HTTPPostBinding, HTTPPostBinding)
-	assert.NilError(t, err)
+	require.NoError(t, err)
 
 	request.AttributeConsumingServiceIndex = "2"
 	doc := etree.NewDocument()
 	doc.SetRoot(request.Element())
 	body, err := doc.WriteToBytes()
-	assert.NilError(t, err)
+	require.NoError(t, err)
 
 	form := url.Values{"SAMLRequest": {base64.StdEncoding.EncodeToString(body)}}
 	r := httptest.NewRequest(http.MethodPost, "https://idp.example.com/saml/sso", strings.NewReader(form.Encode()))
@@ -514,8 +514,8 @@ func TestServeSSOReleasesAttributesOfRequestedService(t *testing.T) {
 
 	w := httptest.NewRecorder()
 	test.IDP.ServeSSO(w, r)
-	assert.Assert(t, is.Equal(w.Code, http.StatusOK), "body: %s", w.Body.String())
+	require.Equal(t, w.Code, http.StatusOK, "body: %s", w.Body.String())
 	_, response := postedResponse(t, w.Body.String())
-	assert.Check(t, is.Equal(response.Status.StatusCode.Value, StatusSuccess))
-	assert.Check(t, is.DeepEqual(attributeNames(released), []string{uidAttributeName}))
+	assert.Equal(t, response.Status.StatusCode.Value, StatusSuccess)
+	assert.Equal(t, attributeNames(released), []string{uidAttributeName})
 }

@@ -12,8 +12,8 @@ import (
 	"testing"
 
 	"github.com/beevik/etree"
-	"gotest.tools/assert"
-	is "gotest.tools/assert/cmp"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 // queryE2ESessionProvider has one logged in user, whom it finds by the NameID that single sign-on asserts for the
@@ -89,29 +89,29 @@ func newQueryE2E(t *testing.T) *queryE2E {
 
 	// The service provider learns the services from the metadata that the identity provider serves.
 	res, err := http.Get(idp.MetadataURL.String())
-	assert.NilError(t, err)
+	require.NoError(t, err)
 
 	defer res.Body.Close()
 
 	body, err := io.ReadAll(res.Body)
-	assert.NilError(t, err)
+	require.NoError(t, err)
 
 	metadata := &EntityDescriptor{}
-	assert.NilError(t, xml.Unmarshal(body, metadata))
+	require.NoError(t, xml.Unmarshal(body, metadata))
 
 	e.f.test.SP.IDPMetadata = metadata
 
 	soapLocation := func(endpoints []Endpoint) string {
 		t.Helper()
 
-		assert.Assert(t, is.Len(endpoints, 1))
-		assert.Assert(t, is.Equal(endpoints[0].Binding, SOAPBinding))
+		require.Len(t, endpoints, 1)
+		require.Equal(t, endpoints[0].Binding, SOAPBinding)
 
 		return endpoints[0].Location
 	}
 
-	assert.Assert(t, is.Len(metadata.AttributeAuthorityDescriptors, 1))
-	assert.Assert(t, is.Len(metadata.AuthnAuthorityDescriptors, 1))
+	require.Len(t, metadata.AttributeAuthorityDescriptors, 1)
+	require.Len(t, metadata.AuthnAuthorityDescriptors, 1)
 
 	e.attributeService = soapLocation(metadata.AttributeAuthorityDescriptors[0].AttributeServices)
 	e.authnQueryService = soapLocation(metadata.AuthnAuthorityDescriptors[0].AuthnQueryServices)
@@ -128,28 +128,28 @@ func (e *queryE2E) sso(t *testing.T) *Assertion {
 	sp := &e.f.test.SP
 
 	request, err := sp.MakeAuthenticationRequest(sp.GetSSOBindingLocation(HTTPPostBinding), HTTPPostBinding, HTTPPostBinding)
-	assert.NilError(t, err)
+	require.NoError(t, err)
 
 	doc := etree.NewDocument()
 	doc.SetRoot(request.Element())
 	body, err := doc.WriteToBytes()
-	assert.NilError(t, err)
+	require.NoError(t, err)
 
 	res, err := http.PostForm(request.Destination, url.Values{"SAMLRequest": {base64.StdEncoding.EncodeToString(body)}})
-	assert.NilError(t, err)
+	require.NoError(t, err)
 
 	defer res.Body.Close()
 
 	page, err := io.ReadAll(res.Body)
-	assert.NilError(t, err)
-	assert.Assert(t, is.Equal(res.StatusCode, http.StatusOK), "body: %s", page)
+	require.NoError(t, err)
+	require.Equal(t, res.StatusCode, http.StatusOK, "body: %s", page)
 
 	posted, _ := postedResponse(t, string(page))
 	responseXML, err := posted.WriteToBytes()
-	assert.NilError(t, err)
+	require.NoError(t, err)
 
 	assertion, err := sp.ParseXMLResponse(responseXML, []string{request.ID}, sp.AcsURL)
-	assert.NilError(t, err)
+	require.NoError(t, err)
 
 	return assertion
 }
@@ -164,18 +164,18 @@ func (e *queryE2E) post(t *testing.T, sp *ServiceProvider, location string, mess
 	}
 
 	req, err := http.NewRequest(http.MethodPost, location, bytes.NewReader(soapLogoutEnvelope(t, message)))
-	assert.NilError(t, err)
+	require.NoError(t, err)
 
 	req.Header.Set("Content-Type", "text/xml; charset=utf-8")
 	req.Header.Set("SOAPAction", `"`+soapActionSAML+`"`)
 
 	res, err := e.server.Client().Do(req)
-	assert.NilError(t, err)
+	require.NoError(t, err)
 
 	defer res.Body.Close()
 
 	body, err := io.ReadAll(res.Body)
-	assert.NilError(t, err)
+	require.NoError(t, err)
 
 	return parseQueryResponse(t, sp, res.StatusCode, res.Header, body)
 }
@@ -185,9 +185,9 @@ func TestQueryEndToEnd(t *testing.T) {
 	f, sp := e.f, &e.f.test.SP
 
 	issued := e.sso(t)
-	assert.Assert(t, issued.Subject != nil && issued.Subject.NameID != nil)
-	assert.Assert(t, is.Len(issued.AuthnStatements, 1))
-	assert.Check(t, is.Equal(issued.Subject.NameID.SPNameQualifier, sp.MetadataURL.String()))
+	require.True(t, issued.Subject != nil && issued.Subject.NameID != nil)
+	require.Len(t, issued.AuthnStatements, 1)
+	assert.Equal(t, issued.Subject.NameID.SPNameQualifier, sp.MetadataURL.String())
 
 	subject := &Subject{NameID: issued.Subject.NameID}
 
@@ -197,15 +197,15 @@ func TestQueryEndToEnd(t *testing.T) {
 
 		response := e.post(t, sp, e.assertionIDRequestService, request.Element())
 		assertQueryStatus(t, response, StatusSuccess, "")
-		assert.Check(t, is.Equal(response.Response.InResponseTo, request.ID))
-		assert.Assert(t, is.Len(response.Assertions, 1))
-		assert.Check(t, is.Equal(response.Encrypted, 1))
+		assert.Equal(t, response.Response.InResponseTo, request.ID)
+		require.Len(t, response.Assertions, 1)
+		assert.Equal(t, response.Encrypted, 1)
 
 		fetched := response.Assertions[0]
-		assert.Check(t, is.Equal(fetched.ID, issued.ID))
-		assert.Check(t, is.DeepEqual(fetched.Subject.NameID, issued.Subject.NameID))
-		assert.Check(t, is.DeepEqual(fetched.AttributeStatements, issued.AttributeStatements))
-		assert.Check(t, is.Equal(fetched.AuthnStatements[0].SessionIndex, "index-e2e"))
+		assert.Equal(t, fetched.ID, issued.ID)
+		assert.Equal(t, fetched.Subject.NameID, issued.Subject.NameID)
+		assert.Equal(t, fetched.AttributeStatements, issued.AttributeStatements)
+		assert.Equal(t, fetched.AuthnStatements[0].SessionIndex, "index-e2e")
 	})
 
 	t.Run("AttributeQuery states what single sign-on stated", func(t *testing.T) {
@@ -214,16 +214,16 @@ func TestQueryEndToEnd(t *testing.T) {
 
 		response := e.post(t, sp, e.attributeService, query.Element())
 		assertQueryStatus(t, response, StatusSuccess, "")
-		assert.Check(t, is.Equal(response.Response.InResponseTo, query.ID))
-		assert.Check(t, is.Equal(response.Response.Issuer.Value, f.test.IDP.MetadataURL.String()))
-		assert.Assert(t, is.Len(response.Assertions, 1))
-		assert.Check(t, is.Equal(response.Encrypted, 1))
+		assert.Equal(t, response.Response.InResponseTo, query.ID)
+		assert.Equal(t, response.Response.Issuer.Value, f.test.IDP.MetadataURL.String())
+		require.Len(t, response.Assertions, 1)
+		assert.Equal(t, response.Encrypted, 1)
 
 		assertion := response.Assertions[0]
 		f.assertQueryAssertion(t, assertion, subject)
-		assert.Check(t, assertion.ID != issued.ID)
-		assert.Check(t, is.DeepEqual(assertion.AttributeStatements, issued.AttributeStatements))
-		assert.Check(t, is.DeepEqual(attributeNames(assertion.AttributeStatements[0].Attributes), []string{mailAttributeName, affiliationAttributeName}))
+		assert.True(t, assertion.ID != issued.ID)
+		assert.Equal(t, assertion.AttributeStatements, issued.AttributeStatements)
+		assert.Equal(t, attributeNames(assertion.AttributeStatements[0].Attributes), []string{mailAttributeName, affiliationAttributeName})
 	})
 
 	t.Run("AttributeQuery for one value", func(t *testing.T) {
@@ -236,11 +236,11 @@ func TestQueryEndToEnd(t *testing.T) {
 
 		response := e.post(t, sp, e.attributeService, query.Element())
 		assertQueryStatus(t, response, StatusSuccess, "")
-		assert.Assert(t, is.Len(response.Assertions, 1))
+		require.Len(t, response.Assertions, 1)
 
 		attributes := response.Assertions[0].AttributeStatements[0].Attributes
-		assert.Assert(t, is.Len(attributes, 1))
-		assert.Check(t, is.DeepEqual(queryAttributeValues(attributes[0]), []string{"Administrators"}))
+		require.Len(t, attributes, 1)
+		assert.Equal(t, queryAttributeValues(attributes[0]), []string{"Administrators"})
 	})
 
 	t.Run("AuthnQuery states the session of single sign-on", func(t *testing.T) {
@@ -251,24 +251,24 @@ func TestQueryEndToEnd(t *testing.T) {
 
 		response := e.post(t, sp, e.authnQueryService, query.Element())
 		assertQueryStatus(t, response, StatusSuccess, "")
-		assert.Assert(t, is.Len(response.Assertions, 1))
+		require.Len(t, response.Assertions, 1)
 
 		assertion := response.Assertions[0]
 		f.assertQueryAssertion(t, assertion, subject)
-		assert.Assert(t, is.Len(assertion.AuthnStatements, 1))
+		require.Len(t, assertion.AuthnStatements, 1)
 
 		statement := assertion.AuthnStatements[0]
-		assert.Check(t, is.Equal(statement.SessionIndex, issued.AuthnStatements[0].SessionIndex))
-		assert.Check(t, statement.AuthnInstant.Equal(issued.AuthnStatements[0].AuthnInstant))
-		assert.Check(t, is.DeepEqual(statement.AuthnContext.AuthnContextClassRef, issued.AuthnStatements[0].AuthnContext.AuthnContextClassRef))
+		assert.Equal(t, statement.SessionIndex, issued.AuthnStatements[0].SessionIndex)
+		assert.True(t, statement.AuthnInstant.Equal(issued.AuthnStatements[0].AuthnInstant))
+		assert.Equal(t, statement.AuthnContext.AuthnContextClassRef, issued.AuthnStatements[0].AuthnContext.AuthnContextClassRef)
 
 		// The assertion that answered the query can itself be fetched.
 		request := f.assertionIDRequest(assertion.ID)
 		request.Destination = e.assertionIDRequestService
 
 		fetched := e.post(t, sp, e.assertionIDRequestService, request.Element())
-		assert.Assert(t, is.Len(fetched.Assertions, 1))
-		assert.Check(t, is.Equal(elementString(t, fetched.AssertionEls[0]), elementString(t, response.AssertionEls[0])))
+		require.Len(t, fetched.Assertions, 1)
+		assert.Equal(t, elementString(t, fetched.AssertionEls[0]), elementString(t, response.AssertionEls[0]))
 	})
 
 	t.Run("AuthnQuery for a context the session does not have", func(t *testing.T) {
@@ -278,7 +278,7 @@ func TestQueryEndToEnd(t *testing.T) {
 
 		response := e.post(t, sp, e.authnQueryService, query.Element())
 		assertQueryStatus(t, response, StatusSuccess, "")
-		assert.Check(t, is.Len(response.Assertions, 0))
+		assert.Len(t, response.Assertions, 0)
 	})
 
 	// Another service provider, with its own key, learns nothing of the first one's user or assertions.
@@ -296,7 +296,7 @@ func TestQueryEndToEnd(t *testing.T) {
 
 		response := e.post(t, &other, e.assertionIDRequestService, request.Element())
 		assertQueryStatus(t, response, StatusSuccess, "")
-		assert.Check(t, is.Len(response.Assertions, 0))
+		assert.Len(t, response.Assertions, 0)
 	})
 
 	t.Run("another service provider cannot query the NameID", func(t *testing.T) {
@@ -332,22 +332,22 @@ func TestQueryEndToEnd(t *testing.T) {
 
 	t.Run("a GET is not SOAP", func(t *testing.T) {
 		res, err := e.server.Client().Get(e.attributeService)
-		assert.NilError(t, err)
+		require.NoError(t, err)
 
 		defer res.Body.Close()
 
-		assert.Check(t, is.Equal(res.StatusCode, http.StatusMethodNotAllowed))
+		assert.Equal(t, res.StatusCode, http.StatusMethodNotAllowed)
 	})
 
 	t.Run("a body that is not an envelope is a fault", func(t *testing.T) {
 		res, err := e.server.Client().Post(e.attributeService, "text/xml", strings.NewReader("<not-soap/>"))
-		assert.NilError(t, err)
+		require.NoError(t, err)
 
 		defer res.Body.Close()
 
 		body, err := io.ReadAll(res.Body)
-		assert.NilError(t, err)
-		assert.Check(t, is.Equal(res.StatusCode, http.StatusInternalServerError))
-		assert.Check(t, is.Contains(string(body), "soapenv:Client"))
+		require.NoError(t, err)
+		assert.Equal(t, res.StatusCode, http.StatusInternalServerError)
+		assert.Contains(t, string(body), "soapenv:Client")
 	})
 }

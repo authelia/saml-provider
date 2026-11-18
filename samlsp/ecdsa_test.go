@@ -8,8 +8,8 @@ import (
 	"net/url"
 	"testing"
 
-	"gotest.tools/assert"
-	is "gotest.tools/assert/cmp"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"authelia.com/provider/jose"
 
@@ -35,7 +35,7 @@ func ecdsaTestSigners(t *testing.T, curve elliptic.Curve) map[string]crypto.Sign
 	t.Helper()
 
 	key, err := ecdsa.GenerateKey(curve, rand.Reader)
-	assert.NilError(t, err)
+	require.NoError(t, err)
 
 	return map[string]crypto.Signer{"key": key, "opaque signer": opaqueSigner{key}}
 }
@@ -45,23 +45,23 @@ func TestDefaultCodecsRoundTripWithECDSA(t *testing.T) {
 		for name, signer := range ecdsaTestSigners(t, tc.curve) {
 			t.Run(tc.name+"/"+name, func(t *testing.T) {
 				u, err := url.Parse("https://sp.example.com/")
-				assert.NilError(t, err)
+				require.NoError(t, err)
 
 				opts := Options{URL: *u, Key: signer}
 
 				sessions := DefaultSessionCodec(opts)
-				assert.Check(t, is.Equal(tc.algorithm, sessions.SigningMethod))
+				assert.Equal(t, tc.algorithm, sessions.SigningMethod)
 				session, err := sessions.Decode(encodeTestSession(t, sessions))
-				assert.NilError(t, err)
-				assert.Check(t, is.Equal("alice", session.(JWTSessionClaims).Subject))
+				require.NoError(t, err)
+				assert.Equal(t, "alice", session.(JWTSessionClaims).Subject)
 
 				requests := DefaultTrackedRequestCodec(opts)
-				assert.Check(t, is.Equal(tc.algorithm, requests.SigningMethod))
+				assert.Equal(t, tc.algorithm, requests.SigningMethod)
 				token, err := requests.Encode(TrackedRequest{Index: "idx", SAMLRequestID: "id-1", URI: "/"})
-				assert.NilError(t, err)
+				require.NoError(t, err)
 				tracked, err := requests.Decode(token)
-				assert.NilError(t, err)
-				assert.Check(t, is.Equal("id-1", tracked.SAMLRequestID))
+				require.NoError(t, err)
+				assert.Equal(t, "id-1", tracked.SAMLRequestID)
 			})
 		}
 	}
@@ -72,10 +72,10 @@ func TestDefaultServiceProviderSigningMethodWithECDSA(t *testing.T) {
 		for name, signer := range ecdsaTestSigners(t, tc.curve) {
 			t.Run(tc.name+"/"+name, func(t *testing.T) {
 				u, err := url.Parse("https://sp.example.com/")
-				assert.NilError(t, err)
+				require.NoError(t, err)
 
 				sp := DefaultServiceProvider(Options{URL: *u, Key: signer, SignRequest: true})
-				assert.Check(t, is.Equal(tc.method, sp.SignatureMethod))
+				assert.Equal(t, tc.method, sp.SignatureMethod)
 			})
 		}
 	}

@@ -8,8 +8,8 @@ import (
 	"testing"
 
 	"github.com/beevik/etree"
-	"gotest.tools/assert"
-	is "gotest.tools/assert/cmp"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func cbcElement(cipher BlockCipher, ciphertext []byte) *etree.Element {
@@ -35,18 +35,18 @@ func TestCBCDecryptRejectsCiphertextOfInvalidLength(t *testing.T) {
 			key := make([]byte, tc.cipher.KeySize())
 			for size := 0; size < 3*tc.blockSize+2; size++ {
 				plaintext, err := tc.cipher.Decrypt(key, cbcElement(tc.cipher, make([]byte, size)))
-				assert.Check(t, err != nil || size%tc.blockSize == 0 && size > tc.blockSize, "size %d: %q", size, plaintext)
+				assert.True(t, err != nil || size%tc.blockSize == 0 && size > tc.blockSize, "size %d: %q", size, plaintext)
 			}
 		})
 	}
 }
 
 func TestTripleDESIsThreeKeyTripleDES(t *testing.T) {
-	assert.Check(t, is.Equal(24, TripleDES.KeySize()))
-	assert.Check(t, is.Equal("http://www.w3.org/2001/04/xmlenc#tripledes-cbc", TripleDES.Algorithm()))
+	assert.Equal(t, 24, TripleDES.KeySize())
+	assert.Equal(t, "http://www.w3.org/2001/04/xmlenc#tripledes-cbc", TripleDES.Algorithm())
 
 	_, err := TripleDES.Decrypt(make([]byte, 8), cbcElement(TripleDES, make([]byte, 16)))
-	assert.Check(t, is.ErrorContains(err, "expected key to be 24 bytes"))
+	assert.ErrorContains(t, err, "expected key to be 24 bytes")
 }
 
 // The ciphertext was produced by OpenSSL, independently of this package:
@@ -54,13 +54,13 @@ func TestTripleDESIsThreeKeyTripleDES(t *testing.T) {
 //	openssl enc -des-ede3-cbc -provider legacy -provider default -nopad -K <key> -iv <iv> -in <padded plaintext>
 func TestTripleDESDecryptsOpenSSLCiphertext(t *testing.T) {
 	key, err := hex.DecodeString("0123456789abcdeffedcba9876543210f0e1d2c3b4a59687")
-	assert.NilError(t, err)
+	require.NoError(t, err)
 	ciphertext, err := hex.DecodeString("a1b2c3d4e5f60718" + "37b247b7d79271079ff107be5f49009ab7fde1abe673e918")
-	assert.NilError(t, err)
+	require.NoError(t, err)
 
 	plaintext, err := TripleDES.Decrypt(key, cbcElement(TripleDES, ciphertext))
-	assert.NilError(t, err)
-	assert.Check(t, is.Equal("<saml:Assertion/>", string(plaintext)))
+	require.NoError(t, err)
+	assert.Equal(t, "<saml:Assertion/>", string(plaintext))
 }
 
 func TestTripleDESRoundTrip(t *testing.T) {
@@ -70,10 +70,10 @@ func TestTripleDESRoundTrip(t *testing.T) {
 	}
 
 	el, err := TripleDES.Encrypt(key, []byte("hello world"), nil)
-	assert.NilError(t, err)
+	require.NoError(t, err)
 	plaintext, err := TripleDES.Decrypt(key, el)
-	assert.NilError(t, err)
-	assert.Check(t, is.Equal("hello world", string(plaintext)))
+	require.NoError(t, err)
+	assert.Equal(t, "hello world", string(plaintext))
 }
 
 // XML Encryption §5.2: the last byte of the plaintext is the number of bytes of padding, which is at least one and
@@ -95,7 +95,7 @@ func TestCBCDecryptRejectsPaddingLongerThanABlock(t *testing.T) {
 			}
 
 			block, err := tc.cipher.cipher(key)
-			assert.NilError(t, err)
+			require.NoError(t, err)
 
 			blockSize := block.BlockSize()
 			content := strings.Repeat("<saml:Assertion/>", 16)[:17*blockSize]
@@ -112,12 +112,12 @@ func TestCBCDecryptRejectsPaddingLongerThanABlock(t *testing.T) {
 
 				switch {
 				case last == 0:
-					assert.Check(t, is.Error(err, "padding must be at least one byte"))
+					assert.EqualError(t, err, "padding must be at least one byte")
 				case last > blockSize:
-					assert.Check(t, is.Error(err, "padding must be at most one block"), "padding of %d bytes: %q", last, plaintext)
+					assert.EqualError(t, err, "padding must be at most one block", "padding of %d bytes: %q", last, plaintext)
 				default:
-					assert.NilError(t, err)
-					assert.Check(t, is.Equal(content+string(make([]byte, blockSize-last)), string(plaintext)))
+					require.NoError(t, err)
+					assert.Equal(t, content+string(make([]byte, blockSize-last)), string(plaintext))
 				}
 			}
 		})

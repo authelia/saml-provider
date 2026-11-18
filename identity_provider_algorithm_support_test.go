@@ -17,8 +17,8 @@ import (
 	"time"
 
 	"github.com/beevik/etree"
-	"gotest.tools/assert"
-	is "gotest.tools/assert/cmp"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"authelia.com/provider/saml/internal/dsig"
 )
@@ -47,28 +47,28 @@ func TestIDPMetadataPublishesTheAlgorithmsItAccepts(t *testing.T) {
 	metadata := test.IDP.Metadata()
 
 	// By default, what the identity provider accepts on a signature: everything it can verify but SHA-1.
-	assert.Assert(t, metadata.Extensions != nil)
-	assert.Check(t, is.DeepEqual(signingMethods(
+	require.NotNil(t, metadata.Extensions)
+	assert.Equal(t, signingMethods(
 		dsig.RSASHA256SignatureMethod, dsig.RSASHA384SignatureMethod, dsig.RSASHA512SignatureMethod,
 		dsig.ECDSASHA256SignatureMethod, dsig.ECDSASHA384SignatureMethod, dsig.ECDSASHA512SignatureMethod,
-	), metadata.Extensions.SigningMethods))
-	assert.Check(t, is.DeepEqual(digestMethods(
+	), metadata.Extensions.SigningMethods)
+	assert.Equal(t, digestMethods(
 		dsig.SHA256DigestMethod, dsig.SHA384DigestMethod, dsig.SHA512DigestMethod,
-	), metadata.Extensions.DigestMethods))
+	), metadata.Extensions.DigestMethods)
 
 	buf, err := xml.Marshal(metadata)
-	assert.NilError(t, err)
-	assert.Check(t, !strings.Contains(string(buf), "sha1"))
-	assert.Check(t, !strings.Contains(string(buf), "KeySize"))
+	require.NoError(t, err)
+	assert.False(t, strings.Contains(string(buf), "sha1"))
+	assert.False(t, strings.Contains(string(buf), "KeySize"))
 
 	// The lists are those of the entity, which every role has, so no role repeats them.
-	assert.Check(t, metadata.IDPSSODescriptors[0].Extensions == nil)
-	assert.Check(t, is.DeepEqual(metadata.Extensions.SigningMethods, metadata.SigningMethods(&metadata.IDPSSODescriptors[0].RoleDescriptor)))
+	assert.Nil(t, metadata.IDPSSODescriptors[0].Extensions)
+	assert.Equal(t, metadata.Extensions.SigningMethods, metadata.SigningMethods(&metadata.IDPSSODescriptors[0].RoleDescriptor))
 
 	doc := etree.NewDocument()
-	assert.NilError(t, doc.ReadFromBytes(buf))
-	assert.Check(t, is.Equal("Extensions", doc.Root().ChildElements()[0].Tag))
-	assert.Check(t, is.Equal("IDPSSODescriptor", doc.Root().ChildElements()[1].Tag))
+	require.NoError(t, doc.ReadFromBytes(buf))
+	assert.Equal(t, "Extensions", doc.Root().ChildElements()[0].Tag)
+	assert.Equal(t, "IDPSSODescriptor", doc.Root().ChildElements()[1].Tag)
 }
 
 func TestIDPMetadataPublishesTheConfiguredAlgorithmsInOrder(t *testing.T) {
@@ -78,15 +78,15 @@ func TestIDPMetadataPublishesTheConfiguredAlgorithmsInOrder(t *testing.T) {
 
 	metadata := test.IDP.Metadata()
 
-	assert.Check(t, is.DeepEqual(signingMethods(dsig.ECDSASHA384SignatureMethod, dsig.RSASHA256SignatureMethod), metadata.Extensions.SigningMethods))
-	assert.Check(t, is.DeepEqual(digestMethods(dsig.SHA512DigestMethod, dsig.SHA256DigestMethod), metadata.Extensions.DigestMethods))
+	assert.Equal(t, signingMethods(dsig.ECDSASHA384SignatureMethod, dsig.RSASHA256SignatureMethod), metadata.Extensions.SigningMethods)
+	assert.Equal(t, digestMethods(dsig.SHA512DigestMethod, dsig.SHA256DigestMethod), metadata.Extensions.DigestMethods)
 
 	// Each list is published on its own.
 	test.IDP.SignatureMethods = nil
 
 	metadata = test.IDP.Metadata()
-	assert.Check(t, is.Len(metadata.Extensions.SigningMethods, 6))
-	assert.Check(t, is.DeepEqual(digestMethods(dsig.SHA512DigestMethod, dsig.SHA256DigestMethod), metadata.Extensions.DigestMethods))
+	assert.Len(t, metadata.Extensions.SigningMethods, 6)
+	assert.Equal(t, digestMethods(dsig.SHA512DigestMethod, dsig.SHA256DigestMethod), metadata.Extensions.DigestMethods)
 }
 
 func TestIDPMetadataPublishesSHA1OnlyWhenItIsAccepted(t *testing.T) {
@@ -96,8 +96,8 @@ func TestIDPMetadataPublishesSHA1OnlyWhenItIsAccepted(t *testing.T) {
 
 	metadata := test.IDP.Metadata()
 
-	assert.Check(t, is.DeepEqual(signingMethods(dsig.RSASHA256SignatureMethod, dsig.RSASHA1SignatureMethod), metadata.Extensions.SigningMethods))
-	assert.Check(t, is.DeepEqual(digestMethods(dsig.SHA256DigestMethod, dsig.SHA1DigestMethod), metadata.Extensions.DigestMethods))
+	assert.Equal(t, signingMethods(dsig.RSASHA256SignatureMethod, dsig.RSASHA1SignatureMethod), metadata.Extensions.SigningMethods)
+	assert.Equal(t, digestMethods(dsig.SHA256DigestMethod, dsig.SHA1DigestMethod), metadata.Extensions.DigestMethods)
 }
 
 func TestIDPMetadataPublishesNothingItWouldRefuse(t *testing.T) {
@@ -113,7 +113,7 @@ func TestIDPMetadataPublishesNothingItWouldRefuse(t *testing.T) {
 			configure(&test.IDP)
 
 			policy, err := test.IDP.signaturePolicy()
-			assert.NilError(t, err)
+			require.NoError(t, err)
 
 			metadata := test.IDP.Metadata()
 
@@ -122,14 +122,14 @@ func TestIDPMetadataPublishesNothingItWouldRefuse(t *testing.T) {
 				published = append(published, method.Algorithm)
 			}
 
-			assert.Check(t, is.DeepEqual(policy.signatureMethods, published))
+			assert.Equal(t, policy.signatureMethods, published)
 
 			published = published[:0]
 			for _, method := range metadata.Extensions.DigestMethods {
 				published = append(published, method.Algorithm)
 			}
 
-			assert.Check(t, is.DeepEqual(policy.digestMethods, published))
+			assert.Equal(t, policy.digestMethods, published)
 		})
 	}
 
@@ -138,7 +138,7 @@ func TestIDPMetadataPublishesNothingItWouldRefuse(t *testing.T) {
 	test.IDP.SignatureMethods = []string{"http://www.w3.org/2007/05/xmldsig-more#rsa-pss"}
 
 	metadata := test.IDP.Metadata()
-	assert.Check(t, metadata.Extensions == nil)
+	assert.Nil(t, metadata.Extensions)
 }
 
 func TestIDPMetadataAlgorithmsAreOfTheEntityForEveryRole(t *testing.T) {
@@ -150,64 +150,64 @@ func TestIDPMetadataAlgorithmsAreOfTheEntityForEveryRole(t *testing.T) {
 	}
 	test.IDP.describeMetadata(ed)
 
-	assert.Check(t, is.Len(ed.Extensions.SigningMethods, 6))
-	assert.Check(t, ed.IDPSSODescriptors[0].Extensions == nil)
-	assert.Check(t, ed.AttributeAuthorityDescriptors[0].Extensions == nil)
-	assert.Check(t, is.Len(ed.SigningMethods(&ed.AttributeAuthorityDescriptors[0].RoleDescriptor), 6))
-	assert.Check(t, is.Len(ed.DigestMethods(&ed.AttributeAuthorityDescriptors[0].RoleDescriptor), 3))
+	assert.Len(t, ed.Extensions.SigningMethods, 6)
+	assert.Nil(t, ed.IDPSSODescriptors[0].Extensions)
+	assert.Nil(t, ed.AttributeAuthorityDescriptors[0].Extensions)
+	assert.Len(t, ed.SigningMethods(&ed.AttributeAuthorityDescriptors[0].RoleDescriptor), 6)
+	assert.Len(t, ed.DigestMethods(&ed.AttributeAuthorityDescriptors[0].RoleDescriptor), 3)
 }
 
 func TestIDPMetadataHookCanRemoveTheAlgorithms(t *testing.T) {
 	test := NewIdentityProviderTest(t)
 	test.IDP.MetadataInfo = federationMetadataInfo()
 	test.IDP.MetadataHook = func(metadata *EntityDescriptor) {
-		assert.Check(t, is.Len(metadata.Extensions.SigningMethods, 6))
+		assert.Len(t, metadata.Extensions.SigningMethods, 6)
 
 		metadata.Extensions.SigningMethods, metadata.Extensions.DigestMethods = nil, nil
 	}
 
 	buf, err := xml.Marshal(test.IDP.Metadata())
-	assert.NilError(t, err)
-	assert.Check(t, !strings.Contains(string(buf), "algsupport"))
-	assert.Check(t, strings.Contains(string(buf), "EntityAttributes"))
+	require.NoError(t, err)
+	assert.False(t, strings.Contains(string(buf), "algsupport"))
+	assert.True(t, strings.Contains(string(buf), "EntityAttributes"))
 }
 
 func TestSignedIDPMetadataWithAlgorithmsIsVerified(t *testing.T) {
 	test, verifier := metadataSigningTest(t)
 
 	signed, err := test.IDP.SignedMetadata()
-	assert.NilError(t, err)
+	require.NoError(t, err)
 
 	doc := etree.NewDocument()
-	assert.NilError(t, doc.ReadFromBytes(signed))
+	require.NoError(t, doc.ReadFromBytes(signed))
 
 	extensions := doc.Root().FindElement("./Extensions")
-	assert.Assert(t, extensions != nil)
-	assert.Check(t, is.Len(extensions.ChildElements(), 9))
+	require.NotNil(t, extensions)
+	assert.Len(t, extensions.ChildElements(), 9)
 
 	for i, child := range extensions.ChildElements() {
-		assert.Check(t, is.Equal("alg", child.Space))
-		assert.Check(t, is.Equal(testNSAlg, child.NamespaceURI()))
+		assert.Equal(t, "alg", child.Space)
+		assert.Equal(t, testNSAlg, child.NamespaceURI())
 
 		if i < 3 {
-			assert.Check(t, is.Equal("DigestMethod", child.Tag))
+			assert.Equal(t, "DigestMethod", child.Tag)
 		} else {
-			assert.Check(t, is.Equal("SigningMethod", child.Tag))
+			assert.Equal(t, "SigningMethod", child.Tag)
 		}
 	}
 
 	verified, err := verifier.Verify(signed)
-	assert.NilError(t, err)
+	require.NoError(t, err)
 
 	var metadata EntityDescriptor
-	assert.NilError(t, xml.Unmarshal(verified, &metadata))
-	assert.Check(t, is.DeepEqual(test.IDP.Metadata().Extensions, metadata.Extensions))
+	require.NoError(t, xml.Unmarshal(verified, &metadata))
+	assert.Equal(t, test.IDP.Metadata().Extensions, metadata.Extensions)
 
 	// A change to an algorithm breaks the signature.
-	assert.Assert(t, is.Equal(1, strings.Count(string(signed), "ecdsa-sha256")))
+	require.Equal(t, 1, strings.Count(string(signed), "ecdsa-sha256"))
 
 	_, err = verifier.Verify([]byte(strings.Replace(string(signed), "ecdsa-sha256", "ecdsa-sha1", 1)))
-	assert.Check(t, err != nil)
+	assert.NotNil(t, err)
 }
 
 // algorithmMetadata changes the metadata of the service provider that the identity provider is given.
@@ -255,8 +255,8 @@ func algorithmsNegotiated(t *testing.T, test *IdentityProviderTest, signatureMet
 
 	for _, signature := range []*etree.Element{responseSignature, assertionSignature} {
 		gotSignatureMethod, gotDigestMethod := issuanceAlgorithms(t, signature)
-		assert.Check(t, is.Equal(gotSignatureMethod, signatureMethod))
-		assert.Check(t, is.Equal(gotDigestMethod, digestMethod))
+		assert.Equal(t, gotSignatureMethod, signatureMethod)
+		assert.Equal(t, gotDigestMethod, digestMethod)
 	}
 
 	issuanceAccept(t, &test.SP, responseXML, []string{id})
@@ -303,7 +303,7 @@ func TestIDPNegotiatesSignatureAlgorithmsWithServiceProvider(t *testing.T) {
 			algorithmMetadata(test, algorithmsListed(tc.signing, tc.digests))
 
 			algorithmsNegotiated(t, test, tc.signatureMethod, tc.digestMethod)
-			assert.Check(t, is.Equal("", logged.String()))
+			assert.Equal(t, "", logged.String())
 		})
 	}
 }
@@ -349,14 +349,14 @@ func TestIDPSignsWithItsDefaultWhenNoListedAlgorithmCanBeUsed(t *testing.T) {
 			algorithmsNegotiated(t, test, tc.signatureMethod, tc.digestMethod)
 
 			lines := strings.Split(strings.TrimSpace(logged.String()), "\n")
-			assert.Assert(t, is.Len(lines, tc.lines), logged.String())
+			require.Len(t, lines, tc.lines, logged.String())
 
 			for _, line := range lines {
-				assert.Check(t, is.Contains(line, test.SP.MetadataURL.String()))
+				assert.Contains(t, line, test.SP.MetadataURL.String())
 			}
 
 			for _, expected := range tc.logged {
-				assert.Check(t, is.Contains(logged.String(), expected))
+				assert.Contains(t, logged.String(), expected)
 			}
 		})
 	}
@@ -421,9 +421,9 @@ func TestIDPNegotiationRespectsKeySizes(t *testing.T) {
 			}
 
 			issuance, err := test.IDP.issuance(IssuanceRequest{ServiceProviderMetadata: mustGetServiceProvider(t, test)})
-			assert.NilError(t, err)
-			assert.Check(t, is.Equal(issuance.SignatureMethod, tc.signatureMethod))
-			assert.Check(t, is.Equal(logged.Len() != 0, tc.logged), logged.String())
+			require.NoError(t, err)
+			assert.Equal(t, issuance.SignatureMethod, tc.signatureMethod)
+			assert.Equal(t, logged.Len() != 0, tc.logged, logged.String())
 		})
 	}
 }
@@ -432,7 +432,7 @@ func mustGetServiceProvider(t *testing.T, test *IdentityProviderTest) *EntityDes
 	t.Helper()
 
 	metadata, err := test.IDP.ServiceProviderProvider.GetServiceProvider(httptest.NewRequest(http.MethodGet, "/", nil), test.SP.MetadataURL.String())
-	assert.NilError(t, err)
+	require.NoError(t, err)
 
 	return metadata
 }
@@ -446,7 +446,7 @@ func TestIDPNegotiatesWithAnECDSAKey(t *testing.T) {
 			test := issuanceTestIDP(t)
 
 			key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
-			assert.NilError(t, err)
+			require.NoError(t, err)
 
 			// The clock of these tests is at the start of the certificate of the service provider.
 			template := &x509.Certificate{
@@ -457,10 +457,10 @@ func TestIDPNegotiatesWithAnECDSAKey(t *testing.T) {
 			}
 
 			der, err := x509.CreateCertificate(rand.Reader, template, template, key.Public(), key)
-			assert.NilError(t, err)
+			require.NoError(t, err)
 
 			certificate, err := x509.ParseCertificate(der)
-			assert.NilError(t, err)
+			require.NoError(t, err)
 
 			apply(&test.IDP, key)
 			test.IDP.Certificate = certificate
@@ -496,9 +496,9 @@ func TestIDPNegotiationPrefersTheRoleOfTheServiceProvider(t *testing.T) {
 
 	// A message that isn't for one role of the service provider is signed as for its first.
 	signingContext, err := test.IDP.signingContextFor(httptest.NewRequest(http.MethodGet, "/", nil), mustGetServiceProvider(t, test))
-	assert.NilError(t, err)
-	assert.Check(t, is.Equal(signingContext.GetSignatureMethodIdentifier(), dsig.RSASHA384SignatureMethod))
-	assert.Check(t, is.Equal(signingContext.GetDigestAlgorithmIdentifier(), dsig.SHA256DigestMethod))
+	require.NoError(t, err)
+	assert.Equal(t, signingContext.GetSignatureMethodIdentifier(), dsig.RSASHA384SignatureMethod)
+	assert.Equal(t, signingContext.GetDigestAlgorithmIdentifier(), dsig.SHA256DigestMethod)
 }
 
 func TestIssuancePolicyOverridesNegotiatedAlgorithms(t *testing.T) {
@@ -547,11 +547,11 @@ func TestIssuancePolicyReceivesTheNegotiatedAlgorithms(t *testing.T) {
 
 	algorithmsNegotiated(t, test, dsig.RSASHA512SignatureMethod, dsig.SHA384DigestMethod)
 
-	assert.Assert(t, len(defaults) != 0)
+	require.True(t, len(defaults) != 0)
 
 	for _, issuance := range defaults {
-		assert.Check(t, is.Equal(issuance.SignatureMethod, dsig.RSASHA512SignatureMethod))
-		assert.Check(t, is.Equal(issuance.DigestMethod, dsig.SHA384DigestMethod))
+		assert.Equal(t, issuance.SignatureMethod, dsig.RSASHA512SignatureMethod)
+		assert.Equal(t, issuance.DigestMethod, dsig.SHA384DigestMethod)
 	}
 }
 
@@ -588,27 +588,27 @@ func TestIDPNegotiatesTheAlgorithmOfALogoutRequest(t *testing.T) {
 	w, id := f.serveSLOFromA(t)
 
 	location := sentLogoutRequest(t, w)
-	assert.Check(t, is.Equal(location.Host, f.b.SloURL.Host))
-	assert.Check(t, is.Equal(location.Query().Get("SigAlg"), expected[location.Host]))
+	assert.Equal(t, location.Host, f.b.SloURL.Host)
+	assert.Equal(t, location.Query().Get("SigAlg"), expected[location.Host])
 	sentLogoutRequestElement(t, f.b, location)
 
 	// And the LogoutResponse to the service provider that asked.
 	w = serveSLO(f.test, respondAsSP(t, f.b, location))
 
 	location, _ = redirectedLogoutResponse(t, w)
-	assert.Check(t, is.Equal(location.Host, f.a.SloURL.Host))
-	assert.Check(t, is.Equal(location.Query().Get("SigAlg"), expected[location.Host]))
-	assert.Check(t, f.a.ValidateLogoutResponseRedirect(location, []string{id}))
+	assert.Equal(t, location.Host, f.a.SloURL.Host)
+	assert.Equal(t, location.Query().Get("SigAlg"), expected[location.Host])
+	assert.NoError(t, f.a.ValidateLogoutResponseRedirect(location, []string{id}))
 
-	assert.Check(t, is.Equal("", logged.String()))
+	assert.Equal(t, "", logged.String())
 }
 
 func TestIDPSignsForAnUnknownServiceProviderWithItsOwnMethod(t *testing.T) {
 	test := issuanceTestIDP(t)
 
 	signingContext, err := test.IDP.signingContextFor(httptest.NewRequest(http.MethodGet, "/", nil), nil)
-	assert.NilError(t, err)
-	assert.Check(t, is.Equal(signingContext.GetSignatureMethodIdentifier(), dsig.RSASHA256SignatureMethod))
+	require.NoError(t, err)
+	assert.Equal(t, signingContext.GetSignatureMethodIdentifier(), dsig.RSASHA256SignatureMethod)
 }
 
 func TestIssuancePolicyDecidesTheAlgorithmOfAPropagatedLogoutResponse(t *testing.T) {
@@ -623,6 +623,6 @@ func TestIssuancePolicyDecidesTheAlgorithmOfAPropagatedLogoutResponse(t *testing
 	w = serveSLO(f.test, respondAsSP(t, f.b, sentLogoutRequest(t, w)))
 
 	location, _ := redirectedLogoutResponse(t, w)
-	assert.Check(t, is.Equal(location.Query().Get("SigAlg"), dsig.RSASHA512SignatureMethod))
-	assert.Check(t, f.a.ValidateLogoutResponseRedirect(location, []string{id}))
+	assert.Equal(t, location.Query().Get("SigAlg"), dsig.RSASHA512SignatureMethod)
+	assert.NoError(t, f.a.ValidateLogoutResponseRedirect(location, []string{id}))
 }

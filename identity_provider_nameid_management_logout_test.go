@@ -11,8 +11,8 @@ import (
 	"net/url"
 	"testing"
 
-	"gotest.tools/assert"
-	is "gotest.tools/assert/cmp"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 // managedLogoutFixture is a propagationFixture whose service providers A and B were each asserted the persistent
@@ -75,7 +75,7 @@ func (f *managedLogoutFixture) manage(t *testing.T, sp *ServiceProvider, mutate 
 	f.test.IDP.ServeSOAPManageNameID(w, nameIDTestSOAPPost(t, soapManageNameIDTestURL, signTestElement(t, sp, el)))
 
 	response := &ManageNameIDResponse{}
-	assert.NilError(t, unmarshalElement(nameIDTestSOAPMessage(t, w, "ManageNameIDResponse"), response))
+	require.NoError(t, unmarshalElement(nameIDTestSOAPMessage(t, w, "ManageNameIDResponse"), response))
 
 	return response.Status
 }
@@ -95,7 +95,7 @@ func (f *managedLogoutFixture) logout(t *testing.T, sp *ServiceProvider, nameID 
 	r, id := redirectLogoutRequest(t, sp, func(request *LogoutRequest) { request.NameID = &nameID })
 
 	_, response := redirectedLogoutResponse(t, serveSLO(f.test, r))
-	assert.Check(t, is.Equal(response.InResponseTo, id))
+	assert.Equal(t, response.InResponseTo, id)
 
 	return response.Status
 }
@@ -106,15 +106,15 @@ func propagatedNameID(t *testing.T, location *url.URL) NameID {
 	t.Helper()
 
 	encoded, err := base64.StdEncoding.DecodeString(location.Query().Get("SAMLRequest"))
-	assert.NilError(t, err)
+	require.NoError(t, err)
 
 	buf, err := io.ReadAll(flate.NewReader(bytes.NewReader(encoded)))
-	assert.NilError(t, err)
+	require.NoError(t, err)
 
 	var request LogoutRequest
 
-	assert.NilError(t, xml.Unmarshal(buf, &request))
-	assert.Assert(t, request.NameID != nil)
+	require.NoError(t, xml.Unmarshal(buf, &request))
+	require.NotNil(t, request.NameID)
 
 	return *request.NameID
 }
@@ -138,10 +138,10 @@ func TestLogoutRequestWithRegisteredSPProvidedIDEndsSession(t *testing.T) {
 		checkStatus(t, f.manage(t, f.a, newID("a-alias")), StatusSuccess, "")
 
 		// The participant is as it was recorded: the library looks the alias up, and doesn't rewrite records.
-		assert.Check(t, is.Equal(f.asserted(f.a).SPProvidedID, ""))
+		assert.Equal(t, f.asserted(f.a).SPProvidedID, "")
 
 		checkStatus(t, f.logout(t, f.a, withAlias(f, "a-alias")), StatusSuccess, "")
-		assert.Check(t, is.DeepEqual(f.provider.terminated, []*Session{f.session}))
+		assert.Equal(t, f.provider.terminated, []*Session{f.session})
 	})
 
 	t.Run("through the NameID of the session", func(t *testing.T) {
@@ -159,12 +159,12 @@ func TestLogoutRequestWithRegisteredSPProvidedIDEndsSession(t *testing.T) {
 
 		// Nothing is registered yet, so the identifier is not one that the identity provider uses.
 		f.logout(t, f.a, nameID)
-		assert.Check(t, is.Len(f.provider.terminated, 0))
+		assert.Len(t, f.provider.terminated, 0)
 
 		f.names.aliases = map[string]string{aliasKey(f.a.MetadataURL.String(), "alice"): "a-alias"}
 
 		checkStatus(t, f.logout(t, f.a, nameID), StatusSuccess, "")
-		assert.Check(t, is.DeepEqual(f.provider.terminated, []*Session{f.session}))
+		assert.Equal(t, f.provider.terminated, []*Session{f.session})
 	})
 
 	t.Run("without the SPProvidedID", func(t *testing.T) {
@@ -177,8 +177,8 @@ func TestLogoutRequestWithRegisteredSPProvidedIDEndsSession(t *testing.T) {
 		f.names.lookups = nil
 
 		checkStatus(t, f.logout(t, f.a, f.asserted(f.a)), StatusSuccess, "")
-		assert.Check(t, is.DeepEqual(f.provider.terminated, []*Session{f.session}))
-		assert.Check(t, is.Len(f.names.lookups, 0))
+		assert.Equal(t, f.provider.terminated, []*Session{f.session})
+		assert.Len(t, f.names.lookups, 0)
 	})
 
 	for name, tc := range map[string]struct {
@@ -202,7 +202,7 @@ func TestLogoutRequestWithRegisteredSPProvidedIDEndsSession(t *testing.T) {
 			f.only(f.a)
 
 			f.logout(t, f.a, withAlias(f, tc.sent))
-			assert.Check(t, is.Len(f.provider.terminated, 0))
+			assert.Len(t, f.provider.terminated, 0)
 		})
 	}
 
@@ -212,7 +212,7 @@ func TestLogoutRequestWithRegisteredSPProvidedIDEndsSession(t *testing.T) {
 		f.names.lookupErr = errors.New("directory unavailable")
 
 		checkStatus(t, f.logout(t, f.a, withAlias(f, "a-alias")), StatusResponder, "")
-		assert.Check(t, is.Len(f.provider.terminated, 0))
+		assert.Len(t, f.provider.terminated, 0)
 	})
 }
 
@@ -231,13 +231,13 @@ func TestPropagatedLogoutRequestCarriesRegisteredSPProvidedID(t *testing.T) {
 	})
 
 	location := sentLogoutRequest(t, serveSLO(f.test, r))
-	assert.Assert(t, is.Equal(location.Host, "sp-b.example.com"))
+	require.Equal(t, location.Host, "sp-b.example.com")
 
 	expected := f.asserted(f.b)
 	expected.SPProvidedID = "b-alias"
 
-	assert.Check(t, is.DeepEqual(propagatedNameID(t, location), expected))
-	assert.Check(t, is.Equal(f.asserted(f.b).SPProvidedID, ""))
+	assert.Equal(t, propagatedNameID(t, location), expected)
+	assert.Equal(t, f.asserted(f.b).SPProvidedID, "")
 
 	t.Run("none registered", func(t *testing.T) {
 		f := newManagedLogoutFixture(t)
@@ -247,7 +247,7 @@ func TestPropagatedLogoutRequestCarriesRegisteredSPProvidedID(t *testing.T) {
 		f.only(f.a)
 
 		location := sentLogoutRequest(t, f.startLogout(t))
-		assert.Check(t, is.DeepEqual(propagatedNameID(t, location), f.asserted(f.a)))
+		assert.Equal(t, propagatedNameID(t, location), f.asserted(f.a))
 	})
 
 	t.Run("lookup fails", func(t *testing.T) {
@@ -257,7 +257,7 @@ func TestPropagatedLogoutRequestCarriesRegisteredSPProvidedID(t *testing.T) {
 
 		// The service provider is still told, with the identifier that was asserted to it.
 		location := sentLogoutRequest(t, f.startLogout(t))
-		assert.Check(t, is.DeepEqual(propagatedNameID(t, location), f.asserted(f.b)))
+		assert.Equal(t, propagatedNameID(t, location), f.asserted(f.b))
 	})
 }
 
@@ -274,9 +274,9 @@ func TestTerminateNameIDKeepsSessions(t *testing.T) {
 		checkStatus(t, f.manage(t, f.a, newID("a-alias")), StatusSuccess, "")
 		checkStatus(t, f.manage(t, f.a, terminateNameID), StatusSuccess, "")
 
-		assert.Check(t, is.Len(f.provider.terminated, 0))
-		assert.Check(t, is.Len(f.provider.participants[f.session.ID], 2))
-		assert.Check(t, is.Len(f.provider.closed, 0))
+		assert.Len(t, f.provider.terminated, 0)
+		assert.Len(t, f.provider.participants[f.session.ID], 2)
+		assert.Len(t, f.provider.closed, 0)
 
 		return f
 	}
@@ -286,7 +286,7 @@ func TestTerminateNameIDKeepsSessions(t *testing.T) {
 		f.only(f.a)
 
 		checkStatus(t, f.logout(t, f.a, f.asserted(f.a)), StatusSuccess, "")
-		assert.Check(t, is.DeepEqual(f.provider.terminated, []*Session{f.session}))
+		assert.Equal(t, f.provider.terminated, []*Session{f.session})
 	})
 
 	t.Run("logout with the SPProvidedID that was terminated", func(t *testing.T) {
@@ -297,7 +297,7 @@ func TestTerminateNameIDKeepsSessions(t *testing.T) {
 		nameID.SPProvidedID = "a-alias"
 
 		f.logout(t, f.a, nameID)
-		assert.Check(t, is.Len(f.provider.terminated, 0))
+		assert.Len(t, f.provider.terminated, 0)
 	})
 
 	t.Run("propagated logout", func(t *testing.T) {
@@ -305,6 +305,6 @@ func TestTerminateNameIDKeepsSessions(t *testing.T) {
 		f.only(f.a)
 
 		location := sentLogoutRequest(t, f.startLogout(t))
-		assert.Check(t, is.DeepEqual(propagatedNameID(t, location), f.asserted(f.a)))
+		assert.Equal(t, propagatedNameID(t, location), f.asserted(f.a))
 	})
 }

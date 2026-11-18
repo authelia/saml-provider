@@ -11,8 +11,8 @@ import (
 	"time"
 
 	"github.com/beevik/etree"
-	"gotest.tools/assert"
-	is "gotest.tools/assert/cmp"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 const nameIDMappingTestURL = "https://idp.example.com/saml/nim"
@@ -160,14 +160,14 @@ func (f *nameIDMappingFixture) send(t *testing.T, opts nameIDMappingOptions) nam
 
 	// SAMLProfiles §7.3.2: the response is signed.
 	result.Element = nameIDTestSOAPMessage(t, w, "NameIDMappingResponse")
-	assert.NilError(t, unmarshalElement(result.Element, result.Response))
+	require.NoError(t, unmarshalElement(result.Element, result.Response))
 
 	// SAMLProfiles §7.4.2.
-	assert.Check(t, is.Equal(result.Response.Version, "2.0"))
-	assert.Assert(t, result.Response.Issuer != nil)
-	assert.Check(t, is.Equal(result.Response.Issuer.Value, f.test.IDP.MetadataURL.String()))
-	assert.Check(t, is.Equal(result.Response.Issuer.Format, string(EntityNameIDFormat)))
-	assert.Check(t, is.Equal(result.Response.Destination, ""))
+	assert.Equal(t, result.Response.Version, "2.0")
+	require.NotNil(t, result.Response.Issuer)
+	assert.Equal(t, result.Response.Issuer.Value, f.test.IDP.MetadataURL.String())
+	assert.Equal(t, result.Response.Issuer.Format, string(EntityNameIDFormat))
+	assert.Equal(t, result.Response.Destination, "")
 
 	return result
 }
@@ -179,19 +179,19 @@ func (result nameIDMappingResult) checkNoIdentifier(t *testing.T, top, second st
 
 	checkStatus(t, result.Response.Status, top, second)
 
-	assert.Check(t, result.Element.FindElement("./EncryptedID") == nil)
+	assert.Nil(t, result.Element.FindElement("./EncryptedID"))
 
 	nameIDs := result.Element.FindElements("./NameID")
-	if assert.Check(t, is.Len(nameIDs, 1)) {
-		assert.Check(t, is.Equal(nameIDs[0].Text(), ""))
+	if assert.Len(t, nameIDs, 1) {
+		assert.Equal(t, nameIDs[0].Text(), "")
 
 		// The verified content declares its namespaces on each element; a NameID has no other attribute.
 		for _, attr := range nameIDs[0].Attr {
-			assert.Check(t, attr.Space == "xmlns" || attr.Key == "xmlns", "attribute %s", attr.Key)
+			assert.True(t, attr.Space == "xmlns" || attr.Key == "xmlns", "attribute %s", attr.Key)
 		}
 	}
 
-	assert.Check(t, !strings.Contains(elementToString(result.Element), "alice"))
+	assert.False(t, strings.Contains(elementToString(result.Element), "alice"))
 }
 
 // SAMLCore §3.8 and SAMLProfiles §7.4.2, §7.5: the mapped identifier is encrypted to the service provider that it
@@ -201,46 +201,46 @@ func TestNameIDMappingAllowed(t *testing.T) {
 
 	result := f.send(t, nameIDMappingOptions{})
 	checkStatus(t, result.Response.Status, StatusSuccess, "")
-	assert.Check(t, is.Equal(result.Response.InResponseTo, result.RequestID))
+	assert.Equal(t, result.Response.InResponseTo, result.RequestID)
 
 	// SAMLCore §3.8.2: the status and then the identifier, which is only there as a ciphertext.
-	assert.Check(t, is.DeepEqual(childTags(result.Element), []string{"Issuer", "Status", "EncryptedID"}))
-	assert.Check(t, !strings.Contains(elementToString(result.Element), "alice"))
-	assert.Check(t, !strings.Contains(elementToString(result.Element), "b-alias"))
+	assert.Equal(t, childTags(result.Element), []string{"Issuer", "Status", "EncryptedID"})
+	assert.False(t, strings.Contains(elementToString(result.Element), "alice"))
+	assert.False(t, strings.Contains(elementToString(result.Element), "b-alias"))
 
 	encryptedID := result.Element.FindElement("./EncryptedID")
-	assert.Check(t, is.Equal(encryptedID.NamespaceURI(), samlAssertionNamespace))
+	assert.Equal(t, encryptedID.NamespaceURI(), samlAssertionNamespace)
 
 	// SAMLCore §2.2.4: the key names the entity it was encrypted for.
 	encryptedKey := encryptedID.FindElement("./EncryptedData/KeyInfo/EncryptedKey")
-	assert.Assert(t, encryptedKey != nil)
-	assert.Check(t, is.Equal(encryptedKey.SelectAttrValue("Recipient", ""), f.b.MetadataURL.String()))
+	require.NotNil(t, encryptedKey)
+	assert.Equal(t, encryptedKey.SelectAttrValue("Recipient", ""), f.b.MetadataURL.String())
 
 	// The target decrypts it with the code of the library's own service provider.
 	nameID, err := f.b.DecryptNameID(reparse(t, encryptedID))
-	assert.NilError(t, err)
-	assert.Check(t, is.DeepEqual(*nameID, NameID{
+	require.NoError(t, err)
+	assert.Equal(t, *nameID, NameID{
 		Format:          string(PersistentNameIDFormat),
 		NameQualifier:   f.test.IDP.MetadataURL.String(),
 		SPNameQualifier: f.b.MetadataURL.String(),
 		SPProvidedID:    "b-alias",
 		Value:           "b-alice",
-	}))
+	})
 
 	// The requester can't.
 	_, err = f.a.DecryptNameID(reparse(t, encryptedID))
-	assert.Check(t, err != nil)
+	assert.NotNil(t, err)
 
-	assert.Assert(t, is.Len(f.provider.calls, 1))
+	require.Len(t, f.provider.calls, 1)
 
 	call := f.provider.calls[0]
-	assert.Check(t, is.Equal(call.ServiceProviderMetadata.EntityID, f.a.MetadataURL.String()))
-	assert.Check(t, is.Equal(call.TargetMetadata.EntityID, f.b.MetadataURL.String()))
-	assert.Check(t, is.DeepEqual(*call.Request.NameID, *testNameID(f.test, f.a)))
-	assert.Check(t, is.Equal(call.Format, ""))
-	assert.Check(t, !call.AllowCreate)
-	assert.Check(t, !call.NameIDEncrypted)
-	assert.Check(t, !call.Unidentified)
+	assert.Equal(t, call.ServiceProviderMetadata.EntityID, f.a.MetadataURL.String())
+	assert.Equal(t, call.TargetMetadata.EntityID, f.b.MetadataURL.String())
+	assert.Equal(t, *call.Request.NameID, *testNameID(f.test, f.a))
+	assert.Equal(t, call.Format, "")
+	assert.False(t, call.AllowCreate)
+	assert.False(t, call.NameIDEncrypted)
+	assert.False(t, call.Unidentified)
 }
 
 // The NameIDPolicy states the format, and whether an identifier may be created (SAMLCore §3.4.1.1).
@@ -263,9 +263,9 @@ func TestNameIDMappingPolicyAttributes(t *testing.T) {
 			}})
 			checkStatus(t, result.Response.Status, StatusSuccess, "")
 
-			assert.Assert(t, is.Len(f.provider.calls, 1))
-			assert.Check(t, is.Equal(f.provider.calls[0].Format, tc.want))
-			assert.Check(t, f.provider.calls[0].AllowCreate)
+			require.Len(t, f.provider.calls, 1)
+			assert.Equal(t, f.provider.calls[0].Format, tc.want)
+			assert.True(t, f.provider.calls[0].AllowCreate)
 		})
 	}
 }
@@ -281,7 +281,7 @@ func TestNameIDMappingToRequester(t *testing.T) {
 	}
 
 	f.send(t, nameIDMappingOptions{mutate: self}).checkNoIdentifier(t, StatusRequester, StatusInvalidNameIDPolicy)
-	assert.Check(t, is.Len(f.provider.calls, 0))
+	assert.Len(t, f.provider.calls, 0)
 
 	f.test.IDP.NameIDMappingPolicy = DefaultNameIDMappingPolicy{Targets: map[string][]string{
 		f.a.MetadataURL.String(): {f.a.MetadataURL.String()},
@@ -291,13 +291,13 @@ func TestNameIDMappingToRequester(t *testing.T) {
 	checkStatus(t, result.Response.Status, StatusSuccess, "")
 
 	nameID, err := f.a.DecryptNameID(reparse(t, result.Element.FindElement("./EncryptedID")))
-	assert.NilError(t, err)
-	assert.Check(t, is.DeepEqual(*nameID, NameID{
+	require.NoError(t, err)
+	assert.Equal(t, *nameID, NameID{
 		Format:          string(EmailAddressNameIDFormat),
 		NameQualifier:   f.test.IDP.MetadataURL.String(),
 		SPNameQualifier: f.a.MetadataURL.String(),
 		Value:           "alice@example.com",
-	}))
+	})
 }
 
 // The principal may be identified with an EncryptedID (SAMLCore §3.8.1).
@@ -308,17 +308,17 @@ func TestNameIDMappingWithEncryptedID(t *testing.T) {
 		var err error
 
 		request.EncryptedID, err = idpEncrypter(t, f.test).encryptNameID(request.NameID)
-		assert.NilError(t, err)
+		require.NoError(t, err)
 	}})
 	checkStatus(t, result.Response.Status, StatusSuccess, "")
 
 	nameID, err := f.b.DecryptNameID(reparse(t, result.Element.FindElement("./EncryptedID")))
-	assert.NilError(t, err)
-	assert.Check(t, is.Equal(nameID.Value, "b-alice"))
+	require.NoError(t, err)
+	assert.Equal(t, nameID.Value, "b-alice")
 
-	assert.Assert(t, is.Len(f.provider.calls, 1))
-	assert.Check(t, f.provider.calls[0].NameIDEncrypted)
-	assert.Check(t, is.DeepEqual(*f.provider.calls[0].Request.NameID, *testNameID(f.test, f.a)))
+	require.Len(t, f.provider.calls, 1)
+	assert.True(t, f.provider.calls[0].NameIDEncrypted)
+	assert.Equal(t, *f.provider.calls[0].Request.NameID, *testNameID(f.test, f.a))
 }
 
 // Nothing is mapped that the policy doesn't allow, and the answer doesn't tell why: whether the target exists,
@@ -386,7 +386,7 @@ func TestNameIDMappingDenied(t *testing.T) {
 			f.send(t, opts).checkNoIdentifier(t, StatusRequester, StatusInvalidNameIDPolicy)
 
 			// The principal is not even looked up.
-			assert.Check(t, is.Len(f.provider.calls, 0))
+			assert.Len(t, f.provider.calls, 0)
 		})
 	}
 }
@@ -410,8 +410,8 @@ func TestNameIDMappingCustomPolicy(t *testing.T) {
 	f.test.IDP.NameIDMappingPolicy = policy
 
 	f.send(t, nameIDMappingOptions{}).checkNoIdentifier(t, StatusRequester, StatusInvalidNameIDPolicy)
-	assert.Check(t, is.Equal(policy.requester, f.a.MetadataURL.String()))
-	assert.Check(t, is.Equal(policy.target, f.b.MetadataURL.String()))
+	assert.Equal(t, policy.requester, f.a.MetadataURL.String())
+	assert.Equal(t, policy.target, f.b.MetadataURL.String())
 
 	policy.allow = true
 
@@ -437,7 +437,7 @@ func TestNameIDMappingUnknownPrincipal(t *testing.T) {
 				var err error
 
 				request.EncryptedID, err = otherKeyEncrypter(t, f.test).encryptNameID(request.NameID)
-				assert.NilError(t, err)
+				require.NoError(t, err)
 			},
 			calls: 1, unidentified: true,
 		},
@@ -448,7 +448,7 @@ func TestNameIDMappingUnknownPrincipal(t *testing.T) {
 				var err error
 
 				request.EncryptedID, err = idpEncrypter(t, f.test).encryptNameID(request.NameID)
-				assert.NilError(t, err)
+				require.NoError(t, err)
 			},
 			calls: 1, unidentified: true,
 		},
@@ -465,14 +465,14 @@ func TestNameIDMappingUnknownPrincipal(t *testing.T) {
 				tc.mutate(t, f, request)
 			}}).checkNoIdentifier(t, StatusRequester, StatusUnknownPrincipal)
 
-			assert.Assert(t, is.Len(f.provider.calls, tc.calls))
+			require.Len(t, f.provider.calls, tc.calls)
 
 			if tc.calls != 0 {
-				assert.Check(t, is.Equal(f.provider.calls[0].Unidentified, tc.unidentified))
+				assert.Equal(t, f.provider.calls[0].Unidentified, tc.unidentified)
 			}
 
 			if tc.unidentified {
-				assert.Check(t, f.provider.calls[0].Request.NameID.Value != "p-alice")
+				assert.True(t, f.provider.calls[0].Request.NameID.Value != "p-alice")
 			}
 		})
 	}
@@ -491,9 +491,9 @@ func TestNameIDMappingUnidentifiedIsNeverMapped(t *testing.T) {
 		var err error
 
 		request.EncryptedID, err = otherKeyEncrypter(t, f.test).encryptNameID(request.NameID)
-		assert.NilError(t, err)
+		require.NoError(t, err)
 	}}).checkNoIdentifier(t, StatusRequester, StatusUnknownPrincipal)
-	assert.Check(t, is.Equal(always.calls, 1))
+	assert.Equal(t, always.calls, 1)
 }
 
 // alwaysMappingProvider maps every identifier, even one that names nobody.
@@ -530,24 +530,24 @@ func TestNameIDMappingFromTransient(t *testing.T) {
 func TestNameIDMappingWithoutProvider(t *testing.T) {
 	f := newNameIDMappingFixture(t)
 
-	assert.Check(t, is.DeepEqual(f.test.IDP.Metadata().IDPSSODescriptors[0].NameIDMappingServices, []Endpoint{
+	assert.Equal(t, f.test.IDP.Metadata().IDPSSODescriptors[0].NameIDMappingServices, []Endpoint{
 		{Binding: SOAPBinding, Location: nameIDMappingTestURL},
-	}))
-	assert.Check(t, is.Len(f.test.IDP.Metadata().IDPSSODescriptors[0].ManageNameIDServices, 0))
+	})
+	assert.Len(t, f.test.IDP.Metadata().IDPSSODescriptors[0].ManageNameIDServices, 0)
 
 	f.test.IDP.NameIDProvider = nil
 
 	f.send(t, nameIDMappingOptions{}).checkNoIdentifier(t, StatusResponder, StatusRequestUnsupported)
-	assert.Check(t, is.Len(f.test.IDP.Metadata().IDPSSODescriptors[0].NameIDMappingServices, 0))
+	assert.Len(t, f.test.IDP.Metadata().IDPSSODescriptors[0].NameIDMappingServices, 0)
 
 	// A service that refuses everything is not advertised either.
 	f.test.IDP.NameIDProvider = f.provider
 	f.test.IDP.NameIDMappingPolicy = nil
-	assert.Check(t, is.Len(f.test.IDP.Metadata().IDPSSODescriptors[0].NameIDMappingServices, 0))
+	assert.Len(t, f.test.IDP.Metadata().IDPSSODescriptors[0].NameIDMappingServices, 0)
 
 	f.test.IDP.NameIDMappingPolicy = DefaultNameIDMappingPolicy{}
 	f.test.IDP.NameIDMappingURL = mustParseURL("")
-	assert.Check(t, is.Len(f.test.IDP.Metadata().IDPSSODescriptors[0].NameIDMappingServices, 0))
+	assert.Len(t, f.test.IDP.Metadata().IDPSSODescriptors[0].NameIDMappingServices, 0)
 }
 
 // What the provider returns is checked against what was requested and allowed.
@@ -620,7 +620,7 @@ func TestNameIDMappingRejectsUnauthenticatedRequests(t *testing.T) {
 			f := newNameIDMappingFixture(t)
 
 			f.send(t, options(t, f)).checkNoIdentifier(t, StatusRequester, StatusRequestDenied)
-			assert.Check(t, is.Len(f.provider.calls, 0))
+			assert.Len(t, f.provider.calls, 0)
 		})
 	}
 }
@@ -650,9 +650,9 @@ func TestNameIDMappingRejectsAlteredRequest(t *testing.T) {
 	f.test.IDP.ServeNameIDMapping(w, nameIDTestSOAPPost(t, nameIDMappingTestURL, el))
 
 	response := &NameIDMappingResponse{}
-	assert.NilError(t, unmarshalElement(nameIDTestSOAPMessage(t, w, "NameIDMappingResponse"), response))
+	require.NoError(t, unmarshalElement(nameIDTestSOAPMessage(t, w, "NameIDMappingResponse"), response))
 	checkStatus(t, response.Status, StatusRequester, StatusRequestDenied)
-	assert.Check(t, is.Len(f.provider.calls, 0))
+	assert.Len(t, f.provider.calls, 0)
 }
 
 func TestNameIDMappingRequestStatus(t *testing.T) {
@@ -698,7 +698,7 @@ func TestNameIDMappingRequestStatus(t *testing.T) {
 			f := newNameIDMappingFixture(t)
 
 			f.send(t, tc.options).checkNoIdentifier(t, tc.top, tc.second)
-			assert.Check(t, is.Len(f.provider.calls, 0))
+			assert.Len(t, f.provider.calls, 0)
 		})
 	}
 }
@@ -717,7 +717,7 @@ func TestServeNameIDMappingEnvelope(t *testing.T) {
 	t.Run("not a POST", func(t *testing.T) {
 		w := httptest.NewRecorder()
 		f.test.IDP.ServeNameIDMapping(w, httptest.NewRequest(http.MethodGet, nameIDMappingTestURL, nil))
-		assert.Check(t, is.Equal(w.Code, http.StatusMethodNotAllowed))
+		assert.Equal(t, w.Code, http.StatusMethodNotAllowed)
 	})
 
 	t.Run("not an envelope", func(t *testing.T) {
@@ -726,7 +726,7 @@ func TestServeNameIDMappingEnvelope(t *testing.T) {
 
 		w := httptest.NewRecorder()
 		f.test.IDP.ServeNameIDMapping(w, r)
-		assert.Check(t, is.Equal(soapFaultCode(t, w), "soapenv:Client"))
+		assert.Equal(t, soapFaultCode(t, w), "soapenv:Client")
 	})
 
 	t.Run("another message", func(t *testing.T) {
@@ -736,17 +736,17 @@ func TestServeNameIDMappingEnvelope(t *testing.T) {
 		f.test.IDP.ServeNameIDMapping(w, nameIDTestSOAPPost(t, nameIDMappingTestURL, signTestElement(t, f.a, el)))
 
 		response := &NameIDMappingResponse{}
-		assert.NilError(t, unmarshalElement(nameIDTestSOAPMessage(t, w, "NameIDMappingResponse"), response))
+		require.NoError(t, unmarshalElement(nameIDTestSOAPMessage(t, w, "NameIDMappingResponse"), response))
 		checkStatus(t, response.Status, StatusRequester, StatusRequestUnsupported)
 	})
 
 	t.Run("handler", func(t *testing.T) {
 		w := httptest.NewRecorder()
 		f.test.IDP.Handler().ServeHTTP(w, httptest.NewRequest(http.MethodGet, nameIDMappingTestURL, nil))
-		assert.Check(t, is.Equal(w.Code, http.StatusMethodNotAllowed))
+		assert.Equal(t, w.Code, http.StatusMethodNotAllowed)
 	})
 
-	assert.Check(t, is.Len(f.provider.calls, 0))
+	assert.Len(t, f.provider.calls, 0)
 }
 
 // Only the content that the signature covers is acted on, not what the message says outside of it.
@@ -769,9 +769,9 @@ func TestNameIDMappingUsesSignedContent(t *testing.T) {
 	f.test.IDP.ServeNameIDMapping(w, nameIDTestSOAPPostBytes(nameIDMappingTestURL, body))
 
 	response := &NameIDMappingResponse{}
-	assert.NilError(t, unmarshalElement(nameIDTestSOAPMessage(t, w, "NameIDMappingResponse"), response))
+	require.NoError(t, unmarshalElement(nameIDTestSOAPMessage(t, w, "NameIDMappingResponse"), response))
 	checkStatus(t, response.Status, StatusRequester, StatusRequestDenied)
-	assert.Check(t, is.Len(f.provider.calls, 0))
+	assert.Len(t, f.provider.calls, 0)
 }
 
 // SAMLSec §6.1.2: a request is answered once.
@@ -799,7 +799,7 @@ func TestNameIDMappingRefusesReplay(t *testing.T) {
 
 		result := nameIDMappingResult{RequestID: request.ID, Response: &NameIDMappingResponse{}}
 		result.Element = nameIDTestSOAPMessage(t, w, "NameIDMappingResponse")
-		assert.NilError(t, unmarshalElement(result.Element, result.Response))
+		require.NoError(t, unmarshalElement(result.Element, result.Response))
 
 		return result
 	}
@@ -808,25 +808,25 @@ func TestNameIDMappingRefusesReplay(t *testing.T) {
 
 	// A request that isn't verified is not recorded.
 	serve(request.Element()).checkNoIdentifier(t, StatusRequester, StatusRequestDenied)
-	assert.Check(t, is.Equal(store.calls(), 0))
+	assert.Equal(t, store.calls(), 0)
 
 	result := serve(signed.Copy())
 	checkStatus(t, result.Response.Status, StatusSuccess, "")
-	assert.Check(t, result.Element.FindElement("./EncryptedID") != nil)
-	assert.Assert(t, is.Equal(store.calls(), 1))
-	assert.Check(t, strings.HasPrefix(store.keys[0], replayKindNameIDMappingRequest+":"))
-	assert.Check(t, is.Len(f.provider.calls, 1))
+	assert.NotNil(t, result.Element.FindElement("./EncryptedID"))
+	require.Equal(t, store.calls(), 1)
+	assert.True(t, strings.HasPrefix(store.keys[0], replayKindNameIDMappingRequest+":"))
+	assert.Len(t, f.provider.calls, 1)
 
 	// The same request again gets no identifier, and the provider is not asked.
 	result = serve(signed.Copy())
 	result.checkNoIdentifier(t, StatusRequester, StatusRequestDenied)
-	assert.Check(t, is.Equal(result.Response.InResponseTo, request.ID))
-	assert.Check(t, is.Len(f.provider.calls, 1))
+	assert.Equal(t, result.Response.InResponseTo, request.ID)
+	assert.Len(t, f.provider.calls, 1)
 
 	// If the store fails nothing is known about a request, and it is refused.
 	store.err = errors.New("store down")
 	request.ID = "id-another-request"
 
 	serve(signTestElement(t, f.a, request.Element())).checkNoIdentifier(t, StatusResponder, "")
-	assert.Check(t, is.Len(f.provider.calls, 1))
+	assert.Len(t, f.provider.calls, 1)
 }

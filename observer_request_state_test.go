@@ -8,8 +8,8 @@ import (
 	"testing"
 
 	"github.com/beevik/etree"
-	"gotest.tools/assert"
-	is "gotest.tools/assert/cmp"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"authelia.com/provider/saml/internal/dsig"
 )
@@ -52,12 +52,12 @@ func TestAlgorithmFallbackIsVerifiedAsItsRequest(t *testing.T) {
 			test.IDP.Observer = &observer
 
 			_, err := test.IDP.issuance(IssuanceRequest{ServiceProviderMetadata: metadata, AuthnRequest: tc.request})
-			assert.NilError(t, err)
+			require.NoError(t, err)
 
 			events := eventsOfKind(&observer, EventAlgorithmFallback)
-			assert.Assert(t, is.Len(events, 1))
-			assert.Check(t, is.Equal(events[0].Verified, tc.verified))
-			assert.Check(t, is.Equal(events[0].ServiceProvider, metadata.EntityID))
+			require.Len(t, events, 1)
+			assert.Equal(t, events[0].Verified, tc.verified)
+			assert.Equal(t, events[0].ServiceProvider, metadata.EntityID)
 		})
 	}
 }
@@ -79,9 +79,9 @@ func TestInvalidSubjectIDWarningIsVerifiedAsItsRequest(t *testing.T) {
 		releasedAttributes(t, req, &Session{ID: "s", NameID: "alice", SubjectID: "alice"})
 
 		events := eventsOfKind(&observer, EventAttributeRelease)
-		assert.Assert(t, is.Len(events, 1))
-		assert.Check(t, is.Equal(events[0].Outcome, OutcomeWarning))
-		assert.Check(t, is.Equal(events[0].Verified, authenticated))
+		require.Len(t, events, 1)
+		assert.Equal(t, events[0].Outcome, OutcomeWarning)
+		assert.Equal(t, events[0].Verified, authenticated)
 	}
 }
 
@@ -106,21 +106,21 @@ func TestLogoutParticipantPartialLogoutIsWarning(t *testing.T) {
 			w = serveSLO(f.test, respondAsSPWithStatusCode(t, f.a, sentLogoutRequest(t, w), tc.code))
 			serveSLO(f.test, respondAsSP(t, f.b, sentLogoutRequest(t, w)))
 
-			assert.Assert(t, f.provider.result != nil)
-			assert.Check(t, f.provider.result.Partial())
-			assert.Check(t, is.Equal(f.provider.result.Participants[0].Outcome, LogoutOutcomeFailed))
+			require.NotNil(t, f.provider.result)
+			assert.True(t, f.provider.result.Partial())
+			assert.Equal(t, f.provider.result.Participants[0].Outcome, LogoutOutcomeFailed)
 
 			var outcomes []Outcome
 
 			for _, event := range eventsOfKind(&observer, EventLogoutPropagation) {
 				if event.ServiceProvider == f.a.MetadataURL.String() {
 					outcomes = append(outcomes, event.Outcome)
-					assert.Check(t, event.Verified)
-					assert.Check(t, event.Err != nil)
+					assert.True(t, event.Verified)
+					assert.NotNil(t, event.Err)
 				}
 			}
 
-			assert.Check(t, is.DeepEqual(outcomes, []Outcome{tc.outcome}))
+			assert.Equal(t, outcomes, []Outcome{tc.outcome})
 		})
 	}
 }
@@ -151,10 +151,10 @@ func TestLogoutResponseWriteFailureKeepsBothCauses(t *testing.T) {
 	req.fail(httptest.NewRecorder(), ErrRequestDenied)
 
 	events := eventsOfKind(&observer, EventLogout)
-	assert.Assert(t, is.Len(events, 1))
-	assert.Check(t, errors.Is(events[0].Err, ErrServerError))
-	assert.Check(t, errors.Is(events[0].Err, policyErr))
-	assert.Check(t, errors.Is(events[0].Err, ErrRequestDenied))
+	require.Len(t, events, 1)
+	assert.True(t, errors.Is(events[0].Err, ErrServerError))
+	assert.True(t, errors.Is(events[0].Err, policyErr))
+	assert.True(t, errors.Is(events[0].Err, ErrRequestDenied))
 }
 
 // A SessionProvider that refuses a request with WriteErrorResponse has it reported as one EventSSO with the
@@ -168,7 +168,7 @@ func TestServeSSOReportsRefusalOfSessionProvider(t *testing.T) {
 		{
 			name: "refusal",
 			get: func(w http.ResponseWriter, req *IdpAuthnRequest) *Session {
-				assert.NilError(t, req.WriteErrorResponse(w, ErrRequestDenied.WithDebug("the user declined")))
+				require.NoError(t, req.WriteErrorResponse(w, ErrRequestDenied.WithDebug("the user declined")))
 
 				return nil
 			},
@@ -198,12 +198,12 @@ func TestServeSSOReportsRefusalOfSessionProvider(t *testing.T) {
 			serveSSO(test, replayPostRequest(signedPostBody(t, &test.SP, nil), nil))
 
 			events := eventsOfKind(&observer, EventSSO)
-			assert.Assert(t, is.Len(events, tc.events))
+			require.Len(t, events, tc.events)
 
 			if tc.events != 0 {
-				assert.Check(t, is.Equal(events[0].Outcome, OutcomeFailure))
-				assert.Check(t, errors.Is(events[0].Err, ErrRequestDenied))
-				assert.Check(t, events[0].Verified)
+				assert.Equal(t, events[0].Outcome, OutcomeFailure)
+				assert.True(t, errors.Is(events[0].Err, ErrRequestDenied))
+				assert.True(t, events[0].Verified)
 			}
 		})
 	}
@@ -215,7 +215,7 @@ func TestCheckStatusDetailChildAttributePrefixes(t *testing.T) {
 		t.Helper()
 
 		doc := etree.NewDocument()
-		assert.NilError(t, doc.ReadFromString(xml))
+		require.NoError(t, doc.ReadFromString(xml))
 
 		return doc.Root()
 	}
@@ -233,11 +233,11 @@ func TestCheckStatusDetailChildAttributePrefixes(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			err := checkStatusDetailChild(parse(t, tc.xml))
-			assert.Check(t, is.Equal(err == nil, tc.ok), "%v", err)
+			assert.Equal(t, err == nil, tc.ok, "%v", err)
 		})
 	}
 
 	// A prefix that only the parent of the child declares is not one that the child declares.
 	parent := parse(t, `<p:Parent xmlns:p="urn:p" xmlns:c="urn:c"><a:Detail xmlns:a="urn:a" c:kind="x"/></p:Parent>`)
-	assert.Check(t, checkStatusDetailChild(parent.ChildElements()[0]) != nil)
+	assert.NotNil(t, checkStatusDetailChild(parent.ChildElements()[0]))
 }

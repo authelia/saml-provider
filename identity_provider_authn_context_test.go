@@ -11,8 +11,8 @@ import (
 	"testing"
 
 	"github.com/beevik/etree"
-	"gotest.tools/assert"
-	is "gotest.tools/assert/cmp"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 const (
@@ -46,13 +46,13 @@ func serveSSOWithSession(t *testing.T, test *IdentityProviderTest, session *Sess
 	}
 
 	request, err := test.SP.MakeAuthenticationRequest("https://idp.example.com/saml/sso", HTTPPostBinding, HTTPPostBinding)
-	assert.NilError(t, err)
+	require.NoError(t, err)
 
 	request.RequestedAuthnContext = requested
 	doc := etree.NewDocument()
 	doc.SetRoot(request.Element())
 	body, err := doc.WriteToBytes()
-	assert.NilError(t, err)
+	require.NoError(t, err)
 
 	form := url.Values{"SAMLRequest": {base64.StdEncoding.EncodeToString(body)}}
 	r := httptest.NewRequest(http.MethodPost, "https://idp.example.com/saml/sso", strings.NewReader(form.Encode()))
@@ -60,7 +60,7 @@ func serveSSOWithSession(t *testing.T, test *IdentityProviderTest, session *Sess
 
 	w := httptest.NewRecorder()
 	test.IDP.ServeSSO(w, r)
-	assert.Check(t, is.Equal(w.Code, http.StatusOK), "body: %s", w.Body.String())
+	assert.Equal(t, w.Code, http.StatusOK, "body: %s", w.Body.String())
 
 	_, response := postedResponse(t, w.Body.String())
 
@@ -69,11 +69,11 @@ func serveSSOWithSession(t *testing.T, test *IdentityProviderTest, session *Sess
 
 func assertNoAuthnContext(t *testing.T, response Response) {
 	t.Helper()
-	assert.Check(t, is.Equal(response.Status.StatusCode.Value, StatusResponder))
-	assert.Assert(t, response.Status.StatusCode.StatusCode != nil)
-	assert.Check(t, is.Equal(response.Status.StatusCode.StatusCode.Value, StatusNoAuthnContext))
-	assert.Check(t, response.Assertion == nil)
-	assert.Check(t, response.EncryptedAssertion == nil)
+	assert.Equal(t, response.Status.StatusCode.Value, StatusResponder)
+	require.NotNil(t, response.Status.StatusCode.StatusCode)
+	assert.Equal(t, response.Status.StatusCode.StatusCode.Value, StatusNoAuthnContext)
+	assert.Nil(t, response.Assertion)
+	assert.Nil(t, response.EncryptedAssertion)
 }
 
 // The default assertion is PasswordProtectedTransport, and with no ranking configured only that
@@ -90,7 +90,7 @@ func TestServeSSOAcceptsSatisfiableAuthnContext(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			test := NewIdentityProviderTest(t, applyKey)
 			response := serveSSOWithAuthnContext(t, test, requested)
-			assert.Check(t, is.Equal(response.Status.StatusCode.Value, StatusSuccess))
+			assert.Equal(t, response.Status.StatusCode.Value, StatusSuccess)
 		})
 	}
 }
@@ -122,11 +122,11 @@ func TestDefaultAssertionMakerUsesSessionAuthnContext(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			test := NewIdentityProviderTest(t, applyKey)
 			req, err := hardeningValidate(test, hardeningRequest(`ID="id-1"`, TimeNow(), hardeningIssuer))
-			assert.NilError(t, err)
-			assert.NilError(t, DefaultAssertionMaker{}.MakeAssertion(req, &Session{ID: "f00d", NameID: "alice", AuthnContextClassRef: tc.session}))
-			assert.Assert(t, is.Len(req.Assertion.AuthnStatements, 1))
-			assert.Assert(t, req.Assertion.AuthnStatements[0].AuthnContext.AuthnContextClassRef != nil)
-			assert.Check(t, is.Equal(req.Assertion.AuthnStatements[0].AuthnContext.AuthnContextClassRef.Value, tc.asserted))
+			require.NoError(t, err)
+			require.NoError(t, DefaultAssertionMaker{}.MakeAssertion(req, &Session{ID: "f00d", NameID: "alice", AuthnContextClassRef: tc.session}))
+			require.Len(t, req.Assertion.AuthnStatements, 1)
+			require.NotNil(t, req.Assertion.AuthnStatements[0].AuthnContext.AuthnContextClassRef)
+			assert.Equal(t, req.Assertion.AuthnStatements[0].AuthnContext.AuthnContextClassRef.Value, tc.asserted)
 		})
 	}
 }
@@ -135,7 +135,7 @@ func TestServeSSOAcceptsSessionAuthnContext(t *testing.T) {
 	test := NewIdentityProviderTest(t, applyKey)
 	session := &Session{ID: "s", NameID: "alice", AuthnContextClassRef: strongClass}
 	response := serveSSOWithSession(t, test, session, &RequestedAuthnContext{AuthnContextClassRefs: []string{strongClass}})
-	assert.Check(t, is.Equal(response.Status.StatusCode.Value, StatusSuccess))
+	assert.Equal(t, response.Status.StatusCode.Value, StatusSuccess)
 
 	response = serveSSOWithSession(t, test, session, &RequestedAuthnContext{AuthnContextClassRefs: []string{transportClass}})
 	assertNoAuthnContext(t, response)
@@ -146,7 +146,7 @@ func TestServeSSOUsesConfiguredAuthnContextEnforcer(t *testing.T) {
 		test := NewIdentityProviderTest(t, applyKey)
 		test.IDP.AuthnContextEnforcer = authnContextEnforcerFunc(func(*RequestedAuthnContext, *Session) error { return nil })
 		response := serveSSOWithAuthnContext(t, test, &RequestedAuthnContext{AuthnContextClassRefs: []string{strongClass}})
-		assert.Check(t, is.Equal(response.Status.StatusCode.Value, StatusSuccess))
+		assert.Equal(t, response.Status.StatusCode.Value, StatusSuccess)
 	})
 
 	t.Run("refuses with the request and session", func(t *testing.T) {
@@ -165,9 +165,9 @@ func TestServeSSOUsesConfiguredAuthnContextEnforcer(t *testing.T) {
 		})
 		response := serveSSOWithAuthnContext(t, test, &RequestedAuthnContext{AuthnContextClassRefs: []string{transportClass, strongClass}})
 		assertNoAuthnContext(t, response)
-		assert.Check(t, is.DeepEqual(classes, []string{transportClass, strongClass}))
-		assert.Check(t, is.Equal(nameID, "alice"))
-		assert.Check(t, statusSaysNothingOfTheRequest(response.Status))
+		assert.Equal(t, classes, []string{transportClass, strongClass})
+		assert.Equal(t, nameID, "alice")
+		assert.True(t, statusSaysNothingOfTheRequest(response.Status))
 	})
 
 	t.Run("not called without a requested context", func(t *testing.T) {
@@ -177,7 +177,7 @@ func TestServeSSOUsesConfiguredAuthnContextEnforcer(t *testing.T) {
 			return nil
 		})
 		response := serveSSOWithAuthnContext(t, test, nil)
-		assert.Check(t, is.Equal(response.Status.StatusCode.Value, StatusSuccess))
+		assert.Equal(t, response.Status.StatusCode.Value, StatusSuccess)
 	})
 }
 
@@ -190,7 +190,7 @@ func TestServeIDPInitiatedSkipsAuthnContextEnforcer(t *testing.T) {
 	})
 	w := httptest.NewRecorder()
 	test.IDP.ServeIDPInitiated(w, httptest.NewRequest(http.MethodGet, "https://idp.example.com/saml/sso", nil), test.SP.MetadataURL.String(), "")
-	assert.Check(t, is.Equal(w.Code, http.StatusOK))
+	assert.Equal(t, w.Code, http.StatusOK)
 }
 
 // enforceAssertedClasses runs the default enforcer against an assertion with one authentication
@@ -249,9 +249,9 @@ func TestDefaultAuthnContextEnforcerComparisons(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			err := enforceAssertedClasses(ranked, tc.requested, tc.asserted...)
 			if tc.ok {
-				assert.Check(t, err)
+				assert.NoError(t, err)
 			} else {
-				assert.Check(t, err != nil)
+				assert.NotNil(t, err)
 			}
 		})
 	}
@@ -260,22 +260,22 @@ func TestDefaultAuthnContextEnforcerComparisons(t *testing.T) {
 
 	t.Run("statement without a class", func(t *testing.T) {
 		assertion := &Assertion{AuthnStatements: []AuthnStatement{{}}}
-		assert.Check(t, idp.satisfiesAuthnContext(request("", weakClass), assertion, &Session{}) != nil)
+		assert.True(t, idp.satisfiesAuthnContext(request("", weakClass), assertion, &Session{}) != nil)
 	})
 
 	t.Run("no assertion", func(t *testing.T) {
-		assert.Check(t, idp.satisfiesAuthnContext(request("", weakClass), nil, &Session{}) != nil)
+		assert.True(t, idp.satisfiesAuthnContext(request("", weakClass), nil, &Session{}) != nil)
 	})
 
 	t.Run("the class of the session", func(t *testing.T) {
-		assert.Check(t, ranked.SatisfiesAuthnContext(request("", strongClass), &Session{AuthnContextClassRef: strongClass}))
-		assert.Check(t, ranked.SatisfiesAuthnContext(request("", strongClass), &Session{AuthnContextClassRef: weakClass}) != nil)
-		assert.Check(t, ranked.SatisfiesAuthnContext(request(AuthnContextComparisonMinimum, weakClass), &Session{AuthnContextClassRef: strongClass}))
+		assert.NoError(t, ranked.SatisfiesAuthnContext(request("", strongClass), &Session{AuthnContextClassRef: strongClass}))
+		assert.True(t, ranked.SatisfiesAuthnContext(request("", strongClass), &Session{AuthnContextClassRef: weakClass}) != nil)
+		assert.NoError(t, ranked.SatisfiesAuthnContext(request(AuthnContextComparisonMinimum, weakClass), &Session{AuthnContextClassRef: strongClass}))
 	})
 
 	t.Run("a session without a class is PasswordProtectedTransport", func(t *testing.T) {
-		assert.Check(t, ranked.SatisfiesAuthnContext(request("", transportClass), &Session{}))
-		assert.Check(t, ranked.SatisfiesAuthnContext(request("", strongClass), &Session{}) != nil)
+		assert.NoError(t, ranked.SatisfiesAuthnContext(request("", transportClass), &Session{}))
+		assert.True(t, ranked.SatisfiesAuthnContext(request("", strongClass), &Session{}) != nil)
 	})
 }
 
@@ -298,8 +298,8 @@ func TestServeSSOEnforcesTheAssertedAuthnContext(t *testing.T) {
 	assertNoAuthnContext(t, response)
 
 	response = serveSSOWithSession(t, test, session, &RequestedAuthnContext{AuthnContextClassRefs: []string{weakClass}})
-	assert.Check(t, is.Equal(response.Status.StatusCode.Value, StatusSuccess))
-	assert.Check(t, is.Equal(session.AuthnContextClassRef, strongClass), "the session is not changed")
+	assert.Equal(t, response.Status.StatusCode.Value, StatusSuccess)
+	assert.Equal(t, session.AuthnContextClassRef, strongClass, "the session is not changed")
 }
 
 // BUG-39: only the last class ref survived parsing.
@@ -309,18 +309,18 @@ func TestRequestedAuthnContextKeepsEveryReference(t *testing.T) {
 		`</samlp:RequestedAuthnContext>`
 
 	var actual RequestedAuthnContext
-	assert.NilError(t, xml.Unmarshal([]byte(input), &actual))
-	assert.Check(t, is.Equal(actual.Comparison, AuthnContextComparisonMinimum))
-	assert.Check(t, is.DeepEqual(actual.AuthnContextClassRefs, []string{"a", "b"}))
+	require.NoError(t, xml.Unmarshal([]byte(input), &actual))
+	assert.Equal(t, actual.Comparison, AuthnContextComparisonMinimum)
+	assert.Equal(t, actual.AuthnContextClassRefs, []string{"a", "b"})
 
 	const declarations = `<samlp:RequestedAuthnContext xmlns:samlp="urn:oasis:names:tc:SAML:2.0:protocol" xmlns:saml="urn:oasis:names:tc:SAML:2.0:assertion">` +
 		`<saml:AuthnContextDeclRef>c</saml:AuthnContextDeclRef><saml:AuthnContextDeclRef>d</saml:AuthnContextDeclRef>` +
 		`</samlp:RequestedAuthnContext>`
 
 	actual = RequestedAuthnContext{}
-	assert.NilError(t, xml.Unmarshal([]byte(declarations), &actual))
-	assert.Check(t, is.DeepEqual(actual.AuthnContextDeclRefs, []string{"c", "d"}))
-	assert.Check(t, is.Len(actual.AuthnContextClassRefs, 0))
+	require.NoError(t, xml.Unmarshal([]byte(declarations), &actual))
+	assert.Equal(t, actual.AuthnContextDeclRefs, []string{"c", "d"})
+	assert.Len(t, actual.AuthnContextClassRefs, 0)
 }
 
 // SP-02: an unset Comparison was written as Comparison="".
@@ -342,8 +342,8 @@ func TestRequestedAuthnContextElement(t *testing.T) {
 			doc := etree.NewDocument()
 			doc.SetRoot(tc.requested.Element())
 			x, err := doc.WriteToBytes()
-			assert.NilError(t, err)
-			assert.Check(t, is.Equal(tc.expected, string(x)))
+			require.NoError(t, err)
+			assert.Equal(t, tc.expected, string(x))
 		})
 	}
 }

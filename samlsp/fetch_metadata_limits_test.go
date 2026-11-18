@@ -10,8 +10,8 @@ import (
 	"testing"
 	"time"
 
-	"gotest.tools/assert"
-	is "gotest.tools/assert/cmp"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestFetchMetadataLimitsSize(t *testing.T) {
@@ -36,15 +36,15 @@ func TestFetchMetadataLimitsSize(t *testing.T) {
 			defer server.Close()
 
 			u, err := url.Parse(server.URL)
-			assert.NilError(t, err)
+			require.NoError(t, err)
 
 			_, err = FetchMetadata(context.Background(), server.Client(), *u)
-			assert.Assert(t, err != nil)
+			require.NotNil(t, err)
 
 			if tc.tooMuch {
-				assert.Check(t, is.ErrorContains(err, "too large"))
+				assert.ErrorContains(t, err, "too large")
 			} else {
-				assert.Check(t, !strings.Contains(err.Error(), "too large"), err.Error())
+				assert.False(t, strings.Contains(err.Error(), "too large"), err.Error())
 			}
 		})
 	}
@@ -62,10 +62,10 @@ func TestFetchMetadataWithoutClientHasTimeout(t *testing.T) {
 	t.Cleanup(func() { close(release) })
 
 	u, err := url.Parse(server.URL)
-	assert.NilError(t, err)
+	require.NoError(t, err)
 
 	start := time.Now()
 	_, err = FetchMetadata(context.Background(), nil, *u)
-	assert.Assert(t, err != nil)
-	assert.Check(t, time.Since(start) < 5*time.Second)
+	require.NotNil(t, err)
+	assert.True(t, time.Since(start) < 5*time.Second)
 }

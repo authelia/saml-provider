@@ -12,14 +12,15 @@ import (
 	"testing"
 	"time"
 
-	"gotest.tools/assert"
-	is "gotest.tools/assert/cmp"
-	"gotest.tools/golden"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+
+	"authelia.com/provider/saml/internal/golden"
 )
 
 func TestServerPublishesRolloverCertificates(t *testing.T) {
 	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
-	assert.NilError(t, err)
+	require.NoError(t, err)
 	template := &x509.Certificate{
 		SerialNumber: big.NewInt(1),
 		Subject:      pkix.Name{CommonName: "idp"},
@@ -27,9 +28,9 @@ func TestServerPublishesRolloverCertificates(t *testing.T) {
 		NotAfter:     time.Now().Add(time.Hour),
 	}
 	der, err := x509.CreateCertificate(rand.Reader, template, template, key.Public(), key)
-	assert.NilError(t, err)
+	require.NoError(t, err)
 	next, err := x509.ParseCertificate(der)
-	assert.NilError(t, err)
+	require.NoError(t, err)
 
 	current := mustParseCertificate(golden.Get(t, "idp_cert.pem"))
 	server, err := New(Options{
@@ -39,7 +40,7 @@ func TestServerPublishesRolloverCertificates(t *testing.T) {
 		Store:                &MemoryStore{},
 		URL:                  url.URL{Scheme: "https", Host: "idp.example.com"},
 	})
-	assert.NilError(t, err)
+	require.NoError(t, err)
 
 	var signing []string
 	for _, descriptor := range server.IDP.Metadata().IDPSSODescriptors[0].KeyDescriptors {
@@ -47,8 +48,9 @@ func TestServerPublishesRolloverCertificates(t *testing.T) {
 			signing = append(signing, descriptor.KeyInfo.X509Data.X509Certificates[0].Data)
 		}
 	}
-	assert.Check(t, is.DeepEqual([]string{
+
+	assert.Equal(t, []string{
 		base64.StdEncoding.EncodeToString(current.Raw),
 		base64.StdEncoding.EncodeToString(next.Raw),
-	}, signing))
+	}, signing)
 }

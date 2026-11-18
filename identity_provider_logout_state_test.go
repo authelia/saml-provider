@@ -6,8 +6,8 @@ import (
 	"testing"
 	"time"
 
-	"gotest.tools/assert"
-	"gotest.tools/assert/cmp"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func logoutTestParticipants(base time.Time) []SessionParticipant {
@@ -27,17 +27,17 @@ func logoutTestParticipants(base time.Time) []SessionParticipant {
 func TestNewLogoutStateGroupsParticipants(t *testing.T) {
 	state := newLogoutState(&IdentityProvider{}, logoutTestParticipants(time.Unix(1000, 0)), "")
 
-	assert.Equal(t, len(state.Participants), 3)
-	assert.Equal(t, state.Participants[0].ServiceProviderEntityID, "A")
-	assert.Equal(t, state.Participants[0].NameID.Value, "x")
-	assert.DeepEqual(t, state.Participants[0].SessionIndexes, []string{"1", "2"})
-	assert.Equal(t, state.Participants[1].ServiceProviderEntityID, "B")
-	assert.DeepEqual(t, state.Participants[1].SessionIndexes, []string{"1"})
-	assert.Equal(t, state.Participants[2].NameID.Value, "z")
-	assert.DeepEqual(t, state.Participants[2].SessionIndexes, []string{"3"})
+	require.Equal(t, len(state.Participants), 3)
+	require.Equal(t, state.Participants[0].ServiceProviderEntityID, "A")
+	require.Equal(t, state.Participants[0].NameID.Value, "x")
+	require.Equal(t, state.Participants[0].SessionIndexes, []string{"1", "2"})
+	require.Equal(t, state.Participants[1].ServiceProviderEntityID, "B")
+	require.Equal(t, state.Participants[1].SessionIndexes, []string{"1"})
+	require.Equal(t, state.Participants[2].NameID.Value, "z")
+	require.Equal(t, state.Participants[2].SessionIndexes, []string{"3"})
 
 	for _, p := range state.Participants {
-		assert.Equal(t, p.Outcome, LogoutOutcomePending)
+		require.Equal(t, p.Outcome, LogoutOutcomePending)
 	}
 }
 
@@ -52,26 +52,26 @@ func TestNewLogoutStateGroupKeyIgnoresSPProvidedIDAndEmptyIndexes(t *testing.T) 
 		{ServiceProviderEntityID: "C", NameID: NameID{Value: "z"}, SessionIndex: "3", IssueInstant: base.Add(4 * time.Second)},
 	}, "")
 
-	assert.Equal(t, len(state.Participants), 3)
+	require.Equal(t, len(state.Participants), 3)
 
 	// A group with a member that has no SessionIndex is sent a request without any, whatever the order.
-	assert.Check(t, cmp.Len(state.Participants[0].SessionIndexes, 0))
-	assert.Check(t, cmp.Len(state.Participants[1].SessionIndexes, 0))
-	assert.DeepEqual(t, state.Participants[2].SessionIndexes, []string{"3"})
+	assert.Len(t, state.Participants[0].SessionIndexes, 0)
+	assert.Len(t, state.Participants[1].SessionIndexes, 0)
+	require.Equal(t, state.Participants[2].SessionIndexes, []string{"3"})
 
 	idp := &IdentityProvider{MetadataURL: mustParseURL("https://idp.example.com/metadata")}
 	endpoint := &Endpoint{Location: "https://sp.example.com/slo"}
 
 	indexes := func(i int) []SessionIndex {
 		request, err := idp.makeLogoutRequest(nil, state, &state.Participants[i], nil, endpoint)
-		assert.NilError(t, err)
+		require.NoError(t, err)
 
 		return request.SessionIndexes
 	}
 
-	assert.Check(t, cmp.Len(indexes(0), 0))
-	assert.Check(t, cmp.Len(indexes(1), 0))
-	assert.DeepEqual(t, indexes(2), []SessionIndex{{Value: "3"}})
+	assert.Len(t, indexes(0), 0)
+	assert.Len(t, indexes(1), 0)
+	require.Equal(t, indexes(2), []SessionIndex{{Value: "3"}})
 }
 
 func TestNewLogoutStateOrdersByEarliestIssueInstant(t *testing.T) {
@@ -82,15 +82,15 @@ func TestNewLogoutStateOrdersByEarliestIssueInstant(t *testing.T) {
 		{ServiceProviderEntityID: "A", NameID: NameID{Value: "x"}, SessionIndex: "1", IssueInstant: base},
 	}, "")
 
-	assert.Equal(t, state.Participants[0].ServiceProviderEntityID, "A")
-	assert.Equal(t, state.Participants[1].ServiceProviderEntityID, "B")
+	require.Equal(t, state.Participants[0].ServiceProviderEntityID, "A")
+	require.Equal(t, state.Participants[1].ServiceProviderEntityID, "B")
 }
 
 func TestNewLogoutStateExcludesOrigin(t *testing.T) {
 	state := newLogoutState(&IdentityProvider{}, logoutTestParticipants(time.Unix(1000, 0)), "A")
 
-	assert.Equal(t, len(state.Participants), 1)
-	assert.Equal(t, state.Participants[0].ServiceProviderEntityID, "B")
+	require.Equal(t, len(state.Participants), 1)
+	require.Equal(t, state.Participants[0].ServiceProviderEntityID, "B")
 }
 
 func TestNewLogoutStateID(t *testing.T) {
@@ -102,14 +102,14 @@ func TestNewLogoutStateID(t *testing.T) {
 	a := newLogoutState(&IdentityProvider{}, nil, "")
 	b := newLogoutState(&IdentityProvider{}, nil, "")
 
-	assert.Equal(t, len(a.ID), 43)
-	assert.Assert(t, regexp.MustCompile(`^[A-Za-z0-9_-]+$`).MatchString(a.ID))
-	assert.Assert(t, a.ID != b.ID)
-	assert.Assert(t, a.ExpireTime.Equal(now.Add(5*time.Minute)))
-	assert.Equal(t, a.Current, -1)
+	require.Equal(t, len(a.ID), 43)
+	require.True(t, regexp.MustCompile(`^[A-Za-z0-9_-]+$`).MatchString(a.ID))
+	require.True(t, a.ID != b.ID)
+	require.True(t, a.ExpireTime.Equal(now.Add(5*time.Minute)))
+	require.Equal(t, a.Current, -1)
 
 	custom := newLogoutState(&IdentityProvider{LogoutStateLifetime: time.Hour}, nil, "")
-	assert.Assert(t, custom.ExpireTime.Equal(now.Add(time.Hour)))
+	require.True(t, custom.ExpireTime.Equal(now.Add(time.Hour)))
 }
 
 func TestLogoutResultPartial(t *testing.T) {
@@ -127,7 +127,7 @@ func TestLogoutResultPartial(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			assert.Equal(t, tc.result.Partial(), tc.expected)
+			require.Equal(t, tc.result.Partial(), tc.expected)
 		})
 	}
 }
@@ -143,11 +143,11 @@ func TestLogoutStateResult(t *testing.T) {
 
 	result := state.result()
 
-	assert.Equal(t, result.StateID, "state-id")
-	assert.Equal(t, result.ReturnURL, "https://idp.example.com/done")
-	assert.Assert(t, result.SessionTerminated)
-	assert.Assert(t, result.SessionPartialLogout)
-	assert.DeepEqual(t, result.Participants, state.Participants)
+	require.Equal(t, result.StateID, "state-id")
+	require.Equal(t, result.ReturnURL, "https://idp.example.com/done")
+	require.True(t, result.SessionTerminated)
+	require.True(t, result.SessionPartialLogout)
+	require.Equal(t, result.Participants, state.Participants)
 }
 
 func TestLogoutStateJSONRoundTrip(t *testing.T) {
@@ -159,10 +159,10 @@ func TestLogoutStateJSONRoundTrip(t *testing.T) {
 	state.ExpireTime = state.ExpireTime.UTC()
 
 	data, err := json.Marshal(state)
-	assert.NilError(t, err)
+	require.NoError(t, err)
 
 	var out LogoutState
 
-	assert.NilError(t, json.Unmarshal(data, &out))
-	assert.Check(t, cmp.DeepEqual(state, &out))
+	require.NoError(t, json.Unmarshal(data, &out))
+	assert.Equal(t, state, &out)
 }

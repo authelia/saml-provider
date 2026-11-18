@@ -15,11 +15,11 @@ import (
 	"time"
 
 	"github.com/beevik/etree"
-	"gotest.tools/assert"
-	is "gotest.tools/assert/cmp"
-	"gotest.tools/golden"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"authelia.com/provider/saml/internal/dsig"
+	"authelia.com/provider/saml/internal/golden"
 )
 
 const (
@@ -149,7 +149,7 @@ func ecpAuthnRequest(t *testing.T, sp *ServiceProvider, mutate func(*AuthnReques
 	unsigned := *sp
 	unsigned.SignatureMethod = ""
 	request, err := unsigned.MakeAuthenticationRequest("", SOAPBinding, PAOSBinding)
-	assert.NilError(t, err)
+	require.NoError(t, err)
 
 	request.AssertionConsumerServiceURL = ecpTestPAOSURL
 
@@ -158,7 +158,7 @@ func ecpAuthnRequest(t *testing.T, sp *ServiceProvider, mutate func(*AuthnReques
 	}
 
 	if sp.SignatureMethod != "" {
-		assert.NilError(t, sp.SignAuthnRequest(request))
+		require.NoError(t, sp.SignAuthnRequest(request))
 	}
 
 	return request
@@ -181,7 +181,7 @@ func ecpEnvelope(t *testing.T, message *etree.Element, headers ...*etree.Element
 	envelope.CreateElement("soapenv:Body").AddChild(message)
 
 	buf, err := doc.WriteToBytes()
-	assert.NilError(t, err)
+	require.NoError(t, err)
 
 	return buf
 }
@@ -231,22 +231,22 @@ func (e *ecpResponse) header(tag string) *etree.Element {
 func parseECPResponse(t *testing.T, w *httptest.ResponseRecorder) *ecpResponse {
 	t.Helper()
 
-	assert.Assert(t, is.Equal(w.Code, http.StatusOK), "body: %s", w.Body.String())
+	require.Equal(t, w.Code, http.StatusOK, "body: %s", w.Body.String())
 
 	// The envelope must also satisfy the parser that a client of the binding would use.
 	_, headers, message, err := parseSOAPEnvelope(w.Body.Bytes())
-	assert.NilError(t, err)
+	require.NoError(t, err)
 
 	soapTestParseResponse(t, w)
 
-	assert.Assert(t, is.Equal(message.Tag, "Response"))
-	assert.Assert(t, is.Equal(message.NamespaceURI(), samlProtocolNS))
+	require.Equal(t, message.Tag, "Response")
+	require.Equal(t, message.NamespaceURI(), samlProtocolNS)
 
 	verified, err := verifyEnvelopedSignature(message, []*x509.Certificate{mustParseCertificate(golden.Get(t, "idp_cert.pem"))}, anySignaturePolicy)
-	assert.NilError(t, err)
+	require.NoError(t, err)
 
 	response := &Response{}
-	assert.NilError(t, unmarshalElement(verified, response))
+	require.NoError(t, unmarshalElement(verified, response))
 
 	return &ecpResponse{Headers: headers, Response: response, Element: message}
 }
@@ -257,13 +257,13 @@ func assertECPResponseHeader(t *testing.T, response *ecpResponse, acs string) {
 	t.Helper()
 
 	header := response.header("Response")
-	assert.Assert(t, header != nil, "the envelope has no ecp:Response header block")
+	require.True(t, header != nil, "the envelope has no ecp:Response header block")
 
-	assert.Check(t, is.Equal(soapHeaderAttr(header, "mustUnderstand"), "1"))
-	assert.Check(t, is.Equal(soapHeaderAttr(header, "actor"), soapActorNext))
-	assert.Check(t, is.Equal(header.SelectAttrValue("AssertionConsumerServiceURL", ""), acs))
-	assert.Check(t, is.Len(header.ChildElements(), 0))
-	assert.Check(t, is.Equal(header.Text(), ""))
+	assert.Equal(t, soapHeaderAttr(header, "mustUnderstand"), "1")
+	assert.Equal(t, soapHeaderAttr(header, "actor"), soapActorNext)
+	assert.Equal(t, header.SelectAttrValue("AssertionConsumerServiceURL", ""), acs)
+	assert.Len(t, header.ChildElements(), 0)
+	assert.Equal(t, header.Text(), "")
 }
 
 // assertECPStatus checks that the answer is an error Response to the request, with the statuses, in an envelope
@@ -274,21 +274,21 @@ func assertECPStatus(t *testing.T, w *httptest.ResponseRecorder, id, top, second
 	response := parseECPResponse(t, w)
 	assertECPResponseHeader(t, response, ecpTestPAOSURL)
 
-	assert.Check(t, is.Equal(response.Response.InResponseTo, id))
-	assert.Check(t, is.Equal(response.Response.Destination, ecpTestPAOSURL))
-	assert.Check(t, is.Equal(response.Response.Status.StatusCode.Value, top))
+	assert.Equal(t, response.Response.InResponseTo, id)
+	assert.Equal(t, response.Response.Destination, ecpTestPAOSURL)
+	assert.Equal(t, response.Response.Status.StatusCode.Value, top)
 
 	if second == "" {
-		assert.Check(t, response.Response.Status.StatusCode.StatusCode == nil)
+		assert.Nil(t, response.Response.Status.StatusCode.StatusCode)
 	} else {
-		assert.Assert(t, response.Response.Status.StatusCode.StatusCode != nil)
-		assert.Check(t, is.Equal(response.Response.Status.StatusCode.StatusCode.Value, second))
+		require.NotNil(t, response.Response.Status.StatusCode.StatusCode)
+		assert.Equal(t, response.Response.Status.StatusCode.StatusCode.Value, second)
 	}
 
 	// SAMLProf §4.1.4.2: an error carries no assertion.
-	assert.Check(t, statusSaysNothingOfTheRequest(response.Response.Status))
-	assert.Check(t, response.Response.Assertion == nil)
-	assert.Check(t, response.Response.EncryptedAssertion == nil)
+	assert.True(t, statusSaysNothingOfTheRequest(response.Response.Status))
+	assert.Nil(t, response.Response.Assertion)
+	assert.Nil(t, response.Response.EncryptedAssertion)
 
 	return response
 }
@@ -311,43 +311,43 @@ func TestServeECPSuccess(t *testing.T) {
 	response := parseECPResponse(t, w)
 
 	assertECPResponseHeader(t, response, ecpTestPAOSURL)
-	assert.Check(t, response.header("RequestAuthenticated") == nil, "the request was not signed")
-	assert.Check(t, is.Len(response.Headers, 1))
+	assert.True(t, response.header("RequestAuthenticated") == nil, "the request was not signed")
+	assert.Len(t, response.Headers, 1)
 
-	assert.Check(t, is.Equal(response.Response.Status.StatusCode.Value, StatusSuccess))
-	assert.Check(t, is.Equal(response.Response.InResponseTo, id))
-	assert.Check(t, is.Equal(response.Response.Destination, ecpTestPAOSURL))
-	assert.Check(t, is.Equal(response.Response.Issuer.Value, test.IDP.MetadataURL.String()))
+	assert.Equal(t, response.Response.Status.StatusCode.Value, StatusSuccess)
+	assert.Equal(t, response.Response.InResponseTo, id)
+	assert.Equal(t, response.Response.Destination, ecpTestPAOSURL)
+	assert.Equal(t, response.Response.Issuer.Value, test.IDP.MetadataURL.String())
 
 	// SAMLProf §4.1.4.2, which ECP v2.0 §2.3.6 applies to a bearer assertion.
 	assertion := response.Response.Assertion
-	assert.Assert(t, assertion != nil)
-	assert.Check(t, assertion.Signature != nil)
-	assert.Check(t, is.Equal(assertion.Issuer.Value, test.IDP.MetadataURL.String()))
-	assert.Check(t, is.Equal(assertion.Subject.NameID.SPNameQualifier, test.SP.MetadataURL.String()))
+	require.NotNil(t, assertion)
+	assert.NotNil(t, assertion.Signature)
+	assert.Equal(t, assertion.Issuer.Value, test.IDP.MetadataURL.String())
+	assert.Equal(t, assertion.Subject.NameID.SPNameQualifier, test.SP.MetadataURL.String())
 
-	assert.Assert(t, is.Len(assertion.Subject.SubjectConfirmations, 1))
+	require.Len(t, assertion.Subject.SubjectConfirmations, 1)
 	confirmation := assertion.Subject.SubjectConfirmations[0]
-	assert.Check(t, is.Equal(confirmation.Method, bearerSubjectConfirmationMethod))
-	assert.Check(t, is.Equal(confirmation.SubjectConfirmationData.Recipient, ecpTestPAOSURL))
-	assert.Check(t, is.Equal(confirmation.SubjectConfirmationData.InResponseTo, id))
-	assert.Check(t, confirmation.SubjectConfirmationData.NotBefore.IsZero())
-	assert.Check(t, !confirmation.SubjectConfirmationData.NotOnOrAfter.IsZero())
-	assert.Check(t, is.Equal(confirmation.SubjectConfirmationData.Address, "192.0.2.1"), "the address of the client")
+	assert.Equal(t, confirmation.Method, bearerSubjectConfirmationMethod)
+	assert.Equal(t, confirmation.SubjectConfirmationData.Recipient, ecpTestPAOSURL)
+	assert.Equal(t, confirmation.SubjectConfirmationData.InResponseTo, id)
+	assert.True(t, confirmation.SubjectConfirmationData.NotBefore.IsZero())
+	assert.False(t, confirmation.SubjectConfirmationData.NotOnOrAfter.IsZero())
+	assert.Equal(t, confirmation.SubjectConfirmationData.Address, "192.0.2.1", "the address of the client")
 
-	assert.Check(t, is.DeepEqual(assertion.Conditions.AudienceRestrictions,
-		[]AudienceRestriction{{Audiences: []Audience{{Value: test.SP.MetadataURL.String()}}}}))
-	assert.Assert(t, is.Len(assertion.AuthnStatements, 1))
-	assert.Check(t, is.Equal(assertion.AuthnStatements[0].SessionIndex, "index-one"))
+	assert.Equal(t, assertion.Conditions.AudienceRestrictions,
+		[]AudienceRestriction{{Audiences: []Audience{{Value: test.SP.MetadataURL.String()}}}})
+	require.Len(t, assertion.AuthnStatements, 1)
+	assert.Equal(t, assertion.AuthnStatements[0].SessionIndex, "index-one")
 
 	// The service provider is a participant of the session, so that a logout reaches it.
-	assert.Assert(t, is.Len(provider.participants, 1))
-	assert.Check(t, is.Equal(provider.participants[0].ServiceProviderEntityID, test.SP.MetadataURL.String()))
-	assert.Check(t, is.Equal(provider.participants[0].SessionIndex, "index-one"))
+	require.Len(t, provider.participants, 1)
+	assert.Equal(t, provider.participants[0].ServiceProviderEntityID, test.SP.MetadataURL.String())
+	assert.Equal(t, provider.participants[0].SessionIndex, "index-one")
 
-	assert.Assert(t, is.Len(provider.requests, 1))
-	assert.Check(t, is.Equal(provider.requests[0].ACSEndpoint.Location, ecpTestPAOSURL))
-	assert.Check(t, is.Equal(provider.requests[0].ServiceProviderMetadata.EntityID, test.SP.MetadataURL.String()))
+	require.Len(t, provider.requests, 1)
+	assert.Equal(t, provider.requests[0].ACSEndpoint.Location, ecpTestPAOSURL)
+	assert.Equal(t, provider.requests[0].ServiceProviderMetadata.EntityID, test.SP.MetadataURL.String())
 }
 
 func TestServeECPSignedRequestIsReportedAuthenticated(t *testing.T) {
@@ -357,20 +357,20 @@ func TestServeECPSignedRequestIsReportedAuthenticated(t *testing.T) {
 
 	// The request has no Destination, which the service provider can't know (ECP v2.0 §2.3.3).
 	w, id := serveECP(t, test, func(r *AuthnRequest) {
-		assert.Equal(t, r.Destination, "")
+		require.Equal(t, r.Destination, "")
 	})
 	response := parseECPResponse(t, w)
 
 	assertECPResponseHeader(t, response, ecpTestPAOSURL)
-	assert.Check(t, is.Equal(response.Response.Status.StatusCode.Value, StatusSuccess))
-	assert.Check(t, is.Equal(response.Response.InResponseTo, id))
+	assert.Equal(t, response.Response.Status.StatusCode.Value, StatusSuccess)
+	assert.Equal(t, response.Response.InResponseTo, id)
 
 	// ECP v2.0 §2.3.6.1.
 	header := response.header("RequestAuthenticated")
-	assert.Assert(t, header != nil, "the envelope has no ecp:RequestAuthenticated header block")
-	assert.Check(t, is.Equal(soapHeaderAttr(header, "actor"), soapActorNext))
-	assert.Check(t, is.Len(header.ChildElements(), 0))
-	assert.Check(t, is.Len(response.Headers, 2))
+	require.True(t, header != nil, "the envelope has no ecp:RequestAuthenticated header block")
+	assert.Equal(t, soapHeaderAttr(header, "actor"), soapActorNext)
+	assert.Len(t, header.ChildElements(), 0)
+	assert.Len(t, response.Headers, 2)
 }
 
 func TestServeECPSignedRequestErrorIsReportedAuthenticated(t *testing.T) {
@@ -380,7 +380,7 @@ func TestServeECPSignedRequestErrorIsReportedAuthenticated(t *testing.T) {
 	w, id := serveECP(t, test, func(r *AuthnRequest) { r.Version = "3.0" })
 	response := assertECPStatus(t, w, id, StatusVersionMismatch, StatusRequestVersionTooHigh)
 
-	assert.Check(t, response.header("RequestAuthenticated") != nil)
+	assert.NotNil(t, response.header("RequestAuthenticated"))
 }
 
 func TestServeECPUsesDefaultPAOSEndpoint(t *testing.T) {
@@ -392,8 +392,8 @@ func TestServeECPUsesDefaultPAOSEndpoint(t *testing.T) {
 	response := parseECPResponse(t, w)
 
 	assertECPResponseHeader(t, response, ecpTestPAOSURL)
-	assert.Check(t, is.Equal(response.Response.Status.StatusCode.Value, StatusSuccess))
-	assert.Check(t, is.Equal(response.Response.Assertion.Subject.SubjectConfirmations[0].SubjectConfirmationData.Recipient, ecpTestPAOSURL))
+	assert.Equal(t, response.Response.Status.StatusCode.Value, StatusSuccess)
+	assert.Equal(t, response.Response.Assertion.Subject.SubjectConfirmations[0].SubjectConfirmationData.Recipient, ecpTestPAOSURL)
 }
 
 func TestServeECPUsesIndexedPAOSEndpoint(t *testing.T) {
@@ -411,7 +411,7 @@ func TestServeECPUsesIndexedPAOSEndpoint(t *testing.T) {
 	response := parseECPResponse(t, w)
 
 	assertECPResponseHeader(t, response, second)
-	assert.Check(t, is.Equal(response.Response.Destination, second))
+	assert.Equal(t, response.Response.Destination, second)
 }
 
 func TestServeECPEnvelopeFailures(t *testing.T) {
@@ -421,9 +421,9 @@ func TestServeECPEnvelopeFailures(t *testing.T) {
 		w := httptest.NewRecorder()
 		test.IDP.ServeECP(w, httptest.NewRequest(http.MethodGet, ecpTestURL, nil))
 
-		assert.Check(t, is.Equal(w.Code, http.StatusMethodNotAllowed))
-		assert.Check(t, is.Equal(w.Header().Get("Allow"), http.MethodPost))
-		assert.Check(t, is.Len(provider.requests, 0))
+		assert.Equal(t, w.Code, http.StatusMethodNotAllowed)
+		assert.Equal(t, w.Header().Get("Allow"), http.MethodPost)
+		assert.Len(t, provider.requests, 0)
 	})
 
 	t.Run("wrong content type", func(t *testing.T) {
@@ -435,8 +435,8 @@ func TestServeECPEnvelopeFailures(t *testing.T) {
 		w := httptest.NewRecorder()
 		test.IDP.ServeECP(w, r)
 
-		assert.Check(t, is.Equal(soapFaultCode(t, w), "soapenv:Client"))
-		assert.Check(t, is.Len(provider.requests, 0))
+		assert.Equal(t, soapFaultCode(t, w), "soapenv:Client")
+		assert.Len(t, provider.requests, 0)
 	})
 
 	t.Run("not an envelope", func(t *testing.T) {
@@ -445,26 +445,26 @@ func TestServeECPEnvelopeFailures(t *testing.T) {
 		doc := etree.NewDocument()
 		doc.SetRoot(ecpAuthnRequest(t, &test.SP, nil).Element())
 		buf, err := doc.WriteToBytes()
-		assert.NilError(t, err)
+		require.NoError(t, err)
 
 		w := httptest.NewRecorder()
 		test.IDP.ServeECP(w, ecpPost(buf))
 
-		assert.Check(t, is.Equal(soapFaultCode(t, w), "soapenv:Client"))
-		assert.Check(t, is.Len(provider.requests, 0))
+		assert.Equal(t, soapFaultCode(t, w), "soapenv:Client")
+		assert.Len(t, provider.requests, 0)
 	})
 
 	t.Run("not an AuthnRequest", func(t *testing.T) {
 		test, provider := ecpTestIDP(t, nil)
 
 		request, err := test.SP.MakeLogoutRequest(ecpTestURL, "alice")
-		assert.NilError(t, err)
+		require.NoError(t, err)
 
 		w := httptest.NewRecorder()
 		test.IDP.ServeECP(w, ecpPost(ecpEnvelope(t, request.Element())))
 
-		assert.Check(t, is.Equal(soapFaultCode(t, w), "soapenv:Client"))
-		assert.Check(t, is.Len(provider.requests, 0))
+		assert.Equal(t, soapFaultCode(t, w), "soapenv:Client")
+		assert.Len(t, provider.requests, 0)
 	})
 
 	t.Run("header block that is not understood", func(t *testing.T) {
@@ -476,8 +476,8 @@ func TestServeECPEnvelopeFailures(t *testing.T) {
 
 		w, _ := serveECP(t, test, nil, header)
 
-		assert.Check(t, is.Equal(soapFaultCode(t, w), "soapenv:MustUnderstand"))
-		assert.Check(t, is.Len(provider.requests, 0))
+		assert.Equal(t, soapFaultCode(t, w), "soapenv:MustUnderstand")
+		assert.Len(t, provider.requests, 0)
 	})
 
 	// SAMLProf §4.2.3.4: the client must remove the header blocks of the service provider, which are addressed to
@@ -493,8 +493,8 @@ func TestServeECPEnvelopeFailures(t *testing.T) {
 
 		w, _ := serveECP(t, test, nil, header)
 
-		assert.Check(t, is.Equal(soapFaultCode(t, w), "soapenv:MustUnderstand"))
-		assert.Check(t, is.Len(provider.requests, 0))
+		assert.Equal(t, soapFaultCode(t, w), "soapenv:MustUnderstand")
+		assert.Len(t, provider.requests, 0)
 	})
 }
 
@@ -536,7 +536,7 @@ func TestServeECPTrustFailuresAreFaults(t *testing.T) {
 			idp: func(test *IdentityProviderTest) {
 				test.SP.SignatureMethod = dsig.RSASHA256SignatureMethod
 				key, err := rsa.GenerateKey(rand.Reader, 2048)
-				assert.NilError(t, err)
+				require.NoError(t, err)
 
 				test.SP.Key = key
 			},
@@ -590,9 +590,9 @@ func TestServeECPTrustFailuresAreFaults(t *testing.T) {
 
 			w, _ := serveECP(t, test, tc.request)
 
-			assert.Check(t, is.Equal(soapFaultCode(t, w), "soapenv:Client"))
-			assert.Check(t, is.Len(provider.requests, 0), "the principal must not be authenticated")
-			assert.Check(t, is.Len(provider.participants, 0))
+			assert.Equal(t, soapFaultCode(t, w), "soapenv:Client")
+			assert.Len(t, provider.requests, 0, "the principal must not be authenticated")
+			assert.Len(t, provider.participants, 0)
 		})
 	}
 }
@@ -608,8 +608,8 @@ func TestServeECPInvalidSignatureIsFault(t *testing.T) {
 	w := httptest.NewRecorder()
 	test.IDP.ServeECP(w, ecpPost(ecpEnvelope(t, el)))
 
-	assert.Check(t, is.Equal(soapFaultCode(t, w), "soapenv:Client"))
-	assert.Check(t, is.Len(provider.requests, 0))
+	assert.Equal(t, soapFaultCode(t, w), "soapenv:Client")
+	assert.Len(t, provider.requests, 0)
 }
 
 // Once the endpoint of the service provider is established, a failure is a Response with an error status in the
@@ -670,9 +670,9 @@ func TestServeECPRequestStatuses(t *testing.T) {
 			w, id := serveECP(t, test, tc.request)
 			response := assertECPStatus(t, w, id, tc.top, tc.second)
 
-			assert.Check(t, response.header("RequestAuthenticated") == nil)
-			assert.Check(t, is.Len(provider.requests, 0), "the principal must not be authenticated")
-			assert.Check(t, is.Len(provider.participants, 0))
+			assert.Nil(t, response.header("RequestAuthenticated"))
+			assert.Len(t, provider.requests, 0, "the principal must not be authenticated")
+			assert.Len(t, provider.participants, 0)
 		})
 	}
 }
@@ -686,7 +686,7 @@ func TestServeECPDestinationIsECPURL(t *testing.T) {
 
 	w, _ := serveECP(t, test, func(r *AuthnRequest) { r.Destination = ecpTestURL })
 
-	assert.Check(t, is.Equal(parseECPResponse(t, w).Response.Status.StatusCode.Value, StatusSuccess))
+	assert.Equal(t, parseECPResponse(t, w).Response.Status.StatusCode.Value, StatusSuccess)
 }
 
 // Channel bindings aren't verified, and ECP v2.0 §2.3.6.2 requires an error Response rather than an assertion
@@ -698,7 +698,7 @@ func TestServeECPChannelBindingsAreRefused(t *testing.T) {
 		w, id := serveECP(t, test, nil, ecpChannelBindingsHeader())
 
 		assertECPStatus(t, w, id, StatusRequester, StatusRequestUnsupported)
-		assert.Check(t, is.Len(provider.requests, 0))
+		assert.Len(t, provider.requests, 0)
 	})
 
 	t.Run("header block of the client for its channel to the identity provider", func(t *testing.T) {
@@ -711,7 +711,7 @@ func TestServeECPChannelBindingsAreRefused(t *testing.T) {
 		w, id := serveECP(t, test, nil, header)
 
 		assertECPStatus(t, w, id, StatusRequester, StatusRequestUnsupported)
-		assert.Check(t, is.Len(provider.requests, 0))
+		assert.Len(t, provider.requests, 0)
 	})
 
 	t.Run("extension of the service provider", func(t *testing.T) {
@@ -732,7 +732,7 @@ func TestServeECPChannelBindingsAreRefused(t *testing.T) {
 		test.IDP.ServeECP(w, ecpPost(ecpEnvelope(t, el)))
 
 		assertECPStatus(t, w, request.ID, StatusRequester, StatusRequestUnsupported)
-		assert.Check(t, is.Len(provider.requests, 0))
+		assert.Len(t, provider.requests, 0)
 	})
 }
 
@@ -751,7 +751,7 @@ func TestServeECPWithoutECPSessionProvider(t *testing.T) {
 	w, id := serveECP(t, test, nil)
 
 	assertECPStatus(t, w, id, StatusResponder, StatusRequestUnsupported)
-	assert.Check(t, is.Equal(browser, 0), "a browser session must not be used")
+	assert.Equal(t, browser, 0, "a browser session must not be used")
 }
 
 // ECP v2.0 §2.3.4 lets the identity provider answer with other HTTP responses, such as a challenge, before it
@@ -773,10 +773,10 @@ func TestServeECPUnauthenticatedIsChallenged(t *testing.T) {
 			w := httptest.NewRecorder()
 			test.IDP.ServeECP(w, r)
 
-			assert.Check(t, is.Equal(w.Code, http.StatusUnauthorized))
-			assert.Check(t, is.Equal(w.Header().Get("WWW-Authenticate"), `Basic realm="idp"`))
-			assert.Check(t, is.Len(provider.requests, 1))
-			assert.Check(t, is.Len(provider.participants, 0))
+			assert.Equal(t, w.Code, http.StatusUnauthorized)
+			assert.Equal(t, w.Header().Get("WWW-Authenticate"), `Basic realm="idp"`)
+			assert.Len(t, provider.requests, 1)
+			assert.Len(t, provider.participants, 0)
 		})
 	}
 }
@@ -788,17 +788,17 @@ func TestServeECPForceAuthnReachesProvider(t *testing.T) {
 
 	w, _ := serveECP(t, test, func(r *AuthnRequest) { r.ForceAuthn = boolPointer(true) })
 
-	assert.Check(t, is.Equal(parseECPResponse(t, w).Response.Status.StatusCode.Value, StatusSuccess))
-	assert.Assert(t, is.Len(provider.requests, 1))
-	assert.Assert(t, provider.requests[0].Request.ForceAuthn != nil)
-	assert.Check(t, *provider.requests[0].Request.ForceAuthn)
+	assert.Equal(t, parseECPResponse(t, w).Response.Status.StatusCode.Value, StatusSuccess)
+	require.Len(t, provider.requests, 1)
+	require.NotNil(t, provider.requests[0].Request.ForceAuthn)
+	assert.True(t, *provider.requests[0].Request.ForceAuthn)
 }
 
 // An ECPSessionProvider can refuse the principal with a SAML status of its own.
 func TestServeECPProviderWritesErrorResponse(t *testing.T) {
 	test, provider := ecpTestIDP(t, nil)
 	provider.getSession = func(w http.ResponseWriter, _ *http.Request, req *IdpAuthnRequest) *Session {
-		assert.Check(t, req.WriteErrorResponse(w, ErrAuthnFailed))
+		assert.NoError(t, req.WriteErrorResponse(w, ErrAuthnFailed))
 
 		return nil
 	}
@@ -858,8 +858,8 @@ func TestServeECPPolicyStatuses(t *testing.T) {
 			w, id := serveECP(t, test, tc.request)
 
 			assertECPStatus(t, w, id, tc.top, tc.second)
-			assert.Check(t, is.Len(provider.requests, 1))
-			assert.Check(t, is.Len(provider.participants, 0))
+			assert.Len(t, provider.requests, 1)
+			assert.Len(t, provider.participants, 0)
 		})
 	}
 }
@@ -877,7 +877,7 @@ func TestServeECPSigningFailureIsServerFault(t *testing.T) {
 
 	w, _ := serveECP(t, test, nil)
 
-	assert.Check(t, is.Equal(soapFaultCode(t, w), "soapenv:Server"))
+	assert.Equal(t, soapFaultCode(t, w), "soapenv:Server")
 }
 
 // A logout of the session that has begun stops the assertion, and the client is told with an error status.
@@ -903,25 +903,25 @@ func TestECPMetadata(t *testing.T) {
 		test, _ := ecpTestIDP(t, nil)
 
 		// SAMLMeta §2.4.3 and ECP v2.0 §2.3.10.
-		assert.Check(t, is.DeepEqual(test.IDP.Metadata().IDPSSODescriptors[0].SingleSignOnServices, []Endpoint{
+		assert.Equal(t, test.IDP.Metadata().IDPSSODescriptors[0].SingleSignOnServices, []Endpoint{
 			{Binding: HTTPRedirectBinding, Location: "https://idp.example.com/saml/sso"},
 			{Binding: HTTPPostBinding, Location: "https://idp.example.com/saml/sso"},
 			soapEndpoint,
-		}))
+		})
 	})
 
 	t.Run("not advertised without the URL", func(t *testing.T) {
 		test, _ := ecpTestIDP(t, nil)
 		test.IDP.ECPURL = mustParseURL("")
 
-		assert.Check(t, is.Len(test.IDP.Metadata().IDPSSODescriptors[0].SingleSignOnServices, 2))
+		assert.Len(t, test.IDP.Metadata().IDPSSODescriptors[0].SingleSignOnServices, 2)
 	})
 
 	t.Run("not advertised without an ECPSessionProvider", func(t *testing.T) {
 		test, _ := ecpTestIDP(t, nil)
 		test.IDP.SessionProvider = &mockSessionProvider{}
 
-		assert.Check(t, is.Len(test.IDP.Metadata().IDPSSODescriptors[0].SingleSignOnServices, 2))
+		assert.Len(t, test.IDP.Metadata().IDPSSODescriptors[0].SingleSignOnServices, 2)
 	})
 }
 
@@ -932,7 +932,7 @@ func TestHandlerServesECP(t *testing.T) {
 		w := httptest.NewRecorder()
 		test.IDP.Handler().ServeHTTP(w, ecpPost(ecpEnvelope(t, ecpAuthnRequest(t, &test.SP, nil).Element())))
 
-		assert.Check(t, is.Equal(parseECPResponse(t, w).Response.Status.StatusCode.Value, StatusSuccess))
+		assert.Equal(t, parseECPResponse(t, w).Response.Status.StatusCode.Value, StatusSuccess)
 	})
 
 	t.Run("at the path of the SSO URL", func(t *testing.T) {
@@ -945,14 +945,14 @@ func TestHandlerServesECP(t *testing.T) {
 		w := httptest.NewRecorder()
 		test.IDP.Handler().ServeHTTP(w, r)
 
-		assert.Check(t, is.Equal(parseECPResponse(t, w).Response.Status.StatusCode.Value, StatusSuccess))
+		assert.Equal(t, parseECPResponse(t, w).Response.Status.StatusCode.Value, StatusSuccess)
 
 		// A browser request at the same path still reaches the SSO service, which refuses this one as it has no
 		// request.
 		w = httptest.NewRecorder()
 		test.IDP.Handler().ServeHTTP(w, httptest.NewRequest(http.MethodGet, test.IDP.SSOURL.String(), nil))
 
-		assert.Check(t, is.Equal(w.Code, http.StatusBadRequest))
+		assert.Equal(t, w.Code, http.StatusBadRequest)
 	})
 }
 
@@ -964,7 +964,7 @@ func TestServeSSOIgnoresPAOSEndpoints(t *testing.T) {
 		r.AssertionConsumerServiceURL = ecpTestPAOSURL
 	})
 
-	assert.Check(t, is.Equal(w.Code, http.StatusBadRequest))
+	assert.Equal(t, w.Code, http.StatusBadRequest)
 }
 
 // SAMLSec §6.1.2: as for ServeSSO, a request is used up once it is answered for an authenticated principal.
@@ -988,25 +988,25 @@ func TestServeECPRefusesReplay(t *testing.T) {
 	r := ecpPost(body)
 	r.Header.Del("Authorization")
 
-	assert.Check(t, is.Equal(serve(r).Code, http.StatusUnauthorized))
-	assert.Check(t, is.Equal(store.calls(), 0))
+	assert.Equal(t, serve(r).Code, http.StatusUnauthorized)
+	assert.Equal(t, store.calls(), 0)
 
 	response := parseECPResponse(t, serve(ecpPost(body)))
-	assert.Check(t, is.Equal(response.Response.Status.StatusCode.Value, StatusSuccess))
-	assert.Assert(t, is.Equal(store.calls(), 1))
-	assert.Check(t, strings.HasPrefix(store.keys[0], replayKindAuthnRequest+":"))
-	assert.Check(t, is.Len(provider.participants, 1))
+	assert.Equal(t, response.Response.Status.StatusCode.Value, StatusSuccess)
+	require.Equal(t, store.calls(), 1)
+	assert.True(t, strings.HasPrefix(store.keys[0], replayKindAuthnRequest+":"))
+	assert.Len(t, provider.participants, 1)
 
 	// The same request again is refused, in the envelope of the profile, and states nothing.
 	assertECPStatus(t, serve(ecpPost(body)), request.ID, StatusRequester, StatusRequestDenied)
-	assert.Check(t, is.Len(provider.participants, 1))
+	assert.Len(t, provider.participants, 1)
 
 	// If the store fails, nothing is known about the request, and it is refused.
 	store.err = errors.New("store down")
 
 	w, id := serveECP(t, test, func(r *AuthnRequest) { r.ID = "id-another-request" })
 	assertECPStatus(t, w, id, StatusResponder, "")
-	assert.Check(t, is.Len(provider.participants, 1))
+	assert.Len(t, provider.participants, 1)
 }
 
 func TestServeECPSavesAssertion(t *testing.T) {
@@ -1018,9 +1018,9 @@ func TestServeECPSavesAssertion(t *testing.T) {
 	w, _ := serveECP(t, test, nil)
 	response := parseECPResponse(t, w)
 
-	assert.Assert(t, response.Response.Assertion != nil)
-	assert.Assert(t, is.DeepEqual(store.saved, []string{response.Response.Assertion.ID}))
-	assert.Check(t, is.Equal(store.assertions[store.saved[0]].serviceProviderID, test.SP.MetadataURL.String()))
+	require.NotNil(t, response.Response.Assertion)
+	require.Equal(t, store.saved, []string{response.Response.Assertion.ID})
+	assert.Equal(t, store.assertions[store.saved[0]].serviceProviderID, test.SP.MetadataURL.String())
 
 	// An error states nothing, so nothing is saved.
 	w, id := serveECP(t, test, func(r *AuthnRequest) {
@@ -1028,7 +1028,7 @@ func TestServeECPSavesAssertion(t *testing.T) {
 		r.IsPassive = boolPointer(true)
 	})
 	assertECPStatus(t, w, id, StatusResponder, StatusNoPassive)
-	assert.Check(t, is.Len(store.saved, 1))
+	assert.Len(t, store.saved, 1)
 }
 
 // The HTTP-Artifact binding is a browser binding: when it is enabled, a request of the profile is still answered
@@ -1056,9 +1056,9 @@ func TestServeECPWithArtifactBinding(t *testing.T) {
 	response := parseECPResponse(t, w)
 
 	assertECPResponseHeader(t, response, ecpTestPAOSURL)
-	assert.Check(t, is.Equal(response.Response.Status.StatusCode.Value, StatusSuccess))
-	assert.Check(t, is.Equal(response.Response.Destination, ecpTestPAOSURL))
-	assert.Check(t, is.Equal(artifacts.Len(), 0))
+	assert.Equal(t, response.Response.Status.StatusCode.Value, StatusSuccess)
+	assert.Equal(t, response.Response.Destination, ecpTestPAOSURL)
+	assert.Equal(t, artifacts.Len(), 0)
 
 	// The client can't deliver an artifact, so the binding is not one that the profile can be answered with.
 	for name, mutate := range map[string]func(*AuthnRequest){
@@ -1077,7 +1077,7 @@ func TestServeECPWithArtifactBinding(t *testing.T) {
 			})
 
 			assertECPStatus(t, w, id, StatusResponder, StatusUnsupportedBinding)
-			assert.Check(t, is.Equal(artifacts.Len(), 0))
+			assert.Equal(t, artifacts.Len(), 0)
 		})
 	}
 
@@ -1088,6 +1088,6 @@ func TestServeECPWithArtifactBinding(t *testing.T) {
 		r.ID = "id-browser"
 		r.AssertionConsumerServiceURL, r.ProtocolBinding = "", ""
 	})
-	assert.Check(t, postedArtifact(t, w).Get("SAMLart") != "")
-	assert.Check(t, is.Equal(artifacts.Len(), 1))
+	assert.True(t, postedArtifact(t, w).Get("SAMLart") != "")
+	assert.Equal(t, artifacts.Len(), 1)
 }

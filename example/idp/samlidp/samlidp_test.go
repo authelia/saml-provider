@@ -12,11 +12,10 @@ import (
 	"testing"
 	"time"
 
-	"gotest.tools/assert"
-	is "gotest.tools/assert/cmp"
-	"gotest.tools/golden"
+	"github.com/stretchr/testify/assert"
 
 	"authelia.com/provider/saml"
+	"authelia.com/provider/saml/internal/golden"
 )
 
 type testRandomReader struct {
@@ -122,8 +121,8 @@ func TestHTTPCanHandleMetadataRequest(t *testing.T) {
 	w := httptest.NewRecorder()
 	r, _ := http.NewRequest("GET", "https://idp.example.com/metadata", nil)
 	test.Server.ServeHTTP(w, r)
-	assert.Check(t, is.Equal(http.StatusOK, w.Code))
-	assert.Check(t,
+	assert.Equal(t, http.StatusOK, w.Code)
+	assert.True(t,
 		strings.HasPrefix(w.Body.String(), "<EntityDescriptor"),
 		w.Body.String())
 	golden.Assert(t, w.Body.String(), "http_metadata_response.html")
@@ -132,13 +131,13 @@ func TestHTTPCanHandleMetadataRequest(t *testing.T) {
 func TestHTTPCanSSORequest(t *testing.T) {
 	test := NewServerTest(t)
 	u, err := test.SP.MakeRedirectAuthenticationRequest("frob")
-	assert.Check(t, err)
+	assert.NoError(t, err)
 
 	w := httptest.NewRecorder()
 	r, _ := http.NewRequest("GET", u.String(), nil)
 	test.Server.ServeHTTP(w, r)
-	assert.Check(t, is.Equal(http.StatusOK, w.Code))
-	assert.Check(t,
+	assert.Equal(t, http.StatusOK, w.Code)
+	assert.True(t,
 		strings.HasPrefix(w.Body.String(), "<html><p></p><form method=\"post\" action=\"https://idp.example.com/sso\">"),
 		w.Body.String())
 	golden.Assert(t, w.Body.String(), "http_sso_response.html")

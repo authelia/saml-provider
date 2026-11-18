@@ -17,10 +17,10 @@ import (
 	"time"
 
 	"github.com/beevik/etree"
-	"gotest.tools/assert"
-	is "gotest.tools/assert/cmp"
-	"gotest.tools/golden"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
+	"authelia.com/provider/saml/internal/golden"
 	"authelia.com/provider/saml/internal/xmlrv"
 )
 
@@ -302,10 +302,10 @@ func signQueryElement(t *testing.T, sp *ServiceProvider, el *etree.Element) *etr
 	t.Helper()
 
 	signingContext, err := GetSigningContext(sp)
-	assert.NilError(t, err)
+	require.NoError(t, err)
 
 	signed, err := signingContext.SignEnveloped(el)
-	assert.NilError(t, err)
+	require.NoError(t, err)
 
 	// SignEnveloped appends the signature without making it a child, so it is taken off the same way.
 	signature := signed.Child[len(signed.Child)-1]
@@ -349,36 +349,36 @@ type queryResponse struct {
 func parseQueryResponse(t *testing.T, sp *ServiceProvider, code int, header http.Header, body []byte) *queryResponse {
 	t.Helper()
 
-	assert.Assert(t, is.Equal(code, http.StatusOK), "body: %s", body)
-	assert.Check(t, is.Equal(header.Get("Content-Type"), "text/xml; charset=utf-8"))
-	assert.Check(t, is.Equal(header.Get("Cache-Control"), "no-cache, no-store"))
-	assert.Check(t, is.Equal(header.Get("Pragma"), "no-cache"))
+	require.Equal(t, code, http.StatusOK, "body: %s", body)
+	assert.Equal(t, header.Get("Content-Type"), "text/xml; charset=utf-8")
+	assert.Equal(t, header.Get("Cache-Control"), "no-cache, no-store")
+	assert.Equal(t, header.Get("Pragma"), "no-cache")
 
 	_, headers, message, err := parseSOAPEnvelope(body)
-	assert.NilError(t, err)
-	assert.Check(t, is.Len(headers, 0))
-	assert.Assert(t, is.Equal(message.Tag, "Response"))
-	assert.Assert(t, is.Equal(message.NamespaceURI(), samlProtocolNS))
+	require.NoError(t, err)
+	assert.Len(t, headers, 0)
+	require.Equal(t, message.Tag, "Response")
+	require.Equal(t, message.NamespaceURI(), samlProtocolNS)
 
 	certificates := []*x509.Certificate{mustParseCertificate(golden.Get(t, "idp_cert.pem"))}
 
 	verified, err := verifyEnvelopedSignature(message, certificates, anySignaturePolicy)
-	assert.NilError(t, err)
+	require.NoError(t, err)
 
 	// SAMLCore §3.2.2: the Issuer, then the Signature, then the Status.
 	children := message.ChildElements()
-	assert.Assert(t, len(children) >= 3)
-	assert.Check(t, is.Equal(children[0].Tag, "Issuer"))
-	assert.Check(t, is.Equal(children[1].Tag, "Signature"))
-	assert.Check(t, is.Equal(children[2].Tag, "Status"))
+	require.True(t, len(children) >= 3)
+	assert.Equal(t, children[0].Tag, "Issuer")
+	assert.Equal(t, children[1].Tag, "Signature")
+	assert.Equal(t, children[2].Tag, "Status")
 
 	out := &queryResponse{}
-	assert.NilError(t, unmarshalElement(verified, &out.Response))
+	require.NoError(t, unmarshalElement(verified, &out.Response))
 
 	// What the signature covers has no Signature.
 	children = verified.ChildElements()
-	assert.Assert(t, len(children) >= 2)
-	assert.Check(t, is.Equal(children[1].Tag, "Status"))
+	require.True(t, len(children) >= 2)
+	assert.Equal(t, children[1].Tag, "Status")
 
 	for _, child := range children[2:] {
 		assertionEl := child
@@ -389,18 +389,18 @@ func parseQueryResponse(t *testing.T, sp *ServiceProvider, code int, header http
 			out.Encrypted++
 
 			assertionEl, err = sp.decryptElement(child)
-			assert.NilError(t, err)
+			require.NoError(t, err)
 		default:
 			t.Fatalf("unexpected %s in the response", child.Tag)
 		}
 
-		assert.Assert(t, is.Equal(assertionEl.Tag, "Assertion"))
+		require.Equal(t, assertionEl.Tag, "Assertion")
 
 		verifiedAssertion, err := verifyEnvelopedSignature(assertionEl, certificates, anySignaturePolicy)
-		assert.NilError(t, err)
+		require.NoError(t, err)
 
 		assertion := &Assertion{}
-		assert.NilError(t, unmarshalElement(verifiedAssertion, assertion))
+		require.NoError(t, unmarshalElement(verifiedAssertion, assertion))
 
 		out.Assertions = append(out.Assertions, assertion)
 		out.AssertionEls = append(out.AssertionEls, assertionEl)
@@ -455,18 +455,18 @@ func assertQueryStatus(t *testing.T, response *queryResponse, top, second string
 
 	status := response.Response.Status
 
-	assert.Check(t, is.Equal(status.StatusCode.Value, top))
-	assert.Check(t, statusSaysNothingOfTheRequest(status), "a StatusMessage is never sent")
+	assert.Equal(t, status.StatusCode.Value, top)
+	assert.True(t, statusSaysNothingOfTheRequest(status), "a StatusMessage is never sent")
 
 	if second == "" {
-		assert.Check(t, status.StatusCode.StatusCode == nil)
+		assert.Nil(t, status.StatusCode.StatusCode)
 	} else {
-		assert.Assert(t, status.StatusCode.StatusCode != nil)
-		assert.Check(t, is.Equal(status.StatusCode.StatusCode.Value, second))
+		require.NotNil(t, status.StatusCode.StatusCode)
+		assert.Equal(t, status.StatusCode.StatusCode.Value, second)
 	}
 
 	if top != StatusSuccess {
-		assert.Check(t, is.Len(response.Assertions, 0))
+		assert.Len(t, response.Assertions, 0)
 	}
 }
 
@@ -474,16 +474,16 @@ func assertQueryStatus(t *testing.T, response *queryResponse, top, second string
 func (f *queryFixture) assertQueryAssertion(t *testing.T, assertion *Assertion, subject *Subject) {
 	t.Helper()
 
-	assert.Check(t, is.Equal(assertion.Version, "2.0"))
-	assert.Check(t, is.Equal(assertion.Issuer.Value, f.test.IDP.MetadataURL.String()))
-	assert.Assert(t, assertion.Subject != nil && assertion.Subject.NameID != nil)
-	assert.Check(t, is.DeepEqual(*assertion.Subject.NameID, *subject.NameID))
-	assert.Check(t, is.Len(assertion.Subject.SubjectConfirmations, 0))
-	assert.Assert(t, assertion.Conditions != nil)
-	assert.Check(t, assertion.Conditions.NotBefore.Equal(TimeNow().Add(-MaxClockSkew)))
-	assert.Check(t, assertion.Conditions.NotOnOrAfter.Equal(TimeNow().Add(MaxIssueDelay)))
-	assert.Assert(t, is.Len(assertion.Conditions.AudienceRestrictions, 1))
-	assert.Check(t, is.DeepEqual(assertion.Conditions.AudienceRestrictions[0].Audiences, []Audience{{Value: f.test.SP.MetadataURL.String()}}))
+	assert.Equal(t, assertion.Version, "2.0")
+	assert.Equal(t, assertion.Issuer.Value, f.test.IDP.MetadataURL.String())
+	require.True(t, assertion.Subject != nil && assertion.Subject.NameID != nil)
+	assert.Equal(t, *assertion.Subject.NameID, *subject.NameID)
+	assert.Len(t, assertion.Subject.SubjectConfirmations, 0)
+	require.NotNil(t, assertion.Conditions)
+	assert.True(t, assertion.Conditions.NotBefore.Equal(TimeNow().Add(-MaxClockSkew)))
+	assert.True(t, assertion.Conditions.NotOnOrAfter.Equal(TimeNow().Add(MaxIssueDelay)))
+	require.Len(t, assertion.Conditions.AudienceRestrictions, 1)
+	assert.Equal(t, assertion.Conditions.AudienceRestrictions[0].Audiences, []Audience{{Value: f.test.SP.MetadataURL.String()}})
 }
 
 func queryAttributeValues(attribute Attribute) []string {
@@ -607,7 +607,7 @@ func TestServeQueryRejects(t *testing.T) {
 			name: "another message",
 			request: func(t *testing.T, f *queryFixture, service queryService) *http.Request {
 				request, err := f.test.SP.MakeLogoutRequest(service.url, "alice")
-				assert.NilError(t, err)
+				require.NoError(t, err)
 
 				el := request.Element()
 				el.CreateAttr("ID", service.message(f).SelectAttrValue("ID", ""))
@@ -631,19 +631,19 @@ func TestServeQueryRejects(t *testing.T) {
 				id := f.lastID
 
 				assertQueryStatus(t, response, tc.top, tc.second)
-				assert.Check(t, is.Equal(response.Response.Destination, ""))
-				assert.Assert(t, response.Response.Issuer != nil)
-				assert.Check(t, is.Equal(response.Response.Issuer.Value, f.test.IDP.MetadataURL.String()))
+				assert.Equal(t, response.Response.Destination, "")
+				require.NotNil(t, response.Response.Issuer)
+				assert.Equal(t, response.Response.Issuer.Value, f.test.IDP.MetadataURL.String())
 
 				if tc.noInResponseTo {
-					assert.Check(t, is.Equal(response.Response.InResponseTo, ""))
+					assert.Equal(t, response.Response.InResponseTo, "")
 				} else {
-					assert.Check(t, is.Equal(response.Response.InResponseTo, id))
+					assert.Equal(t, response.Response.InResponseTo, id)
 				}
 
-				assert.Check(t, is.Len(f.provider.nameIDs, 0), "the session provider must not be asked")
-				assert.Check(t, is.Len(f.store.gets, 0), "the assertion store must not be asked")
-				assert.Check(t, is.Len(f.store.saved, 0))
+				assert.Len(t, f.provider.nameIDs, 0, "the session provider must not be asked")
+				assert.Len(t, f.store.gets, 0, "the assertion store must not be asked")
+				assert.Len(t, f.store.saved, 0)
 			})
 		}
 	}
@@ -655,8 +655,8 @@ func TestServeQuerySOAPErrors(t *testing.T) {
 			f := newQueryFixture(t)
 
 			w := f.serve(service, httptest.NewRequest(http.MethodGet, service.url, nil))
-			assert.Check(t, is.Equal(w.Code, http.StatusMethodNotAllowed))
-			assert.Check(t, is.Equal(w.Header().Get("Allow"), http.MethodPost))
+			assert.Equal(t, w.Code, http.StatusMethodNotAllowed)
+			assert.Equal(t, w.Header().Get("Allow"), http.MethodPost)
 		})
 
 		t.Run(service.name+"/not text/xml", func(t *testing.T) {
@@ -665,7 +665,7 @@ func TestServeQuerySOAPErrors(t *testing.T) {
 			r := queryPost(t, service.url, signQueryElement(t, &f.test.SP, service.message(f)))
 			r.Header.Set("Content-Type", "application/soap+xml")
 
-			assert.Check(t, is.Equal(soapFaultCode(t, f.serve(service, r)), "soapenv:Client"))
+			assert.Equal(t, soapFaultCode(t, f.serve(service, r)), "soapenv:Client")
 		})
 
 		t.Run(service.name+"/not an envelope", func(t *testing.T) {
@@ -674,12 +674,12 @@ func TestServeQuerySOAPErrors(t *testing.T) {
 			doc := etree.NewDocument()
 			doc.SetRoot(signQueryElement(t, &f.test.SP, service.message(f)))
 			body, err := doc.WriteToBytes()
-			assert.NilError(t, err)
+			require.NoError(t, err)
 
 			r := httptest.NewRequest(http.MethodPost, service.url, bytes.NewReader(body))
 			r.Header.Set("Content-Type", "text/xml")
 
-			assert.Check(t, is.Equal(soapFaultCode(t, f.serve(service, r)), "soapenv:Client"))
+			assert.Equal(t, soapFaultCode(t, f.serve(service, r)), "soapenv:Client")
 		})
 
 		t.Run(service.name+"/too large", func(t *testing.T) {
@@ -690,7 +690,7 @@ func TestServeQuerySOAPErrors(t *testing.T) {
 
 			r := queryPost(t, service.url, signQueryElement(t, &f.test.SP, message))
 
-			assert.Check(t, is.Equal(soapFaultCode(t, f.serve(service, r)), "soapenv:Client"))
+			assert.Equal(t, soapFaultCode(t, f.serve(service, r)), "soapenv:Client")
 		})
 
 		t.Run(service.name+"/header that must be understood", func(t *testing.T) {
@@ -703,12 +703,12 @@ func TestServeQuerySOAPErrors(t *testing.T) {
 			envelope.CreateElement("soapenv:Body").AddChild(signQueryElement(t, &f.test.SP, service.message(f)))
 
 			body, err := doc.WriteToBytes()
-			assert.NilError(t, err)
+			require.NoError(t, err)
 
 			r := httptest.NewRequest(http.MethodPost, service.url, bytes.NewReader(body))
 			r.Header.Set("Content-Type", "text/xml")
 
-			assert.Check(t, is.Equal(soapFaultCode(t, f.serve(service, r)), "soapenv:MustUnderstand"))
+			assert.Equal(t, soapFaultCode(t, f.serve(service, r)), "soapenv:MustUnderstand")
 		})
 
 		t.Run(service.name+"/cannot sign the response", func(t *testing.T) {
@@ -717,7 +717,7 @@ func TestServeQuerySOAPErrors(t *testing.T) {
 
 			r := queryPost(t, service.url, service.message(f))
 
-			assert.Check(t, is.Equal(soapFaultCode(t, f.serve(service, r)), "soapenv:Server"))
+			assert.Equal(t, soapFaultCode(t, f.serve(service, r)), "soapenv:Server")
 		})
 	}
 }
@@ -752,17 +752,17 @@ func TestServeQueryLogsNoUnverifiedContent(t *testing.T) {
 			// service provider of an event that is not verified, and the ID of its request. Nothing else of the
 			// request is reported, and none of it is in the text of the error.
 			events := observer.Events()
-			assert.Assert(t, is.Len(events, 1))
+			require.Len(t, events, 1)
 
 			event := events[0]
-			assert.Check(t, is.Equal(event.Outcome, OutcomeFailure))
-			assert.Check(t, !event.Verified)
-			assert.Check(t, is.Equal(event.ServiceProvider, "https://"+marker+".example.com"))
-			assert.Check(t, is.Equal(event.RequestID, "id-"+marker))
-			assert.Check(t, errors.Is(event.Err, ErrUnknownServiceProvider))
+			assert.Equal(t, event.Outcome, OutcomeFailure)
+			assert.False(t, event.Verified)
+			assert.Equal(t, event.ServiceProvider, "https://"+marker+".example.com")
+			assert.Equal(t, event.RequestID, "id-"+marker)
+			assert.True(t, errors.Is(event.Err, ErrUnknownServiceProvider))
 
 			event.ServiceProvider, event.RequestID = "", ""
-			assert.Check(t, !strings.Contains(fmt.Sprintf("%+v", event), marker), "event: %+v", event)
+			assert.False(t, strings.Contains(fmt.Sprintf("%+v", event), marker), "event: %+v", event)
 		})
 	}
 }
@@ -777,7 +777,7 @@ func TestServeQueryDestinationOptional(t *testing.T) {
 
 			response := f.query(t, service, message)
 			assertQueryStatus(t, response, StatusSuccess, "")
-			assert.Check(t, is.Equal(response.Response.InResponseTo, message.SelectAttrValue("ID", "")))
+			assert.Equal(t, response.Response.InResponseTo, message.SelectAttrValue("ID", ""))
 		})
 	}
 }
@@ -790,36 +790,36 @@ func TestServeAttributeQuery(t *testing.T) {
 
 	response := f.queryAttributes(t, query)
 	assertQueryStatus(t, response, StatusSuccess, "")
-	assert.Check(t, is.Equal(response.Response.InResponseTo, query.ID))
-	assert.Check(t, is.Equal(response.Response.Destination, ""))
-	assert.Check(t, is.Equal(response.Response.Version, "2.0"))
-	assert.Assert(t, response.Response.Issuer != nil)
-	assert.Check(t, is.Equal(response.Response.Issuer.Value, f.test.IDP.MetadataURL.String()))
-	assert.Check(t, is.Equal(response.Response.Issuer.Format, "urn:oasis:names:tc:SAML:2.0:nameid-format:entity"))
+	assert.Equal(t, response.Response.InResponseTo, query.ID)
+	assert.Equal(t, response.Response.Destination, "")
+	assert.Equal(t, response.Response.Version, "2.0")
+	require.NotNil(t, response.Response.Issuer)
+	assert.Equal(t, response.Response.Issuer.Value, f.test.IDP.MetadataURL.String())
+	assert.Equal(t, response.Response.Issuer.Format, "urn:oasis:names:tc:SAML:2.0:nameid-format:entity")
 
-	assert.Assert(t, is.Len(response.Assertions, 1))
-	assert.Check(t, is.Equal(response.Encrypted, 1), "the service provider has an encryption key")
+	require.Len(t, response.Assertions, 1)
+	assert.Equal(t, response.Encrypted, 1, "the service provider has an encryption key")
 
 	assertion := response.Assertions[0]
 	f.assertQueryAssertion(t, assertion, query.Subject)
-	assert.Check(t, is.Len(assertion.AuthnStatements, 0))
-	assert.Assert(t, is.Len(assertion.AttributeStatements, 1))
-	assert.Check(t, is.DeepEqual(attributeNames(assertion.AttributeStatements[0].Attributes), []string{uidAttributeName, mailAttributeName}))
+	assert.Len(t, assertion.AuthnStatements, 0)
+	require.Len(t, assertion.AttributeStatements, 1)
+	assert.Equal(t, attributeNames(assertion.AttributeStatements[0].Attributes), []string{uidAttributeName, mailAttributeName})
 
 	// The provider is asked about the NameID of the query, for the service provider that signed it.
-	assert.Check(t, is.DeepEqual(f.provider.nameIDs, []NameID{*query.Subject.NameID}))
-	assert.Check(t, is.DeepEqual(f.provider.serviceProviders, []string{f.test.SP.MetadataURL.String()}))
+	assert.Equal(t, f.provider.nameIDs, []NameID{*query.Subject.NameID})
+	assert.Equal(t, f.provider.serviceProviders, []string{f.test.SP.MetadataURL.String()})
 
 	// The assertion is saved as it was signed, before it was encrypted.
-	assert.Assert(t, is.DeepEqual(f.store.saved, []string{assertion.ID}))
+	require.Equal(t, f.store.saved, []string{assertion.ID})
 
 	saved := f.store.assertions[assertion.ID]
-	assert.Check(t, is.Equal(saved.serviceProviderID, f.test.SP.MetadataURL.String()))
-	assert.Check(t, saved.notOnOrAfter.Equal(assertion.Conditions.NotOnOrAfter))
-	assert.Check(t, is.Equal(saved.assertion.Tag, "Assertion"))
+	assert.Equal(t, saved.serviceProviderID, f.test.SP.MetadataURL.String())
+	assert.True(t, saved.notOnOrAfter.Equal(assertion.Conditions.NotOnOrAfter))
+	assert.Equal(t, saved.assertion.Tag, "Assertion")
 
 	_, err := verifyEnvelopedSignature(saved.assertion, []*x509.Certificate{f.test.Certificate}, anySignaturePolicy)
-	assert.Check(t, err)
+	assert.NoError(t, err)
 }
 
 func TestServeAttributeQueryNarrows(t *testing.T) {
@@ -917,21 +917,21 @@ func TestServeAttributeQueryNarrows(t *testing.T) {
 
 			// SAMLCore §3.3.4: Success with no assertion when there is nothing to state.
 			if len(tc.released) == 0 {
-				assert.Check(t, is.Len(response.Assertions, 0))
-				assert.Check(t, is.Len(f.store.saved, 0))
+				assert.Len(t, response.Assertions, 0)
+				assert.Len(t, f.store.saved, 0)
 
 				return
 			}
 
-			assert.Assert(t, is.Len(response.Assertions, 1))
-			assert.Assert(t, is.Len(response.Assertions[0].AttributeStatements, 1))
+			require.Len(t, response.Assertions, 1)
+			require.Len(t, response.Assertions[0].AttributeStatements, 1)
 
 			released := map[string][]string{}
 			for _, attribute := range response.Assertions[0].AttributeStatements[0].Attributes {
 				released[attribute.Name] = queryAttributeValues(attribute)
 			}
 
-			assert.Check(t, is.DeepEqual(released, tc.released))
+			assert.Equal(t, released, tc.released)
 		})
 	}
 }
@@ -950,8 +950,8 @@ func TestServeAttributeQueryUsesDefaultAttributeConsumingService(t *testing.T) {
 
 	response := f.queryAttributes(t, f.attributeQuery())
 	assertQueryStatus(t, response, StatusSuccess, "")
-	assert.Assert(t, is.Len(response.Assertions, 1))
-	assert.Check(t, is.DeepEqual(attributeNames(response.Assertions[0].AttributeStatements[0].Attributes), []string{uidAttributeName}))
+	require.Len(t, response.Assertions, 1)
+	assert.Equal(t, attributeNames(response.Assertions[0].AttributeStatements[0].Attributes), []string{uidAttributeName})
 }
 
 func TestServeAttributeQueryAttributeReleasePolicy(t *testing.T) {
@@ -969,7 +969,7 @@ func TestServeAttributeQueryAttributeReleasePolicy(t *testing.T) {
 		f.test.IDP.AttributeReleasePolicy = attributeReleasePolicyFunc(func(req AttributeReleaseRequest, session *Session, c []Attribute) ([]Attribute, error) {
 			got, candidates = req, c
 
-			assert.Check(t, session == f.provider.subject)
+			assert.True(t, session == f.provider.subject)
 
 			return c, nil
 		})
@@ -977,22 +977,22 @@ func TestServeAttributeQueryAttributeReleasePolicy(t *testing.T) {
 		response := f.queryAttributes(t, f.attributeQuery(queried))
 		assertQueryStatus(t, response, StatusSuccess, "")
 
-		assert.Assert(t, got.Query != nil && got.Query.AttributeQuery != nil)
-		assert.Check(t, got.AuthnRequest == nil)
-		assert.Check(t, got.HTTPRequest != nil)
-		assert.Check(t, is.Equal(got.ServiceProviderMetadata.EntityID, f.test.SP.MetadataURL.String()))
-		assert.Assert(t, got.Ceiling != nil)
-		assert.Check(t, is.Equal(got.Ceiling.RequestedAttributes[0].Name, mailAttributeName))
-		assert.Assert(t, is.Len(got.Requested, 1))
-		assert.Check(t, is.Equal(got.Requested[0].Name, affiliationAttributeName))
+		require.True(t, got.Query != nil && got.Query.AttributeQuery != nil)
+		assert.Nil(t, got.AuthnRequest)
+		assert.NotNil(t, got.HTTPRequest)
+		assert.Equal(t, got.ServiceProviderMetadata.EntityID, f.test.SP.MetadataURL.String())
+		require.NotNil(t, got.Ceiling)
+		assert.Equal(t, got.Ceiling.RequestedAttributes[0].Name, mailAttributeName)
+		require.Len(t, got.Requested, 1)
+		assert.Equal(t, got.Requested[0].Name, affiliationAttributeName)
 
 		// The candidates are not narrowed to the query, so that the policy decides as for single sign-on. This
 		// policy releases beyond the ceiling, and the answer is narrowed to the query.
-		assert.Check(t, is.Contains(attributeNames(candidates), mailAttributeName))
-		assert.Check(t, is.Contains(attributeNames(candidates), SubjectIDAttributeName))
-		assert.Check(t, is.DeepEqual(queryAttributeValues(*attributeNamed(candidates, affiliationAttributeName)), []string{"Users", "Administrators"}))
-		assert.Assert(t, is.Len(response.Assertions, 1))
-		assert.Check(t, is.DeepEqual(queryAttributeValues(response.Assertions[0].AttributeStatements[0].Attributes[0]), []string{"Users"}))
+		assert.Contains(t, attributeNames(candidates), mailAttributeName)
+		assert.Contains(t, attributeNames(candidates), SubjectIDAttributeName)
+		assert.Equal(t, queryAttributeValues(*attributeNamed(candidates, affiliationAttributeName)), []string{"Users", "Administrators"})
+		require.Len(t, response.Assertions, 1)
+		assert.Equal(t, queryAttributeValues(response.Assertions[0].AttributeStatements[0].Attributes[0]), []string{"Users"})
 	})
 
 	t.Run("cannot release what the query does not name", func(t *testing.T) {
@@ -1006,12 +1006,12 @@ func TestServeAttributeQueryAttributeReleasePolicy(t *testing.T) {
 
 		response := f.queryAttributes(t, f.attributeQuery(queried))
 		assertQueryStatus(t, response, StatusSuccess, "")
-		assert.Assert(t, is.Len(response.Assertions, 1))
+		require.Len(t, response.Assertions, 1)
 
 		attributes := response.Assertions[0].AttributeStatements[0].Attributes
-		assert.Assert(t, is.Len(attributes, 1))
-		assert.Check(t, is.Equal(attributes[0].Name, affiliationAttributeName))
-		assert.Check(t, is.DeepEqual(queryAttributeValues(attributes[0]), []string{"Users"}))
+		require.Len(t, attributes, 1)
+		assert.Equal(t, attributes[0].Name, affiliationAttributeName)
+		assert.Equal(t, queryAttributeValues(attributes[0]), []string{"Users"})
 	})
 
 	t.Run("refuses", func(t *testing.T) {
@@ -1034,8 +1034,8 @@ func TestServeAttributeQueryPrincipal(t *testing.T) {
 		// what an AuthnQuery for an unknown principal gets, and doesn't tell which principals exist.
 		response := f.queryAttributes(t, f.attributeQuery())
 		assertQueryStatus(t, response, StatusSuccess, "")
-		assert.Check(t, is.Len(response.Assertions, 0))
-		assert.Check(t, is.Equal(response.Encrypted, 0))
+		assert.Len(t, response.Assertions, 0)
+		assert.Equal(t, response.Encrypted, 0)
 	})
 
 	t.Run("lookup fails", func(t *testing.T) {
@@ -1045,7 +1045,7 @@ func TestServeAttributeQueryPrincipal(t *testing.T) {
 
 		response := f.queryAttributes(t, f.attributeQuery())
 		assertQueryStatus(t, response, StatusResponder, "")
-		assert.Check(t, is.Contains(f.log.String(), "directory unavailable"))
+		assert.Contains(t, f.log.String(), "directory unavailable")
 	})
 
 	t.Run("no QuerySessionProvider", func(t *testing.T) {
@@ -1185,18 +1185,18 @@ func TestServeQuerySubject(t *testing.T) {
 				assertQueryStatus(t, response, tc.top, tc.second)
 
 				if tc.top != StatusSuccess {
-					assert.Check(t, is.Len(f.provider.nameIDs, 0), "the session provider must not be asked")
+					assert.Len(t, f.provider.nameIDs, 0, "the session provider must not be asked")
 
 					return
 				}
 
 				// SAMLCore §3.3.4: the identifier of the assertion is identical to that of the query.
 				queried := &Subject{}
-				assert.NilError(t, unmarshalElement(message.FindElement("./Subject"), queried))
+				require.NoError(t, unmarshalElement(message.FindElement("./Subject"), queried))
 
-				assert.Assert(t, is.Len(response.Assertions, 1))
+				require.Len(t, response.Assertions, 1)
 				f.assertQueryAssertion(t, response.Assertions[0], queried)
-				assert.Check(t, is.DeepEqual(f.provider.nameIDs, []NameID{*queried.NameID}))
+				assert.Equal(t, f.provider.nameIDs, []NameID{*queried.NameID})
 			})
 		}
 	}
@@ -1221,7 +1221,7 @@ func TestServeQueryAffiliationLookupFails(t *testing.T) {
 	query.Subject.NameID.SPNameQualifier = queryTestAffiliationID
 
 	assertQueryStatus(t, f.queryAttributes(t, query), StatusResponder, "")
-	assert.Check(t, is.Len(f.provider.nameIDs, 0))
+	assert.Len(t, f.provider.nameIDs, 0)
 }
 
 func TestServeAttributeQueryInvalidAttributes(t *testing.T) {
@@ -1235,7 +1235,7 @@ func TestServeAttributeQueryInvalidAttributes(t *testing.T) {
 			f.requestAttributes(requested(mailAttributeName, uriAttrNameFormat))
 
 			assertQueryStatus(t, f.queryAttributes(t, f.attributeQuery(attributes...)), StatusRequester, StatusInvalidAttrNameOrValue)
-			assert.Check(t, is.Len(f.provider.nameIDs, 0))
+			assert.Len(t, f.provider.nameIDs, 0)
 		})
 	}
 
@@ -1248,7 +1248,7 @@ func TestServeAttributeQueryInvalidAttributes(t *testing.T) {
 			Attribute{Name: mailAttributeName, NameFormat: basicAttrNameFormat},
 		))
 		assertQueryStatus(t, response, StatusSuccess, "")
-		assert.Check(t, is.Len(response.Assertions, 1))
+		assert.Len(t, response.Assertions, 1)
 	})
 }
 
@@ -1271,8 +1271,8 @@ func TestServeQueryEncryption(t *testing.T) {
 
 		response := f.queryAttributes(t, f.attributeQuery())
 		assertQueryStatus(t, response, StatusSuccess, "")
-		assert.Assert(t, is.Len(response.Assertions, 1))
-		assert.Check(t, is.Equal(response.Encrypted, 0))
+		require.Len(t, response.Assertions, 1)
+		assert.Equal(t, response.Encrypted, 0)
 	})
 
 	t.Run("never in plaintext when the encryption certificate is refused", func(t *testing.T) {
@@ -1300,15 +1300,15 @@ func TestServeQueryEncryption(t *testing.T) {
 		f.test.IDP.EncryptionKeyEnforcer = encryptionKeyEnforcerFunc(func(req *IdpAuthnRequest, key ServiceProviderEncryptionKey) error {
 			entityID = req.ServiceProviderMetadata.EntityID
 
-			assert.Check(t, req.HTTPRequest != nil)
-			assert.Check(t, req.Now.Equal(TimeNow()))
-			assert.Check(t, key.Certificate.Equal(f.test.SPCertificate))
+			assert.NotNil(t, req.HTTPRequest)
+			assert.True(t, req.Now.Equal(TimeNow()))
+			assert.True(t, key.Certificate.Equal(f.test.SPCertificate))
 
 			return nil
 		})
 
 		assertQueryStatus(t, f.queryAttributes(t, f.attributeQuery()), StatusSuccess, "")
-		assert.Check(t, is.Equal(entityID, f.test.SP.MetadataURL.String()))
+		assert.Equal(t, entityID, f.test.SP.MetadataURL.String())
 	})
 }
 
@@ -1319,33 +1319,33 @@ func TestServeAuthnQuery(t *testing.T) {
 
 	response := f.queryAuthn(t, query)
 	assertQueryStatus(t, response, StatusSuccess, "")
-	assert.Check(t, is.Equal(response.Response.InResponseTo, query.ID))
-	assert.Check(t, is.Equal(response.Response.Destination, ""))
-	assert.Assert(t, is.Len(response.Assertions, 1))
-	assert.Check(t, is.Equal(response.Encrypted, 1))
+	assert.Equal(t, response.Response.InResponseTo, query.ID)
+	assert.Equal(t, response.Response.Destination, "")
+	require.Len(t, response.Assertions, 1)
+	assert.Equal(t, response.Encrypted, 1)
 
 	assertion := response.Assertions[0]
 	f.assertQueryAssertion(t, assertion, query.Subject)
-	assert.Check(t, is.Len(assertion.AttributeStatements, 0))
-	assert.Assert(t, is.Len(assertion.AuthnStatements, 2))
+	assert.Len(t, assertion.AttributeStatements, 0)
+	require.Len(t, assertion.AuthnStatements, 2)
 
 	one, two := assertion.AuthnStatements[0], assertion.AuthnStatements[1]
-	assert.Check(t, is.Equal(one.SessionIndex, "index-one"))
-	assert.Check(t, one.AuthnInstant.Equal(TimeNow().Add(-time.Hour)))
-	assert.Assert(t, one.AuthnContext.AuthnContextClassRef != nil)
-	assert.Check(t, is.Equal(one.AuthnContext.AuthnContextClassRef.Value, transportClass))
-	assert.Check(t, one.SubjectLocality == nil, "the address of the service provider is not that of the principal")
+	assert.Equal(t, one.SessionIndex, "index-one")
+	assert.True(t, one.AuthnInstant.Equal(TimeNow().Add(-time.Hour)))
+	require.NotNil(t, one.AuthnContext.AuthnContextClassRef)
+	assert.Equal(t, one.AuthnContext.AuthnContextClassRef.Value, transportClass)
+	assert.True(t, one.SubjectLocality == nil, "the address of the service provider is not that of the principal")
 
-	assert.Check(t, is.Equal(two.SessionIndex, "index-two"))
-	assert.Check(t, two.AuthnInstant.Equal(TimeNow().Add(-time.Minute)))
-	assert.Assert(t, two.AuthnContext.AuthnContextClassRef != nil)
-	assert.Check(t, is.Equal(two.AuthnContext.AuthnContextClassRef.Value, strongClass))
-	assert.Assert(t, two.SubjectLocality != nil)
-	assert.Check(t, is.Equal(two.SubjectLocality.Address, "192.0.2.7"))
+	assert.Equal(t, two.SessionIndex, "index-two")
+	assert.True(t, two.AuthnInstant.Equal(TimeNow().Add(-time.Minute)))
+	require.NotNil(t, two.AuthnContext.AuthnContextClassRef)
+	assert.Equal(t, two.AuthnContext.AuthnContextClassRef.Value, strongClass)
+	require.NotNil(t, two.SubjectLocality)
+	assert.Equal(t, two.SubjectLocality.Address, "192.0.2.7")
 
-	assert.Check(t, is.DeepEqual(f.provider.nameIDs, []NameID{*query.Subject.NameID}))
-	assert.Check(t, is.DeepEqual(f.provider.serviceProviders, []string{f.test.SP.MetadataURL.String()}))
-	assert.Check(t, is.DeepEqual(f.store.saved, []string{assertion.ID}))
+	assert.Equal(t, f.provider.nameIDs, []NameID{*query.Subject.NameID})
+	assert.Equal(t, f.provider.serviceProviders, []string{f.test.SP.MetadataURL.String()})
+	assert.Equal(t, f.store.saved, []string{assertion.ID})
 }
 
 func TestServeAuthnQueryFilters(t *testing.T) {
@@ -1398,19 +1398,19 @@ func TestServeAuthnQueryFilters(t *testing.T) {
 
 			// SAMLCore §3.3.4: Success with no assertion when there is nothing to state.
 			if len(tc.indexes) == 0 {
-				assert.Check(t, is.Len(response.Assertions, 0))
+				assert.Len(t, response.Assertions, 0)
 
 				return
 			}
 
-			assert.Assert(t, is.Len(response.Assertions, 1))
+			require.Len(t, response.Assertions, 1)
 
 			var indexes []string
 			for _, statement := range response.Assertions[0].AuthnStatements {
 				indexes = append(indexes, statement.SessionIndex)
 			}
 
-			assert.Check(t, is.DeepEqual(indexes, tc.indexes))
+			assert.Equal(t, indexes, tc.indexes)
 		})
 	}
 }
@@ -1422,8 +1422,8 @@ func TestServeAuthnQueryPrincipal(t *testing.T) {
 
 		response := f.queryAuthn(t, f.authnQuery())
 		assertQueryStatus(t, response, StatusSuccess, "")
-		assert.Check(t, is.Len(response.Assertions, 0))
-		assert.Check(t, is.Len(f.store.saved, 0))
+		assert.Len(t, response.Assertions, 0)
+		assert.Len(t, f.store.saved, 0)
 	})
 
 	t.Run("lookup fails", func(t *testing.T) {
@@ -1454,10 +1454,10 @@ func (f *queryFixture) storeAssertion(t *testing.T, id, serviceProviderID string
 	}
 
 	signingContext, err := f.test.IDP.signingContext()
-	assert.NilError(t, err)
+	require.NoError(t, err)
 
 	signed, err := signingContext.SignEnveloped(assertion.Element())
-	assert.NilError(t, err)
+	require.NoError(t, err)
 
 	if f.store.assertions == nil {
 		f.store.assertions = map[string]storedAssertion{}
@@ -1478,18 +1478,18 @@ func TestServeAssertionIDRequest(t *testing.T) {
 
 	response := f.requestAssertions(t, request)
 	assertQueryStatus(t, response, StatusSuccess, "")
-	assert.Check(t, is.Equal(response.Response.InResponseTo, request.ID))
-	assert.Check(t, is.Equal(response.Response.Destination, ""))
-	assert.Assert(t, is.Len(response.Assertions, 1))
-	assert.Check(t, is.Equal(response.Encrypted, 1), "it is encrypted again for the service provider")
-	assert.Check(t, is.Equal(response.Assertions[0].ID, queryTestStoredAssertionID))
-	assert.Check(t, is.Equal(elementString(t, response.AssertionEls[0]), before), "it is returned as it was signed")
+	assert.Equal(t, response.Response.InResponseTo, request.ID)
+	assert.Equal(t, response.Response.Destination, "")
+	require.Len(t, response.Assertions, 1)
+	assert.Equal(t, response.Encrypted, 1, "it is encrypted again for the service provider")
+	assert.Equal(t, response.Assertions[0].ID, queryTestStoredAssertionID)
+	assert.Equal(t, elementString(t, response.AssertionEls[0]), before, "it is returned as it was signed")
 
-	assert.Check(t, is.DeepEqual(f.store.gets, []string{queryTestStoredAssertionID}))
-	assert.Check(t, is.Len(f.store.saved, 0), "an assertion that is fetched is not issued again")
-	assert.Check(t, is.Equal(elementString(t, stored), before), "the stored assertion is not modified")
-	assert.Check(t, stored.Parent() == nil)
-	assert.Check(t, is.Len(f.provider.nameIDs, 0))
+	assert.Equal(t, f.store.gets, []string{queryTestStoredAssertionID})
+	assert.Len(t, f.store.saved, 0, "an assertion that is fetched is not issued again")
+	assert.Equal(t, elementString(t, stored), before, "the stored assertion is not modified")
+	assert.Nil(t, stored.Parent())
+	assert.Len(t, f.provider.nameIDs, 0)
 }
 
 func elementString(t *testing.T, el *etree.Element) string {
@@ -1499,7 +1499,7 @@ func elementString(t *testing.T, el *etree.Element) string {
 	doc.SetRoot(el.Copy())
 
 	s, err := doc.WriteToString()
-	assert.NilError(t, err)
+	require.NoError(t, err)
 
 	return s
 }
@@ -1573,7 +1573,7 @@ func TestServeAssertionIDRequestSelects(t *testing.T) {
 				found = append(found, assertion.ID)
 			}
 
-			assert.Check(t, is.DeepEqual(found, tc.found))
+			assert.Equal(t, found, tc.found)
 		})
 	}
 }
@@ -1587,12 +1587,12 @@ func TestServeAssertionIDRequestTooMany(t *testing.T) {
 	f := newQueryFixture(t)
 
 	assertQueryStatus(t, f.requestAssertions(t, f.assertionIDRequest(refs...)), StatusResponder, StatusTooManyResponses)
-	assert.Check(t, is.Len(f.store.gets, 0))
+	assert.Len(t, f.store.gets, 0)
 
 	f = newQueryFixture(t)
 
 	assertQueryStatus(t, f.requestAssertions(t, f.assertionIDRequest(refs[:maxAssertionIDRefs]...)), StatusSuccess, "")
-	assert.Check(t, is.Len(f.store.gets, maxAssertionIDRefs))
+	assert.Len(t, f.store.gets, maxAssertionIDRefs)
 }
 
 // An assertion that answers a query can be fetched again by its ID.
@@ -1601,12 +1601,12 @@ func TestServeAssertionIDRequestReturnsQueryAssertion(t *testing.T) {
 	f.requestAttributes(requested(mailAttributeName, uriAttrNameFormat))
 
 	issued := f.queryAttributes(t, f.attributeQuery())
-	assert.Assert(t, is.Len(issued.Assertions, 1))
+	require.Len(t, issued.Assertions, 1)
 
 	fetched := f.requestAssertions(t, f.assertionIDRequest(issued.Assertions[0].ID))
 	assertQueryStatus(t, fetched, StatusSuccess, "")
-	assert.Assert(t, is.Len(fetched.Assertions, 1))
-	assert.Check(t, is.Equal(elementString(t, fetched.AssertionEls[0]), elementString(t, issued.AssertionEls[0])))
+	require.Len(t, fetched.Assertions, 1)
+	assert.Equal(t, elementString(t, fetched.AssertionEls[0]), elementString(t, issued.AssertionEls[0]))
 }
 
 func TestAssertionStoreSaveFailureDoesNotFailTheRequest(t *testing.T) {
@@ -1616,8 +1616,8 @@ func TestAssertionStoreSaveFailureDoesNotFailTheRequest(t *testing.T) {
 
 	response := f.queryAttributes(t, f.attributeQuery())
 	assertQueryStatus(t, response, StatusSuccess, "")
-	assert.Check(t, is.Len(response.Assertions, 1))
-	assert.Check(t, is.Contains(f.log.String(), "failed to save assertion: storage unavailable"))
+	assert.Len(t, response.Assertions, 1)
+	assert.Contains(t, f.log.String(), "failed to save assertion: storage unavailable")
 }
 
 // Single sign-on saves the assertion as it was signed, before it is encrypted.
@@ -1628,12 +1628,12 @@ func TestServeSSOSavesAssertion(t *testing.T) {
 	}
 
 	request, err := f.test.SP.MakeAuthenticationRequest(f.test.IDP.SSOURL.String(), HTTPPostBinding, HTTPPostBinding)
-	assert.NilError(t, err)
+	require.NoError(t, err)
 
 	doc := etree.NewDocument()
 	doc.SetRoot(request.Element())
 	body, err := doc.WriteToBytes()
-	assert.NilError(t, err)
+	require.NoError(t, err)
 
 	form := url.Values{"SAMLRequest": {base64.StdEncoding.EncodeToString(body)}}
 	r := httptest.NewRequest(http.MethodPost, f.test.IDP.SSOURL.String(), strings.NewReader(form.Encode()))
@@ -1641,27 +1641,27 @@ func TestServeSSOSavesAssertion(t *testing.T) {
 
 	w := httptest.NewRecorder()
 	f.test.IDP.ServeSSO(w, r)
-	assert.Assert(t, is.Equal(w.Code, http.StatusOK), "body: %s", w.Body.String())
+	require.Equal(t, w.Code, http.StatusOK, "body: %s", w.Body.String())
 
 	posted, response := postedResponse(t, w.Body.String())
-	assert.Assert(t, is.Equal(response.Status.StatusCode.Value, StatusSuccess))
+	require.Equal(t, response.Status.StatusCode.Value, StatusSuccess)
 
 	assertionEl, err := f.test.SP.decryptElement(posted.FindElement("//EncryptedAssertion"))
-	assert.NilError(t, err)
+	require.NoError(t, err)
 
 	id := assertionEl.SelectAttrValue("ID", "")
-	assert.Assert(t, is.DeepEqual(f.store.saved, []string{id}))
+	require.Equal(t, f.store.saved, []string{id})
 
 	saved := f.store.assertions[id]
-	assert.Check(t, is.Equal(saved.serviceProviderID, f.test.SP.MetadataURL.String()))
-	assert.Check(t, saved.notOnOrAfter.Equal(TimeNow().Add(MaxIssueDelay)))
-	assert.Check(t, is.Equal(elementString(t, saved.assertion), elementString(t, assertionEl)))
+	assert.Equal(t, saved.serviceProviderID, f.test.SP.MetadataURL.String())
+	assert.True(t, saved.notOnOrAfter.Equal(TimeNow().Add(MaxIssueDelay)))
+	assert.Equal(t, elementString(t, saved.assertion), elementString(t, assertionEl))
 
 	// The service provider can fetch what it was sent.
 	fetched := f.requestAssertions(t, f.assertionIDRequest(id))
 	assertQueryStatus(t, fetched, StatusSuccess, "")
-	assert.Assert(t, is.Len(fetched.Assertions, 1))
-	assert.Check(t, is.Equal(elementString(t, fetched.AssertionEls[0]), elementString(t, assertionEl)))
+	require.Len(t, fetched.Assertions, 1)
+	assert.Equal(t, elementString(t, fetched.AssertionEls[0]), elementString(t, assertionEl))
 }
 
 func TestQueryMetadata(t *testing.T) {
@@ -1672,9 +1672,9 @@ func TestQueryMetadata(t *testing.T) {
 		f.test.IDP.AttributeServiceURL, f.test.IDP.AuthnQueryServiceURL, f.test.IDP.AssertionIDRequestServiceURL = url.URL{}, url.URL{}, url.URL{}
 
 		metadata := f.test.IDP.Metadata()
-		assert.Check(t, is.Len(metadata.AttributeAuthorityDescriptors, 0))
-		assert.Check(t, is.Len(metadata.AuthnAuthorityDescriptors, 0))
-		assert.Check(t, is.Len(metadata.IDPSSODescriptors[0].AssertionIDRequestServices, 0))
+		assert.Len(t, metadata.AttributeAuthorityDescriptors, 0)
+		assert.Len(t, metadata.AuthnAuthorityDescriptors, 0)
+		assert.Len(t, metadata.IDPSSODescriptors[0].AssertionIDRequestServices, 0)
 	})
 
 	t.Run("nothing without the interfaces", func(t *testing.T) {
@@ -1683,9 +1683,9 @@ func TestQueryMetadata(t *testing.T) {
 		f.test.IDP.AssertionStore = nil
 
 		metadata := f.test.IDP.Metadata()
-		assert.Check(t, is.Len(metadata.AttributeAuthorityDescriptors, 0))
-		assert.Check(t, is.Len(metadata.AuthnAuthorityDescriptors, 0))
-		assert.Check(t, is.Len(metadata.IDPSSODescriptors[0].AssertionIDRequestServices, 0))
+		assert.Len(t, metadata.AttributeAuthorityDescriptors, 0)
+		assert.Len(t, metadata.AuthnAuthorityDescriptors, 0)
+		assert.Len(t, metadata.IDPSSODescriptors[0].AssertionIDRequestServices, 0)
 	})
 
 	t.Run("everything", func(t *testing.T) {
@@ -1695,28 +1695,28 @@ func TestQueryMetadata(t *testing.T) {
 		metadata := f.test.IDP.Metadata()
 		formats := []NameIDFormat{PersistentNameIDFormat, TransientNameIDFormat}
 
-		assert.Check(t, is.DeepEqual(metadata.IDPSSODescriptors[0].AssertionIDRequestServices, soap(assertionIDRequestTestURL)))
+		assert.Equal(t, metadata.IDPSSODescriptors[0].AssertionIDRequestServices, soap(assertionIDRequestTestURL))
 
-		assert.Assert(t, is.Len(metadata.AttributeAuthorityDescriptors, 1))
+		require.Len(t, metadata.AttributeAuthorityDescriptors, 1)
 
 		attributes := metadata.AttributeAuthorityDescriptors[0]
-		assert.Check(t, is.Equal(attributes.ProtocolSupportEnumeration, "urn:oasis:names:tc:SAML:2.0:protocol"))
-		assert.Check(t, is.DeepEqual(attributes.AttributeServices, soap(attributeServiceTestURL)))
-		assert.Check(t, is.DeepEqual(attributes.AssertionIDRequestServices, soap(assertionIDRequestTestURL)))
-		assert.Check(t, is.DeepEqual(attributes.NameIDFormats, formats))
-		assert.Assert(t, is.Len(attributes.KeyDescriptors, 1))
-		assert.Check(t, is.Equal(attributes.KeyDescriptors[0].Use, "signing"))
-		assert.Check(t, is.DeepEqual(attributes.KeyDescriptors[0], metadata.IDPSSODescriptors[0].KeyDescriptors[0]))
+		assert.Equal(t, attributes.ProtocolSupportEnumeration, "urn:oasis:names:tc:SAML:2.0:protocol")
+		assert.Equal(t, attributes.AttributeServices, soap(attributeServiceTestURL))
+		assert.Equal(t, attributes.AssertionIDRequestServices, soap(assertionIDRequestTestURL))
+		assert.Equal(t, attributes.NameIDFormats, formats)
+		require.Len(t, attributes.KeyDescriptors, 1)
+		assert.Equal(t, attributes.KeyDescriptors[0].Use, "signing")
+		assert.Equal(t, attributes.KeyDescriptors[0], metadata.IDPSSODescriptors[0].KeyDescriptors[0])
 
-		assert.Assert(t, is.Len(metadata.AuthnAuthorityDescriptors, 1))
+		require.Len(t, metadata.AuthnAuthorityDescriptors, 1)
 
 		authn := metadata.AuthnAuthorityDescriptors[0]
-		assert.Check(t, is.Equal(authn.ProtocolSupportEnumeration, "urn:oasis:names:tc:SAML:2.0:protocol"))
-		assert.Check(t, is.DeepEqual(authn.AuthnQueryServices, soap(authnQueryServiceTestURL)))
-		assert.Check(t, is.DeepEqual(authn.AssertionIDRequestServices, soap(assertionIDRequestTestURL)))
-		assert.Check(t, is.DeepEqual(authn.NameIDFormats, formats))
-		assert.Assert(t, is.Len(authn.KeyDescriptors, 1))
-		assert.Check(t, is.Equal(authn.KeyDescriptors[0].Use, "signing"))
+		assert.Equal(t, authn.ProtocolSupportEnumeration, "urn:oasis:names:tc:SAML:2.0:protocol")
+		assert.Equal(t, authn.AuthnQueryServices, soap(authnQueryServiceTestURL))
+		assert.Equal(t, authn.AssertionIDRequestServices, soap(assertionIDRequestTestURL))
+		assert.Equal(t, authn.NameIDFormats, formats)
+		require.Len(t, authn.KeyDescriptors, 1)
+		assert.Equal(t, authn.KeyDescriptors[0].Use, "signing")
 	})
 
 	t.Run("queries without an AssertionStore", func(t *testing.T) {
@@ -1724,11 +1724,11 @@ func TestQueryMetadata(t *testing.T) {
 		f.test.IDP.AssertionStore = nil
 
 		metadata := f.test.IDP.Metadata()
-		assert.Assert(t, is.Len(metadata.AttributeAuthorityDescriptors, 1))
-		assert.Assert(t, is.Len(metadata.AuthnAuthorityDescriptors, 1))
-		assert.Check(t, is.Len(metadata.AttributeAuthorityDescriptors[0].AssertionIDRequestServices, 0))
-		assert.Check(t, is.Len(metadata.AuthnAuthorityDescriptors[0].AssertionIDRequestServices, 0))
-		assert.Check(t, is.Len(metadata.IDPSSODescriptors[0].AssertionIDRequestServices, 0))
+		require.Len(t, metadata.AttributeAuthorityDescriptors, 1)
+		require.Len(t, metadata.AuthnAuthorityDescriptors, 1)
+		assert.Len(t, metadata.AttributeAuthorityDescriptors[0].AssertionIDRequestServices, 0)
+		assert.Len(t, metadata.AuthnAuthorityDescriptors[0].AssertionIDRequestServices, 0)
+		assert.Len(t, metadata.IDPSSODescriptors[0].AssertionIDRequestServices, 0)
 	})
 
 	t.Run("an AssertionStore without queries", func(t *testing.T) {
@@ -1736,9 +1736,9 @@ func TestQueryMetadata(t *testing.T) {
 		f.test.IDP.SessionProvider = &f.provider.mockSessionProvider
 
 		metadata := f.test.IDP.Metadata()
-		assert.Check(t, is.Len(metadata.AttributeAuthorityDescriptors, 0))
-		assert.Check(t, is.Len(metadata.AuthnAuthorityDescriptors, 0))
-		assert.Check(t, is.DeepEqual(metadata.IDPSSODescriptors[0].AssertionIDRequestServices, soap(assertionIDRequestTestURL)))
+		assert.Len(t, metadata.AttributeAuthorityDescriptors, 0)
+		assert.Len(t, metadata.AuthnAuthorityDescriptors, 0)
+		assert.Equal(t, metadata.IDPSSODescriptors[0].AssertionIDRequestServices, soap(assertionIDRequestTestURL))
 	})
 
 	t.Run("one query service", func(t *testing.T) {
@@ -1746,8 +1746,8 @@ func TestQueryMetadata(t *testing.T) {
 		f.test.IDP.AuthnQueryServiceURL = url.URL{}
 
 		metadata := f.test.IDP.Metadata()
-		assert.Check(t, is.Len(metadata.AttributeAuthorityDescriptors, 1))
-		assert.Check(t, is.Len(metadata.AuthnAuthorityDescriptors, 0))
+		assert.Len(t, metadata.AttributeAuthorityDescriptors, 1)
+		assert.Len(t, metadata.AuthnAuthorityDescriptors, 0)
 	})
 
 	t.Run("it is valid metadata that parses back", func(t *testing.T) {
@@ -1756,15 +1756,15 @@ func TestQueryMetadata(t *testing.T) {
 		w := httptest.NewRecorder()
 		f.test.IDP.ServeMetadata(w, httptest.NewRequest(http.MethodGet, f.test.IDP.MetadataURL.String(), nil))
 
-		assert.NilError(t, xmlrv.Validate(w.Body.Bytes()))
+		require.NoError(t, xmlrv.Validate(w.Body.Bytes()))
 
 		parsed := &EntityDescriptor{}
-		assert.NilError(t, xml.Unmarshal(w.Body.Bytes(), parsed))
-		assert.Assert(t, is.Len(parsed.AttributeAuthorityDescriptors, 1))
-		assert.Check(t, is.DeepEqual(parsed.AttributeAuthorityDescriptors[0].AttributeServices, soap(attributeServiceTestURL)))
-		assert.Assert(t, is.Len(parsed.AuthnAuthorityDescriptors, 1))
-		assert.Check(t, is.DeepEqual(parsed.AuthnAuthorityDescriptors[0].AuthnQueryServices, soap(authnQueryServiceTestURL)))
-		assert.Check(t, is.DeepEqual(parsed.IDPSSODescriptors[0].AssertionIDRequestServices, soap(assertionIDRequestTestURL)))
+		require.NoError(t, xml.Unmarshal(w.Body.Bytes(), parsed))
+		require.Len(t, parsed.AttributeAuthorityDescriptors, 1)
+		assert.Equal(t, parsed.AttributeAuthorityDescriptors[0].AttributeServices, soap(attributeServiceTestURL))
+		require.Len(t, parsed.AuthnAuthorityDescriptors, 1)
+		assert.Equal(t, parsed.AuthnAuthorityDescriptors[0].AuthnQueryServices, soap(authnQueryServiceTestURL))
+		assert.Equal(t, parsed.IDPSSODescriptors[0].AssertionIDRequestServices, soap(assertionIDRequestTestURL))
 	})
 }
 
@@ -1782,7 +1782,7 @@ func TestHandlerServesQueries(t *testing.T) {
 
 			response := f.answer(t, w)
 			assertQueryStatus(t, response, StatusSuccess, "")
-			assert.Check(t, is.Len(response.Assertions, 1))
+			assert.Len(t, response.Assertions, 1)
 		})
 
 		// Each service only accepts its own message.
@@ -1812,7 +1812,7 @@ func TestHandlerServesQueries(t *testing.T) {
 		for _, service := range queryServices {
 			w := httptest.NewRecorder()
 			handler.ServeHTTP(w, queryPost(t, service.url, service.message(f)))
-			assert.Check(t, is.Equal(w.Code, http.StatusNotFound))
+			assert.Equal(t, w.Code, http.StatusNotFound)
 		}
 	})
 }
@@ -1830,15 +1830,15 @@ func TestServeQueryRefusesReplay(t *testing.T) {
 			// A request that can't be verified is refused without being recorded, so nobody but the service
 			// provider can use up its IDs.
 			assertQueryStatus(t, f.answer(t, f.serve(service, queryPost(t, service.url, message))), StatusRequester, StatusRequestDenied)
-			assert.Check(t, is.Equal(store.calls(), 0))
+			assert.Equal(t, store.calls(), 0)
 
 			// SAMLSec §6.1.2: the request is answered once, and is a replay after that.
 			assertQueryStatus(t, f.query(t, service, message), StatusSuccess, "")
-			assert.Assert(t, is.Equal(store.calls(), 1))
-			assert.Check(t, store.expiries[0].Equal(TimeNow().Add(MaxIssueDelay+2*MaxClockSkew)))
+			require.Equal(t, store.calls(), 1)
+			assert.True(t, store.expiries[0].Equal(TimeNow().Add(MaxIssueDelay+2*MaxClockSkew)))
 
 			assertQueryStatus(t, f.query(t, service, message), StatusRequester, StatusRequestDenied)
-			assert.Check(t, is.Contains(f.log.String(), "is a replay"))
+			assert.Contains(t, f.log.String(), "is a replay")
 
 			// Another request is not, and nor is the same ID from another kind of message.
 			assertQueryStatus(t, f.query(t, service, service.message(f)), StatusSuccess, "")
@@ -1852,7 +1852,7 @@ func TestServeQueryRefusesReplay(t *testing.T) {
 			store.err = errors.New("store down")
 			response := f.query(t, service, service.message(f))
 			assertQueryStatus(t, response, StatusResponder, "")
-			assert.Check(t, is.Len(response.Assertions, 0))
+			assert.Len(t, response.Assertions, 0)
 		})
 	}
 }

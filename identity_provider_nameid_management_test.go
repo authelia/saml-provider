@@ -19,9 +19,10 @@ import (
 	"time"
 
 	"github.com/beevik/etree"
-	"gotest.tools/assert"
-	is "gotest.tools/assert/cmp"
-	"gotest.tools/golden"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+
+	"authelia.com/provider/saml/internal/golden"
 )
 
 const (
@@ -228,10 +229,10 @@ func signTestElement(t *testing.T, signer *ServiceProvider, el *etree.Element) *
 	}
 
 	signingContext, err := GetSigningContext(signer)
-	assert.NilError(t, err)
+	require.NoError(t, err)
 
 	signed, err := signingContext.SignEnveloped(el)
-	assert.NilError(t, err)
+	require.NoError(t, err)
 
 	return signed
 }
@@ -251,20 +252,20 @@ func nameIDTestSOAPPost(t *testing.T, target string, el *etree.Element) *http.Re
 func nameIDTestSOAPMessage(t *testing.T, w *httptest.ResponseRecorder, tag string) *etree.Element {
 	t.Helper()
 
-	assert.Assert(t, is.Equal(w.Code, http.StatusOK), "body: %s", w.Body.String())
+	require.Equal(t, w.Code, http.StatusOK, "body: %s", w.Body.String())
 
 	envelope := soapTestParseResponse(t, w)
 
 	body := envelope.FindElement("./Body")
-	assert.Assert(t, body != nil)
-	assert.Assert(t, is.Len(body.ChildElements(), 1))
+	require.NotNil(t, body)
+	require.Len(t, body.ChildElements(), 1)
 
 	message := detachSOAPBodyChild(body.ChildElements()[0])
-	assert.Assert(t, is.Equal(message.Tag, tag))
-	assert.Assert(t, is.Equal(message.NamespaceURI(), samlProtocolNS))
+	require.Equal(t, message.Tag, tag)
+	require.Equal(t, message.NamespaceURI(), samlProtocolNS)
 
 	verified, err := verifyEnvelopedSignature(message, []*x509.Certificate{mustParseCertificate(golden.Get(t, "idp_cert.pem"))}, anySignaturePolicy)
-	assert.NilError(t, err)
+	require.NoError(t, err)
 
 	return verified
 }
@@ -300,21 +301,21 @@ func frontChannelManageNameIDResult(t *testing.T, w *httptest.ResponseRecorder, 
 	switch w.Code {
 	case http.StatusFound:
 		location, err := url.Parse(w.Header().Get("Location"))
-		assert.NilError(t, err)
+		require.NoError(t, err)
 
 		// SAMLProfiles §4.5.3.2: the response MUST be signed, which on this binding is in the query.
-		assert.NilError(t, verifyRedirectSignature(location.RawQuery, "SAMLResponse", certificates, anySignaturePolicy))
+		require.NoError(t, verifyRedirectSignature(location.RawQuery, "SAMLResponse", certificates, anySignaturePolicy))
 
 		compressed, err := base64.StdEncoding.DecodeString(location.Query().Get("SAMLResponse"))
-		assert.NilError(t, err)
+		require.NoError(t, err)
 		buf, err := io.ReadAll(flate.NewReader(bytes.NewReader(compressed)))
-		assert.NilError(t, err)
+		require.NoError(t, err)
 
 		doc := etree.NewDocument()
-		assert.NilError(t, doc.ReadFromBytes(buf))
+		require.NoError(t, doc.ReadFromBytes(buf))
 
 		result.Response = &ManageNameIDResponse{}
-		assert.NilError(t, unmarshalElement(doc.Root(), result.Response))
+		require.NoError(t, unmarshalElement(doc.Root(), result.Response))
 
 		result.Binding, result.RelayState = HTTPRedirectBinding, location.Query().Get("RelayState")
 		location.RawQuery = ""
@@ -324,27 +325,27 @@ func frontChannelManageNameIDResult(t *testing.T, w *httptest.ResponseRecorder, 
 		field := func(name string) string {
 			marker := `name="` + name + `" value="`
 			start := strings.Index(body, marker)
-			assert.Assert(t, start >= 0, "no %s in %q", name, body)
+			require.True(t, start >= 0, "no %s in %q", name, body)
 			value, _, _ := strings.Cut(body[start+len(marker):], `"`)
 
 			return html.UnescapeString(value)
 		}
 
 		buf, err := base64.StdEncoding.DecodeString(field("SAMLResponse"))
-		assert.NilError(t, err)
+		require.NoError(t, err)
 
 		doc := etree.NewDocument()
-		assert.NilError(t, doc.ReadFromBytes(buf))
+		require.NoError(t, doc.ReadFromBytes(buf))
 
 		verified, err := verifyEnvelopedSignature(doc.Root(), certificates, anySignaturePolicy)
-		assert.NilError(t, err)
+		require.NoError(t, err)
 
 		result.Response = &ManageNameIDResponse{}
-		assert.NilError(t, unmarshalElement(verified, result.Response))
+		require.NoError(t, unmarshalElement(verified, result.Response))
 
 		marker := `action="`
 		start := strings.Index(body, marker)
-		assert.Assert(t, start >= 0)
+		require.True(t, start >= 0)
 		action, _, _ := strings.Cut(body[start+len(marker):], `"`)
 
 		result.Binding, result.RelayState, result.Destination = HTTPPostBinding, field("RelayState"), html.UnescapeString(action)
@@ -360,7 +361,7 @@ var manageNameIDBindings = map[string]func(t *testing.T, test *IdentityProviderT
 
 		el, id := manageNameIDRequestElement(test, manageNameIDTestURL, opts)
 		u, err := redirectURL(manageNameIDTestURL, "SAMLRequest", el, "relay", testSigner(&test.SP, opts.signer, opts.unsigned))
-		assert.NilError(t, err)
+		require.NoError(t, err)
 
 		w := httptest.NewRecorder()
 		test.IDP.ServeManageNameID(w, httptest.NewRequest(http.MethodGet, u.String(), nil))
@@ -375,7 +376,7 @@ var manageNameIDBindings = map[string]func(t *testing.T, test *IdentityProviderT
 		doc := etree.NewDocument()
 		doc.SetRoot(signTestElement(t, testSigner(&test.SP, opts.signer, opts.unsigned), el))
 		body, err := doc.WriteToBytes()
-		assert.NilError(t, err)
+		require.NoError(t, err)
 
 		form := url.Values{"SAMLRequest": {base64.StdEncoding.EncodeToString(body)}, "RelayState": {"relay"}}
 		r := httptest.NewRequest(http.MethodPost, manageNameIDTestURL, strings.NewReader(form.Encode()))
@@ -399,7 +400,7 @@ var manageNameIDBindings = map[string]func(t *testing.T, test *IdentityProviderT
 
 		if w.Code == http.StatusOK {
 			result.Response = &ManageNameIDResponse{}
-			assert.NilError(t, unmarshalElement(nameIDTestSOAPMessage(t, w, "ManageNameIDResponse"), result.Response))
+			require.NoError(t, unmarshalElement(nameIDTestSOAPMessage(t, w, "ManageNameIDResponse"), result.Response))
 		}
 
 		return result
@@ -411,16 +412,16 @@ var manageNameIDBindings = map[string]func(t *testing.T, test *IdentityProviderT
 func checkStatus(t *testing.T, status Status, top, second string) {
 	t.Helper()
 
-	assert.Check(t, is.Equal(status.StatusCode.Value, top))
+	assert.Equal(t, status.StatusCode.Value, top)
 
 	if second == "" {
-		assert.Check(t, status.StatusCode.StatusCode == nil)
-	} else if assert.Check(t, status.StatusCode.StatusCode != nil, "no second-level status") {
-		assert.Check(t, is.Equal(status.StatusCode.StatusCode.Value, second))
+		assert.Nil(t, status.StatusCode.StatusCode)
+	} else if assert.True(t, status.StatusCode.StatusCode != nil, "no second-level status") {
+		assert.Equal(t, status.StatusCode.StatusCode.Value, second)
 	}
 
-	assert.Check(t, statusSaysNothingOfTheRequest(status))
-	assert.Check(t, status.StatusDetail == nil)
+	assert.True(t, statusSaysNothingOfTheRequest(status))
+	assert.Nil(t, status.StatusDetail)
 }
 
 // idpEncrypter returns the encrypter of the service provider to the identity provider, negotiated from its
@@ -429,7 +430,7 @@ func idpEncrypter(t *testing.T, test *IdentityProviderTest) *elementEncrypter {
 	t.Helper()
 
 	encrypter, err := test.SP.idpElementEncrypter()
-	assert.NilError(t, err)
+	require.NoError(t, err)
 
 	return encrypter
 }
@@ -450,33 +451,33 @@ func TestManageNameIDNewID(t *testing.T) {
 			test, provider := manageNameIDTestIDP(t)
 
 			result := send(t, test, manageNameIDOptions{})
-			assert.Assert(t, result.Response != nil, "HTTP status %d", result.Code)
+			require.True(t, result.Response != nil, "HTTP status %d", result.Code)
 			checkStatus(t, result.Response.Status, StatusSuccess, "")
 
 			// SAMLCore §3.2.2, SAMLProfiles §4.5.4.2.
-			assert.Check(t, is.Equal(result.Response.InResponseTo, result.RequestID))
-			assert.Check(t, is.Equal(result.Response.Version, "2.0"))
-			assert.Assert(t, result.Response.Issuer != nil)
-			assert.Check(t, is.Equal(result.Response.Issuer.Value, test.IDP.MetadataURL.String()))
-			assert.Check(t, is.Equal(result.Response.Issuer.Format, string(EntityNameIDFormat)))
+			assert.Equal(t, result.Response.InResponseTo, result.RequestID)
+			assert.Equal(t, result.Response.Version, "2.0")
+			require.NotNil(t, result.Response.Issuer)
+			assert.Equal(t, result.Response.Issuer.Value, test.IDP.MetadataURL.String())
+			assert.Equal(t, result.Response.Issuer.Format, string(EntityNameIDFormat))
 
 			if result.Binding == SOAPBinding {
-				assert.Check(t, is.Equal(result.Response.Destination, ""))
+				assert.Equal(t, result.Response.Destination, "")
 			} else {
-				assert.Check(t, is.Equal(result.Response.Destination, manageNameIDTestSPURL))
-				assert.Check(t, is.Equal(result.Destination, manageNameIDTestSPURL))
-				assert.Check(t, is.Equal(result.RelayState, "relay"))
+				assert.Equal(t, result.Response.Destination, manageNameIDTestSPURL)
+				assert.Equal(t, result.Destination, manageNameIDTestSPURL)
+				assert.Equal(t, result.RelayState, "relay")
 			}
 
 			// SAMLCore §3.6.3: the NewID is the SPProvidedID from now on.
-			assert.Assert(t, is.Len(provider.calls, 1))
-			assert.Check(t, is.Equal(provider.calls[0].SPProvidedID, "sp-alias"))
-			assert.Check(t, !provider.calls[0].Terminate)
-			assert.Check(t, is.DeepEqual(provider.calls[0].NameID, *testNameID(test, &test.SP)))
-			assert.Check(t, is.Equal(provider.calls[0].Request.ServiceProviderMetadata.EntityID, test.SP.MetadataURL.String()))
-			assert.Check(t, !provider.calls[0].Request.NameIDEncrypted)
-			assert.Check(t, !provider.calls[0].Request.NewIDEncrypted)
-			assert.Check(t, !provider.calls[0].Request.Unidentified)
+			require.Len(t, provider.calls, 1)
+			assert.Equal(t, provider.calls[0].SPProvidedID, "sp-alias")
+			assert.False(t, provider.calls[0].Terminate)
+			assert.Equal(t, provider.calls[0].NameID, *testNameID(test, &test.SP))
+			assert.Equal(t, provider.calls[0].Request.ServiceProviderMetadata.EntityID, test.SP.MetadataURL.String())
+			assert.False(t, provider.calls[0].Request.NameIDEncrypted)
+			assert.False(t, provider.calls[0].Request.NewIDEncrypted)
+			assert.False(t, provider.calls[0].Request.Unidentified)
 		})
 	}
 }
@@ -489,13 +490,13 @@ func TestManageNameIDTerminate(t *testing.T) {
 			result := send(t, test, manageNameIDOptions{mutate: func(request *ManageNameIDRequest) {
 				request.NewID, request.Terminate = "", true
 			}})
-			assert.Assert(t, result.Response != nil, "HTTP status %d", result.Code)
+			require.True(t, result.Response != nil, "HTTP status %d", result.Code)
 			checkStatus(t, result.Response.Status, StatusSuccess, "")
 
-			assert.Assert(t, is.Len(provider.calls, 1))
-			assert.Check(t, provider.calls[0].Terminate)
-			assert.Check(t, is.Equal(provider.calls[0].SPProvidedID, ""))
-			assert.Check(t, is.Equal(provider.calls[0].NameID.Value, "p-alice"))
+			require.Len(t, provider.calls, 1)
+			assert.True(t, provider.calls[0].Terminate)
+			assert.Equal(t, provider.calls[0].SPProvidedID, "")
+			assert.Equal(t, provider.calls[0].NameID.Value, "p-alice")
 		})
 	}
 }
@@ -513,30 +514,30 @@ func TestManageNameIDEncrypted(t *testing.T) {
 					var err error
 
 					request.EncryptedID, err = encrypter.encryptNameID(request.NameID)
-					assert.NilError(t, err)
+					require.NoError(t, err)
 					request.NewEncryptedID, err = encrypter.encryptNewID("sp-secret-alias")
-					assert.NilError(t, err)
+					require.NoError(t, err)
 				},
 				mutateEl: func(el *etree.Element) {
 					// Neither identifier is in the message in plaintext.
 					text := elementToString(el)
-					assert.Check(t, !strings.Contains(text, "p-alice"))
-					assert.Check(t, !strings.Contains(text, "alias"))
-					assert.Check(t, el.FindElement("./EncryptedID") != nil)
-					assert.Check(t, el.FindElement("./NewEncryptedID") != nil)
-					assert.Check(t, el.FindElement("./NameID") == nil)
-					assert.Check(t, el.FindElement("./NewID") == nil)
+					assert.False(t, strings.Contains(text, "p-alice"))
+					assert.False(t, strings.Contains(text, "alias"))
+					assert.NotNil(t, el.FindElement("./EncryptedID"))
+					assert.NotNil(t, el.FindElement("./NewEncryptedID"))
+					assert.Nil(t, el.FindElement("./NameID"))
+					assert.Nil(t, el.FindElement("./NewID"))
 				},
 			})
-			assert.Assert(t, result.Response != nil, "HTTP status %d", result.Code)
+			require.True(t, result.Response != nil, "HTTP status %d", result.Code)
 			checkStatus(t, result.Response.Status, StatusSuccess, "")
 
-			assert.Assert(t, is.Len(provider.calls, 1))
-			assert.Check(t, is.Equal(provider.calls[0].SPProvidedID, "sp-secret-alias"))
-			assert.Check(t, is.DeepEqual(provider.calls[0].NameID, *testNameID(test, &test.SP)))
-			assert.Check(t, provider.calls[0].Request.NameIDEncrypted)
-			assert.Check(t, provider.calls[0].Request.NewIDEncrypted)
-			assert.Check(t, !provider.calls[0].Request.Unidentified)
+			require.Len(t, provider.calls, 1)
+			assert.Equal(t, provider.calls[0].SPProvidedID, "sp-secret-alias")
+			assert.Equal(t, provider.calls[0].NameID, *testNameID(test, &test.SP))
+			assert.True(t, provider.calls[0].Request.NameIDEncrypted)
+			assert.True(t, provider.calls[0].Request.NewIDEncrypted)
+			assert.False(t, provider.calls[0].Request.Unidentified)
 		})
 	}
 }
@@ -546,17 +547,17 @@ func TestManageNameIDNewEncryptedIDRefused(t *testing.T) {
 	for name, encrypt := range map[string]func(t *testing.T, test *IdentityProviderTest) *etree.Element{
 		"encrypted to another key": func(t *testing.T, test *IdentityProviderTest) *etree.Element {
 			el, err := otherKeyEncrypter(t, test).encryptNewID("sp-alias")
-			assert.NilError(t, err)
+			require.NoError(t, err)
 
 			return el
 		},
 		"tampered ciphertext": func(t *testing.T, test *IdentityProviderTest) *etree.Element {
 			el, err := idpEncrypter(t, test).encryptNewID("sp-alias")
-			assert.NilError(t, err)
+			require.NoError(t, err)
 
 			value := el.FindElement("./EncryptedData/CipherData/CipherValue")
 			buf, err := base64.StdEncoding.DecodeString(value.Text())
-			assert.NilError(t, err)
+			require.NoError(t, err)
 
 			buf[len(buf)-1] ^= 0x01
 			value.SetText(base64.StdEncoding.EncodeToString(buf))
@@ -569,13 +570,13 @@ func TestManageNameIDNewEncryptedIDRefused(t *testing.T) {
 			encrypter := &elementEncrypter{certificate: test.Certificate, encrypter: testElementEncrypter(t, method(aes128CBC)).encrypter}
 
 			el, err := encrypter.encryptNewID("sp-alias")
-			assert.NilError(t, err)
+			require.NoError(t, err)
 
 			return el
 		},
 		"holds a NameID": func(t *testing.T, test *IdentityProviderTest) *etree.Element {
 			el, err := idpEncrypter(t, test).encryptNameID(testNameID(test, &test.SP))
-			assert.NilError(t, err)
+			require.NoError(t, err)
 
 			el.Tag, el.Space = "NewEncryptedID", "samlp"
 
@@ -583,7 +584,7 @@ func TestManageNameIDNewEncryptedIDRefused(t *testing.T) {
 		},
 		"holds an empty NewID": func(t *testing.T, test *IdentityProviderTest) *etree.Element {
 			el, err := idpEncrypter(t, test).encryptNewID("")
-			assert.NilError(t, err)
+			require.NoError(t, err)
 
 			return el
 		},
@@ -595,9 +596,9 @@ func TestManageNameIDNewEncryptedIDRefused(t *testing.T) {
 				result := send(t, test, manageNameIDOptions{mutate: func(request *ManageNameIDRequest) {
 					request.NewEncryptedID = encrypt(t, test)
 				}})
-				assert.Assert(t, result.Response != nil, "HTTP status %d", result.Code)
+				require.True(t, result.Response != nil, "HTTP status %d", result.Code)
 				checkStatus(t, result.Response.Status, StatusRequester, StatusRequestDenied)
-				assert.Check(t, is.Len(provider.calls, 0))
+				assert.Len(t, provider.calls, 0)
 			})
 		}
 	}
@@ -626,7 +627,7 @@ func TestManageNameIDUnknownPrincipal(t *testing.T) {
 				var err error
 
 				request.EncryptedID, err = idpEncrypter(t, test).encryptNameID(request.NameID)
-				assert.NilError(t, err)
+				require.NoError(t, err)
 			},
 			calls: 1,
 		},
@@ -635,7 +636,7 @@ func TestManageNameIDUnknownPrincipal(t *testing.T) {
 				var err error
 
 				request.EncryptedID, err = otherKeyEncrypter(t, test).encryptNameID(request.NameID)
-				assert.NilError(t, err)
+				require.NoError(t, err)
 			},
 		},
 		"tampered ciphertext": {
@@ -643,11 +644,11 @@ func TestManageNameIDUnknownPrincipal(t *testing.T) {
 				var err error
 
 				request.EncryptedID, err = idpEncrypter(t, test).encryptNameID(request.NameID)
-				assert.NilError(t, err)
+				require.NoError(t, err)
 
 				value := request.EncryptedID.FindElement("./EncryptedData/CipherData/CipherValue")
 				buf, err := base64.StdEncoding.DecodeString(value.Text())
-				assert.NilError(t, err)
+				require.NoError(t, err)
 
 				buf[len(buf)-1] ^= 0x01
 				value.SetText(base64.StdEncoding.EncodeToString(buf))
@@ -661,7 +662,7 @@ func TestManageNameIDUnknownPrincipal(t *testing.T) {
 				var err error
 
 				request.EncryptedID, err = idpEncrypter(t, test).encryptNameID(request.NameID)
-				assert.NilError(t, err)
+				require.NoError(t, err)
 			},
 		},
 		"identifier of another service provider": {
@@ -687,7 +688,7 @@ func TestManageNameIDUnknownPrincipal(t *testing.T) {
 				var err error
 
 				request.EncryptedID, err = idpEncrypter(t, test).encryptNameID(request.NameID)
-				assert.NilError(t, err)
+				require.NoError(t, err)
 			},
 		},
 	} {
@@ -698,15 +699,15 @@ func TestManageNameIDUnknownPrincipal(t *testing.T) {
 				result := send(t, test, manageNameIDOptions{mutate: func(request *ManageNameIDRequest) {
 					tc.mutate(t, test, request)
 				}})
-				assert.Assert(t, result.Response != nil, "HTTP status %d", result.Code)
+				require.True(t, result.Response != nil, "HTTP status %d", result.Code)
 				checkStatus(t, result.Response.Status, StatusRequester, StatusUnknownPrincipal)
 
-				assert.Assert(t, is.Len(provider.calls, tc.calls))
-				assert.Check(t, is.Len(provider.lookups, 0))
+				require.Len(t, provider.calls, tc.calls)
+				assert.Len(t, provider.lookups, 0)
 
 				for _, call := range provider.calls {
-					assert.Check(t, !call.Request.Unidentified)
-					assert.Check(t, is.Equal(call.NameID.Value, "p-mallory"))
+					assert.False(t, call.Request.Unidentified)
+					assert.Equal(t, call.NameID.Value, "p-mallory")
 				}
 			})
 		}
@@ -720,7 +721,7 @@ func TestManageNameIDUnidentifiedNeverReachesProvider(t *testing.T) {
 		var err error
 
 		request.EncryptedID, err = otherKeyEncrypter(t, test).encryptNameID(request.NameID)
-		assert.NilError(t, err)
+		require.NoError(t, err)
 	}
 
 	for name, mutate := range map[string]func(*ManageNameIDRequest){
@@ -735,12 +736,12 @@ func TestManageNameIDUnidentifiedNeverReachesProvider(t *testing.T) {
 					mutate(request)
 					unidentified(t, test, request)
 				}})
-				assert.Assert(t, result.Response != nil, "HTTP status %d", result.Code)
+				require.True(t, result.Response != nil, "HTTP status %d", result.Code)
 				checkStatus(t, result.Response.Status, StatusRequester, StatusUnknownPrincipal)
 
-				assert.Check(t, is.Len(provider.calls, 0))
-				assert.Check(t, is.Len(provider.lookups, 0))
-				assert.Check(t, is.Len(provider.aliases, 0))
+				assert.Len(t, provider.calls, 0)
+				assert.Len(t, provider.lookups, 0)
+				assert.Len(t, provider.aliases, 0)
 			})
 		}
 	}
@@ -759,11 +760,11 @@ func TestManageNameIDUnidentifiedNeverReachesProvider(t *testing.T) {
 		}
 
 		err := test.IDP.manageNameID(httptest.NewRequest(http.MethodPost, "/", nil), req)
-		assert.Check(t, errors.Is(err, ErrUnknownPrincipal), "%v", err)
+		assert.True(t, errors.Is(err, ErrUnknownPrincipal), "%v", err)
 		checkStatus(t, test.IDP.ErrorStatus(err), StatusRequester, StatusUnknownPrincipal)
 	}
 
-	assert.Check(t, is.Len(provider.calls, 0))
+	assert.Len(t, provider.calls, 0)
 }
 
 // An affiliation that the service provider is a member of may qualify the identifier (SAMLCore §3.6.3).
@@ -789,10 +790,10 @@ func TestManageNameIDAffiliation(t *testing.T) {
 	result := manageNameIDBindings["soap"](t, test, manageNameIDOptions{mutate: func(request *ManageNameIDRequest) {
 		request.NameID.SPNameQualifier = affiliation
 	}})
-	assert.Assert(t, result.Response != nil)
+	require.NotNil(t, result.Response)
 	checkStatus(t, result.Response.Status, StatusSuccess, "")
-	assert.Assert(t, is.Len(provider.calls, 1))
-	assert.Check(t, is.Equal(provider.calls[0].NameID.SPNameQualifier, affiliation))
+	require.Len(t, provider.calls, 1)
+	assert.Equal(t, provider.calls[0].NameID.SPNameQualifier, affiliation)
 }
 
 // Without a NameIDManagementProvider the protocol is not supported, and not advertised.
@@ -803,10 +804,10 @@ func TestManageNameIDWithoutProvider(t *testing.T) {
 			test.IDP.NameIDProvider = nil
 
 			result := send(t, test, manageNameIDOptions{})
-			assert.Assert(t, result.Response != nil, "HTTP status %d", result.Code)
+			require.True(t, result.Response != nil, "HTTP status %d", result.Code)
 			checkStatus(t, result.Response.Status, StatusResponder, StatusRequestUnsupported)
 
-			assert.Check(t, is.Len(test.IDP.Metadata().IDPSSODescriptors[0].ManageNameIDServices, 0))
+			assert.Len(t, test.IDP.Metadata().IDPSSODescriptors[0].ManageNameIDServices, 0)
 		})
 	}
 }
@@ -818,7 +819,7 @@ func TestManageNameIDProviderFailure(t *testing.T) {
 			provider.err = errors.New("the database is down: secret detail")
 
 			result := send(t, test, manageNameIDOptions{})
-			assert.Assert(t, result.Response != nil, "HTTP status %d", result.Code)
+			require.True(t, result.Response != nil, "HTTP status %d", result.Code)
 			checkStatus(t, result.Response.Status, StatusResponder, "")
 		})
 	}
@@ -866,16 +867,16 @@ func TestManageNameIDRejectsUnauthenticatedRequests(t *testing.T) {
 				test, provider := manageNameIDTestIDP(t)
 
 				result := send(t, test, options(t, test))
-				assert.Check(t, is.Len(provider.calls, 0))
+				assert.Len(t, provider.calls, 0)
 
 				if binding != "soap" {
-					assert.Check(t, is.Equal(result.Code, http.StatusBadRequest))
-					assert.Check(t, result.Response == nil)
+					assert.Equal(t, result.Code, http.StatusBadRequest)
+					assert.Nil(t, result.Response)
 
 					return
 				}
 
-				assert.Assert(t, result.Response != nil, "HTTP status %d", result.Code)
+				require.True(t, result.Response != nil, "HTTP status %d", result.Code)
 				checkStatus(t, result.Response.Status, StatusRequester, StatusRequestDenied)
 			})
 		}
@@ -894,9 +895,9 @@ func TestManageNameIDRejectsAlteredRequest(t *testing.T) {
 	test.IDP.ServeSOAPManageNameID(w, nameIDTestSOAPPost(t, soapManageNameIDTestURL, el))
 
 	response := &ManageNameIDResponse{}
-	assert.NilError(t, unmarshalElement(nameIDTestSOAPMessage(t, w, "ManageNameIDResponse"), response))
+	require.NoError(t, unmarshalElement(nameIDTestSOAPMessage(t, w, "ManageNameIDResponse"), response))
 	checkStatus(t, response.Status, StatusRequester, StatusRequestDenied)
-	assert.Check(t, is.Len(provider.calls, 0))
+	assert.Len(t, provider.calls, 0)
 }
 
 // The requester of a valid request is answered with an error status for what is wrong with the request.
@@ -971,9 +972,9 @@ func TestManageNameIDRequestStatus(t *testing.T) {
 				test, provider := manageNameIDTestIDP(t)
 
 				result := send(t, test, tc.options)
-				assert.Assert(t, result.Response != nil, "HTTP status %d", result.Code)
+				require.True(t, result.Response != nil, "HTTP status %d", result.Code)
 				checkStatus(t, result.Response.Status, tc.top, tc.second)
-				assert.Check(t, is.Len(provider.calls, 0))
+				assert.Len(t, provider.calls, 0)
 			})
 		}
 	}
@@ -989,13 +990,13 @@ func TestManageNameIDWithoutDestination(t *testing.T) {
 			result := send(t, test, manageNameIDOptions{mutate: func(request *ManageNameIDRequest) { request.Destination = "" }})
 
 			if binding != "soap" {
-				assert.Check(t, is.Equal(result.Code, http.StatusBadRequest))
-				assert.Check(t, is.Len(provider.calls, 0))
+				assert.Equal(t, result.Code, http.StatusBadRequest)
+				assert.Len(t, provider.calls, 0)
 
 				return
 			}
 
-			assert.Assert(t, result.Response != nil, "HTTP status %d", result.Code)
+			require.True(t, result.Response != nil, "HTTP status %d", result.Code)
 			checkStatus(t, result.Response.Status, StatusSuccess, "")
 		})
 	}
@@ -1007,9 +1008,9 @@ func TestManageNameIDResponseEndpoint(t *testing.T) {
 		test, _ := manageNameIDTestIDP(t, HTTPRedirectBinding)
 
 		result := manageNameIDBindings["post"](t, test, manageNameIDOptions{})
-		assert.Assert(t, result.Response != nil, "HTTP status %d", result.Code)
-		assert.Check(t, is.Equal(result.Binding, HTTPRedirectBinding))
-		assert.Check(t, is.Equal(result.Destination, manageNameIDTestSPURL))
+		require.True(t, result.Response != nil, "HTTP status %d", result.Code)
+		assert.Equal(t, result.Binding, HTTPRedirectBinding)
+		assert.Equal(t, result.Destination, manageNameIDTestSPURL)
 	})
 
 	t.Run("response location", func(t *testing.T) {
@@ -1021,9 +1022,9 @@ func TestManageNameIDResponseEndpoint(t *testing.T) {
 		}, &test.SP)
 
 		result := manageNameIDBindings["post"](t, test, manageNameIDOptions{})
-		assert.Assert(t, result.Response != nil, "HTTP status %d", result.Code)
-		assert.Check(t, is.Equal(result.Destination, manageNameIDTestSPURL+"/response"))
-		assert.Check(t, is.Equal(result.Response.Destination, manageNameIDTestSPURL+"/response"))
+		require.True(t, result.Response != nil, "HTTP status %d", result.Code)
+		assert.Equal(t, result.Destination, manageNameIDTestSPURL+"/response")
+		assert.Equal(t, result.Response.Destination, manageNameIDTestSPURL+"/response")
 	})
 
 	for name, endpoints := range map[string][]Endpoint{
@@ -1039,8 +1040,8 @@ func TestManageNameIDResponseEndpoint(t *testing.T) {
 			}, &test.SP)
 
 			result := manageNameIDBindings["post"](t, test, manageNameIDOptions{})
-			assert.Check(t, is.Equal(result.Code, http.StatusBadRequest))
-			assert.Check(t, is.Len(provider.calls, 0))
+			assert.Equal(t, result.Code, http.StatusBadRequest)
+			assert.Len(t, provider.calls, 0)
 		})
 	}
 }
@@ -1051,7 +1052,7 @@ func TestServeSOAPManageNameIDEnvelope(t *testing.T) {
 	t.Run("not a POST", func(t *testing.T) {
 		w := httptest.NewRecorder()
 		test.IDP.ServeSOAPManageNameID(w, httptest.NewRequest(http.MethodGet, soapManageNameIDTestURL, nil))
-		assert.Check(t, is.Equal(w.Code, http.StatusMethodNotAllowed))
+		assert.Equal(t, w.Code, http.StatusMethodNotAllowed)
 	})
 
 	t.Run("not an envelope", func(t *testing.T) {
@@ -1060,7 +1061,7 @@ func TestServeSOAPManageNameIDEnvelope(t *testing.T) {
 
 		w := httptest.NewRecorder()
 		test.IDP.ServeSOAPManageNameID(w, r)
-		assert.Check(t, is.Equal(soapFaultCode(t, w), "soapenv:Client"))
+		assert.Equal(t, soapFaultCode(t, w), "soapenv:Client")
 	})
 
 	t.Run("another message", func(t *testing.T) {
@@ -1070,12 +1071,12 @@ func TestServeSOAPManageNameIDEnvelope(t *testing.T) {
 		test.IDP.ServeSOAPManageNameID(w, nameIDTestSOAPPost(t, soapManageNameIDTestURL, el))
 
 		response := &ManageNameIDResponse{}
-		assert.NilError(t, unmarshalElement(nameIDTestSOAPMessage(t, w, "ManageNameIDResponse"), response))
+		require.NoError(t, unmarshalElement(nameIDTestSOAPMessage(t, w, "ManageNameIDResponse"), response))
 		checkStatus(t, response.Status, StatusRequester, StatusRequestUnsupported)
-		assert.Check(t, is.Equal(response.InResponseTo, id))
+		assert.Equal(t, response.InResponseTo, id)
 	})
 
-	assert.Check(t, is.Len(provider.calls, 0))
+	assert.Len(t, provider.calls, 0)
 }
 
 // The identity provider sends no ManageNameIDRequest on the front channel, so it accepts no response there.
@@ -1088,12 +1089,12 @@ func TestServeManageNameIDRefusesResponse(t *testing.T) {
 
 	w := httptest.NewRecorder()
 	test.IDP.ServeManageNameID(w, r)
-	assert.Check(t, is.Equal(w.Code, http.StatusBadRequest))
+	assert.Equal(t, w.Code, http.StatusBadRequest)
 
 	w = httptest.NewRecorder()
 	test.IDP.ServeManageNameID(w, httptest.NewRequest(http.MethodPut, manageNameIDTestURL, nil))
-	assert.Check(t, is.Equal(w.Code, http.StatusBadRequest))
-	assert.Check(t, is.Len(provider.calls, 0))
+	assert.Equal(t, w.Code, http.StatusBadRequest)
+	assert.Len(t, provider.calls, 0)
 }
 
 func TestNameIDServiceMetadata(t *testing.T) {
@@ -1102,18 +1103,18 @@ func TestNameIDServiceMetadata(t *testing.T) {
 	descriptor := test.IDP.Metadata().IDPSSODescriptors[0]
 
 	// SAMLMeta §2.4.2.
-	assert.Check(t, is.DeepEqual(descriptor.ManageNameIDServices, []Endpoint{
+	assert.Equal(t, descriptor.ManageNameIDServices, []Endpoint{
 		{Binding: HTTPRedirectBinding, Location: manageNameIDTestURL},
 		{Binding: HTTPPostBinding, Location: manageNameIDTestURL},
 		{Binding: SOAPBinding, Location: soapManageNameIDTestURL},
-	}))
-	assert.Check(t, is.Len(descriptor.NameIDMappingServices, 0))
+	})
+	assert.Len(t, descriptor.NameIDMappingServices, 0)
 
 	test.IDP.SOAPManageNameIDURL = url.URL{}
-	assert.Check(t, is.Len(test.IDP.Metadata().IDPSSODescriptors[0].ManageNameIDServices, 2))
+	assert.Len(t, test.IDP.Metadata().IDPSSODescriptors[0].ManageNameIDServices, 2)
 
 	test.IDP.ManageNameIDURL = url.URL{}
-	assert.Check(t, is.Len(test.IDP.Metadata().IDPSSODescriptors[0].ManageNameIDServices, 0))
+	assert.Len(t, test.IDP.Metadata().IDPSSODescriptors[0].ManageNameIDServices, 0)
 }
 
 func TestHandlerServesNameIDServices(t *testing.T) {
@@ -1128,19 +1129,19 @@ func TestHandlerServesNameIDServices(t *testing.T) {
 	w := httptest.NewRecorder()
 	handler.ServeHTTP(w, nameIDTestSOAPPost(t, manageNameIDTestURL, signTestElement(t, &test.SP, el)))
 	nameIDTestSOAPMessage(t, w, "ManageNameIDResponse")
-	assert.Check(t, is.Len(provider.calls, 1))
+	assert.Len(t, provider.calls, 1)
 
 	el, id := manageNameIDRequestElement(test, manageNameIDTestURL, manageNameIDOptions{})
 	u, err := redirectURL(manageNameIDTestURL, "SAMLRequest", el, "relay", &test.SP)
-	assert.NilError(t, err)
+	require.NoError(t, err)
 
 	w = httptest.NewRecorder()
 	handler.ServeHTTP(w, httptest.NewRequest(http.MethodGet, u.String(), nil))
 
 	result := frontChannelManageNameIDResult(t, w, id)
-	assert.Assert(t, result.Response != nil, "HTTP status %d", w.Code)
+	require.True(t, result.Response != nil, "HTTP status %d", w.Code)
 	checkStatus(t, result.Response.Status, StatusSuccess, "")
-	assert.Check(t, is.Len(provider.calls, 2))
+	assert.Len(t, provider.calls, 2)
 
 	// Services that share a path never make Handler panic. Two front-channel services can't be told apart, so
 	// the first of them, which is the logout service, gets the requests of the browser, and the SOAP service
@@ -1154,7 +1155,7 @@ func TestHandlerServesNameIDServices(t *testing.T) {
 	w = httptest.NewRecorder()
 	handler.ServeHTTP(w, nameIDTestSOAPPost(t, manageNameIDTestURL, signTestElement(t, &test.SP, el)))
 	nameIDTestSOAPMessage(t, w, "ManageNameIDResponse")
-	assert.Check(t, is.Len(provider.calls, 3))
+	assert.Len(t, provider.calls, 3)
 }
 
 // Several services on the SOAP binding at one path: Handler sends each request to the service of its message.
@@ -1183,10 +1184,10 @@ func TestHandlerServesNameIDServicesAtOneSOAPPath(t *testing.T) {
 	handler.ServeHTTP(w, nameIDTestSOAPPost(t, nameIDMappingTestURL, signTestElement(t, f.a, mapping.Element())))
 
 	response := &NameIDMappingResponse{}
-	assert.NilError(t, unmarshalElement(nameIDTestSOAPMessage(t, w, "NameIDMappingResponse"), response))
+	require.NoError(t, unmarshalElement(nameIDTestSOAPMessage(t, w, "NameIDMappingResponse"), response))
 	checkStatus(t, response.Status, StatusSuccess, "")
-	assert.Check(t, is.Equal(response.InResponseTo, mapping.ID))
-	assert.Check(t, is.Len(f.provider.calls, 1))
+	assert.Equal(t, response.InResponseTo, mapping.ID)
+	assert.Len(t, f.provider.calls, 1)
 
 	// The provider of this fixture doesn't manage identifiers, which the management service answers.
 	el, id := manageNameIDRequestElement(f.test, nameIDMappingTestURL, manageNameIDOptions{})
@@ -1195,9 +1196,9 @@ func TestHandlerServesNameIDServicesAtOneSOAPPath(t *testing.T) {
 	handler.ServeHTTP(w, nameIDTestSOAPPost(t, nameIDMappingTestURL, signTestElement(t, f.a, el)))
 
 	managed := &ManageNameIDResponse{}
-	assert.NilError(t, unmarshalElement(nameIDTestSOAPMessage(t, w, "ManageNameIDResponse"), managed))
+	require.NoError(t, unmarshalElement(nameIDTestSOAPMessage(t, w, "ManageNameIDResponse"), managed))
 	checkStatus(t, managed.Status, StatusResponder, StatusRequestUnsupported)
-	assert.Check(t, is.Equal(managed.InResponseTo, id))
+	assert.Equal(t, managed.InResponseTo, id)
 
 	logout, _ := soapLogoutRequestElement(t, f.a, nil)
 
@@ -1208,7 +1209,7 @@ func TestHandlerServesNameIDServicesAtOneSOAPPath(t *testing.T) {
 	// A request of the browser goes to the front-channel service, which refuses this one as it holds no request.
 	w = httptest.NewRecorder()
 	handler.ServeHTTP(w, httptest.NewRequest(http.MethodGet, nameIDMappingTestURL, nil))
-	assert.Check(t, is.Equal(w.Code, http.StatusBadRequest))
+	assert.Equal(t, w.Code, http.StatusBadRequest)
 }
 
 // SAMLSec §6.1.2: a request is acted on once. A request that changed an identifier and is presented again after a
@@ -1229,7 +1230,7 @@ func TestManageNameIDRefusesReplay(t *testing.T) {
 			test.IDP.ServeSOAPManageNameID(w, nameIDTestSOAPPost(t, soapManageNameIDTestURL, el))
 
 			response := &ManageNameIDResponse{}
-			assert.NilError(t, unmarshalElement(nameIDTestSOAPMessage(t, w, "ManageNameIDResponse"), response))
+			require.NoError(t, unmarshalElement(nameIDTestSOAPMessage(t, w, "ManageNameIDResponse"), response))
 
 			return response
 		}
@@ -1240,30 +1241,30 @@ func TestManageNameIDRefusesReplay(t *testing.T) {
 
 		// A request that isn't verified is not recorded, so nobody else can use up the ID.
 		checkStatus(t, serve(unsigned).Status, StatusRequester, StatusRequestDenied)
-		assert.Check(t, is.Equal(store.calls(), 0))
+		assert.Equal(t, store.calls(), 0)
 
 		checkStatus(t, serve(older.Copy()).Status, StatusSuccess, "")
-		assert.Assert(t, is.Equal(store.calls(), 1))
-		assert.Check(t, strings.HasPrefix(store.keys[0], replayKindManageNameIDRequest+":"))
-		assert.Check(t, store.expiries[0].Equal(TimeNow().Add(MaxIssueDelay+2*MaxClockSkew)))
+		require.Equal(t, store.calls(), 1)
+		assert.True(t, strings.HasPrefix(store.keys[0], replayKindManageNameIDRequest+":"))
+		assert.True(t, store.expiries[0].Equal(TimeNow().Add(MaxIssueDelay+2*MaxClockSkew)))
 
 		newer, _ := manageNameIDRequestElement(test, soapManageNameIDTestURL, newID("alias-two"))
 		checkStatus(t, serve(signTestElement(t, &test.SP, newer)).Status, StatusSuccess, "")
-		assert.Assert(t, is.Len(provider.calls, 2))
+		require.Len(t, provider.calls, 2)
 
 		// The older request again doesn't bring its identifier back.
 		response := serve(older.Copy())
 		checkStatus(t, response.Status, StatusRequester, StatusRequestDenied)
-		assert.Check(t, is.Equal(response.InResponseTo, olderID))
-		assert.Assert(t, is.Len(provider.calls, 2))
-		assert.Check(t, is.Equal(provider.calls[1].SPProvidedID, "alias-two"))
+		assert.Equal(t, response.InResponseTo, olderID)
+		require.Len(t, provider.calls, 2)
+		assert.Equal(t, provider.calls[1].SPProvidedID, "alias-two")
 
 		// If the store fails nothing is known about a request, and it is refused.
 		store.err = errors.New("store down")
 
 		another, _ := manageNameIDRequestElement(test, soapManageNameIDTestURL, newID("alias-three"))
 		checkStatus(t, serve(signTestElement(t, &test.SP, another)).Status, StatusResponder, "")
-		assert.Check(t, is.Len(provider.calls, 2))
+		assert.Len(t, provider.calls, 2)
 	})
 
 	t.Run("redirect", func(t *testing.T) {
@@ -1274,26 +1275,26 @@ func TestManageNameIDRefusesReplay(t *testing.T) {
 			test.IDP.ServeManageNameID(w, httptest.NewRequest(http.MethodGet, u.String(), nil))
 
 			result := frontChannelManageNameIDResult(t, w, id)
-			assert.Assert(t, result.Response != nil, "HTTP status %d", w.Code)
+			require.True(t, result.Response != nil, "HTTP status %d", w.Code)
 
 			return result
 		}
 
 		el, olderID := manageNameIDRequestElement(test, manageNameIDTestURL, newID("alias-one"))
 		older, err := redirectURL(manageNameIDTestURL, "SAMLRequest", el, "relay", &test.SP)
-		assert.NilError(t, err)
+		require.NoError(t, err)
 
 		checkStatus(t, serve(older, olderID).Response.Status, StatusSuccess, "")
 
 		el, newerID := manageNameIDRequestElement(test, manageNameIDTestURL, newID("alias-two"))
 		newer, err := redirectURL(manageNameIDTestURL, "SAMLRequest", el, "relay", &test.SP)
-		assert.NilError(t, err)
+		require.NoError(t, err)
 
 		checkStatus(t, serve(newer, newerID).Response.Status, StatusSuccess, "")
 
 		checkStatus(t, serve(older, olderID).Response.Status, StatusRequester, StatusRequestDenied)
-		assert.Assert(t, is.Len(provider.calls, 2))
-		assert.Check(t, is.Equal(provider.calls[1].SPProvidedID, "alias-two"))
+		require.Len(t, provider.calls, 2)
+		assert.Equal(t, provider.calls[1].SPProvidedID, "alias-two")
 	})
 }
 
@@ -1306,7 +1307,7 @@ func smuggledIssueInstant(t *testing.T, el *etree.Element) []byte {
 	doc.SetRoot(el)
 
 	body, err := doc.WriteToBytes()
-	assert.NilError(t, err)
+	require.NoError(t, err)
 
 	// encoding/xml keeps the last of the two, so the declaration goes at the end of the start tag.
 	end := bytes.IndexByte(body, '>')
@@ -1343,9 +1344,9 @@ func TestManageNameIDUsesSignedContent(t *testing.T) {
 		test.IDP.ServeManageNameID(w, r)
 
 		result := frontChannelManageNameIDResult(t, w, id)
-		assert.Assert(t, result.Response != nil, "HTTP status %d", w.Code)
+		require.True(t, result.Response != nil, "HTTP status %d", w.Code)
 		checkStatus(t, result.Response.Status, StatusRequester, StatusRequestDenied)
-		assert.Check(t, is.Len(provider.calls, 0))
+		assert.Len(t, provider.calls, 0)
 	})
 
 	t.Run("soap", func(t *testing.T) {
@@ -1358,8 +1359,8 @@ func TestManageNameIDUsesSignedContent(t *testing.T) {
 		test.IDP.ServeSOAPManageNameID(w, nameIDTestSOAPPostBytes(soapManageNameIDTestURL, body))
 
 		response := &ManageNameIDResponse{}
-		assert.NilError(t, unmarshalElement(nameIDTestSOAPMessage(t, w, "ManageNameIDResponse"), response))
+		require.NoError(t, unmarshalElement(nameIDTestSOAPMessage(t, w, "ManageNameIDResponse"), response))
 		checkStatus(t, response.Status, StatusRequester, StatusRequestDenied)
-		assert.Check(t, is.Len(provider.calls, 0))
+		assert.Len(t, provider.calls, 0)
 	})
 }

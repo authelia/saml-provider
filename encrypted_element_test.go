@@ -8,8 +8,8 @@ import (
 	"testing"
 
 	"github.com/beevik/etree"
-	"gotest.tools/assert"
-	is "gotest.tools/assert/cmp"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 const encryptedElementRecipient = "https://sp.example.com/saml2/metadata"
@@ -21,10 +21,10 @@ func testElementEncrypter(t *testing.T, methods ...EncryptionMethod) *elementEnc
 	_, cert := negotiationKey()
 
 	policy, err := (*IdentityProvider)(nil).encryptionPolicy()
-	assert.NilError(t, err)
+	require.NoError(t, err)
 
 	encrypter, err := policy.encrypter(methods)
-	assert.NilError(t, err)
+	require.NoError(t, err)
 
 	return &elementEncrypter{certificate: cert, encrypter: encrypter, recipient: encryptedElementRecipient}
 }
@@ -43,10 +43,10 @@ func reparse(t *testing.T, el *etree.Element) *etree.Element {
 	doc.SetRoot(el.Copy())
 
 	buf, err := doc.WriteToBytes()
-	assert.NilError(t, err)
+	require.NoError(t, err)
 
 	parsed := etree.NewDocument()
-	assert.NilError(t, parsed.ReadFromBytes(buf))
+	require.NoError(t, parsed.ReadFromBytes(buf))
 
 	return parsed.Root()
 }
@@ -76,29 +76,29 @@ func TestElementEncrypterNameIDRoundTrip(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			encryptedID, err := testElementEncrypter(t, tc.methods...).encryptNameID(&testEncryptedNameID)
-			assert.NilError(t, err)
+			require.NoError(t, err)
 
 			encryptedID = reparse(t, encryptedID)
-			assert.Check(t, is.Equal("EncryptedID", encryptedID.Tag))
-			assert.Check(t, is.Equal(samlAssertionNamespace, encryptedID.NamespaceURI()))
+			assert.Equal(t, "EncryptedID", encryptedID.Tag)
+			assert.Equal(t, samlAssertionNamespace, encryptedID.NamespaceURI())
 
 			// SAMLCore §2.2.4 and §6.1.
 			data := encryptedID.FindElement("./EncryptedData")
-			assert.Assert(t, data != nil)
-			assert.Check(t, is.Equal(xmlencElementType, data.SelectAttrValue("Type", "")))
-			assert.Check(t, is.Equal(tc.content, data.FindElement("./EncryptionMethod").SelectAttrValue("Algorithm", "")))
+			require.NotNil(t, data)
+			assert.Equal(t, xmlencElementType, data.SelectAttrValue("Type", ""))
+			assert.Equal(t, tc.content, data.FindElement("./EncryptionMethod").SelectAttrValue("Algorithm", ""))
 
 			key := data.FindElement("./KeyInfo/EncryptedKey")
-			assert.Assert(t, key != nil)
-			assert.Check(t, is.Equal(encryptedElementRecipient, key.SelectAttrValue("Recipient", "")))
-			assert.Check(t, is.Equal(tc.key, key.FindElement("./EncryptionMethod").SelectAttrValue("Algorithm", "")))
+			require.NotNil(t, key)
+			assert.Equal(t, encryptedElementRecipient, key.SelectAttrValue("Recipient", ""))
+			assert.Equal(t, tc.key, key.FindElement("./EncryptionMethod").SelectAttrValue("Algorithm", ""))
 
 			// The identifier isn't visible in what is sent.
-			assert.Check(t, !strings.Contains(elementToString(encryptedID), testEncryptedNameID.Value))
+			assert.False(t, strings.Contains(elementToString(encryptedID), testEncryptedNameID.Value))
 
 			nameID, err := testElementDecrypter().decryptNameID(encryptedID)
-			assert.NilError(t, err)
-			assert.Check(t, is.DeepEqual(testEncryptedNameID, *nameID))
+			require.NoError(t, err)
+			assert.Equal(t, testEncryptedNameID, *nameID)
 		})
 	}
 }
@@ -112,19 +112,19 @@ func TestElementEncrypterAttributeRoundTrip(t *testing.T) {
 	}
 
 	encrypted, err := testElementEncrypter(t, method(aes128GCM)).encryptAttribute(&attribute)
-	assert.NilError(t, err)
+	require.NoError(t, err)
 
 	encrypted = reparse(t, encrypted)
-	assert.Check(t, is.Equal("EncryptedAttribute", encrypted.Tag))
-	assert.Check(t, !strings.Contains(elementToString(encrypted), "alice@example.com"))
+	assert.Equal(t, "EncryptedAttribute", encrypted.Tag)
+	assert.False(t, strings.Contains(elementToString(encrypted), "alice@example.com"))
 
 	el, err := testElementDecrypter().decryptElement(encrypted, "Attribute")
-	assert.NilError(t, err)
+	require.NoError(t, err)
 
 	var got Attribute
 
-	assert.NilError(t, unmarshalElement(el, &got))
-	assert.Check(t, is.DeepEqual(attribute, got))
+	require.NoError(t, unmarshalElement(el, &got))
+	assert.Equal(t, attribute, got)
 }
 
 func TestElementEncrypterCiphertextIsUnique(t *testing.T) {
@@ -135,27 +135,27 @@ func TestElementEncrypterCiphertextIsUnique(t *testing.T) {
 
 	for range 4 {
 		el, err := encrypter.encryptNameID(&testEncryptedNameID)
-		assert.NilError(t, err)
+		require.NoError(t, err)
 
 		for _, value := range el.FindElements(".//CipherValue") {
-			assert.Check(t, !seen[value.Text()], "a cipher value was repeated")
+			assert.False(t, seen[value.Text()], "a cipher value was repeated")
 
 			seen[value.Text()] = true
 		}
 	}
 
-	assert.Check(t, is.Len(seen, 8))
+	assert.Len(t, seen, 8)
 }
 
 func TestElementDecrypterRejects(t *testing.T) {
 	otherKey, err := rsa.GenerateKey(rand.Reader, 2048)
-	assert.NilError(t, err)
+	require.NoError(t, err)
 
 	gcmOnly, err := (&IdentityProvider{ContentEncryptionMethods: []string{aes128GCM}}).encryptionPolicy()
-	assert.NilError(t, err)
+	require.NoError(t, err)
 
 	sha256Only, err := (&IdentityProvider{KeyTransportDigestMethods: []string{digestSHA256}}).encryptionPolicy()
-	assert.NilError(t, err)
+	require.NoError(t, err)
 
 	flip := func(path string) func(*testing.T, *etree.Element) {
 		return func(t *testing.T, el *etree.Element) { flipCipherValueBit(t, el, path, -1) }
@@ -266,7 +266,7 @@ func TestElementDecrypterRejects(t *testing.T) {
 				encryptedID, err = encrypter.encryptNameID(&testEncryptedNameID)
 			}
 
-			assert.NilError(t, err)
+			require.NoError(t, err)
 
 			encryptedID = reparse(t, encryptedID)
 			if tc.mutate != nil {
@@ -279,9 +279,9 @@ func TestElementDecrypterRejects(t *testing.T) {
 			}
 
 			nameID, err := decrypter.decryptNameID(encryptedID)
-			assert.Check(t, nameID == nil)
+			assert.Nil(t, nameID)
 
-			assert.Check(t, is.ErrorContains(err, tc.err))
+			assert.ErrorContains(t, err, tc.err)
 		})
 	}
 }
@@ -292,10 +292,10 @@ func flipCipherValueBit(t *testing.T, el *etree.Element, path string, index int)
 	t.Helper()
 
 	value := el.FindElement(path)
-	assert.Assert(t, value != nil)
+	require.NotNil(t, value)
 
 	buf, err := base64.StdEncoding.DecodeString(value.Text())
-	assert.NilError(t, err)
+	require.NoError(t, err)
 
 	if index < 0 {
 		index += len(buf)
@@ -318,24 +318,24 @@ func TestElementDecrypterTamperedCBCPadding(t *testing.T) {
 	doc.SetRoot(el)
 
 	plaintext, err := doc.WriteToBytes()
-	assert.NilError(t, err)
-	assert.Assert(t, is.Equal(0, len(plaintext)%16), "the last block must hold only padding")
+	require.NoError(t, err)
+	require.Equal(t, 0, len(plaintext)%16, "the last block must hold only padding")
 
 	for range 64 {
 		encryptedID, err := testElementEncrypter(t, method(aes128CBC)).encryptNameID(&testEncryptedNameID)
-		assert.NilError(t, err)
+		require.NoError(t, err)
 
 		encryptedID = reparse(t, encryptedID)
 		flipCipherValueBit(t, encryptedID, "./EncryptedData/CipherData/CipherValue", -1)
 
 		nameID, err := testElementDecrypter().decryptNameID(encryptedID)
 		if err != nil {
-			assert.Check(t, nameID == nil)
+			assert.Nil(t, nameID)
 
 			continue
 		}
 
-		assert.Check(t, is.DeepEqual(testEncryptedNameID, *nameID))
+		assert.Equal(t, testEncryptedNameID, *nameID)
 	}
 }
 
@@ -347,7 +347,7 @@ func siblingKey(t *testing.T, encryptedEl *etree.Element) *etree.Element {
 	data := encryptedEl.FindElement("./EncryptedData")
 	keyInfo := data.FindElement("./KeyInfo")
 	key := keyInfo.FindElement("./EncryptedKey")
-	assert.Assert(t, key != nil)
+	require.NotNil(t, key)
 
 	keyInfo.RemoveChild(key)
 
@@ -365,7 +365,7 @@ func TestElementDecrypterSiblingKeys(t *testing.T) {
 		t.Helper()
 
 		el, err := testElementEncrypter(t, method(aes128GCM)).encryptNameID(&testEncryptedNameID)
-		assert.NilError(t, err)
+		require.NoError(t, err)
 
 		return el
 	}
@@ -384,7 +384,7 @@ func TestElementDecrypterSiblingKeys(t *testing.T) {
 		value := key.FindElement("./CipherData/CipherValue")
 
 		buf, err := base64.StdEncoding.DecodeString(value.Text())
-		assert.NilError(t, err)
+		require.NoError(t, err)
 
 		buf[0] ^= 0x01
 		value.SetText(base64.StdEncoding.EncodeToString(buf))
@@ -397,8 +397,8 @@ func TestElementDecrypterSiblingKeys(t *testing.T) {
 		siblingKey(t, el)
 
 		nameID, err := testElementDecrypter().decryptNameID(reparse(t, el))
-		assert.NilError(t, err)
-		assert.Check(t, is.Equal(testEncryptedNameID.Value, nameID.Value))
+		require.NoError(t, err)
+		assert.Equal(t, testEncryptedNameID.Value, nameID.Value)
 	})
 
 	t.Run("key for this recipient among others", func(t *testing.T) {
@@ -417,14 +417,14 @@ func TestElementDecrypterSiblingKeys(t *testing.T) {
 		decrypter := testElementDecrypter()
 
 		ordered, err := decrypter.encryptedKeys(el, el.FindElement("./EncryptedData"))
-		assert.NilError(t, err)
-		assert.Assert(t, is.Len(ordered, 3))
-		assert.Check(t, is.Equal(encryptedElementRecipient, ordered[0].SelectAttrValue("Recipient", "")))
-		assert.Check(t, is.Equal("", ordered[1].SelectAttrValue("Recipient", "")))
+		require.NoError(t, err)
+		require.Len(t, ordered, 3)
+		assert.Equal(t, encryptedElementRecipient, ordered[0].SelectAttrValue("Recipient", ""))
+		assert.Equal(t, "", ordered[1].SelectAttrValue("Recipient", ""))
 
 		nameID, err := decrypter.decryptNameID(reparse(t, el))
-		assert.NilError(t, err)
-		assert.Check(t, is.Equal(testEncryptedNameID.Value, nameID.Value))
+		require.NoError(t, err)
+		assert.Equal(t, testEncryptedNameID.Value, nameID.Value)
 	})
 
 	t.Run("first key understood is used", func(t *testing.T) {
@@ -440,8 +440,8 @@ func TestElementDecrypterSiblingKeys(t *testing.T) {
 		el.AddChild(key)
 
 		nameID, err := testElementDecrypter().decryptNameID(reparse(t, el))
-		assert.NilError(t, err)
-		assert.Check(t, is.Equal(testEncryptedNameID.Value, nameID.Value))
+		require.NoError(t, err)
+		assert.Equal(t, testEncryptedNameID.Value, nameID.Value)
 	})
 
 	t.Run("too many keys", func(t *testing.T) {
@@ -460,7 +460,7 @@ func TestElementDecrypterSiblingKeys(t *testing.T) {
 		el.AddChild(key)
 
 		_, err := testElementDecrypter().decryptNameID(reparse(t, el))
-		assert.Check(t, is.ErrorContains(err, "failed to decrypt key from response"))
+		assert.ErrorContains(t, err, "failed to decrypt key from response")
 	})
 
 	t.Run("no key", func(t *testing.T) {
@@ -468,46 +468,46 @@ func TestElementDecrypterSiblingKeys(t *testing.T) {
 		el.RemoveChild(siblingKey(t, el))
 
 		_, err := testElementDecrypter().decryptNameID(reparse(t, el))
-		assert.Check(t, err != nil)
+		assert.NotNil(t, err)
 	})
 }
 
 func TestEncryptedIDReplacesNameIDWhenSerialized(t *testing.T) {
 	encryptedID, err := testElementEncrypter(t).encryptNameID(&testEncryptedNameID)
-	assert.NilError(t, err)
+	require.NoError(t, err)
 
 	nameID := testEncryptedNameID
 
 	subject := Subject{NameID: &nameID, EncryptedID: encryptedID}
 	el := subject.Element()
-	assert.Check(t, el.FindElement("./NameID") == nil)
-	assert.Check(t, el.FindElement("./EncryptedID") != nil)
+	assert.Nil(t, el.FindElement("./NameID"))
+	assert.NotNil(t, el.FindElement("./EncryptedID"))
 
 	confirmation := SubjectConfirmation{Method: bearerSubjectConfirmationMethod, NameID: &nameID, EncryptedID: encryptedID}
 	el = confirmation.Element()
-	assert.Check(t, el.FindElement("./NameID") == nil)
-	assert.Check(t, el.FindElement("./EncryptedID") != nil)
+	assert.Nil(t, el.FindElement("./NameID"))
+	assert.NotNil(t, el.FindElement("./EncryptedID"))
 
 	request := LogoutRequest{ID: "id-1", Version: "2.0", NameID: &nameID, EncryptedID: encryptedID, SessionIndexes: []SessionIndex{{Value: "1"}}}
 	el = request.Element()
-	assert.Check(t, el.FindElement("./NameID") == nil)
-	assert.Check(t, !strings.Contains(elementToString(el), nameID.Value))
+	assert.Nil(t, el.FindElement("./NameID"))
+	assert.False(t, strings.Contains(elementToString(el), nameID.Value))
 
 	// SAMLCore §3.7.1: the identifier comes before the SessionIndex elements.
 	children := el.ChildElements()
-	assert.Assert(t, is.Len(children, 2))
-	assert.Check(t, is.Equal("EncryptedID", children[0].Tag))
+	require.Len(t, children, 2)
+	assert.Equal(t, "EncryptedID", children[0].Tag)
 
 	encryptedAttribute, err := testElementEncrypter(t).encryptAttribute(&Attribute{Name: "secret", Values: []AttributeValue{{Value: "s3cret"}}})
-	assert.NilError(t, err)
+	require.NoError(t, err)
 
 	statement := AttributeStatement{
 		Attributes:          []Attribute{{Name: "public", Values: []AttributeValue{{Value: "p"}}}},
 		EncryptedAttributes: []*etree.Element{encryptedAttribute},
 	}
 	el = statement.Element()
-	assert.Assert(t, is.Len(el.ChildElements(), 2))
-	assert.Check(t, is.Equal("Attribute", el.ChildElements()[0].Tag))
-	assert.Check(t, is.Equal("EncryptedAttribute", el.ChildElements()[1].Tag))
-	assert.Check(t, !strings.Contains(elementToString(el), "s3cret"))
+	require.Len(t, el.ChildElements(), 2)
+	assert.Equal(t, "Attribute", el.ChildElements()[0].Tag)
+	assert.Equal(t, "EncryptedAttribute", el.ChildElements()[1].Tag)
+	assert.False(t, strings.Contains(elementToString(el), "s3cret"))
 }

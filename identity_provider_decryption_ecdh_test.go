@@ -15,8 +15,8 @@ import (
 	"time"
 
 	"github.com/beevik/etree"
-	"gotest.tools/assert"
-	is "gotest.tools/assert/cmp"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 // hsmKeyAgreer is an elliptic curve key that is not an *ecdh.PrivateKey or an *ecdsa.PrivateKey, as one in a
@@ -44,7 +44,7 @@ func ecEncryptionPair(t *testing.T, curve elliptic.Curve, keyUsage x509.KeyUsage
 	t.Helper()
 
 	key, err := ecdsa.GenerateKey(curve, rand.Reader)
-	assert.NilError(t, err)
+	require.NoError(t, err)
 
 	now := TimeNow()
 
@@ -58,7 +58,7 @@ func ecdhIDP(t *testing.T, key crypto.PrivateKey, cert *x509.Certificate) *Ident
 
 	test := NewIdentityProviderTest(t, applyKey)
 	test.IDP.EncryptionCertificate, test.IDP.EncryptionKey = cert, key
-	assert.NilError(t, test.IDP.CheckEncryptionKeys())
+	require.NoError(t, test.IDP.CheckEncryptionKeys())
 
 	test.SP.IDPMetadata = test.IDP.Metadata()
 
@@ -71,10 +71,10 @@ func encrypterToIDPKey(t *testing.T, test *IdentityProviderTest, cert *x509.Cert
 	t.Helper()
 
 	policy, err := test.IDP.encryptionPolicy()
-	assert.NilError(t, err)
+	require.NoError(t, err)
 
 	encrypter, err := policy.encrypterFor(nil, Issuance{}, cert.PublicKey)
-	assert.NilError(t, err)
+	require.NoError(t, err)
 
 	return &elementEncrypter{certificate: cert, publicKey: cert.PublicKey, encrypter: encrypter, recipient: test.IDP.entityID()}
 }
@@ -84,7 +84,7 @@ func decryptAtIDP(t *testing.T, test *IdentityProviderTest, encryptedID *etree.E
 	t.Helper()
 
 	decrypter, err := test.IDP.elementDecrypter()
-	assert.NilError(t, err)
+	require.NoError(t, err)
 
 	return decrypter.decryptNameID(reparse(t, encryptedID))
 }
@@ -97,7 +97,7 @@ func TestIDPCheckECEncryptionKeys(t *testing.T) {
 	signing, signingCert := ecEncryptionPair(t, elliptic.P256(), x509.KeyUsageDigitalSignature)
 
 	p256ECDH, err := p256.ECDH()
-	assert.NilError(t, err)
+	require.NoError(t, err)
 
 	for name, tc := range map[string]struct {
 		cert *x509.Certificate
@@ -122,12 +122,12 @@ func TestIDPCheckECEncryptionKeys(t *testing.T) {
 
 			err := test.IDP.CheckEncryptionKeys()
 			if tc.err == "" {
-				assert.NilError(t, err)
+				require.NoError(t, err)
 
 				return
 			}
 
-			assert.Check(t, is.ErrorContains(err, tc.err))
+			assert.ErrorContains(t, err, tc.err)
 		})
 	}
 }
@@ -139,19 +139,19 @@ func TestIDPMetadataPublishesECEncryptionKey(t *testing.T) {
 	test := ecdhIDP(t, key, cert)
 
 	descriptors := encryptionKeyDescriptors(test.IDP.Metadata().IDPSSODescriptors[0].KeyDescriptors)
-	assert.Assert(t, is.Len(descriptors, 1))
+	require.Len(t, descriptors, 1)
 
 	algorithms := make([]string, 0, len(descriptors[0].EncryptionMethods))
 	for _, method := range descriptors[0].EncryptionMethods {
 		algorithms = append(algorithms, method.Algorithm)
 	}
 
-	assert.Check(t, is.DeepEqual(algorithms, []string{aes128GCM, aes192GCM, aes256GCM, aes128CBC, aes192CBC, aes256CBC, ecdhES, kwAES256, kwAES192, kwAES128}))
+	assert.Equal(t, algorithms, []string{aes128GCM, aes192GCM, aes256GCM, aes128CBC, aes192CBC, aes256CBC, ecdhES, kwAES256, kwAES192, kwAES128})
 
 	test.IDP.KeyWrapMethods = []string{kwAES128}
 
 	descriptors = encryptionKeyDescriptors(test.IDP.Metadata().IDPSSODescriptors[0].KeyDescriptors)
-	assert.Check(t, is.Equal(descriptors[0].EncryptionMethods[len(descriptors[0].EncryptionMethods)-1].Algorithm, kwAES128))
+	assert.Equal(t, descriptors[0].EncryptionMethods[len(descriptors[0].EncryptionMethods)-1].Algorithm, kwAES128)
 }
 
 // An elliptic curve signing key is never used to decrypt, so it is not published for encryption.
@@ -161,11 +161,11 @@ func TestIDPDoesNotDecryptWithECSigningKey(t *testing.T) {
 	test := NewIdentityProviderTest(t, applyKey)
 	test.IDP.Key, test.IDP.Certificate = key, cert
 
-	assert.Check(t, is.Len(encryptionKeyDescriptors(test.IDP.Metadata().IDPSSODescriptors[0].KeyDescriptors), 0))
+	assert.Len(t, encryptionKeyDescriptors(test.IDP.Metadata().IDPSSODescriptors[0].KeyDescriptors), 0)
 
 	_, keys, err := test.IDP.encryptionKeys()
-	assert.NilError(t, err)
-	assert.Check(t, is.Len(keys, 0))
+	require.NoError(t, err)
+	assert.Len(t, keys, 0)
 }
 
 // The service provider of this package encrypts an EncryptedID to the elliptic curve key in the metadata of the
@@ -174,7 +174,7 @@ func TestSPEncryptsToECKeyOfIDP(t *testing.T) {
 	key, cert := ecEncryptionPair(t, elliptic.P256(), x509.KeyUsageKeyAgreement)
 
 	ecdhKey, err := key.ECDH()
-	assert.NilError(t, err)
+	require.NoError(t, err)
 
 	for name, private := range map[string]crypto.PrivateKey{"ecdsa": key, "ecdh": ecdhKey, "key agreer": &hsmKeyAgreer{key: key}} {
 		t.Run(name, func(t *testing.T) {
@@ -182,16 +182,16 @@ func TestSPEncryptsToECKeyOfIDP(t *testing.T) {
 			test.SP.EncryptNameID = true
 
 			request, err := test.SP.MakeLogoutRequest("https://idp.example.com/saml/slo", "alice")
-			assert.NilError(t, err)
-			assert.Assert(t, request.EncryptedID != nil)
-			assert.Check(t, request.EncryptedID.FindElement("./EncryptedData/KeyInfo/EncryptedKey/KeyInfo/AgreementMethod") != nil)
+			require.NoError(t, err)
+			require.NotNil(t, request.EncryptedID)
+			assert.NotNil(t, request.EncryptedID.FindElement("./EncryptedData/KeyInfo/EncryptedKey/KeyInfo/AgreementMethod"))
 
 			nameID, err := decryptAtIDP(t, test, request.EncryptedID)
-			assert.NilError(t, err)
-			assert.Check(t, is.Equal(nameID.Value, "alice"))
+			require.NoError(t, err)
+			assert.Equal(t, nameID.Value, "alice")
 
 			if agreer, ok := private.(*hsmKeyAgreer); ok {
-				assert.Check(t, is.Equal(agreer.calls, 1))
+				assert.Equal(t, agreer.calls, 1)
 			}
 		})
 	}
@@ -219,25 +219,25 @@ func TestIDPDecryptsWithRSAAndECKeysTogether(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			test := NewIdentityProviderTest(t, applyKey)
 			configure(&test.IDP)
-			assert.NilError(t, test.IDP.CheckEncryptionKeys())
+			require.NoError(t, test.IDP.CheckEncryptionKeys())
 
 			for _, cert := range []*x509.Certificate{ecCert, rsaPair.Certificate} {
 				ecAgreer.calls, rsaDecrypter.calls = 0, 0
 
 				encryptedID, err := encrypterToIDPKey(t, test, cert).encryptNameID(&testEncryptedNameID)
-				assert.NilError(t, err)
+				require.NoError(t, err)
 
 				nameID, err := decryptAtIDP(t, test, encryptedID)
-				assert.NilError(t, err)
-				assert.Check(t, is.Equal(nameID.Value, testEncryptedNameID.Value))
+				require.NoError(t, err)
+				assert.Equal(t, nameID.Value, testEncryptedNameID.Value)
 
 				// Only the key of the type that the EncryptedKey is for is asked.
 				if cert == ecCert {
-					assert.Check(t, is.Equal(ecAgreer.calls, 1))
-					assert.Check(t, is.Equal(rsaDecrypter.calls, 0))
+					assert.Equal(t, ecAgreer.calls, 1)
+					assert.Equal(t, rsaDecrypter.calls, 0)
 				} else {
-					assert.Check(t, is.Equal(ecAgreer.calls, 0))
-					assert.Check(t, is.Equal(rsaDecrypter.calls, 1))
+					assert.Equal(t, ecAgreer.calls, 0)
+					assert.Equal(t, rsaDecrypter.calls, 1)
 				}
 			}
 		})
@@ -254,15 +254,15 @@ func TestIDPChoosesECKeyByRecipientKeyInfo(t *testing.T) {
 	test := NewIdentityProviderTest(t, applyKey)
 	test.IDP.EncryptionCertificate, test.IDP.EncryptionKey = firstCert, firstAgreer
 	test.IDP.DecryptionKeys = []DecryptionKey{{Certificate: secondCert, Key: secondAgreer}}
-	assert.NilError(t, test.IDP.CheckEncryptionKeys())
+	require.NoError(t, test.IDP.CheckEncryptionKeys())
 
 	encryptedID, err := encrypterToIDPKey(t, test, secondCert).encryptNameID(&testEncryptedNameID)
-	assert.NilError(t, err)
+	require.NoError(t, err)
 
 	_, err = decryptAtIDP(t, test, encryptedID)
-	assert.NilError(t, err)
-	assert.Check(t, is.Equal(firstAgreer.calls, 0))
-	assert.Check(t, is.Equal(secondAgreer.calls, 1))
+	require.NoError(t, err)
+	assert.Equal(t, firstAgreer.calls, 0)
+	assert.Equal(t, secondAgreer.calls, 1)
 
 	// Without the hint, each key is asked, and the one that holds it decrypts.
 	encryptedID.FindElement(".//AgreementMethod").RemoveChild(encryptedID.FindElement(".//RecipientKeyInfo"))
@@ -270,9 +270,9 @@ func TestIDPChoosesECKeyByRecipientKeyInfo(t *testing.T) {
 	firstAgreer.calls, secondAgreer.calls = 0, 0
 
 	_, err = decryptAtIDP(t, test, encryptedID)
-	assert.NilError(t, err)
-	assert.Check(t, is.Equal(firstAgreer.calls, 1))
-	assert.Check(t, is.Equal(secondAgreer.calls, 1))
+	require.NoError(t, err)
+	assert.Equal(t, firstAgreer.calls, 1)
+	assert.Equal(t, secondAgreer.calls, 1)
 }
 
 // What is encrypted to an elliptic curve key is only decrypted with the algorithms that the identity provider
@@ -306,7 +306,7 @@ func TestIDPRefusesECDHItDoesNotAllow(t *testing.T) {
 			test := ecdhIDP(t, key, cert)
 
 			encryptedID, err := encrypterToIDPKey(t, test, cert).encryptNameID(&testEncryptedNameID)
-			assert.NilError(t, err)
+			require.NoError(t, err)
 
 			if tc.configure != nil {
 				tc.configure(&test.IDP)
@@ -317,7 +317,7 @@ func TestIDPRefusesECDHItDoesNotAllow(t *testing.T) {
 			}
 
 			_, err = decryptAtIDP(t, test, encryptedID)
-			assert.Check(t, is.ErrorContains(err, tc.err))
+			assert.ErrorContains(t, err, tc.err)
 		})
 	}
 }
@@ -330,14 +330,14 @@ func TestIDPRefusesEncryptedKeyOfAnotherType(t *testing.T) {
 
 	test := NewIdentityProviderTest(t, applyKey)
 	test.IDP.EncryptionCertificate, test.IDP.EncryptionKey = ecCert, ecAgreer
-	assert.NilError(t, test.IDP.CheckEncryptionKeys())
+	require.NoError(t, test.IDP.CheckEncryptionKeys())
 
 	encryptedID, err := encrypterToIDPKey(t, test, encryptionTestPair(t, 0, "rsa").Certificate).encryptNameID(&testEncryptedNameID)
-	assert.NilError(t, err)
+	require.NoError(t, err)
 
 	_, err = decryptAtIDP(t, test, encryptedID)
-	assert.Check(t, is.ErrorContains(err, "no private key of the type"))
-	assert.Check(t, is.Equal(ecAgreer.calls, 0))
+	assert.ErrorContains(t, err, "no private key of the type")
+	assert.Equal(t, ecAgreer.calls, 0)
 }
 
 // xmlsec1ECDHEncryptedIDTemplate is what xmlsec1 fills in to encrypt a NameID to the identity provider with ECDH-ES,
@@ -366,15 +366,15 @@ func TestIDPDecryptsECDHOfXMLSec1(t *testing.T) {
 	originator, _ := ecEncryptionPair(t, elliptic.P256(), 0)
 
 	originatorDER, err := x509.MarshalPKCS8PrivateKey(originator)
-	assert.NilError(t, err)
+	require.NoError(t, err)
 
 	recipientDER, err := x509.MarshalPKIXPublicKey(&key.PublicKey)
-	assert.NilError(t, err)
+	require.NoError(t, err)
 
 	dir := t.TempDir()
 	write := func(name string, data []byte) string {
 		path := filepath.Join(dir, name)
-		assert.NilError(t, os.WriteFile(path, data, 0o600))
+		require.NoError(t, os.WriteFile(path, data, 0o600))
 
 		return path
 	}
@@ -390,17 +390,17 @@ func TestIDPDecryptsECDHOfXMLSec1(t *testing.T) {
 	doc.SetRoot(nameID)
 
 	data, err := doc.WriteToBytes()
-	assert.NilError(t, err)
+	require.NoError(t, err)
 
 	dataPath, outPath := write("data.xml", data), filepath.Join(dir, "out.xml")
 
 	out, err := exec.Command(xmlsec1, "--encrypt", "--enabled-key-data", "agreement-method,enc-key,key-value,key-name,ec",
 		"--max-encrypted-key-level", "3", "--session-key", "aes-256", "--privkey-pem:originator", originatorPath,
 		"--pubkey-pem:recipient", recipientPath, "--xml-data", dataPath, "--output", outPath, templatePath).CombinedOutput()
-	assert.NilError(t, err, "xmlsec1: %s", out)
+	require.NoError(t, err, "xmlsec1: %s", out)
 
 	encrypted := etree.NewDocument()
-	assert.NilError(t, encrypted.ReadFromFile(outPath))
+	require.NoError(t, encrypted.ReadFromFile(outPath))
 
 	encryptedID := etree.NewElement("saml:EncryptedID")
 	encryptedID.CreateAttr("xmlns:saml", samlAssertionNamespace)
@@ -409,6 +409,6 @@ func TestIDPDecryptsECDHOfXMLSec1(t *testing.T) {
 	test := ecdhIDP(t, key, cert)
 
 	decrypted, err := decryptAtIDP(t, test, encryptedID)
-	assert.NilError(t, err)
-	assert.Check(t, is.Equal(decrypted.Value, testEncryptedNameID.Value))
+	require.NoError(t, err)
+	assert.Equal(t, decrypted.Value, testEncryptedNameID.Value)
 }

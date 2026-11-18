@@ -3,8 +3,8 @@ package samlsp
 import (
 	"testing"
 
-	"gotest.tools/assert"
-	is "gotest.tools/assert/cmp"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"authelia.com/provider/jose"
 )
@@ -14,11 +14,11 @@ func TestJWTTrackedRequestCodecRoundTrip(t *testing.T) {
 	want := TrackedRequest{Index: "idx", SAMLRequestID: "id-1", URI: "/frob"}
 
 	token, err := codec.Encode(want)
-	assert.NilError(t, err)
+	require.NoError(t, err)
 
 	got, err := codec.Decode(token)
-	assert.NilError(t, err)
-	assert.Check(t, is.DeepEqual(want, *got))
+	require.NoError(t, err)
+	assert.Equal(t, want, *got)
 }
 
 func TestJWTTrackedRequestCodecDecodeRejects(t *testing.T) {
@@ -32,7 +32,7 @@ func TestJWTTrackedRequestCodecDecodeRejects(t *testing.T) {
 			encode: func(t *testing.T, codec JWTTrackedRequestCodec) string {
 				codec.SigningMethod = jose.RS512
 				token, err := codec.Encode(TrackedRequest{Index: "idx", SAMLRequestID: "id-1", URI: "/"})
-				assert.NilError(t, err)
+				require.NoError(t, err)
 
 				return token
 			},
@@ -52,7 +52,7 @@ func TestJWTTrackedRequestCodecDecodeRejects(t *testing.T) {
 			codec := newTestTrackedRequestCodec(t)
 
 			_, err := codec.Decode(tc.encode(t, codec))
-			assert.Check(t, is.Error(err, tc.err))
+			assert.EqualError(t, err, tc.err)
 		})
 	}
 }

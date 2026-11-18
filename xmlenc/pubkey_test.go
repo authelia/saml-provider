@@ -6,9 +6,10 @@ import (
 	"testing"
 
 	"github.com/beevik/etree"
-	"gotest.tools/assert"
-	is "gotest.tools/assert/cmp"
-	"gotest.tools/golden"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+
+	"authelia.com/provider/saml/internal/golden"
 )
 
 func TestPKCS1v15DecryptRequiresOptIn(t *testing.T) {
@@ -39,27 +40,27 @@ func TestPKCS1v15DecryptRequiresOptIn(t *testing.T) {
 
 			certBlock, _ := pem.Decode(golden.Get(t, "cert.cert"))
 			certificate, err := x509.ParseCertificate(certBlock.Bytes)
-			assert.NilError(t, err)
+			require.NoError(t, err)
 
 			keyBlock, _ := pem.Decode(golden.Get(t, "cert.key"))
 			key, err := x509.ParsePKCS8PrivateKey(keyBlock.Bytes)
-			assert.NilError(t, err)
+			require.NoError(t, err)
 
 			plaintext := golden.Get(t, "plaintext.xml")
 			el, err := PKCS1v15().Encrypt(certificate, plaintext, nil)
-			assert.NilError(t, err)
+			require.NoError(t, err)
 
 			doc := etree.NewDocument()
 			doc.SetRoot(el)
 
 			actual, err := Decrypt(key, doc.Root())
 			if tc.err != "" {
-				assert.Check(t, is.Error(err, tc.err))
+				assert.EqualError(t, err, tc.err)
 				return
 			}
 
-			assert.NilError(t, err)
-			assert.Check(t, is.DeepEqual(plaintext, actual))
+			require.NoError(t, err)
+			assert.Equal(t, plaintext, actual)
 		})
 	}
 }

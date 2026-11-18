@@ -11,8 +11,8 @@ import (
 	"testing"
 
 	"github.com/beevik/etree"
-	"gotest.tools/assert"
-	is "gotest.tools/assert/cmp"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 // participantCall is a call of AddSessionParticipant.
@@ -111,13 +111,13 @@ func serveParticipantSSO(t *testing.T, test *IdentityProviderTest, policy *NameI
 	t.Helper()
 
 	request, err := test.SP.MakeAuthenticationRequest("https://idp.example.com/saml/sso", HTTPPostBinding, HTTPPostBinding)
-	assert.NilError(t, err)
+	require.NoError(t, err)
 
 	request.NameIDPolicy = policy
 	doc := etree.NewDocument()
 	doc.SetRoot(request.Element())
 	body, err := doc.WriteToBytes()
-	assert.NilError(t, err)
+	require.NoError(t, err)
 
 	form := url.Values{"SAMLRequest": {base64.StdEncoding.EncodeToString(body)}}
 	r := httptest.NewRequest(http.MethodPost, "https://idp.example.com/saml/sso", strings.NewReader(form.Encode()))
@@ -132,16 +132,16 @@ func serveParticipantSSO(t *testing.T, test *IdentityProviderTest, policy *NameI
 func assertParticipantRecorded(t *testing.T, test *IdentityProviderTest, provider *participantSessionProvider, capture *assertionCapture, session *Session) {
 	t.Helper()
 
-	assert.Assert(t, is.Len(provider.added, 1))
-	assert.Assert(t, capture.assertion != nil)
+	require.Len(t, provider.added, 1)
+	require.NotNil(t, capture.assertion)
 
 	call := provider.added[0]
-	assert.Check(t, call.session == session)
-	assert.Check(t, is.Equal(call.participant.ServiceProviderEntityID, test.SP.MetadataURL.String()))
-	assert.Check(t, is.Equal(call.participant.NameID.Value, capture.assertion.Subject.NameID.Value))
-	assert.Check(t, call.participant.NameID.Value != "")
-	assert.Check(t, is.Equal(call.participant.SessionIndex, session.Index))
-	assert.Check(t, is.Equal(call.participant.IssueInstant, TimeNow()))
+	assert.True(t, call.session == session)
+	assert.Equal(t, call.participant.ServiceProviderEntityID, test.SP.MetadataURL.String())
+	assert.Equal(t, call.participant.NameID.Value, capture.assertion.Subject.NameID.Value)
+	assert.True(t, call.participant.NameID.Value != "")
+	assert.Equal(t, call.participant.SessionIndex, session.Index)
+	assert.Equal(t, call.participant.IssueInstant, TimeNow())
 }
 
 func TestServeSSORecordsSessionParticipant(t *testing.T) {
@@ -149,7 +149,7 @@ func TestServeSSORecordsSessionParticipant(t *testing.T) {
 	test, provider, capture := newParticipantTest(t, session)
 
 	w := serveParticipantSSO(t, test, nil)
-	assert.Check(t, is.Equal(w.Code, http.StatusOK))
+	assert.Equal(t, w.Code, http.StatusOK)
 	assertSuccessStatus(t, w)
 	assertParticipantRecorded(t, test, provider, capture, session)
 }
@@ -160,7 +160,7 @@ func TestServeIDPInitiatedRecordsSessionParticipant(t *testing.T) {
 
 	w := httptest.NewRecorder()
 	test.IDP.ServeIDPInitiated(w, httptest.NewRequest(http.MethodGet, "https://idp.example.com/saml/sso", nil), test.SP.MetadataURL.String(), "")
-	assert.Check(t, is.Equal(w.Code, http.StatusOK))
+	assert.Equal(t, w.Code, http.StatusOK)
 	assertSuccessStatus(t, w)
 	assertParticipantRecorded(t, test, provider, capture, session)
 }
@@ -171,11 +171,11 @@ func TestErrorResponseRecordsNoParticipant(t *testing.T) {
 
 	format := "urn:oasis:names:tc:SAML:2.0:nameid-format:persistent"
 	w := serveParticipantSSO(t, test, &NameIDPolicy{Format: &format})
-	assert.Check(t, is.Equal(w.Code, http.StatusOK))
+	assert.Equal(t, w.Code, http.StatusOK)
 
 	_, response := postedResponse(t, w.Body.String())
-	assert.Check(t, is.Equal(response.Status.StatusCode.Value, StatusRequester))
-	assert.Check(t, is.Len(provider.added, 0))
+	assert.Equal(t, response.Status.StatusCode.Value, StatusRequester)
+	assert.Len(t, provider.added, 0)
 }
 
 func TestMakeResponseFailsWhenParticipantCannotBeRecorded(t *testing.T) {
@@ -186,21 +186,21 @@ func TestMakeResponseFailsWhenParticipantCannotBeRecorded(t *testing.T) {
 		provider.err = errors.New("storage unavailable")
 
 		w := serveParticipantSSO(t, test, nil)
-		assert.Check(t, is.Equal(w.Code, http.StatusOK))
+		assert.Equal(t, w.Code, http.StatusOK)
 
 		_, response := postedResponse(t, w.Body.String())
-		assert.Check(t, is.Equal(response.Status.StatusCode.Value, StatusResponder))
-		assert.Check(t, response.Assertion == nil)
-		assert.Check(t, response.EncryptedAssertion == nil)
+		assert.Equal(t, response.Status.StatusCode.Value, StatusResponder)
+		assert.Nil(t, response.Assertion)
+		assert.Nil(t, response.EncryptedAssertion)
 	})
 
 	t.Run("no session", func(t *testing.T) {
 		test, req := errorResponseRequest(t)
 		test.IDP.SessionProvider = &participantSessionProvider{}
 
-		assert.NilError(t, DefaultAssertionMaker{}.MakeAssertion(req, session))
-		assert.Check(t, is.ErrorContains(req.MakeResponse(), "session"))
-		assert.Check(t, req.ResponseEl == nil)
+		require.NoError(t, DefaultAssertionMaker{}.MakeAssertion(req, session))
+		assert.ErrorContains(t, req.MakeResponse(), "session")
+		assert.Nil(t, req.ResponseEl)
 	})
 }
 
@@ -213,7 +213,7 @@ func TestMakeResponseWithoutParticipantProvider(t *testing.T) {
 	}
 
 	w := serveParticipantSSO(t, test, nil)
-	assert.Check(t, is.Equal(w.Code, http.StatusOK))
+	assert.Equal(t, w.Code, http.StatusOK)
 	assertSuccessStatus(t, w)
 }
 
@@ -226,7 +226,7 @@ func participantRequest(t *testing.T, session *Session) (*IdentityProviderTest, 
 	req.IDP = &test.IDP
 	req.Session = session
 
-	assert.NilError(t, DefaultAssertionMaker{}.MakeAssertion(req, session))
+	require.NoError(t, DefaultAssertionMaker{}.MakeAssertion(req, session))
 
 	return test, provider, req
 }
@@ -237,18 +237,18 @@ func TestLogoutBetweenMakeResponseAndWriteResponse(t *testing.T) {
 	session := &Session{ID: "f00df00df00d", NameID: "alice", UserName: "alice", Index: "index-6"}
 	_, provider, req := participantRequest(t, session)
 
-	assert.NilError(t, req.MakeResponse())
-	assert.Assert(t, req.ResponseEl != nil)
+	require.NoError(t, req.MakeResponse())
+	require.NotNil(t, req.ResponseEl)
 
 	participants, err := provider.CloseSessionParticipants(nil, session)
-	assert.NilError(t, err)
-	assert.Check(t, is.Len(participants, 0))
+	require.NoError(t, err)
+	assert.Len(t, participants, 0)
 
 	w := httptest.NewRecorder()
 	err = req.WriteResponse(w)
-	assert.Check(t, errors.Is(err, ErrSessionParticipantsClosed))
-	assert.Check(t, is.Equal(w.Body.Len(), 0))
-	assert.Check(t, is.Len(provider.added, 0))
+	assert.True(t, errors.Is(err, ErrSessionParticipantsClosed))
+	assert.Equal(t, w.Body.Len(), 0)
+	assert.Len(t, provider.added, 0)
 }
 
 // A response written again is recorded again, and so isn't written again once a logout of the session has begun.
@@ -257,18 +257,18 @@ func TestWriteResponseAgainAfterLogoutSendsNothing(t *testing.T) {
 	_, provider, req := participantRequest(t, session)
 
 	first := httptest.NewRecorder()
-	assert.NilError(t, req.WriteResponse(first))
+	require.NoError(t, req.WriteResponse(first))
 	assertSuccessStatus(t, first)
 
 	participants, err := provider.CloseSessionParticipants(nil, session)
-	assert.NilError(t, err)
-	assert.Check(t, is.Len(participants, 1))
+	require.NoError(t, err)
+	assert.Len(t, participants, 1)
 
 	second := httptest.NewRecorder()
 	err = req.WriteResponse(second)
-	assert.Check(t, errors.Is(err, ErrSessionParticipantsClosed))
-	assert.Check(t, is.Equal(second.Body.Len(), 0))
-	assert.Check(t, is.Len(provider.added, 1))
+	assert.True(t, errors.Is(err, ErrSessionParticipantsClosed))
+	assert.Equal(t, second.Body.Len(), 0)
+	assert.Len(t, provider.added, 1)
 }
 
 // A response which can't be written leaves its participant recorded, since part of it may have been sent.
@@ -276,9 +276,9 @@ func TestPublishResponseKeepsTheParticipantWhenPublishFails(t *testing.T) {
 	session := &Session{ID: "f00df00df00d", NameID: "alice", UserName: "alice", Index: "index-9"}
 	_, provider, req := participantRequest(t, session)
 
-	assert.NilError(t, req.MakeResponse())
+	require.NoError(t, req.MakeResponse())
 
 	failed := errors.New("connection reset")
-	assert.Check(t, is.Equal(req.PublishResponse(func() error { return failed }), failed))
-	assert.Check(t, is.Len(provider.added, 1))
+	assert.Equal(t, req.PublishResponse(func() error { return failed }), failed)
+	assert.Len(t, provider.added, 1)
 }

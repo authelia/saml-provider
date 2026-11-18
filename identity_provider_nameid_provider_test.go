@@ -10,8 +10,8 @@ import (
 	"testing"
 	"time"
 
-	"gotest.tools/assert"
-	is "gotest.tools/assert/cmp"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 const testAffiliationID = "https://affiliation.example.com"
@@ -113,21 +113,21 @@ func TestDefaultNameIDProviderTransientIsRandom(t *testing.T) {
 	session := &Session{ID: "s", NameID: "alice"}
 
 	first, err := req.resolveNameID(session)
-	assert.NilError(t, err)
+	require.NoError(t, err)
 	second, err := req.resolveNameID(session)
-	assert.NilError(t, err)
+	require.NoError(t, err)
 
 	for _, nameID := range []*NameID{first, second} {
-		assert.Check(t, len(nameID.Value) >= 22, nameID.Value)
+		assert.True(t, len(nameID.Value) >= 22, nameID.Value)
 		_, err = base64.RawURLEncoding.DecodeString(nameID.Value)
-		assert.Check(t, err)
-		assert.Check(t, nameID.Value != session.NameID)
-		assert.Check(t, is.Equal(nameID.Format, transient))
-		assert.Check(t, is.Equal(nameID.NameQualifier, "https://idp.example.com/saml/metadata"))
-		assert.Check(t, is.Equal(nameID.SPNameQualifier, "https://sp.example.com/saml2/metadata"))
+		assert.NoError(t, err)
+		assert.True(t, nameID.Value != session.NameID)
+		assert.Equal(t, nameID.Format, transient)
+		assert.Equal(t, nameID.NameQualifier, "https://idp.example.com/saml/metadata")
+		assert.Equal(t, nameID.SPNameQualifier, "https://sp.example.com/saml2/metadata")
 	}
 
-	assert.Check(t, first.Value != second.Value)
+	assert.True(t, first.Value != second.Value)
 }
 
 func TestDefaultNameIDProviderSessionFormat(t *testing.T) {
@@ -136,13 +136,13 @@ func TestDefaultNameIDProviderSessionFormat(t *testing.T) {
 	req := nameIDTestRequest(test, &NameIDPolicy{Format: &email})
 
 	nameID, err := req.resolveNameID(&Session{ID: "s", NameID: "alice@example.com", NameIDFormat: email})
-	assert.NilError(t, err)
-	assert.Check(t, is.DeepEqual(nameID, &NameID{
+	require.NoError(t, err)
+	assert.Equal(t, nameID, &NameID{
 		Format:          email,
 		NameQualifier:   "https://idp.example.com/saml/metadata",
 		SPNameQualifier: "https://sp.example.com/saml2/metadata",
 		Value:           "alice@example.com",
-	}))
+	})
 }
 
 // SAMLCore §8.3.6 requires the qualifiers and SPProvidedID of an entity NameID to be omitted, whether the session
@@ -156,8 +156,8 @@ func TestResolveNameIDEntityHasNoQualifiers(t *testing.T) {
 		req := nameIDTestRequest(test, &NameIDPolicy{Format: &entity})
 
 		nameID, err := req.resolveNameID(&Session{ID: "s", NameID: want.Value, NameIDFormat: entity})
-		assert.NilError(t, err)
-		assert.Check(t, is.DeepEqual(nameID, want))
+		require.NoError(t, err)
+		assert.Equal(t, nameID, want)
 	})
 
 	t.Run("provider sets qualifiers", func(t *testing.T) {
@@ -174,8 +174,8 @@ func TestResolveNameIDEntityHasNoQualifiers(t *testing.T) {
 		req := nameIDTestRequest(test, &NameIDPolicy{Format: &entity})
 
 		nameID, err := req.resolveNameID(&Session{ID: "s", NameID: "alice"})
-		assert.NilError(t, err)
-		assert.Check(t, is.DeepEqual(nameID, want))
+		require.NoError(t, err)
+		assert.Equal(t, nameID, want)
 	})
 }
 
@@ -190,7 +190,7 @@ func TestDefaultNameIDProviderRefusesPersistent(t *testing.T) {
 		req := nameIDTestRequest(test, &NameIDPolicy{Format: &persistent})
 
 		_, err := req.resolveNameID(session)
-		assert.Check(t, errors.Is(err, ErrInvalidNameIDPolicy), "error: %v", err)
+		assert.True(t, errors.Is(err, ErrInvalidNameIDPolicy), "error: %v", err)
 	})
 
 	t.Run("open format falls back to transient", func(t *testing.T) {
@@ -198,9 +198,9 @@ func TestDefaultNameIDProviderRefusesPersistent(t *testing.T) {
 		req := nameIDTestRequest(test, nil)
 
 		nameID, err := req.resolveNameID(session)
-		assert.NilError(t, err)
-		assert.Check(t, is.Equal(nameID.Format, string(TransientNameIDFormat)))
-		assert.Check(t, nameID.Value != session.NameID)
+		require.NoError(t, err)
+		assert.Equal(t, nameID.Format, string(TransientNameIDFormat))
+		assert.True(t, nameID.Value != session.NameID)
 	})
 }
 
@@ -213,18 +213,18 @@ func TestResolveNameIDSessionWithoutNameID(t *testing.T) {
 		test := NewIdentityProviderTest(t, applyKey)
 
 		nameID, err := nameIDTestRequest(test, &NameIDPolicy{Format: &transient}).resolveNameID(&Session{ID: "s"})
-		assert.NilError(t, err)
-		assert.Check(t, nameID.Value != "")
+		require.NoError(t, err)
+		assert.True(t, nameID.Value != "")
 	})
 
 	t.Run("session format", func(t *testing.T) {
 		test := NewIdentityProviderTest(t, applyKey)
 
 		_, err := nameIDTestRequest(test, nil).resolveNameID(&Session{ID: "s", NameIDFormat: email})
-		assert.Check(t, is.ErrorContains(err, "no NameID"))
+		assert.ErrorContains(t, err, "no NameID")
 
 		// The session is incomplete, so the format left open doesn't fall back to transient.
-		assert.Check(t, !errors.Is(err, ErrInvalidNameIDPolicy), "error: %v", err)
+		assert.False(t, errors.Is(err, ErrInvalidNameIDPolicy), "error: %v", err)
 	})
 
 	t.Run("provider returns an empty value", func(t *testing.T) {
@@ -237,7 +237,7 @@ func TestResolveNameIDSessionWithoutNameID(t *testing.T) {
 		}
 
 		_, err := nameIDTestRequest(test, &NameIDPolicy{Format: &transient}).resolveNameID(&Session{ID: "s", NameID: "alice"})
-		assert.Check(t, is.ErrorContains(err, "returned no NameID"))
+		assert.ErrorContains(t, err, "returned no NameID")
 	})
 }
 
@@ -246,15 +246,15 @@ func TestDefaultNameIDProviderRefusesOtherFormat(t *testing.T) {
 	req := NameIDRequest{Format: string(PersistentNameIDFormat), SPNameQualifier: "https://sp.example.com/saml2/metadata"}
 
 	nameID, err := DefaultNameIDProvider{}.NameID(r, req, &Session{ID: "s", NameID: "alice@example.com", NameIDFormat: string(EmailAddressNameIDFormat)})
-	assert.Check(t, errors.Is(err, ErrInvalidNameIDPolicy), "%v", err)
-	assert.Check(t, nameID == nil)
+	assert.True(t, errors.Is(err, ErrInvalidNameIDPolicy), "%v", err)
+	assert.Nil(t, nameID)
 }
 
 func TestDefaultNameIDProviderFormats(t *testing.T) {
-	assert.Check(t, is.DeepEqual(DefaultNameIDProvider{}.NameIDFormats(), []string{string(TransientNameIDFormat)}))
+	assert.Equal(t, DefaultNameIDProvider{}.NameIDFormats(), []string{string(TransientNameIDFormat)})
 
 	formats := []string{string(EmailAddressNameIDFormat), string(TransientNameIDFormat)}
-	assert.Check(t, is.DeepEqual(DefaultNameIDProvider{Formats: formats}.NameIDFormats(), formats))
+	assert.Equal(t, DefaultNameIDProvider{Formats: formats}.NameIDFormats(), formats)
 }
 
 func TestResolveNameID(t *testing.T) {
@@ -395,19 +395,19 @@ func TestResolveNameID(t *testing.T) {
 				return
 			}
 
-			assert.Assert(t, is.Equal(response.Status.StatusCode.Value, StatusSuccess))
+			require.Equal(t, response.Status.StatusCode.Value, StatusSuccess)
 
 			nameID := *captured
-			assert.Assert(t, nameID != nil)
-			assert.Check(t, is.Equal(nameID.Format, tc.expected.format))
-			assert.Check(t, is.Equal(nameID.SPNameQualifier, tc.expected.spNameQualifier))
-			assert.Check(t, is.Equal(nameID.NameQualifier, "https://idp.example.com/saml/metadata"))
+			require.NotNil(t, nameID)
+			assert.Equal(t, nameID.Format, tc.expected.format)
+			assert.Equal(t, nameID.SPNameQualifier, tc.expected.spNameQualifier)
+			assert.Equal(t, nameID.NameQualifier, "https://idp.example.com/saml/metadata")
 
 			if tc.expected.value != "" {
-				assert.Check(t, is.Equal(nameID.Value, tc.expected.value))
+				assert.Equal(t, nameID.Value, tc.expected.value)
 			} else {
-				assert.Check(t, nameID.Value != tc.session.NameID)
-				assert.Check(t, len(nameID.Value) >= 22, nameID.Value)
+				assert.True(t, nameID.Value != tc.session.NameID)
+				assert.True(t, len(nameID.Value) >= 22, nameID.Value)
 			}
 		})
 	}
@@ -421,10 +421,10 @@ func TestResolveNameIDAffiliationLookupFailure(t *testing.T) {
 	affiliation := testAffiliationID
 
 	response := serveSSOWithPolicy(t, test, &Session{ID: "s", NameID: "alice"}, &NameIDPolicy{SPNameQualifier: &affiliation})
-	assert.Check(t, is.Equal(response.Status.StatusCode.Value, StatusResponder))
-	assert.Check(t, response.Status.StatusCode.StatusCode == nil)
-	assert.Check(t, response.Assertion == nil)
-	assert.Check(t, response.EncryptedAssertion == nil)
+	assert.Equal(t, response.Status.StatusCode.Value, StatusResponder)
+	assert.Nil(t, response.Status.StatusCode.StatusCode)
+	assert.Nil(t, response.Assertion)
+	assert.Nil(t, response.EncryptedAssertion)
 }
 
 // The library fills what the provider leaves out, on a copy of its NameID.
@@ -444,14 +444,14 @@ func TestResolveNameIDCompletesProviderNameID(t *testing.T) {
 	req := nameIDTestRequest(test, &NameIDPolicy{SPNameQualifier: &affiliation})
 
 	nameID, err := req.resolveNameID(&Session{ID: "s", NameID: "alice"})
-	assert.NilError(t, err)
-	assert.Check(t, is.DeepEqual(nameID, &NameID{
+	require.NoError(t, err)
+	assert.Equal(t, nameID, &NameID{
 		Format:          string(TransientNameIDFormat),
 		NameQualifier:   "https://idp.example.com/saml/metadata",
 		SPNameQualifier: affiliation,
 		Value:           "opaque",
-	}))
-	assert.Check(t, is.DeepEqual(provided, &NameID{Value: "opaque"}))
+	})
+	assert.Equal(t, provided, &NameID{Value: "opaque"})
 }
 
 // With the format left open, the order of the formats in the metadata of the service provider decides,
@@ -488,9 +488,9 @@ func TestResolveNameIDPrefersServiceProviderFormats(t *testing.T) {
 			captured := captureNameID(test)
 
 			response := serveSSOWithPolicy(t, test, &Session{ID: "s", NameID: "alice", NameIDFormat: persistent}, nil)
-			assert.Assert(t, is.Equal(response.Status.StatusCode.Value, StatusSuccess))
-			assert.Assert(t, *captured != nil)
-			assert.Check(t, is.Equal((*captured).Format, tc.expected))
+			require.Equal(t, response.Status.StatusCode.Value, StatusSuccess)
+			require.NotNil(t, *captured)
+			assert.Equal(t, (*captured).Format, tc.expected)
 		})
 	}
 }
@@ -503,10 +503,10 @@ func TestResolveNameIDFallsBackWhenSPFormatUnavailable(t *testing.T) {
 	captured := captureNameID(test)
 
 	response := serveSSOWithPolicy(t, test, &Session{ID: "s", NameID: "alice"}, nil)
-	assert.Assert(t, is.Equal(response.Status.StatusCode.Value, StatusSuccess))
-	assert.Assert(t, *captured != nil)
-	assert.Check(t, is.Equal((*captured).Format, string(TransientNameIDFormat)))
-	assert.Check(t, (*captured).Value != "alice")
+	require.Equal(t, response.Status.StatusCode.Value, StatusSuccess)
+	require.NotNil(t, *captured)
+	assert.Equal(t, (*captured).Format, string(TransientNameIDFormat))
+	assert.True(t, (*captured).Value != "alice")
 }
 
 func TestResolveNameIDPassesAllowCreate(t *testing.T) {
@@ -535,9 +535,9 @@ func TestResolveNameIDPassesAllowCreate(t *testing.T) {
 			}
 
 			response := serveSSOWithPolicy(t, test, &Session{ID: "s", NameID: "alice"}, tc.policy)
-			assert.Check(t, is.Equal(response.Status.StatusCode.Value, StatusSuccess))
-			assert.Assert(t, seen != nil)
-			assert.Check(t, is.Equal(*seen, tc.expected))
+			assert.Equal(t, response.Status.StatusCode.Value, StatusSuccess)
+			require.NotNil(t, seen)
+			assert.Equal(t, *seen, tc.expected)
 		})
 	}
 }
@@ -546,8 +546,8 @@ func TestMetadataAdvertisesProviderFormats(t *testing.T) {
 	test := NewIdentityProviderTest(t, applyKey)
 	test.IDP.NameIDProvider = DefaultNameIDProvider{Formats: []string{string(EmailAddressNameIDFormat), string(TransientNameIDFormat)}}
 
-	assert.Check(t, is.DeepEqual(test.IDP.Metadata().IDPSSODescriptors[0].NameIDFormats,
-		[]NameIDFormat{EmailAddressNameIDFormat, TransientNameIDFormat}))
+	assert.Equal(t, test.IDP.Metadata().IDPSSODescriptors[0].NameIDFormats,
+		[]NameIDFormat{EmailAddressNameIDFormat, TransientNameIDFormat})
 }
 
 // A session whose format is transient has its own transient NameID, which DefaultNameIDProvider issues.
@@ -567,17 +567,17 @@ func TestDefaultNameIDProviderTransientSessionFormat(t *testing.T) {
 			// The NameID of a transient session would be the same for every service provider, so a random one is
 			// issued instead (SAMLCore §8.3.8).
 			nameID, err := req.resolveNameID(&Session{ID: "s", NameID: "opaque-session-id", NameIDFormat: transient})
-			assert.NilError(t, err)
-			assert.Check(t, is.Equal(nameID.Format, transient))
-			assert.Check(t, nameID.Value != "opaque-session-id")
+			require.NoError(t, err)
+			assert.Equal(t, nameID.Format, transient)
+			assert.True(t, nameID.Value != "opaque-session-id")
 		})
 	}
 
 	// Another format of the session still gets a random transient NameID.
 	req := nameIDTestRequest(test, &NameIDPolicy{Format: &transient})
 	nameID, err := req.resolveNameID(&Session{ID: "s", NameID: "alice@example.com", NameIDFormat: string(EmailAddressNameIDFormat)})
-	assert.NilError(t, err)
-	assert.Check(t, nameID.Value != "alice@example.com")
+	require.NoError(t, err)
+	assert.True(t, nameID.Value != "alice@example.com")
 }
 
 // A transient NameID that was asserted to the service provider in the session is asserted again, so that the
@@ -648,20 +648,20 @@ func TestResolveNameIDReusesTransientParticipant(t *testing.T) {
 			session := &Session{ID: "s", NameID: "alice"}
 
 			nameID, err := req.resolveNameID(session)
-			assert.NilError(t, err)
-			assert.Check(t, is.Equal(nameID.Format, transient))
+			require.NoError(t, err)
+			assert.Equal(t, nameID.Format, transient)
 
 			if tc.expected != "" {
-				assert.Check(t, is.Equal(nameID.Value, tc.expected))
+				assert.Equal(t, nameID.Value, tc.expected)
 				return
 			}
 
 			for _, p := range tc.participants {
-				assert.Check(t, nameID.Value != p.NameID.Value)
+				assert.True(t, nameID.Value != p.NameID.Value)
 			}
 
-			assert.Check(t, nameID.Value != session.NameID)
-			assert.Check(t, len(nameID.Value) >= 22, nameID.Value)
+			assert.True(t, nameID.Value != session.NameID)
+			assert.True(t, len(nameID.Value) >= 22, nameID.Value)
 		})
 	}
 
@@ -671,8 +671,8 @@ func TestResolveNameIDReusesTransientParticipant(t *testing.T) {
 		test.IDP.SessionProvider = &fixedParticipantProvider{err: boom}
 
 		_, err := nameIDTestRequest(test, nil).resolveNameID(&Session{ID: "s", NameID: "alice"})
-		assert.Check(t, errors.Is(err, boom), "%v", err)
-		assert.Check(t, !errors.Is(err, ErrInvalidNameIDPolicy), "%v", err)
+		assert.True(t, errors.Is(err, boom), "%v", err)
+		assert.False(t, errors.Is(err, ErrInvalidNameIDPolicy), "%v", err)
 	})
 
 	t.Run("participants error is a Responder status", func(t *testing.T) {
@@ -685,8 +685,8 @@ func TestResolveNameIDReusesTransientParticipant(t *testing.T) {
 		test.IDP.SessionProvider = provider
 
 		response := postSSOWithPolicy(t, test, nil)
-		assert.Check(t, is.Equal(response.Status.StatusCode.Value, StatusResponder))
-		assert.Check(t, response.Status.StatusCode.StatusCode == nil)
-		assert.Check(t, response.EncryptedAssertion == nil)
+		assert.Equal(t, response.Status.StatusCode.Value, StatusResponder)
+		assert.Nil(t, response.Status.StatusCode.StatusCode)
+		assert.Nil(t, response.EncryptedAssertion)
 	})
 }

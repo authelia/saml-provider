@@ -10,8 +10,8 @@ import (
 	"time"
 
 	"github.com/beevik/etree"
-	"gotest.tools/assert"
-	is "gotest.tools/assert/cmp"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestIdentityProviderReadsRequestExtensions(t *testing.T) {
@@ -31,8 +31,8 @@ func TestIdentityProviderReadsRequestExtensions(t *testing.T) {
 	body := signedPostBody(t, &test.SP, func(request *AuthnRequest) { request.Extensions = extensionsTestValue() })
 
 	w := serveSSO(test, replayPostRequest(body, nil))
-	assert.Assert(t, is.Equal(w.Code, http.StatusOK), "body: %s", w.Body.String())
-	assert.Check(t, is.DeepEqual(got, extensionsTestValue()))
+	require.Equal(t, w.Code, http.StatusOK, "body: %s", w.Body.String())
+	assert.Equal(t, got, extensionsTestValue())
 }
 
 func TestIssuanceResponseExtensions(t *testing.T) {
@@ -46,15 +46,15 @@ func TestIssuanceResponseExtensions(t *testing.T) {
 		tags = append(tags, child.Tag)
 	}
 
-	assert.Assert(t, len(tags) >= 3, "children: %v", tags)
-	assert.Check(t, is.DeepEqual(tags[:3], []string{"Issuer", "Signature", "Extensions"}))
+	require.True(t, len(tags) >= 3, "children: %v", tags)
+	assert.Equal(t, tags[:3], []string{"Issuer", "Signature", "Extensions"})
 
 	// The extensions are covered by the signature of the response, which the service provider accepts.
 	issuanceAccept(t, &test.SP, responseXML, []string{requestID})
 
 	var response Response
-	assert.NilError(t, xml.Unmarshal(responseXML, &response))
-	assert.Check(t, is.DeepEqual(response.Extensions, extensionsTestValue()))
+	require.NoError(t, xml.Unmarshal(responseXML, &response))
+	assert.Equal(t, response.Extensions, extensionsTestValue())
 
 	assertExtensionsTamperBreaksSignature(t, &test.SP, responseEl)
 }
@@ -64,15 +64,15 @@ func TestIssuanceResponseExtensions(t *testing.T) {
 func assertExtensionsTamperBreaksSignature(t *testing.T, sp *ServiceProvider, responseEl *etree.Element) {
 	t.Helper()
 
-	assert.NilError(t, sp.validateSignature(responseEl.Copy()))
+	require.NoError(t, sp.validateSignature(responseEl.Copy()))
 
 	tampered := responseEl.Copy()
 	hint := tampered.FindElement("./Extensions/Hint")
-	assert.Assert(t, hint != nil)
-	assert.Assert(t, hint.SelectAttrValue("kind", "") == "a")
+	require.NotNil(t, hint)
+	require.True(t, hint.SelectAttrValue("kind", "") == "a")
 	hint.CreateAttr("kind", "b")
 
-	assert.Check(t, sp.validateSignature(tampered) != nil)
+	assert.NotNil(t, sp.validateSignature(tampered))
 }
 
 func TestIssuanceResponseExtensionsSignResponseWhenAssertionOnly(t *testing.T) {
@@ -83,8 +83,8 @@ func TestIssuanceResponseExtensionsSignResponseWhenAssertionOnly(t *testing.T) {
 
 	// The extensions are outside the assertion, so the Response is signed to cover them.
 	response, assertion, _ := issuanceSignatures(t, &test.SP, responseEl)
-	assert.Check(t, response != nil)
-	assert.Check(t, assertion != nil)
+	assert.NotNil(t, response)
+	assert.NotNil(t, assertion)
 
 	issuanceAccept(t, &test.SP, responseXML, []string{requestID})
 	assertExtensionsTamperBreaksSignature(t, &test.SP, responseEl)
@@ -95,18 +95,18 @@ func TestIssuanceResponseExtensionsCheckedOnlyForSSO(t *testing.T) {
 	issuanceFor(test, ServiceProviderIssuance{ResponseExtensions: &ProtocolExtensions{}})
 
 	req, err := hardeningValidate(test, hardeningRequest(`ID="id-1"`, TimeNow(), hardeningIssuer))
-	assert.NilError(t, err)
+	require.NoError(t, err)
 
 	_, err = req.Issuance(nil)
-	assert.Check(t, is.ErrorContains(err, "ResponseExtensions"))
+	assert.ErrorContains(t, err, "ResponseExtensions")
 
 	// An assertion that answers a query is issued with no endpoint, and carries no extensions.
 	req.ACSEndpoint = nil
 	_, err = req.Issuance(nil)
-	assert.Check(t, err)
+	assert.NoError(t, err)
 
 	_, err = test.IDP.signingContextFor(req.HTTPRequest, req.ServiceProviderMetadata)
-	assert.Check(t, err)
+	assert.NoError(t, err)
 }
 
 func TestIssuanceResponseExtensionsOnErrorResponse(t *testing.T) {
@@ -120,8 +120,8 @@ func TestIssuanceResponseExtensionsOnErrorResponse(t *testing.T) {
 	assertRequestStatus(t, w, authnRequestID(t, body), StatusResponder, "")
 
 	doc, _ := postedResponse(t, w.Body.String())
-	assert.Check(t, doc.Root().FindElement("./Extensions/Hint") != nil)
-	assert.NilError(t, test.SP.validateSignature(doc.Root()))
+	assert.NotNil(t, doc.Root().FindElement("./Extensions/Hint"))
+	require.NoError(t, test.SP.validateSignature(doc.Root()))
 
 	assertExtensionsTamperBreaksSignature(t, &test.SP, doc.Root())
 }
@@ -140,9 +140,9 @@ func TestIssuanceRefusesInvalidResponseExtensions(t *testing.T) {
 			test.IDP.Observer = logObserver(logs)
 
 			w := serveSSO(test, replayPostRequest(signedPostBody(t, &test.SP, nil), nil))
-			assert.Check(t, is.Equal(w.Code, http.StatusInternalServerError))
-			assert.Check(t, !strings.Contains(w.Body.String(), "SAMLResponse"))
-			assert.Check(t, is.Contains(logs.String(), "ResponseExtensions"))
+			assert.Equal(t, w.Code, http.StatusInternalServerError)
+			assert.False(t, strings.Contains(w.Body.String(), "SAMLResponse"))
+			assert.Contains(t, logs.String(), "ResponseExtensions")
 		})
 	}
 }
@@ -174,8 +174,8 @@ func TestIssuanceReleasesAttributeExtensions(t *testing.T) {
 		}
 	}
 
-	assert.Assert(t, found != nil, "the attribute was not released")
-	assert.Check(t, is.Equal(found.OriginalIssuer, "https://idp.example.com/saml"))
-	assert.Check(t, found.LastModified.Equal(lastModified))
-	assert.Check(t, is.DeepEqual(found.Attrs, attributeExtValue().Attrs))
+	require.True(t, found != nil, "the attribute was not released")
+	assert.Equal(t, found.OriginalIssuer, "https://idp.example.com/saml")
+	assert.True(t, found.LastModified.Equal(lastModified))
+	assert.Equal(t, found.Attrs, attributeExtValue().Attrs)
 }

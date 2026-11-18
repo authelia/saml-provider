@@ -13,8 +13,8 @@ import (
 	"testing"
 
 	"github.com/beevik/etree"
-	"gotest.tools/assert"
-	is "gotest.tools/assert/cmp"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 // keyValueMetadata returns metadata as an identity provider reads it once each encryption key in it is given as
@@ -32,20 +32,20 @@ func keyValueMetadata(t *testing.T, metadata *EntityDescriptor) *EntityDescripto
 			}
 
 			cert, err := parseCert(firstCertificateData(keyDescriptors[j]))
-			assert.NilError(t, err)
+			require.NoError(t, err)
 
 			keyDescriptors[j].KeyInfo = KeyInfo{KeyValues: []KeyValue{NewRSAKeyValue(cert.PublicKey.(*rsa.PublicKey))}}
 		}
 	}
 
 	buf, err := xml.Marshal(metadata)
-	assert.NilError(t, err)
-	assert.Check(t, is.Contains(string(buf), "<RSAKeyValue"))
+	require.NoError(t, err)
+	assert.Contains(t, string(buf), "<RSAKeyValue")
 
 	parsed := &EntityDescriptor{}
 
 	//nolint:gosec // G709: the XML is what was marshalled above, into a fixed type.
-	assert.NilError(t, xml.Unmarshal(buf, parsed))
+	require.NoError(t, xml.Unmarshal(buf, parsed))
 
 	return parsed
 }
@@ -59,8 +59,8 @@ func useKeyValueMetadata(t *testing.T, req *IdpAuthnRequest) {
 	req.ACSEndpoint = &req.SPSSODescriptor.AssertionConsumerServices[0]
 
 	keyDescriptor := req.spEncryptionKeyDescriptor()
-	assert.Assert(t, keyDescriptor != nil, "the key value is not taken for an encryption key")
-	assert.Assert(t, is.Len(keyDescriptor.KeyInfo.X509Data.X509Certificates, 0))
+	require.True(t, keyDescriptor != nil, "the key value is not taken for an encryption key")
+	require.Len(t, keyDescriptor.KeyInfo.X509Data.X509Certificates, 0)
 }
 
 // checkKeyValueKeyInfo checks that the EncryptedKey of encryptedEl identifies key by its ds:KeyValue, and not by
@@ -69,20 +69,20 @@ func checkKeyValueKeyInfo(t *testing.T, encryptedEl *etree.Element, key *rsa.Pub
 	t.Helper()
 
 	encryptedKey := encryptedEl.FindElement("./EncryptedData/KeyInfo/EncryptedKey")
-	assert.Assert(t, encryptedKey != nil)
+	require.NotNil(t, encryptedKey)
 
 	keyInfo, err := findOneChild(encryptedKey, xmldsigNamespace, "KeyInfo")
-	assert.NilError(t, err)
-	assert.Check(t, is.DeepEqual(childTags(keyInfo), []string{"KeyValue"}))
+	require.NoError(t, err)
+	assert.Equal(t, childTags(keyInfo), []string{"KeyValue"})
 
 	rsaKeyValue := keyInfo.FindElement("./KeyValue/RSAKeyValue")
-	assert.Assert(t, rsaKeyValue != nil)
-	assert.Check(t, is.Equal(rsaKeyValue.NamespaceURI(), xmldsigNamespace))
-	assert.Check(t, is.DeepEqual(childTags(rsaKeyValue), []string{"Modulus", "Exponent"}))
+	require.NotNil(t, rsaKeyValue)
+	assert.Equal(t, rsaKeyValue.NamespaceURI(), xmldsigNamespace)
+	assert.Equal(t, childTags(rsaKeyValue), []string{"Modulus", "Exponent"})
 
 	want := NewRSAKeyValue(key).RSAKeyValue
-	assert.Check(t, is.Equal(rsaKeyValue.FindElement("./Modulus").Text(), want.Modulus))
-	assert.Check(t, is.Equal(rsaKeyValue.FindElement("./Exponent").Text(), want.Exponent))
+	assert.Equal(t, rsaKeyValue.FindElement("./Modulus").Text(), want.Modulus)
+	assert.Equal(t, rsaKeyValue.FindElement("./Exponent").Text(), want.Exponent)
 }
 
 // recordingEnforcer records the keys that the identity provider asks about, and refuses them with err.
@@ -113,45 +113,45 @@ func TestIDPEncryptsToKeyValueKey(t *testing.T) {
 	body := respond(t, req)
 
 	// The enforcer is asked before anything is encrypted, about a key that has no certificate.
-	assert.Assert(t, len(enforcer.keys) != 0)
+	require.True(t, len(enforcer.keys) != 0)
 
 	for _, key := range enforcer.keys {
-		assert.Check(t, key.Certificate == nil)
-		assert.Check(t, spKey.Equal(key.PublicKey))
+		assert.Nil(t, key.Certificate)
+		assert.True(t, spKey.Equal(key.PublicKey))
 	}
 
 	doc := etree.NewDocument()
-	assert.NilError(t, doc.ReadFromString(body))
+	require.NoError(t, doc.ReadFromString(body))
 
 	encryptedAssertion := doc.Root().FindElement("./EncryptedAssertion")
-	assert.Assert(t, encryptedAssertion != nil, "the assertion is not encrypted: %s", body)
+	require.True(t, encryptedAssertion != nil, "the assertion is not encrypted: %s", body)
 	checkKeyValueKeyInfo(t, encryptedAssertion, spKey)
-	assert.Check(t, encryptedAssertion.FindElement(".//X509Data") == nil)
+	assert.Nil(t, encryptedAssertion.FindElement(".//X509Data"))
 
 	sent := sentAssertionElement(t, test, body)
-	assert.Check(t, !strings.Contains(elementToString(sent), "alice"))
+	assert.False(t, strings.Contains(elementToString(sent), "alice"))
 
 	encryptedID := sent.FindElement("./Subject/EncryptedID")
-	assert.Assert(t, encryptedID != nil)
+	require.NotNil(t, encryptedID)
 	checkKeyValueKeyInfo(t, encryptedID, spKey)
-	assert.Check(t, is.Equal(test.SP.MetadataURL.String(), encryptedID.FindElement("./EncryptedData/KeyInfo/EncryptedKey").SelectAttrValue("Recipient", "")))
+	assert.Equal(t, test.SP.MetadataURL.String(), encryptedID.FindElement("./EncryptedData/KeyInfo/EncryptedKey").SelectAttrValue("Recipient", ""))
 
 	encryptedAttributes := sent.FindElements("./AttributeStatement/EncryptedAttribute")
-	assert.Assert(t, is.Len(encryptedAttributes, 4))
-	assert.Check(t, sent.FindElement("./AttributeStatement/Attribute") == nil)
+	require.Len(t, encryptedAttributes, 4)
+	assert.Nil(t, sent.FindElement("./AttributeStatement/Attribute"))
 
 	for _, encryptedAttribute := range encryptedAttributes {
 		checkKeyValueKeyInfo(t, encryptedAttribute, spKey)
-		assert.Check(t, is.Equal(test.SP.MetadataURL.String(), encryptedAttribute.FindElement("./EncryptedData/KeyInfo/EncryptedKey").SelectAttrValue("Recipient", "")))
+		assert.Equal(t, test.SP.MetadataURL.String(), encryptedAttribute.FindElement("./EncryptedData/KeyInfo/EncryptedKey").SelectAttrValue("Recipient", ""))
 	}
 
 	// The algorithms are still negotiated from the EncryptionMethods of the descriptor.
-	assert.Check(t, is.Equal(aes128GCM, encryptedID.FindElement("./EncryptedData/EncryptionMethod").SelectAttrValue("Algorithm", "")))
+	assert.Equal(t, aes128GCM, encryptedID.FindElement("./EncryptedData/EncryptionMethod").SelectAttrValue("Algorithm", ""))
 
 	assertion, err := test.SP.ParseXMLResponse([]byte(body), []string{"id-request"}, test.SP.AcsURL)
-	assert.NilError(t, err)
-	assert.Check(t, is.DeepEqual(*req.Assertion.Subject.NameID, *assertion.Subject.NameID))
-	assert.Check(t, is.DeepEqual(req.Assertion.AttributeStatements, assertion.AttributeStatements))
+	require.NoError(t, err)
+	assert.Equal(t, *req.Assertion.Subject.NameID, *assertion.Subject.NameID)
+	assert.Equal(t, req.Assertion.AttributeStatements, assertion.AttributeStatements)
 }
 
 // The key is refused like one in a certificate is: nothing is sent, in plaintext or to another key.
@@ -168,17 +168,17 @@ func TestIDPEnforcerRefusesKeyValueKey(t *testing.T) {
 		enforcer := &recordingEnforcer{err: refusal}
 		test.IDP.EncryptionKeyEnforcer = enforcer
 
-		assert.NilError(t, DefaultAssertionMaker{}.MakeAssertion(req, encryptedPartsSession))
+		require.NoError(t, DefaultAssertionMaker{}.MakeAssertion(req, encryptedPartsSession))
 
 		err := req.MakeAssertionEl()
-		assert.Check(t, errors.Is(err, refusal), "err=%v", err)
-		assert.Check(t, !errors.Is(err, os.ErrNotExist))
-		assert.Check(t, req.AssertionEl == nil)
-		assert.Check(t, errors.Is(req.MakeResponse(), refusal))
-		assert.Check(t, req.ResponseEl == nil)
+		assert.True(t, errors.Is(err, refusal), "err=%v", err)
+		assert.False(t, errors.Is(err, os.ErrNotExist))
+		assert.Nil(t, req.AssertionEl)
+		assert.True(t, errors.Is(req.MakeResponse(), refusal))
+		assert.Nil(t, req.ResponseEl)
 
-		assert.Assert(t, len(enforcer.keys) != 0)
-		assert.Check(t, enforcer.keys[0].Certificate == nil)
+		require.True(t, len(enforcer.keys) != 0)
+		assert.Nil(t, enforcer.keys[0].Certificate)
 	})
 
 	rsa2048, rsa1024 := spCertTestKeys(t)
@@ -213,16 +213,16 @@ func TestIDPEnforcerRefusesKeyValueKey(t *testing.T) {
 
 			key, err := req.spEncryptionKey()
 			if tc.err == "" {
-				assert.NilError(t, err)
-				assert.Check(t, key.Certificate == nil)
-				assert.Check(t, tc.key.PublicKey.Equal(key.PublicKey))
+				require.NoError(t, err)
+				assert.Nil(t, key.Certificate)
+				assert.True(t, tc.key.PublicKey.Equal(key.PublicKey))
 
 				return
 			}
 
-			assert.Check(t, is.ErrorContains(err, tc.err))
-			assert.Check(t, !errors.Is(err, os.ErrNotExist), "a refused key must not fall back to plaintext")
-			assert.Check(t, key == nil)
+			assert.ErrorContains(t, err, tc.err)
+			assert.False(t, errors.Is(err, os.ErrNotExist), "a refused key must not fall back to plaintext")
+			assert.Nil(t, key)
 		})
 	}
 }
@@ -234,10 +234,10 @@ func TestDefaultEncryptionKeyEnforcerRequiresKey(t *testing.T) {
 	req := &IdpAuthnRequest{Now: ecdsaCert.NotBefore}
 	enforcer := DefaultEncryptionKeyEnforcer{IgnoreValidityPeriod: true}
 
-	assert.Check(t, is.ErrorContains(enforcer.EnforceEncryptionKey(req, ServiceProviderEncryptionKey{}), "neither an RSA nor an elliptic curve"))
-	assert.Check(t, is.ErrorContains(enforcer.EnforceEncryptionKey(req, ServiceProviderEncryptionKey{PublicKey: ed25519.PublicKey(make([]byte, ed25519.PublicKeySize))}), "neither an RSA nor an elliptic curve"))
-	assert.Check(t, enforcer.EnforceEncryptionKey(req, ServiceProviderEncryptionKey{Certificate: ecdsaCert}))
-	assert.Check(t, is.ErrorContains(enforcer.EnforceEncryptionKey(req, ServiceProviderEncryptionKey{PublicKey: (*ecdsa.PublicKey)(nil)}), "not an elliptic curve public key"))
+	assert.ErrorContains(t, enforcer.EnforceEncryptionKey(req, ServiceProviderEncryptionKey{}), "neither an RSA nor an elliptic curve")
+	assert.ErrorContains(t, enforcer.EnforceEncryptionKey(req, ServiceProviderEncryptionKey{PublicKey: ed25519.PublicKey(make([]byte, ed25519.PublicKeySize))}), "neither an RSA nor an elliptic curve")
+	assert.NoError(t, enforcer.EnforceEncryptionKey(req, ServiceProviderEncryptionKey{Certificate: ecdsaCert}))
+	assert.ErrorContains(t, enforcer.EnforceEncryptionKey(req, ServiceProviderEncryptionKey{PublicKey: (*ecdsa.PublicKey)(nil)}), "not an elliptic curve public key")
 }
 
 const (
@@ -269,8 +269,8 @@ func parsedKeyDescriptor(t *testing.T, template, use string) KeyDescriptor {
 
 	var keyDescriptor KeyDescriptor
 
-	assert.NilError(t, xml.Unmarshal([]byte(strings.Replace(template, "%USE%", use, 1)), &keyDescriptor))
-	assert.Check(t, is.Equal(keyDescriptor.Use, use))
+	require.NoError(t, xml.Unmarshal([]byte(strings.Replace(template, "%USE%", use, 1)), &keyDescriptor))
+	assert.Equal(t, keyDescriptor.Use, use)
 
 	return keyDescriptor
 }
@@ -399,38 +399,38 @@ func TestIDPEncryptionKeySelection(t *testing.T) {
 
 			switch tc.want {
 			case toCert:
-				assert.NilError(t, err)
-				assert.Check(t, test.SPCertificate.Equal(key.Certificate))
-				assert.Check(t, certKey.Equal(key.PublicKey))
-				assert.Check(t, req.spEncryptionKeyDescriptor() != nil)
+				require.NoError(t, err)
+				assert.True(t, test.SPCertificate.Equal(key.Certificate))
+				assert.True(t, certKey.Equal(key.PublicKey))
+				assert.NotNil(t, req.spEncryptionKeyDescriptor())
 			case toECCert:
-				assert.NilError(t, err)
-				assert.Check(t, ecdsaCert.Equal(key.Certificate))
-				assert.Check(t, ecdsaCert.PublicKey.(*ecdsa.PublicKey).Equal(key.PublicKey))
-				assert.Check(t, req.spEncryptionKeyDescriptor() != nil)
+				require.NoError(t, err)
+				assert.True(t, ecdsaCert.Equal(key.Certificate))
+				assert.True(t, ecdsaCert.PublicKey.(*ecdsa.PublicKey).Equal(key.PublicKey))
+				assert.NotNil(t, req.spEncryptionKeyDescriptor())
 			case toKeyValue:
-				assert.NilError(t, err)
-				assert.Check(t, key.Certificate == nil)
-				assert.Check(t, tc.key.Equal(key.PublicKey))
-				assert.Check(t, req.spEncryptionKeyDescriptor() != nil)
+				require.NoError(t, err)
+				assert.Nil(t, key.Certificate)
+				assert.True(t, tc.key.Equal(key.PublicKey))
+				assert.NotNil(t, req.spEncryptionKeyDescriptor())
 			case plaintext:
-				assert.Check(t, is.Equal(os.ErrNotExist, err))
-				assert.Check(t, key == nil)
-				assert.Check(t, req.spEncryptionKeyDescriptor() == nil)
+				assert.Equal(t, os.ErrNotExist, err)
+				assert.Nil(t, key)
+				assert.Nil(t, req.spEncryptionKeyDescriptor())
 			case failClosed:
 				// Not os.ErrNotExist, which would send the assertion in plaintext.
-				assert.Check(t, is.ErrorContains(err, "allows encryption but has no usable key"))
-				assert.Check(t, !errors.Is(err, os.ErrNotExist))
-				assert.Check(t, key == nil)
-				assert.Check(t, req.spEncryptionKeyDescriptor() == nil)
+				assert.ErrorContains(t, err, "allows encryption but has no usable key")
+				assert.False(t, errors.Is(err, os.ErrNotExist))
+				assert.Nil(t, key)
+				assert.Nil(t, req.spEncryptionKeyDescriptor())
 			case broken:
-				assert.Check(t, is.ErrorContains(err, "cannot "))
-				assert.Check(t, !errors.Is(err, os.ErrNotExist))
-				assert.Check(t, key == nil)
+				assert.ErrorContains(t, err, "cannot ")
+				assert.False(t, errors.Is(err, os.ErrNotExist))
+				assert.Nil(t, key)
 
 				// The service provider is not taken to have no key, which is how a request for an EncryptedID
 				// would be answered as if it could not be met rather than as the error it is.
-				assert.Check(t, req.spEncryptionKeyDescriptor() != nil)
+				assert.NotNil(t, req.spEncryptionKeyDescriptor())
 			}
 		})
 	}
@@ -456,21 +456,21 @@ func TestIDPKeyValueFailsClosed(t *testing.T) {
 			_, req := encryptedPartsRequest(t)
 			req.SPSSODescriptor.KeyDescriptors = []KeyDescriptor{parsedKeyDescriptor(t, tc.template, tc.use)}
 
-			assert.NilError(t, DefaultAssertionMaker{}.MakeAssertion(req, encryptedPartsSession))
+			require.NoError(t, DefaultAssertionMaker{}.MakeAssertion(req, encryptedPartsSession))
 
 			err := req.MakeResponse()
 			if !tc.plaintext {
-				assert.Check(t, is.ErrorContains(err, "allows encryption but has no usable key"))
-				assert.Check(t, req.AssertionEl == nil)
-				assert.Check(t, req.ResponseEl == nil)
+				assert.ErrorContains(t, err, "allows encryption but has no usable key")
+				assert.Nil(t, req.AssertionEl)
+				assert.Nil(t, req.ResponseEl)
 
 				return
 			}
 
-			assert.NilError(t, err)
-			assert.Check(t, is.Equal(req.AssertionEl.Tag, "Assertion"))
-			assert.Check(t, req.ResponseEl.FindElement("./Assertion") != nil)
-			assert.Check(t, req.ResponseEl.FindElement("./EncryptedAssertion") == nil)
+			require.NoError(t, err)
+			assert.Equal(t, req.AssertionEl.Tag, "Assertion")
+			assert.NotNil(t, req.ResponseEl.FindElement("./Assertion"))
+			assert.Nil(t, req.ResponseEl.FindElement("./EncryptedAssertion"))
 		})
 	}
 }
@@ -493,23 +493,23 @@ func TestIDPEncryptsPastWhitespaceCertificate(t *testing.T) {
 			edit(req.SPSSODescriptor)
 
 			buf, err := xml.Marshal(req.ServiceProviderMetadata)
-			assert.NilError(t, err)
+			require.NoError(t, err)
 
 			req.ServiceProviderMetadata = &EntityDescriptor{}
-			assert.NilError(t, xml.Unmarshal(buf, req.ServiceProviderMetadata))
+			require.NoError(t, xml.Unmarshal(buf, req.ServiceProviderMetadata))
 			req.SPSSODescriptor = &req.ServiceProviderMetadata.SPSSODescriptors[0]
 			req.ACSEndpoint = &req.SPSSODescriptor.AssertionConsumerServices[0]
 
-			assert.Check(t, is.Equal(req.SPSSODescriptor.KeyDescriptors[0].KeyInfo.X509Data.X509Certificates[0].Data, "\n      "))
+			assert.Equal(t, req.SPSSODescriptor.KeyDescriptors[0].KeyInfo.X509Data.X509Certificates[0].Data, "\n      ")
 
 			body := respond(t, req)
 
 			encryptedKey := req.ResponseEl.FindElement("./EncryptedAssertion/EncryptedData/KeyInfo/EncryptedKey")
-			assert.Assert(t, encryptedKey != nil, "the assertion is not encrypted: %s", body)
-			assert.Check(t, is.Equal(encryptedKey.FindElement("./KeyInfo/X509Data/X509Certificate").Text(), base64.StdEncoding.EncodeToString(test.SP.Certificate.Raw)))
+			require.True(t, encryptedKey != nil, "the assertion is not encrypted: %s", body)
+			assert.Equal(t, encryptedKey.FindElement("./KeyInfo/X509Data/X509Certificate").Text(), base64.StdEncoding.EncodeToString(test.SP.Certificate.Raw))
 
 			_, err = test.SP.ParseXMLResponse([]byte(body), []string{"id-request"}, test.SP.AcsURL)
-			assert.NilError(t, err)
+			require.NoError(t, err)
 		})
 	}
 }
@@ -527,11 +527,11 @@ func TestLogoutRequestToParticipantWithKeyValueKey(t *testing.T) {
 	checkEncryptedLogoutRequest(t, f.test, f.a, el)
 
 	encryptedID, err := findOneChild(el, samlAssertionNamespace, "EncryptedID")
-	assert.NilError(t, err)
+	require.NoError(t, err)
 	checkKeyValueKeyInfo(t, encryptedID, f.a.Certificate.PublicKey.(*rsa.PublicKey))
 
-	assert.Assert(t, is.Len(enforcer.keys, 1))
-	assert.Check(t, enforcer.keys[0].Certificate == nil)
+	require.Len(t, enforcer.keys, 1)
+	assert.Nil(t, enforcer.keys[0].Certificate)
 }
 
 // The identifier of a NameIDMappingResponse is encrypted to the key of its target (SAMLProfiles §4.6.4.2).
@@ -550,17 +550,17 @@ func TestNameIDMappingToKeyValueKey(t *testing.T) {
 	checkStatus(t, result.Response.Status, StatusSuccess, "")
 
 	encryptedID := result.Element.FindElement("./EncryptedID")
-	assert.Assert(t, encryptedID != nil)
+	require.NotNil(t, encryptedID)
 	checkKeyValueKeyInfo(t, encryptedID, f.b.Certificate.PublicKey.(*rsa.PublicKey))
-	assert.Check(t, is.Equal(encryptedID.FindElement("./EncryptedData/KeyInfo/EncryptedKey").SelectAttrValue("Recipient", ""), f.b.MetadataURL.String()))
+	assert.Equal(t, encryptedID.FindElement("./EncryptedData/KeyInfo/EncryptedKey").SelectAttrValue("Recipient", ""), f.b.MetadataURL.String())
 
 	nameID, err := f.b.DecryptNameID(reparse(t, encryptedID))
-	assert.NilError(t, err)
-	assert.Check(t, is.Equal(nameID.Value, "b-alice"))
+	require.NoError(t, err)
+	assert.Equal(t, nameID.Value, "b-alice")
 
-	assert.Assert(t, is.Len(enforcer.keys, 1))
-	assert.Check(t, enforcer.keys[0].Certificate == nil)
-	assert.Check(t, f.b.Certificate.PublicKey.(*rsa.PublicKey).Equal(enforcer.keys[0].PublicKey))
+	require.Len(t, enforcer.keys, 1)
+	assert.Nil(t, enforcer.keys[0].Certificate)
+	assert.True(t, f.b.Certificate.PublicKey.(*rsa.PublicKey).Equal(enforcer.keys[0].PublicKey))
 
 	// A refusal of the key refuses the mapping.
 	enforcer.err = errors.New("this key is not allowed")
@@ -582,15 +582,15 @@ func TestQueryAnswerEncryptedToKeyValueKey(t *testing.T) {
 	// parseQueryResponse decrypts the assertion with the key of the service provider.
 	response := f.queryAttributes(t, f.attributeQuery())
 	assertQueryStatus(t, response, StatusSuccess, "")
-	assert.Assert(t, is.Len(response.Assertions, 1))
-	assert.Check(t, is.Equal(response.Encrypted, 1))
+	require.Len(t, response.Assertions, 1)
+	assert.Equal(t, response.Encrypted, 1)
 
-	assert.Assert(t, len(enforcer.keys) != 0)
-	assert.Check(t, enforcer.keys[0].Certificate == nil)
-	assert.Check(t, f.test.SP.Certificate.PublicKey.(*rsa.PublicKey).Equal(enforcer.keys[0].PublicKey))
+	require.True(t, len(enforcer.keys) != 0)
+	assert.Nil(t, enforcer.keys[0].Certificate)
+	assert.True(t, f.test.SP.Certificate.PublicKey.(*rsa.PublicKey).Equal(enforcer.keys[0].PublicKey))
 
 	enforcer.err = errors.New("this key is not allowed")
 	response = f.queryAttributes(t, f.attributeQuery())
 	assertQueryStatus(t, response, StatusResponder, "")
-	assert.Check(t, is.Len(response.Assertions, 0))
+	assert.Len(t, response.Assertions, 0)
 }

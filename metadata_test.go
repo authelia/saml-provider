@@ -7,9 +7,10 @@ import (
 	"testing"
 	"time"
 
-	"gotest.tools/assert"
-	is "gotest.tools/assert/cmp"
-	"gotest.tools/golden"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+
+	"authelia.com/provider/saml/internal/golden"
 )
 
 func TestCanParseMetadata(t *testing.T) {
@@ -17,7 +18,7 @@ func TestCanParseMetadata(t *testing.T) {
 
 	metadata := EntityDescriptor{}
 	err := xml.Unmarshal(buf, &metadata)
-	assert.Check(t, err)
+	assert.NoError(t, err)
 
 	var (
 		False = false
@@ -87,7 +88,7 @@ func TestCanParseMetadata(t *testing.T) {
 			},
 		},
 	}
-	assert.Check(t, is.DeepEqual(expected, metadata))
+	assert.Equal(t, expected, metadata)
 }
 
 func TestCanProduceSPMetadata(t *testing.T) {
@@ -165,7 +166,7 @@ cvCsEFiJZ4AbF+DgmO6TarJ8O05t8zvnOwJlNCASPZRH/JmF8tX0hoHuAQ==`,
 	}
 
 	buf, err := xml.MarshalIndent(metadata, "", "  ")
-	assert.Check(t, err)
+	assert.NoError(t, err)
 	golden.Assert(t, string(buf), "TestCanProduceSPMetadata_expected")
 }
 
@@ -174,7 +175,7 @@ func TestMetadataValidatesUrlSchemeForProtocolBinding(t *testing.T) {
 
 	metadata := EntityDescriptor{}
 	err := xml.Unmarshal(buf, &metadata)
-	assert.Error(t, err, "invalid url scheme \"javascript\" for binding \"urn:oasis:names:tc:SAML:2.0:bindings:HTTP-POST\"")
+	require.EqualError(t, err, "invalid url scheme \"javascript\" for binding \"urn:oasis:names:tc:SAML:2.0:bindings:HTTP-POST\"")
 }
 
 func TestEncryptionMethodKeepsItsParameters(t *testing.T) {
@@ -216,16 +217,16 @@ func TestEncryptionMethodKeepsItsParameters(t *testing.T) {
 	}
 
 	var parsed EntityDescriptor
-	assert.NilError(t, xml.Unmarshal([]byte(metadata), &parsed))
-	assert.Check(t, is.DeepEqual(want, parsed.SPSSODescriptors[0].KeyDescriptors[0].EncryptionMethods))
+	require.NoError(t, xml.Unmarshal([]byte(metadata), &parsed))
+	assert.Equal(t, want, parsed.SPSSODescriptors[0].KeyDescriptors[0].EncryptionMethods)
 
 	// The parameters are marshalled in the namespaces they were parsed from, so that they survive a round trip.
 	buf, err := xml.Marshal(parsed)
-	assert.NilError(t, err)
+	require.NoError(t, err)
 
 	var again EntityDescriptor
-	assert.NilError(t, xml.Unmarshal(buf, &again))
-	assert.Check(t, is.DeepEqual(want, again.SPSSODescriptors[0].KeyDescriptors[0].EncryptionMethods))
+	require.NoError(t, xml.Unmarshal(buf, &again))
+	assert.Equal(t, want, again.SPSSODescriptors[0].KeyDescriptors[0].EncryptionMethods)
 
 	for _, fragment := range []string{
 		`<KeySize xmlns="http://www.w3.org/2001/04/xmlenc#">256</KeySize>`,
@@ -234,7 +235,7 @@ func TestEncryptionMethodKeepsItsParameters(t *testing.T) {
 		`<MGF xmlns="http://www.w3.org/2009/xmlenc11#" Algorithm="http://www.w3.org/2009/xmlenc11#mgf1sha256"></MGF>`,
 		`<EncryptionMethod Algorithm="http://www.w3.org/2001/04/xmlenc#aes128-cbc"></EncryptionMethod>`,
 	} {
-		assert.Check(t, is.Contains(string(buf), fragment))
+		assert.Contains(t, string(buf), fragment)
 	}
 }
 
@@ -246,8 +247,8 @@ func TestEncryptionMethodIgnoresParametersInOtherNamespaces(t *testing.T) {
 	</KeyDescriptor>`
 
 	var parsed KeyDescriptor
-	assert.NilError(t, xml.Unmarshal([]byte(keyDescriptor), &parsed))
-	assert.Check(t, is.DeepEqual([]EncryptionMethod{{Algorithm: "http://www.w3.org/2001/04/xmlenc#rsa-oaep-mgf1p"}}, parsed.EncryptionMethods))
+	require.NoError(t, xml.Unmarshal([]byte(keyDescriptor), &parsed))
+	assert.Equal(t, []EncryptionMethod{{Algorithm: "http://www.w3.org/2001/04/xmlenc#rsa-oaep-mgf1p"}}, parsed.EncryptionMethods)
 }
 
 // SAMLMeta §2.4.1.1: the use of a KeyDescriptor is optional, and a key with none is for both signing and
@@ -259,22 +260,22 @@ func TestKeyDescriptorWithoutUseRoundTrips(t *testing.T) {
 
 	var keyDescriptor KeyDescriptor
 
-	assert.NilError(t, xml.Unmarshal([]byte(in), &keyDescriptor))
-	assert.Check(t, is.Equal(keyDescriptor.Use, ""))
+	require.NoError(t, xml.Unmarshal([]byte(in), &keyDescriptor))
+	assert.Equal(t, keyDescriptor.Use, "")
 
 	out, err := xml.Marshal(keyDescriptor)
-	assert.NilError(t, err)
-	assert.Check(t, is.Equal(string(out), `<KeyDescriptor>`+
+	require.NoError(t, err)
+	assert.Equal(t, string(out), `<KeyDescriptor>`+
 		`<KeyInfo xmlns="http://www.w3.org/2000/09/xmldsig#"><X509Data xmlns="http://www.w3.org/2000/09/xmldsig#">`+
 		`<X509Certificate xmlns="http://www.w3.org/2000/09/xmldsig#">MIIB</X509Certificate></X509Data></KeyInfo>`+
-		`</KeyDescriptor>`))
+		`</KeyDescriptor>`)
 
 	// A use that is given is kept.
 	keyDescriptor.Use = "signing"
 
 	out, err = xml.Marshal(keyDescriptor)
-	assert.NilError(t, err)
-	assert.Check(t, is.Contains(string(out), `<KeyDescriptor use="signing">`))
+	require.NoError(t, err)
+	assert.Contains(t, string(out), `<KeyDescriptor use="signing">`)
 }
 
 // A KeyInfo keeps the names and the RSA key values it is read with, and is not written with an X509Data it never
@@ -343,7 +344,7 @@ func TestKeyInfoRoundTrips(t *testing.T) {
 
 			var keyDescriptor KeyDescriptor
 
-			assert.NilError(t, xml.Unmarshal([]byte(in), &keyDescriptor))
+			require.NoError(t, xml.Unmarshal([]byte(in), &keyDescriptor))
 
 			actual := keyDescriptor.KeyInfo
 			actual.XMLName = xml.Name{}
@@ -357,20 +358,20 @@ func TestKeyInfoRoundTrips(t *testing.T) {
 				actual.X509Data.X509Certificates[i].XMLName = xml.Name{}
 			}
 
-			assert.Check(t, is.DeepEqual(actual, tc.expected))
+			assert.Equal(t, actual, tc.expected)
 
 			out, err := xml.Marshal(keyDescriptor)
-			assert.NilError(t, err)
-			assert.Check(t, is.Equal(string(out), `<KeyDescriptor use="encryption"><KeyInfo xmlns="http://www.w3.org/2000/09/xmldsig#">`+tc.out+`</KeyInfo></KeyDescriptor>`))
+			require.NoError(t, err)
+			assert.Equal(t, string(out), `<KeyDescriptor use="encryption"><KeyInfo xmlns="http://www.w3.org/2000/09/xmldsig#">`+tc.out+`</KeyInfo></KeyDescriptor>`)
 
 			// What is written is read as what was kept.
 			var again KeyDescriptor
 
-			assert.NilError(t, xml.Unmarshal(out, &again))
+			require.NoError(t, xml.Unmarshal(out, &again))
 
 			reread, err := xml.Marshal(again)
-			assert.NilError(t, err)
-			assert.Check(t, is.Equal(string(reread), string(out)))
+			require.NoError(t, err)
+			assert.Equal(t, string(reread), string(out))
 		})
 	}
 }
@@ -379,17 +380,17 @@ func TestRSAKeyValuePublicKey(t *testing.T) {
 	key := &rsa.PublicKey{N: new(big.Int).Lsh(big.NewInt(0xc5), 2040), E: 65537}
 
 	keyValue := NewRSAKeyValue(key)
-	assert.Check(t, is.Equal(keyValue.RSAKeyValue.Exponent, "AQAB"))
+	assert.Equal(t, keyValue.RSAKeyValue.Exponent, "AQAB")
 
 	parsed, err := keyValue.RSAKeyValue.PublicKey()
-	assert.NilError(t, err)
-	assert.Check(t, key.Equal(parsed))
+	require.NoError(t, err)
+	assert.True(t, key.Equal(parsed))
 
 	// The encoding of a long value is wrapped.
 	wrapped := RSAKeyValue{Modulus: "\n  " + keyValue.RSAKeyValue.Modulus[:40] + "\r\n\t" + keyValue.RSAKeyValue.Modulus[40:] + "\n", Exponent: " AQAB "}
 	parsed, err = wrapped.PublicKey()
-	assert.NilError(t, err)
-	assert.Check(t, key.Equal(parsed))
+	require.NoError(t, err)
+	assert.True(t, key.Equal(parsed))
 
 	for name, tc := range map[string]struct {
 		value RSAKeyValue
@@ -405,8 +406,8 @@ func TestRSAKeyValuePublicKey(t *testing.T) {
 	} {
 		t.Run(name, func(t *testing.T) {
 			parsed, err := tc.value.PublicKey()
-			assert.Check(t, is.ErrorContains(err, tc.err))
-			assert.Check(t, parsed == nil)
+			assert.ErrorContains(t, err, tc.err)
+			assert.Nil(t, parsed)
 		})
 	}
 }

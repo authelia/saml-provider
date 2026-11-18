@@ -12,9 +12,10 @@ import (
 	"testing"
 
 	"github.com/beevik/etree"
-	"gotest.tools/assert"
-	is "gotest.tools/assert/cmp"
-	"gotest.tools/golden"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+
+	"authelia.com/provider/saml/internal/golden"
 )
 
 const soapLogoutTestURL = "https://idp.example.com/saml/slo/soap"
@@ -39,14 +40,14 @@ func soapLogoutRequestElement(t *testing.T, sp *ServiceProvider, mutate func(*Lo
 	unsigned := *sp
 	unsigned.SignatureMethod = ""
 	request, err := unsigned.MakeLogoutRequest(soapLogoutTestURL, "alice")
-	assert.NilError(t, err)
+	require.NoError(t, err)
 
 	if mutate != nil {
 		mutate(request)
 	}
 
 	if sp.SignatureMethod != "" {
-		assert.NilError(t, sp.SignLogoutRequest(request))
+		require.NoError(t, sp.SignLogoutRequest(request))
 	}
 
 	return request.Element(), request.ID
@@ -60,7 +61,7 @@ func soapLogoutEnvelope(t *testing.T, message *etree.Element) []byte {
 	envelope.CreateElement("soapenv:Body").AddChild(message)
 
 	buf, err := doc.WriteToBytes()
-	assert.NilError(t, err)
+	require.NoError(t, err)
 
 	return buf
 }
@@ -96,7 +97,7 @@ func serveSOAPLogout(test *IdentityProviderTest, r *http.Request) *httptest.Resp
 func soapLogoutResponse(t *testing.T, w *httptest.ResponseRecorder) *LogoutResponse {
 	t.Helper()
 
-	assert.Assert(t, is.Equal(w.Code, http.StatusOK), "body: %s", w.Body.String())
+	require.Equal(t, w.Code, http.StatusOK, "body: %s", w.Body.String())
 
 	envelope := soapTestParseResponse(t, w)
 
@@ -108,17 +109,17 @@ func soapLogoutResponse(t *testing.T, w *httptest.ResponseRecorder) *LogoutRespo
 		}
 	}
 
-	assert.Assert(t, body != nil)
-	assert.Assert(t, is.Len(body.ChildElements(), 1))
+	require.NotNil(t, body)
+	require.Len(t, body.ChildElements(), 1)
 
 	message := detachSOAPBodyChild(body.ChildElements()[0])
-	assert.Check(t, is.Equal(message.Tag, "LogoutResponse"))
+	assert.Equal(t, message.Tag, "LogoutResponse")
 
 	verified, err := verifyEnvelopedSignature(message, []*x509.Certificate{mustParseCertificate(golden.Get(t, "idp_cert.pem"))}, anySignaturePolicy)
-	assert.NilError(t, err)
+	require.NoError(t, err)
 
 	response := &LogoutResponse{}
-	assert.NilError(t, unmarshalElement(verified, response))
+	require.NoError(t, unmarshalElement(verified, response))
 
 	return response
 }
@@ -127,12 +128,12 @@ func soapLogoutResponse(t *testing.T, w *httptest.ResponseRecorder) *LogoutRespo
 func soapFaultCode(t *testing.T, w *httptest.ResponseRecorder) string {
 	t.Helper()
 
-	assert.Assert(t, is.Equal(w.Code, http.StatusInternalServerError), "body: %s", w.Body.String())
+	require.Equal(t, w.Code, http.StatusInternalServerError, "body: %s", w.Body.String())
 
 	envelope := soapTestParseResponse(t, w)
 
 	fault := envelope.FindElement("./Body/Fault/faultcode")
-	assert.Assert(t, fault != nil, "body: %s", w.Body.String())
+	require.True(t, fault != nil, "body: %s", w.Body.String())
 
 	return fault.Text()
 }
@@ -141,16 +142,16 @@ func soapFaultCode(t *testing.T, w *httptest.ResponseRecorder) string {
 func assertLogoutStatus(t *testing.T, response *LogoutResponse, top, second string) {
 	t.Helper()
 
-	assert.Check(t, is.Equal(response.Status.StatusCode.Value, top))
+	assert.Equal(t, response.Status.StatusCode.Value, top)
 
 	if second == "" {
-		assert.Check(t, response.Status.StatusCode.StatusCode == nil)
+		assert.Nil(t, response.Status.StatusCode.StatusCode)
 
 		return
 	}
 
-	assert.Assert(t, response.Status.StatusCode.StatusCode != nil)
-	assert.Check(t, is.Equal(response.Status.StatusCode.StatusCode.Value, second))
+	require.NotNil(t, response.Status.StatusCode.StatusCode)
+	assert.Equal(t, response.Status.StatusCode.StatusCode.Value, second)
 }
 
 func TestServeSOAPLogoutSuccess(t *testing.T) {
@@ -158,20 +159,20 @@ func TestServeSOAPLogoutSuccess(t *testing.T) {
 	r, id := soapLogoutRequest(t, &test.SP, nil)
 	w := serveSOAPLogout(test, r)
 
-	assert.Check(t, is.Equal(w.Header().Get("Content-Type"), "text/xml; charset=utf-8"))
-	assert.Check(t, is.Equal(w.Header().Get("Cache-Control"), "no-cache, no-store"))
-	assert.Check(t, is.Equal(w.Header().Get("Pragma"), "no-cache"))
+	assert.Equal(t, w.Header().Get("Content-Type"), "text/xml; charset=utf-8")
+	assert.Equal(t, w.Header().Get("Cache-Control"), "no-cache, no-store")
+	assert.Equal(t, w.Header().Get("Pragma"), "no-cache")
 
 	response := soapLogoutResponse(t, w)
-	assert.Check(t, is.Equal(response.InResponseTo, id))
-	assert.Check(t, is.Equal(response.Destination, ""))
-	assert.Assert(t, response.Issuer != nil)
-	assert.Check(t, is.Equal(response.Issuer.Value, test.IDP.MetadataURL.String()))
+	assert.Equal(t, response.InResponseTo, id)
+	assert.Equal(t, response.Destination, "")
+	require.NotNil(t, response.Issuer)
+	assert.Equal(t, response.Issuer.Value, test.IDP.MetadataURL.String())
 	assertLogoutStatus(t, response, StatusSuccess, "")
 
-	assert.Assert(t, is.Len(provider.lookups, 1))
-	assert.Check(t, is.Equal(provider.lookups[0].ServiceProviderMetadata.EntityID, test.SP.MetadataURL.String()))
-	assert.Check(t, is.Len(provider.terminated, 1))
+	require.Len(t, provider.lookups, 1)
+	assert.Equal(t, provider.lookups[0].ServiceProviderMetadata.EntityID, test.SP.MetadataURL.String())
+	assert.Len(t, provider.terminated, 1)
 }
 
 func TestServeSOAPLogoutDestinationOptional(t *testing.T) {
@@ -179,9 +180,9 @@ func TestServeSOAPLogoutDestinationOptional(t *testing.T) {
 	r, id := soapLogoutRequest(t, &test.SP, func(request *LogoutRequest) { request.Destination = "" })
 
 	response := soapLogoutResponse(t, serveSOAPLogout(test, r))
-	assert.Check(t, is.Equal(response.InResponseTo, id))
+	assert.Equal(t, response.InResponseTo, id)
 	assertLogoutStatus(t, response, StatusSuccess, "")
-	assert.Check(t, is.Len(provider.terminated, 1))
+	assert.Len(t, provider.terminated, 1)
 }
 
 // soapLogoutServiceProviderB adds a second service provider to the identity provider of test, with its own key.
@@ -296,7 +297,7 @@ func TestServeSOAPLogoutRejects(t *testing.T) {
 			name: "not a LogoutRequest",
 			request: func(t *testing.T, test *IdentityProviderTest) (*http.Request, string) {
 				request, err := test.SP.MakeAuthenticationRequest(signatureTestSSOURL, HTTPPostBinding, HTTPPostBinding)
-				assert.NilError(t, err)
+				require.NoError(t, err)
 
 				return soapLogoutPost(soapLogoutEnvelope(t, request.Element())), request.ID
 			},
@@ -311,17 +312,17 @@ func TestServeSOAPLogoutRejects(t *testing.T) {
 
 			response := soapLogoutResponse(t, serveSOAPLogout(test, r))
 			assertLogoutStatus(t, response, tc.top, tc.second)
-			assert.Check(t, statusSaysNothingOfTheRequest(response.Status))
-			assert.Check(t, is.Equal(response.Destination, ""))
+			assert.True(t, statusSaysNothingOfTheRequest(response.Status))
+			assert.Equal(t, response.Destination, "")
 
 			if tc.noInResponseTo {
-				assert.Check(t, is.Equal(response.InResponseTo, ""))
+				assert.Equal(t, response.InResponseTo, "")
 			} else {
-				assert.Check(t, is.Equal(response.InResponseTo, id))
+				assert.Equal(t, response.InResponseTo, id)
 			}
 
-			assert.Check(t, is.Len(provider.lookups, 0))
-			assert.Check(t, is.Len(provider.terminated, 0))
+			assert.Len(t, provider.lookups, 0)
+			assert.Len(t, provider.terminated, 0)
 		})
 	}
 }
@@ -336,9 +337,9 @@ func TestServeSOAPLogoutServiceProviderLookupError(t *testing.T) {
 	r, id := soapLogoutRequest(t, &test.SP, nil)
 
 	response := soapLogoutResponse(t, serveSOAPLogout(test, r))
-	assert.Check(t, is.Equal(response.InResponseTo, id))
+	assert.Equal(t, response.InResponseTo, id)
 	assertLogoutStatus(t, response, StatusResponder, "")
-	assert.Check(t, is.Len(provider.terminated, 0))
+	assert.Len(t, provider.terminated, 0)
 }
 
 func TestServeSOAPLogoutWithoutLogoutSessionProvider(t *testing.T) {
@@ -347,7 +348,7 @@ func TestServeSOAPLogoutWithoutLogoutSessionProvider(t *testing.T) {
 	r, id := soapLogoutRequest(t, &test.SP, nil)
 
 	response := soapLogoutResponse(t, serveSOAPLogout(test, r))
-	assert.Check(t, is.Equal(response.InResponseTo, id))
+	assert.Equal(t, response.InResponseTo, id)
 	assertLogoutStatus(t, response, StatusResponder, "")
 }
 
@@ -358,7 +359,7 @@ func TestServeSOAPLogoutLookupFailure(t *testing.T) {
 
 	response := soapLogoutResponse(t, serveSOAPLogout(test, r))
 	assertLogoutStatus(t, response, StatusResponder, "")
-	assert.Check(t, is.Len(provider.terminated, 0))
+	assert.Len(t, provider.terminated, 0)
 }
 
 func TestServeSOAPLogoutTerminationFails(t *testing.T) {
@@ -369,7 +370,7 @@ func TestServeSOAPLogoutTerminationFails(t *testing.T) {
 
 		response := soapLogoutResponse(t, serveSOAPLogout(test, r))
 		assertLogoutStatus(t, response, StatusResponder, "")
-		assert.Check(t, statusSaysNothingOfTheRequest(response.Status))
+		assert.True(t, statusSaysNothingOfTheRequest(response.Status))
 	})
 
 	t.Run("partial", func(t *testing.T) {
@@ -389,8 +390,8 @@ func TestServeSOAPLogoutDiscardsSessionHeaders(t *testing.T) {
 
 	assertLogoutStatus(t, soapLogoutResponse(t, w), StatusSuccess, "")
 	// logoutSessionProvider sets a cookie on the writer it is given.
-	assert.Check(t, is.Len(provider.terminated, 1))
-	assert.Check(t, is.Equal(w.Header().Get("Set-Cookie"), ""))
+	assert.Len(t, provider.terminated, 1)
+	assert.Equal(t, w.Header().Get("Set-Cookie"), "")
 }
 
 // soapLogoutInheritedNamespaces returns a SOAP POST of el with its namespace declarations moved onto the Envelope.
@@ -401,7 +402,7 @@ func soapLogoutInheritedNamespaces(t *testing.T, el *etree.Element) *http.Reques
 
 	for _, prefix := range []string{"samlp", "saml"} {
 		attr := el.SelectAttr("xmlns:" + prefix)
-		assert.Assert(t, attr != nil)
+		require.NotNil(t, attr)
 		envelope.CreateAttr("xmlns:"+prefix, attr.Value)
 		el.RemoveAttr("xmlns:" + prefix)
 	}
@@ -409,8 +410,8 @@ func soapLogoutInheritedNamespaces(t *testing.T, el *etree.Element) *http.Reques
 	envelope.CreateElement("soapenv:Body").AddChild(el)
 
 	buf, err := doc.WriteToBytes()
-	assert.NilError(t, err)
-	assert.Assert(t, !bytes.Contains(buf, []byte(`<samlp:LogoutRequest xmlns:`)), "%s", buf)
+	require.NoError(t, err)
+	require.False(t, bytes.Contains(buf, []byte(`<samlp:LogoutRequest xmlns:`)), "%s", buf)
 
 	return soapLogoutPost(buf)
 }
@@ -421,9 +422,9 @@ func TestServeSOAPLogoutInheritedNamespacePrefix(t *testing.T) {
 		el, id := soapLogoutRequestElement(t, &test.SP, nil)
 
 		response := soapLogoutResponse(t, serveSOAPLogout(test, soapLogoutInheritedNamespaces(t, el)))
-		assert.Check(t, is.Equal(response.InResponseTo, id))
+		assert.Equal(t, response.InResponseTo, id)
 		assertLogoutStatus(t, response, StatusSuccess, "")
-		assert.Check(t, is.Len(provider.terminated, 1))
+		assert.Len(t, provider.terminated, 1)
 	})
 
 	t.Run("unsigned", func(t *testing.T) {
@@ -433,9 +434,9 @@ func TestServeSOAPLogoutInheritedNamespacePrefix(t *testing.T) {
 		el, id := soapLogoutRequestElement(t, &unsigned, nil)
 
 		response := soapLogoutResponse(t, serveSOAPLogout(test, soapLogoutInheritedNamespaces(t, el)))
-		assert.Check(t, is.Equal(response.InResponseTo, id))
+		assert.Equal(t, response.InResponseTo, id)
 		assertLogoutStatus(t, response, StatusRequester, StatusRequestDenied)
-		assert.Check(t, is.Len(provider.terminated, 0))
+		assert.Len(t, provider.terminated, 0)
 	})
 }
 
@@ -443,16 +444,16 @@ func TestServeSOAPLogoutFaults(t *testing.T) {
 	t.Run("method", func(t *testing.T) {
 		test, _ := soapLogoutTestIDP(t)
 		w := serveSOAPLogout(test, httptest.NewRequest(http.MethodGet, soapLogoutTestURL, nil))
-		assert.Check(t, is.Equal(w.Code, http.StatusMethodNotAllowed))
-		assert.Check(t, is.Equal(w.Header().Get("Allow"), http.MethodPost))
+		assert.Equal(t, w.Code, http.StatusMethodNotAllowed)
+		assert.Equal(t, w.Header().Get("Allow"), http.MethodPost)
 	})
 
 	t.Run("content type", func(t *testing.T) {
 		test, provider := soapLogoutTestIDP(t)
 		r, _ := soapLogoutRequest(t, &test.SP, nil)
 		r.Header.Set("Content-Type", "application/json")
-		assert.Check(t, is.Equal(soapFaultCode(t, serveSOAPLogout(test, r)), "soapenv:Client"))
-		assert.Check(t, is.Len(provider.terminated, 0))
+		assert.Equal(t, soapFaultCode(t, serveSOAPLogout(test, r)), "soapenv:Client")
+		assert.Len(t, provider.terminated, 0)
 	})
 
 	t.Run("must understand", func(t *testing.T) {
@@ -461,12 +462,12 @@ func TestServeSOAPLogoutFaults(t *testing.T) {
 		doc := etree.NewDocument()
 		doc.SetRoot(el)
 		message, err := doc.WriteToString()
-		assert.NilError(t, err)
+		require.NoError(t, err)
 
 		body := soapTestEnvelope(soapTestHeader(`soapenv:mustUnderstand="1"`), message)
 		w := serveSOAPLogout(test, soapLogoutPost([]byte(body)))
-		assert.Check(t, is.Equal(soapFaultCode(t, w), "soapenv:MustUnderstand"))
-		assert.Check(t, is.Len(provider.terminated, 0))
+		assert.Equal(t, soapFaultCode(t, w), "soapenv:MustUnderstand")
+		assert.Len(t, provider.terminated, 0)
 	})
 
 	t.Run("signing fails", func(t *testing.T) {
@@ -475,8 +476,8 @@ func TestServeSOAPLogoutFaults(t *testing.T) {
 		test.IDP.Signer = nil
 		r, _ := soapLogoutRequest(t, &test.SP, nil)
 		w := serveSOAPLogout(test, r)
-		assert.Check(t, is.Equal(soapFaultCode(t, w), "soapenv:Server"))
-		assert.Check(t, !strings.Contains(w.Body.String(), "LogoutResponse"))
+		assert.Equal(t, soapFaultCode(t, w), "soapenv:Server")
+		assert.False(t, strings.Contains(w.Body.String(), "LogoutResponse"))
 	})
 }
 
@@ -490,27 +491,27 @@ func TestMetadataSOAPLogoutURL(t *testing.T) {
 	t.Run("listed", func(t *testing.T) {
 		test, _ := soapLogoutTestIDP(t)
 		services := test.IDP.Metadata().IDPSSODescriptors[0].SingleLogoutServices
-		assert.Check(t, is.DeepEqual(services, append(append([]Endpoint{}, frontChannel...), soapEndpoint)))
+		assert.Equal(t, services, append(append([]Endpoint{}, frontChannel...), soapEndpoint))
 	})
 
 	t.Run("without LogoutURL", func(t *testing.T) {
 		test, _ := soapLogoutTestIDP(t)
 		test.IDP.LogoutURL = mustParseURL("")
 		services := test.IDP.Metadata().IDPSSODescriptors[0].SingleLogoutServices
-		assert.Check(t, is.DeepEqual(services, []Endpoint{soapEndpoint}))
+		assert.Equal(t, services, []Endpoint{soapEndpoint})
 	})
 
 	t.Run("without LogoutSessionProvider", func(t *testing.T) {
 		test, _ := soapLogoutTestIDP(t)
 		test.IDP.SessionProvider = &mockSessionProvider{}
 		services := test.IDP.Metadata().IDPSSODescriptors[0].SingleLogoutServices
-		assert.Check(t, is.DeepEqual(services, frontChannel))
+		assert.Equal(t, services, frontChannel)
 	})
 
 	t.Run("unset", func(t *testing.T) {
 		test, _ := logoutTestIDP(t)
 		services := test.IDP.Metadata().IDPSSODescriptors[0].SingleLogoutServices
-		assert.Check(t, is.DeepEqual(services, frontChannel))
+		assert.Equal(t, services, frontChannel)
 	})
 
 	t.Run("handler", func(t *testing.T) {
@@ -520,9 +521,9 @@ func TestMetadataSOAPLogoutURL(t *testing.T) {
 		test.IDP.Handler().ServeHTTP(w, r)
 
 		response := soapLogoutResponse(t, w)
-		assert.Check(t, is.Equal(response.InResponseTo, id))
+		assert.Equal(t, response.InResponseTo, id)
 		assertLogoutStatus(t, response, StatusSuccess, "")
-		assert.Check(t, is.Len(provider.terminated, 1))
+		assert.Len(t, provider.terminated, 1)
 	})
 
 	t.Run("handler shared path", func(t *testing.T) {
@@ -535,14 +536,14 @@ func TestMetadataSOAPLogoutURL(t *testing.T) {
 		handler.ServeHTTP(w, r)
 
 		response := soapLogoutResponse(t, w)
-		assert.Check(t, is.Equal(response.InResponseTo, id))
+		assert.Equal(t, response.InResponseTo, id)
 		assertLogoutStatus(t, response, StatusSuccess, "")
-		assert.Check(t, is.Len(provider.terminated, 1))
+		assert.Len(t, provider.terminated, 1)
 
 		w = httptest.NewRecorder()
 		handler.ServeHTTP(w, httptest.NewRequest(http.MethodGet, soapLogoutTestURL, nil))
-		assert.Check(t, is.Equal(w.Code, http.StatusBadRequest))
-		assert.Check(t, is.Len(provider.terminated, 1))
+		assert.Equal(t, w.Code, http.StatusBadRequest)
+		assert.Len(t, provider.terminated, 1)
 	})
 
 	t.Run("handler empty path", func(t *testing.T) {
@@ -554,6 +555,6 @@ func TestMetadataSOAPLogoutURL(t *testing.T) {
 		test.IDP.Handler().ServeHTTP(w, r)
 
 		response := soapLogoutResponse(t, w)
-		assert.Check(t, is.Equal(response.InResponseTo, id))
+		assert.Equal(t, response.InResponseTo, id)
 	})
 }

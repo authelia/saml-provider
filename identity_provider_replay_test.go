@@ -15,8 +15,8 @@ import (
 	"testing"
 	"time"
 
-	"gotest.tools/assert"
-	is "gotest.tools/assert/cmp"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"authelia.com/provider/saml/xmlenc"
 )
@@ -80,12 +80,12 @@ func TestMemoryReplayStoreRefusesSecondUse(t *testing.T) {
 	store := NewMemoryReplayStore(8)
 	expires := TimeNow().Add(time.Minute)
 
-	assert.NilError(t, store.Consume(context.Background(), "kind:a", expires))
-	assert.Check(t, errors.Is(store.Consume(context.Background(), "kind:a", expires), ErrReplayed))
-	assert.Check(t, errors.Is(store.Consume(context.Background(), "kind:a", expires.Add(time.Hour)), ErrReplayed))
-	assert.NilError(t, store.Consume(context.Background(), "kind:b", expires))
-	assert.NilError(t, store.Consume(context.Background(), "other:a", expires))
-	assert.Check(t, is.Equal(store.Len(), 3))
+	require.NoError(t, store.Consume(context.Background(), "kind:a", expires))
+	assert.True(t, errors.Is(store.Consume(context.Background(), "kind:a", expires), ErrReplayed))
+	assert.True(t, errors.Is(store.Consume(context.Background(), "kind:a", expires.Add(time.Hour)), ErrReplayed))
+	require.NoError(t, store.Consume(context.Background(), "kind:b", expires))
+	require.NoError(t, store.Consume(context.Background(), "other:a", expires))
+	assert.Equal(t, store.Len(), 3)
 }
 
 func TestMemoryReplayStoreForgetsExpiredKeys(t *testing.T) {
@@ -93,21 +93,21 @@ func TestMemoryReplayStoreForgetsExpiredKeys(t *testing.T) {
 
 	store := NewMemoryReplayStore(8)
 
-	assert.NilError(t, store.Consume(context.Background(), "kind:short", TimeNow().Add(time.Minute)))
-	assert.NilError(t, store.Consume(context.Background(), "kind:long", TimeNow().Add(time.Hour)))
+	require.NoError(t, store.Consume(context.Background(), "kind:short", TimeNow().Add(time.Minute)))
+	require.NoError(t, store.Consume(context.Background(), "kind:long", TimeNow().Add(time.Hour)))
 
 	advance(time.Minute - time.Nanosecond)
-	assert.Check(t, errors.Is(store.Consume(context.Background(), "kind:short", TimeNow().Add(time.Minute)), ErrReplayed))
+	assert.True(t, errors.Is(store.Consume(context.Background(), "kind:short", TimeNow().Add(time.Minute)), ErrReplayed))
 
 	// At its expiry the key is forgotten, and may be recorded again.
 	advance(time.Nanosecond)
-	assert.NilError(t, store.Consume(context.Background(), "kind:short", TimeNow().Add(time.Minute)))
-	assert.Check(t, errors.Is(store.Consume(context.Background(), "kind:long", TimeNow().Add(time.Hour)), ErrReplayed))
-	assert.Check(t, is.Equal(store.Len(), 2))
+	require.NoError(t, store.Consume(context.Background(), "kind:short", TimeNow().Add(time.Minute)))
+	assert.True(t, errors.Is(store.Consume(context.Background(), "kind:long", TimeNow().Add(time.Hour)), ErrReplayed))
+	assert.Equal(t, store.Len(), 2)
 
 	advance(2 * time.Hour)
-	assert.NilError(t, store.Consume(context.Background(), "kind:other", TimeNow().Add(time.Minute)))
-	assert.Check(t, is.Equal(store.Len(), 1))
+	require.NoError(t, store.Consume(context.Background(), "kind:other", TimeNow().Add(time.Minute)))
+	assert.Equal(t, store.Len(), 1)
 }
 
 func TestMemoryReplayStoreDoesNotRecordExpiredKey(t *testing.T) {
@@ -115,9 +115,9 @@ func TestMemoryReplayStoreDoesNotRecordExpiredKey(t *testing.T) {
 
 	store := NewMemoryReplayStore(8)
 
-	assert.NilError(t, store.Consume(context.Background(), "kind:a", TimeNow()))
-	assert.NilError(t, store.Consume(context.Background(), "kind:a", TimeNow().Add(-time.Minute)))
-	assert.Check(t, is.Equal(store.Len(), 0))
+	require.NoError(t, store.Consume(context.Background(), "kind:a", TimeNow()))
+	require.NoError(t, store.Consume(context.Background(), "kind:a", TimeNow().Add(-time.Minute)))
+	assert.Equal(t, store.Len(), 0)
 }
 
 func TestMemoryReplayStoreIsBounded(t *testing.T) {
@@ -136,28 +136,28 @@ func TestMemoryReplayStoreIsBounded(t *testing.T) {
 		case errors.Is(err, ErrReplayStoreFull):
 			full++
 		default:
-			assert.NilError(t, err)
+			require.NoError(t, err)
 		}
 	}
 
-	assert.Check(t, is.Equal(full, 9900))
-	assert.Check(t, is.Equal(store.Len(), 100))
-	assert.Check(t, len(store.queue) == 100 && cap(store.queue) < 1000)
+	assert.Equal(t, full, 9900)
+	assert.Equal(t, store.Len(), 100)
+	assert.True(t, len(store.queue) == 100 && cap(store.queue) < 1000)
 
 	// A full store still refuses a key that it holds as a replay, and never forgets one to make room.
-	assert.Check(t, errors.Is(store.Consume(context.Background(), "kind:"+long+"0", expires), ErrReplayed))
-	assert.Check(t, !errors.Is(ErrReplayStoreFull, ErrReplayed))
+	assert.True(t, errors.Is(store.Consume(context.Background(), "kind:"+long+"0", expires), ErrReplayed))
+	assert.False(t, errors.Is(ErrReplayStoreFull, ErrReplayed))
 
 	// There is room again once the keys expire.
 	advance(time.Minute)
-	assert.NilError(t, store.Consume(context.Background(), "kind:new", TimeNow().Add(time.Minute)))
-	assert.Check(t, is.Equal(store.Len(), 1))
+	require.NoError(t, store.Consume(context.Background(), "kind:new", TimeNow().Add(time.Minute)))
+	assert.Equal(t, store.Len(), 1)
 }
 
 func TestNewMemoryReplayStoreDefaultCapacity(t *testing.T) {
-	assert.Check(t, is.Equal(NewMemoryReplayStore(0).capacity, DefaultMemoryReplayStoreCapacity))
-	assert.Check(t, is.Equal(NewMemoryReplayStore(-1).capacity, DefaultMemoryReplayStoreCapacity))
-	assert.Check(t, is.Equal(NewMemoryReplayStore(7).capacity, 7))
+	assert.Equal(t, NewMemoryReplayStore(0).capacity, DefaultMemoryReplayStoreCapacity)
+	assert.Equal(t, NewMemoryReplayStore(-1).capacity, DefaultMemoryReplayStoreCapacity)
+	assert.Equal(t, NewMemoryReplayStore(7).capacity, 7)
 }
 
 func TestMemoryReplayStoreConcurrentUse(t *testing.T) {
@@ -198,28 +198,28 @@ func TestMemoryReplayStoreConcurrentUse(t *testing.T) {
 
 	wg.Wait()
 
-	assert.Check(t, is.Equal(accepted.Load(), int64(100+workers*100)))
-	assert.Check(t, is.Equal(replayed.Load(), int64((workers-1)*100)))
-	assert.Check(t, is.Equal(store.Len(), 100+workers*100))
+	assert.Equal(t, accepted.Load(), int64(100+workers*100))
+	assert.Equal(t, replayed.Load(), int64((workers-1)*100))
+	assert.Equal(t, store.Len(), 100+workers*100)
 }
 
 func TestReplayKey(t *testing.T) {
 	key := replayKey(replayKindAuthnRequest, "https://idp.example.com/metadata", "https://sp.example.com/metadata", "id-1")
 
-	assert.Check(t, strings.HasPrefix(key, "authnrequest:"))
-	assert.Check(t, len(key) <= 96)
-	assert.Check(t, is.Equal(key, replayKey(replayKindAuthnRequest, "https://idp.example.com/metadata", "https://sp.example.com/metadata", "id-1")))
+	assert.True(t, strings.HasPrefix(key, "authnrequest:"))
+	assert.True(t, len(key) <= 96)
+	assert.Equal(t, key, replayKey(replayKindAuthnRequest, "https://idp.example.com/metadata", "https://sp.example.com/metadata", "id-1"))
 
 	// The parts are kept apart, and the kind is part of the key.
-	assert.Check(t, replayKey("kind", "ab", "c") != replayKey("kind", "a", "bc"))
-	assert.Check(t, replayKey("kind", "a", "") != replayKey("kind", "", "a"))
-	assert.Check(t, replayKey("kind", "a") != replayKey("other", "a"))
+	assert.True(t, replayKey("kind", "ab", "c") != replayKey("kind", "a", "bc"))
+	assert.True(t, replayKey("kind", "a", "") != replayKey("kind", "", "a"))
+	assert.True(t, replayKey("kind", "a") != replayKey("other", "a"))
 
 	// The size doesn't depend on the parts, which come from the message.
-	assert.Check(t, is.Equal(len(replayKey("kind", strings.Repeat("x", 64*1024))), len(replayKey("kind", "x"))))
+	assert.Equal(t, len(replayKey("kind", strings.Repeat("x", 64*1024))), len(replayKey("kind", "x")))
 
 	for _, c := range key {
-		assert.Check(t, c > ' ' && c < 0x7f)
+		assert.True(t, c > ' ' && c < 0x7f)
 	}
 }
 
@@ -227,18 +227,18 @@ func TestIdentityProviderDefaultReplayStore(t *testing.T) {
 	idp := &IdentityProvider{}
 
 	store := idp.replayStore()
-	assert.Assert(t, store != nil)
-	assert.Check(t, store == idp.replayStore())
-	assert.Check(t, is.Equal(store.(*MemoryReplayStore).capacity, DefaultMemoryReplayStoreCapacity))
+	require.NotNil(t, store)
+	assert.True(t, store == idp.replayStore())
+	assert.Equal(t, store.(*MemoryReplayStore).capacity, DefaultMemoryReplayStoreCapacity)
 
 	// A copy shares the store that was already made, and an identity provider of its own doesn't.
 	duplicate := *idp
-	assert.Check(t, duplicate.replayStore() == store)
-	assert.Check(t, (&IdentityProvider{}).replayStore() != store)
+	assert.True(t, duplicate.replayStore() == store)
+	assert.True(t, (&IdentityProvider{}).replayStore() != store)
 
 	custom := newRecordingReplayStore()
 	idp.ReplayStore = custom
-	assert.Check(t, idp.replayStore() == ReplayStore(custom))
+	assert.True(t, idp.replayStore() == ReplayStore(custom))
 }
 
 func TestIdentityProviderDefaultReplayStoreConcurrentFirstUse(t *testing.T) {
@@ -260,7 +260,7 @@ func TestIdentityProviderDefaultReplayStoreConcurrentFirstUse(t *testing.T) {
 	wg.Wait()
 
 	for _, store := range stores {
-		assert.Check(t, store == stores[0])
+		assert.True(t, store == stores[0])
 	}
 }
 
@@ -271,22 +271,22 @@ func TestCheckReplayKeysByIssuerKindAndIdentityProvider(t *testing.T) {
 	expires := TimeNow().Add(time.Minute)
 	ctx := context.Background()
 
-	assert.NilError(t, idp.checkReplay(ctx, replayKindAuthnRequest, "https://sp-a.example.com", "id-1", expires))
+	require.NoError(t, idp.checkReplay(ctx, replayKindAuthnRequest, "https://sp-a.example.com", "id-1", expires))
 
 	err := idp.checkReplay(ctx, replayKindAuthnRequest, "https://sp-a.example.com", "id-1", expires)
-	assert.Check(t, errors.Is(err, ErrReplayed))
+	assert.True(t, errors.Is(err, ErrReplayed))
 
 	status := idp.ErrorStatus(err)
-	assert.Check(t, is.Equal(status.StatusCode.Value, StatusRequester))
-	assert.Check(t, is.Equal(status.StatusCode.StatusCode.Value, StatusRequestDenied))
+	assert.Equal(t, status.StatusCode.Value, StatusRequester)
+	assert.Equal(t, status.StatusCode.StatusCode.Value, StatusRequestDenied)
 
 	// The same ID is not a replay from another issuer (SAMLCore §1.3.4), in a message of another kind, or at
 	// another identity provider that shares the store.
-	assert.NilError(t, idp.checkReplay(ctx, replayKindAuthnRequest, "https://sp-b.example.com", "id-1", expires))
-	assert.NilError(t, idp.checkReplay(ctx, replayKindLogoutRequest, "https://sp-a.example.com", "id-1", expires))
+	require.NoError(t, idp.checkReplay(ctx, replayKindAuthnRequest, "https://sp-b.example.com", "id-1", expires))
+	require.NoError(t, idp.checkReplay(ctx, replayKindLogoutRequest, "https://sp-a.example.com", "id-1", expires))
 
 	other := &IdentityProvider{MetadataURL: mustParseURL("https://other.example.com/metadata"), ReplayStore: idp.replayStore()}
-	assert.NilError(t, other.checkReplay(ctx, replayKindAuthnRequest, "https://sp-a.example.com", "id-1", expires))
+	require.NoError(t, other.checkReplay(ctx, replayKindAuthnRequest, "https://sp-a.example.com", "id-1", expires))
 }
 
 func TestCheckReplayStoreFailureIsResponder(t *testing.T) {
@@ -302,14 +302,14 @@ func TestCheckReplayStoreFailureIsResponder(t *testing.T) {
 			idp := &IdentityProvider{ReplayStore: store}
 
 			err := idp.checkReplay(context.Background(), replayKindAuthnRequest, "https://sp.example.com", "id-1", TimeNow())
-			assert.Check(t, errors.Is(err, storeErr))
-			assert.Check(t, !errors.Is(err, ErrReplayed))
+			assert.True(t, errors.Is(err, storeErr))
+			assert.False(t, errors.Is(err, ErrReplayed))
 
-			assert.Check(t, errors.Is(err, ErrServerError))
+			assert.True(t, errors.Is(err, ErrServerError))
 
 			status := idp.ErrorStatus(err)
-			assert.Check(t, is.Equal(status.StatusCode.Value, StatusResponder))
-			assert.Check(t, status.StatusCode.StatusCode == nil)
+			assert.Equal(t, status.StatusCode.Value, StatusResponder)
+			assert.Nil(t, status.StatusCode.StatusCode)
 		})
 	}
 }
@@ -339,13 +339,13 @@ func serveSSO(test *IdentityProviderTest, r *http.Request) *httptest.ResponseRec
 func assertAssertionResponse(t *testing.T, w *httptest.ResponseRecorder, id string) {
 	t.Helper()
 
-	assert.Assert(t, is.Equal(w.Code, http.StatusOK), "body: %s", w.Body.String())
+	require.Equal(t, w.Code, http.StatusOK, "body: %s", w.Body.String())
 
 	_, response := postedResponse(t, w.Body.String())
 
-	assert.Check(t, is.Equal(response.InResponseTo, id))
-	assert.Check(t, is.Equal(response.Status.StatusCode.Value, StatusSuccess))
-	assert.Check(t, response.Assertion != nil || response.EncryptedAssertion != nil)
+	assert.Equal(t, response.InResponseTo, id)
+	assert.Equal(t, response.Status.StatusCode.Value, StatusSuccess)
+	assert.True(t, response.Assertion != nil || response.EncryptedAssertion != nil)
 }
 
 // authnRequestID returns the ID of the AuthnRequest in body.
@@ -353,7 +353,7 @@ func authnRequestID(t *testing.T, body []byte) string {
 	t.Helper()
 
 	start := strings.Index(string(body), ` ID="`)
-	assert.Assert(t, start >= 0)
+	require.True(t, start >= 0)
 
 	id, _, _ := strings.Cut(string(body[start+len(` ID="`):]), `"`)
 
@@ -373,12 +373,12 @@ func TestServeSSORefusesReplayedPost(t *testing.T) {
 	for range 2 {
 		w := serveSSO(test, replayPostRequest(body, nil))
 		assertRequestStatus(t, w, id, StatusRequester, StatusRequestDenied)
-		assert.Check(t, is.Contains(w.Body.String(), `action="https://sp.example.com/saml2/acs"`))
+		assert.Contains(t, w.Body.String(), `action="https://sp.example.com/saml2/acs"`)
 	}
 
 	// Another request of the same service provider is not affected.
 	other := signedPostBody(t, &test.SP, nil)
-	assert.Assert(t, authnRequestID(t, other) != id)
+	require.True(t, authnRequestID(t, other) != id)
 	assertAssertionResponse(t, serveSSO(test, replayPostRequest(other, nil)), authnRequestID(t, other))
 }
 
@@ -393,7 +393,7 @@ func TestServeSSORefusesReplayedUnsignedPost(t *testing.T) {
 	RandReader = &testRandomReader{}
 
 	w, replayedID := serveSSOModified(t, test, func(request *AuthnRequest) { request.ID = id })
-	assert.Check(t, is.Equal(replayedID, id))
+	assert.Equal(t, replayedID, id)
 	assertRequestStatus(t, w, id, StatusRequester, StatusRequestDenied)
 }
 
@@ -404,10 +404,10 @@ func TestServeSSORefusesReplayedRedirect(t *testing.T) {
 	u := signedRedirectURL(t, test)
 
 	first := serveSSO(test, httptest.NewRequest(http.MethodGet, u.String(), nil))
-	assert.Assert(t, is.Equal(first.Code, http.StatusOK), "body: %s", first.Body.String())
+	require.Equal(t, first.Code, http.StatusOK, "body: %s", first.Body.String())
 
 	_, response := postedResponse(t, first.Body.String())
-	assert.Check(t, is.Equal(response.Status.StatusCode.Value, StatusSuccess))
+	assert.Equal(t, response.Status.StatusCode.Value, StatusSuccess)
 
 	id := response.InResponseTo
 
@@ -441,16 +441,16 @@ func TestServeSSOAllowsRequestRepresentedAfterLogin(t *testing.T) {
 			// The request arrives, and then a login form posts it back with the wrong password.
 			for range 3 {
 				w := serveSSO(test, replayPostRequest(body, nil))
-				assert.Check(t, is.Equal(w.Code, http.StatusOK))
-				assert.Check(t, is.Equal(w.Body.String(), "login form"))
+				assert.Equal(t, w.Code, http.StatusOK)
+				assert.Equal(t, w.Body.String(), "login form")
 			}
 
-			assert.Check(t, is.Equal(store.calls(), 0))
+			assert.Equal(t, store.calls(), 0)
 
 			provider.session = &Session{ID: "f00f00", UserName: "alice", NameID: "alice"}
 
 			assertAssertionResponse(t, serveSSO(test, replayPostRequest(body, url.Values{"password": {"correct"}})), id)
-			assert.Check(t, is.Equal(store.calls(), 1))
+			assert.Equal(t, store.calls(), 1)
 
 			// Once it is answered, presenting it again is a replay.
 			assertRequestStatus(t, serveSSO(test, replayPostRequest(body, url.Values{"password": {"correct"}})), id, StatusRequester, StatusRequestDenied)
@@ -525,10 +525,10 @@ func TestServeSSODoesNotRecordUnansweredRequests(t *testing.T) {
 
 			for range 2 {
 				w := serveSSO(test, replayPostRequest(body, nil))
-				assert.Check(t, is.Equal(w.Code, tc.code), "body: %s", w.Body.String())
+				assert.Equal(t, w.Code, tc.code, "body: %s", w.Body.String())
 			}
 
-			assert.Check(t, is.Equal(store.calls(), 0))
+			assert.Equal(t, store.calls(), 0)
 		})
 	}
 }
@@ -554,11 +554,11 @@ func TestServeSSORecordsRequestUntilItExpires(t *testing.T) {
 				maxAge = MaxIssueDelay
 			}
 
-			assert.Assert(t, is.Equal(store.calls(), 1))
-			assert.Check(t, store.expiries[0].Equal(issued.Add(maxAge).Add(2*MaxClockSkew)), "expires %s", store.expiries[0])
-			assert.Check(t, is.Equal(store.contexts[0].Value(replayTestContextKey{}), "value"))
-			assert.Check(t, is.Equal(store.keys[0], replayKey(replayKindAuthnRequest,
-				test.IDP.MetadataURL.String(), test.SP.MetadataURL.String(), authnRequestID(t, body))))
+			require.Equal(t, store.calls(), 1)
+			assert.True(t, store.expiries[0].Equal(issued.Add(maxAge).Add(2*MaxClockSkew)), "expires %s", store.expiries[0])
+			assert.Equal(t, store.contexts[0].Value(replayTestContextKey{}), "value")
+			assert.Equal(t, store.keys[0], replayKey(replayKindAuthnRequest,
+				test.IDP.MetadataURL.String(), test.SP.MetadataURL.String(), authnRequestID(t, body)))
 		})
 	}
 }
@@ -650,8 +650,8 @@ func TestServeSSOConcurrentReplayIsAnsweredOnce(t *testing.T) {
 		}
 	}
 
-	assert.Check(t, is.Equal(answered, 1))
-	assert.Check(t, is.Equal(refused, workers-1))
+	assert.Equal(t, answered, 1)
+	assert.Equal(t, refused, workers-1)
 }
 
 func TestIdpAuthnRequestCheckReplay(t *testing.T) {
@@ -660,26 +660,26 @@ func TestIdpAuthnRequestCheckReplay(t *testing.T) {
 
 	validated := func() *IdpAuthnRequest {
 		req, err := NewIdpAuthnRequest(&test.IDP, replayPostRequest(body, nil))
-		assert.NilError(t, err)
+		require.NoError(t, err)
 		// Validate records nothing, however often the request is presented.
-		assert.NilError(t, req.Validate())
+		require.NoError(t, req.Validate())
 
 		return req
 	}
 
-	assert.NilError(t, validated().CheckReplay())
+	require.NoError(t, validated().CheckReplay())
 
 	err := validated().CheckReplay()
-	assert.Check(t, errors.Is(err, ErrReplayed))
+	assert.True(t, errors.Is(err, ErrReplayed))
 
 	top, second := errorCodes(err)
-	assert.Check(t, is.Equal(top, StatusRequester))
-	assert.Check(t, is.Equal(second, StatusRequestDenied))
+	assert.Equal(t, top, StatusRequester)
+	assert.Equal(t, second, StatusRequestDenied)
 
 	// A request made without an HTTP request has no context to pass on.
 	req := validated()
 	req.HTTPRequest = nil
-	assert.Check(t, errors.Is(req.CheckReplay(), ErrReplayed))
+	assert.True(t, errors.Is(req.CheckReplay(), ErrReplayed))
 }
 
 func TestServeSLORefusesReplayedRequest(t *testing.T) {
@@ -693,12 +693,12 @@ func TestServeSLORefusesReplayedRequest(t *testing.T) {
 			response := func(w *httptest.ResponseRecorder) LogoutResponse {
 				if binding == "redirect" {
 					location, response := redirectedLogoutResponse(t, w)
-					assert.Check(t, strings.HasPrefix(location.String(), "https://sp.example.com/saml2/slo?"))
+					assert.True(t, strings.HasPrefix(location.String(), "https://sp.example.com/saml2/slo?"))
 
 					return response
 				}
 
-				assert.Check(t, is.Contains(w.Body.String(), `action="https://sp.example.com/saml2/slo"`))
+				assert.Contains(t, w.Body.String(), `action="https://sp.example.com/saml2/slo"`)
 
 				_, _, response := postedLogoutResponse(t, w)
 
@@ -710,19 +710,19 @@ func TestServeSLORefusesReplayedRequest(t *testing.T) {
 			r, id := request(t, &test.SP, nil)
 			first := response(serveSLO(test, r))
 			assertLogoutStatus(t, &first, StatusSuccess, "")
-			assert.Check(t, is.Len(provider.terminated, 1))
+			assert.Len(t, provider.terminated, 1)
 
 			RandReader = &testRandomReader{}
 			r, replayedID := request(t, &test.SP, nil)
-			assert.Assert(t, is.Equal(replayedID, id))
+			require.Equal(t, replayedID, id)
 
 			replayed := response(serveSLO(test, r))
-			assert.Check(t, is.Equal(replayed.InResponseTo, id))
+			assert.Equal(t, replayed.InResponseTo, id)
 			assertLogoutStatus(t, &replayed, StatusRequester, StatusRequestDenied)
 
 			// The replay reached no session.
-			assert.Check(t, is.Len(provider.lookups, 1))
-			assert.Check(t, is.Len(provider.terminated, 1))
+			assert.Len(t, provider.lookups, 1)
+			assert.Len(t, provider.terminated, 1)
 		})
 	}
 }
@@ -735,16 +735,16 @@ func TestServeSOAPLogoutRefusesReplayedRequest(t *testing.T) {
 
 	first := soapLogoutResponse(t, serveSOAPLogout(test, soapLogoutPost(body)))
 	assertLogoutStatus(t, first, StatusSuccess, "")
-	assert.Check(t, is.Len(provider.terminated, 1))
+	assert.Len(t, provider.terminated, 1)
 
 	replayed := soapLogoutResponse(t, serveSOAPLogout(test, soapLogoutPost(body)))
-	assert.Check(t, is.Equal(replayed.InResponseTo, id))
+	assert.Equal(t, replayed.InResponseTo, id)
 	assertLogoutStatus(t, replayed, StatusRequester, StatusRequestDenied)
-	assert.Check(t, is.Len(provider.lookups, 1))
-	assert.Check(t, is.Len(provider.terminated, 1))
+	assert.Len(t, provider.lookups, 1)
+	assert.Len(t, provider.terminated, 1)
 
 	// The same request is a replay on the front channel too: the ID is recorded for the issuer, not the binding.
-	assert.Check(t, errors.Is(test.IDP.checkReplay(context.Background(), replayKindLogoutRequest,
+	assert.True(t, errors.Is(test.IDP.checkReplay(context.Background(), replayKindLogoutRequest,
 		test.SP.MetadataURL.String(), id, TimeNow()), ErrReplayed))
 }
 
@@ -781,8 +781,8 @@ func TestLogoutDoesNotRecordRefusedRequests(t *testing.T) {
 				serveSOAPLogout(test, r)
 			}
 
-			assert.Check(t, is.Equal(store.calls(), 0))
-			assert.Check(t, is.Len(provider.terminated, 0))
+			assert.Equal(t, store.calls(), 0)
+			assert.Len(t, provider.terminated, 0)
 		})
 	}
 }
@@ -814,10 +814,10 @@ func TestLogoutRecordsRequestUntilItExpires(t *testing.T) {
 
 			assertLogoutStatus(t, soapLogoutResponse(t, serveSOAPLogout(test, r)), StatusSuccess, "")
 
-			assert.Assert(t, is.Equal(store.calls(), 1))
-			assert.Check(t, store.expiries[0].Equal(issued.Add(tc.expires).Add(2*MaxClockSkew)), "expires %s", store.expiries[0])
-			assert.Check(t, is.Equal(store.keys[0], replayKey(replayKindLogoutRequest,
-				test.IDP.MetadataURL.String(), test.SP.MetadataURL.String(), id)))
+			require.Equal(t, store.calls(), 1)
+			assert.True(t, store.expiries[0].Equal(issued.Add(tc.expires).Add(2*MaxClockSkew)), "expires %s", store.expiries[0])
+			assert.Equal(t, store.keys[0], replayKey(replayKindLogoutRequest,
+				test.IDP.MetadataURL.String(), test.SP.MetadataURL.String(), id))
 		})
 	}
 }
@@ -830,7 +830,7 @@ func TestLogoutFailsClosedWhenStoreFails(t *testing.T) {
 
 	r, id := postLogoutRequest(t, &test.SP, nil)
 	_, _, posted := postedLogoutResponse(t, serveSLO(test, r))
-	assert.Check(t, is.Equal(posted.InResponseTo, id))
+	assert.Equal(t, posted.InResponseTo, id)
 	assertLogoutStatus(t, &posted, StatusResponder, "")
 
 	r, _ = redirectLogoutRequest(t, &test.SP, nil)
@@ -840,7 +840,7 @@ func TestLogoutFailsClosedWhenStoreFails(t *testing.T) {
 	r, _ = soapLogoutRequest(t, &test.SP, nil)
 	assertLogoutStatus(t, soapLogoutResponse(t, serveSOAPLogout(test, r)), StatusResponder, "")
 
-	assert.Check(t, is.Equal(store.calls(), 3))
-	assert.Check(t, is.Len(provider.lookups, 0))
-	assert.Check(t, is.Len(provider.terminated, 0))
+	assert.Equal(t, store.calls(), 3)
+	assert.Len(t, provider.lookups, 0)
+	assert.Len(t, provider.terminated, 0)
 }

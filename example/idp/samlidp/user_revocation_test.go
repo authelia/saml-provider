@@ -8,8 +8,8 @@ import (
 	"testing"
 	"time"
 
-	"gotest.tools/assert"
-	is "gotest.tools/assert/cmp"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"authelia.com/provider/saml"
 )
@@ -17,8 +17,8 @@ import (
 // addBobSession stores the user bob and a session of his, which changes to alice must leave alone.
 func addBobSession(t *testing.T, test *ServerTest) *http.Cookie {
 	t.Helper()
-	assert.NilError(t, test.Store.Put("/users/bob", User{Name: "bob", Email: "bob@example.com"}))
-	assert.NilError(t, test.Store.Put("/sessions/bob-session", saml.Session{
+	require.NoError(t, test.Store.Put("/users/bob", User{Name: "bob", Email: "bob@example.com"}))
+	require.NoError(t, test.Store.Put("/sessions/bob-session", saml.Session{
 		ID:         "bob-session",
 		UserName:   "bob",
 		NameID:     "bob@example.com",
@@ -38,7 +38,7 @@ func adminRequest(test *ServerTest, method, path, body string) int {
 func assertLoggedOut(t *testing.T, test *ServerTest, cookie *http.Cookie) {
 	t.Helper()
 	w := serveWithCookie(test, constrainedRequestURL(t, test, false, false), cookie)
-	assert.Check(t, strings.Contains(w.Body.String(), `name="password"`), w.Body.String())
+	assert.True(t, strings.Contains(w.Body.String(), `name="password"`), w.Body.String())
 }
 
 // A change to a user, such as a new password, ends the sessions of that user, which would otherwise
@@ -55,10 +55,10 @@ func TestUserChangesEndTheirSessions(t *testing.T) {
 			bob := addBobSession(t, test)
 			cookie := loggedInCookie(t, test)
 
-			assert.Assert(t, is.Equal(adminRequest(test, change.method, "/users/alice", change.body), http.StatusNoContent))
-			assert.Check(t, !sessionStored(t, test, cookie))
+			require.Equal(t, adminRequest(test, change.method, "/users/alice", change.body), http.StatusNoContent)
+			assert.False(t, sessionStored(t, test, cookie))
 			assertLoggedOut(t, test, cookie)
-			assert.Check(t, sessionStored(t, test, bob))
+			assert.True(t, sessionStored(t, test, bob))
 		})
 	}
 }
@@ -70,7 +70,7 @@ func TestSessionOfMissingUserIsNotUsed(t *testing.T) {
 	hardeningAddUser(t, test)
 	cookie := loggedInCookie(t, test)
 
-	assert.NilError(t, test.Store.Delete("/users/alice"))
+	require.NoError(t, test.Store.Delete("/users/alice"))
 	assertLoggedOut(t, test, cookie)
 }
 
@@ -80,7 +80,7 @@ func TestUserChangeFailsWhenSessionsCannotBeEnded(t *testing.T) {
 	test := NewServerTest(t)
 	hardeningAddUser(t, test)
 	test.Server.Store = &failingListStore{Store: &test.Store}
-	assert.Check(t, is.Equal(adminRequest(test, http.MethodDelete, "/users/alice", ""), http.StatusInternalServerError))
+	assert.Equal(t, adminRequest(test, http.MethodDelete, "/users/alice", ""), http.StatusInternalServerError)
 }
 
 type failingListStore struct {
@@ -96,21 +96,21 @@ func (failingListStore) List(string) ([]string, error) {
 func TestSessionFromEarlierUserRevisionIsNotUsed(t *testing.T) {
 	test := NewServerTest(t)
 	hardeningAddUser(t, test)
-	assert.Assert(t, is.Equal(adminRequest(test, http.MethodPut, "/users/alice", `{"password":"hunter2","email":"alice@example.com"}`), http.StatusNoContent))
+	require.Equal(t, adminRequest(test, http.MethodPut, "/users/alice", `{"password":"hunter2","email":"alice@example.com"}`), http.StatusNoContent)
 	cookie := loggedInCookie(t, test)
 	var stale map[string]any
-	assert.NilError(t, test.Store.Get("/sessions/"+cookie.Value, &stale))
+	require.NoError(t, test.Store.Get("/sessions/"+cookie.Value, &stale))
 
-	assert.Assert(t, is.Equal(adminRequest(test, http.MethodPut, "/users/alice", `{"email":"alice@example.org"}`), http.StatusNoContent))
-	assert.NilError(t, test.Store.Put("/sessions/"+cookie.Value, stale))
+	require.Equal(t, adminRequest(test, http.MethodPut, "/users/alice", `{"email":"alice@example.org"}`), http.StatusNoContent)
+	require.NoError(t, test.Store.Put("/sessions/"+cookie.Value, stale))
 	assertLoggedOut(t, test, cookie)
 }
 
 // The revision is set by the server, so a request can't choose one that matches an old session.
 func TestUserRevisionIsNotTakenFromTheRequest(t *testing.T) {
 	test := NewServerTest(t)
-	assert.Assert(t, is.Equal(adminRequest(test, http.MethodPut, "/users/carol", `{"revision":"chosen"}`), http.StatusNoContent))
+	require.Equal(t, adminRequest(test, http.MethodPut, "/users/carol", `{"revision":"chosen"}`), http.StatusNoContent)
 	user := User{}
-	assert.NilError(t, test.Store.Get("/users/carol", &user))
-	assert.Check(t, user.Revision != "" && user.Revision != "chosen", user.Revision)
+	require.NoError(t, test.Store.Get("/users/carol", &user))
+	assert.True(t, user.Revision != "" && user.Revision != "chosen", user.Revision)
 }

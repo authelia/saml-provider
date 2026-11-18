@@ -5,8 +5,7 @@ import (
 	"os"
 	"testing"
 
-	"gotest.tools/assert"
-	is "gotest.tools/assert/cmp"
+	"github.com/stretchr/testify/assert"
 )
 
 func TestIDPEncryptionFailsClosed(t *testing.T) {
@@ -49,12 +48,12 @@ func TestIDPEncryptionFailsClosed(t *testing.T) {
 
 			switch tc.want {
 			case "encrypted":
-				assert.Check(t, err)
-				assert.Check(t, cert != nil)
+				assert.NoError(t, err)
+				assert.NotNil(t, cert)
 			case "plaintext":
-				assert.Check(t, is.Equal(os.ErrNotExist, err))
+				assert.Equal(t, os.ErrNotExist, err)
 			default:
-				assert.Check(t, err != nil && err != os.ErrNotExist, "err=%v", err)
+				assert.True(t, err != nil && err != os.ErrNotExist, "err=%v", err)
 			}
 		})
 	}

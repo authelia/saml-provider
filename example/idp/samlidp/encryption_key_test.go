@@ -11,18 +11,18 @@ import (
 	"testing"
 	"time"
 
-	"gotest.tools/assert"
-	is "gotest.tools/assert/cmp"
-	"gotest.tools/golden"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"authelia.com/provider/saml"
+	"authelia.com/provider/saml/internal/golden"
 )
 
 func newEncryptionKeyPair(t *testing.T) saml.DecryptionKey {
 	t.Helper()
 
 	key, err := rsa.GenerateKey(rand.Reader, 2048)
-	assert.NilError(t, err)
+	require.NoError(t, err)
 
 	template := &x509.Certificate{
 		SerialNumber: big.NewInt(1),
@@ -31,9 +31,9 @@ func newEncryptionKeyPair(t *testing.T) saml.DecryptionKey {
 		NotAfter:     time.Now().Add(time.Hour),
 	}
 	der, err := x509.CreateCertificate(rand.Reader, template, template, key.Public(), key)
-	assert.NilError(t, err)
+	require.NoError(t, err)
 	cert, err := x509.ParseCertificate(der)
-	assert.NilError(t, err)
+	require.NoError(t, err)
 
 	return saml.DecryptionKey{Certificate: cert, Key: key}
 }
@@ -53,8 +53,8 @@ func TestServerPublishesEncryptionKey(t *testing.T) {
 	}
 
 	server, err := New(options)
-	assert.NilError(t, err)
-	assert.Check(t, is.DeepEqual(server.IDP.DecryptionKeys, []saml.DecryptionKey{previous}))
+	require.NoError(t, err)
+	assert.Equal(t, server.IDP.DecryptionKeys, []saml.DecryptionKey{previous})
 
 	var encryption []string
 
@@ -64,10 +64,10 @@ func TestServerPublishesEncryptionKey(t *testing.T) {
 		}
 	}
 
-	assert.Check(t, is.DeepEqual([]string{base64.StdEncoding.EncodeToString(current.Certificate.Raw)}, encryption))
+	assert.Equal(t, []string{base64.StdEncoding.EncodeToString(current.Certificate.Raw)}, encryption)
 
 	// Keys that are not valid are refused when the server is made.
 	options.EncryptionKey = previous.Key
 	_, err = New(options)
-	assert.Check(t, is.Error(err, "IdentityProvider.EncryptionKey: the private key is not that of the certificate"))
+	assert.EqualError(t, err, "IdentityProvider.EncryptionKey: the private key is not that of the certificate")
 }

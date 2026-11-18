@@ -7,8 +7,8 @@ import (
 	"strings"
 	"testing"
 
-	"gotest.tools/assert"
-	is "gotest.tools/assert/cmp"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 // insecureServiceMetadata returns metadata whose HTTP-POST ACS endpoints have the given locations.
@@ -34,13 +34,13 @@ func putService(test *ServerTest, id, metadata string) int {
 func TestPutServiceRefusesInsecureACS(t *testing.T) {
 	test := NewServerTest(t)
 
-	assert.Check(t, is.Equal(putService(test, "a", insecureServiceMetadata("https://a.example.com/metadata", "http://a.example.com/acs")), http.StatusBadRequest))
+	assert.Equal(t, putService(test, "a", insecureServiceMetadata("https://a.example.com/metadata", "http://a.example.com/acs")), http.StatusBadRequest)
 	_, ok := test.Server.serviceProviders["https://a.example.com/metadata"]
-	assert.Check(t, !ok)
+	assert.False(t, ok)
 
 	// One secure endpoint is enough, as it is the one which is used.
-	assert.Check(t, is.Equal(putService(test, "b", insecureServiceMetadata("https://b.example.com/metadata", "http://b.example.com/acs", "https://b.example.com/acs")), http.StatusNoContent))
-	assert.Check(t, is.Equal(putService(test, "c", insecureServiceMetadata("https://c.example.com/metadata", "http://localhost:8000/acs")), http.StatusNoContent))
+	assert.Equal(t, putService(test, "b", insecureServiceMetadata("https://b.example.com/metadata", "http://b.example.com/acs", "https://b.example.com/acs")), http.StatusNoContent)
+	assert.Equal(t, putService(test, "c", insecureServiceMetadata("https://c.example.com/metadata", "http://localhost:8000/acs")), http.StatusNoContent)
 }
 
 func TestOptionsAllowInsecureServiceProviderEndpoints(t *testing.T) {
@@ -49,12 +49,12 @@ func TestOptionsAllowInsecureServiceProviderEndpoints(t *testing.T) {
 		Store:                                 &MemoryStore{},
 		AllowInsecureServiceProviderEndpoints: true,
 	})
-	assert.NilError(t, err)
-	assert.Check(t, server.IDP.AllowInsecureServiceProviderEndpoints)
+	require.NoError(t, err)
+	assert.True(t, server.IDP.AllowInsecureServiceProviderEndpoints)
 	server.AdminAuthorizer = func(*http.Request) bool { return true }
 
 	test := &ServerTest{Server: server}
-	assert.Check(t, is.Equal(putService(test, "a", insecureServiceMetadata("https://a.example.com/metadata", "http://a.example.com/acs")), http.StatusNoContent))
+	assert.Equal(t, putService(test, "a", insecureServiceMetadata("https://a.example.com/metadata", "http://a.example.com/acs")), http.StatusNoContent)
 }
 
 // Only the descriptors that have not expired are served, so a secure endpoint in an expired one
@@ -73,16 +73,16 @@ func TestPutServiceChecksACSOfCurrentDescriptors(t *testing.T) {
 	}
 	expired := ` validUntil="2000-01-01T00:00:00Z"`
 
-	assert.Check(t, is.Equal(putService(test, "a", metadata("https://a.example.com/metadata",
+	assert.Equal(t, putService(test, "a", metadata("https://a.example.com/metadata",
 		descriptor(expired, "https://a.example.com/acs"),
-		descriptor("", "http://a.example.com/acs"))), http.StatusBadRequest))
+		descriptor("", "http://a.example.com/acs"))), http.StatusBadRequest)
 	_, ok := test.Server.serviceProviders["https://a.example.com/metadata"]
-	assert.Check(t, !ok)
+	assert.False(t, ok)
 
-	assert.Check(t, is.Equal(putService(test, "b", metadata("https://b.example.com/metadata",
+	assert.Equal(t, putService(test, "b", metadata("https://b.example.com/metadata",
 		descriptor(expired, "http://b.example.com/acs"),
-		descriptor("", "https://b.example.com/acs"))), http.StatusNoContent))
+		descriptor("", "https://b.example.com/acs"))), http.StatusNoContent)
 	stored := Service{}
-	assert.NilError(t, test.Store.Get("/services/b", &stored))
-	assert.Check(t, is.Len(stored.Metadata.SPSSODescriptors, 2))
+	require.NoError(t, test.Store.Get("/services/b", &stored))
+	assert.Len(t, stored.Metadata.SPSSODescriptors, 2)
 }

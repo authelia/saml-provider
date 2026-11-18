@@ -9,8 +9,8 @@ import (
 	"time"
 
 	"github.com/beevik/etree"
-	"gotest.tools/assert"
-	is "gotest.tools/assert/cmp"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 const entityIDTestValue = "urn:example:idp"
@@ -27,50 +27,50 @@ func entityIDRequest(t *testing.T, entityID string) (*IdentityProviderTest, *Idp
 func TestIDPEntityIDDefaultsToMetadataURL(t *testing.T) {
 	test, req := entityIDRequest(t, "")
 
-	assert.Check(t, is.Equal(test.IDP.Metadata().EntityID, "https://idp.example.com/saml/metadata"))
+	assert.Equal(t, test.IDP.Metadata().EntityID, "https://idp.example.com/saml/metadata")
 
-	assert.NilError(t, DefaultAssertionMaker{}.MakeAssertion(req, &Session{ID: "session", NameID: "alice"}))
-	assert.Check(t, is.Equal(req.Assertion.Issuer.Value, "https://idp.example.com/saml/metadata"))
-	assert.Check(t, is.Equal(req.Assertion.Subject.NameID.NameQualifier, "https://idp.example.com/saml/metadata"))
+	require.NoError(t, DefaultAssertionMaker{}.MakeAssertion(req, &Session{ID: "session", NameID: "alice"}))
+	assert.Equal(t, req.Assertion.Issuer.Value, "https://idp.example.com/saml/metadata")
+	assert.Equal(t, req.Assertion.Subject.NameID.NameQualifier, "https://idp.example.com/saml/metadata")
 }
 
 func TestIDPEntityIDInMetadata(t *testing.T) {
 	test, _ := entityIDRequest(t, entityIDTestValue)
 
-	assert.Check(t, is.Equal(test.IDP.Metadata().EntityID, entityIDTestValue))
+	assert.Equal(t, test.IDP.Metadata().EntityID, entityIDTestValue)
 
 	// The metadata is still served at the MetadataURL.
 	w := httptest.NewRecorder()
 	test.IDP.Handler().ServeHTTP(w, httptest.NewRequest(http.MethodGet, test.IDP.MetadataURL.String(), nil))
-	assert.Assert(t, is.Equal(w.Code, http.StatusOK), "body: %s", w.Body.String())
+	require.Equal(t, w.Code, http.StatusOK, "body: %s", w.Body.String())
 
 	var metadata EntityDescriptor
-	assert.NilError(t, xml.Unmarshal(w.Body.Bytes(), &metadata))
-	assert.Check(t, is.Equal(metadata.EntityID, entityIDTestValue))
+	require.NoError(t, xml.Unmarshal(w.Body.Bytes(), &metadata))
+	assert.Equal(t, metadata.EntityID, entityIDTestValue)
 }
 
 func TestIDPEntityIDInAssertion(t *testing.T) {
 	_, req := entityIDRequest(t, entityIDTestValue)
 
-	assert.NilError(t, DefaultAssertionMaker{}.MakeAssertion(req, &Session{ID: "session", NameID: "alice"}))
-	assert.Check(t, is.Equal(req.Assertion.Issuer.Value, entityIDTestValue))
-	assert.Check(t, is.Equal(req.Assertion.Subject.NameID.NameQualifier, entityIDTestValue))
+	require.NoError(t, DefaultAssertionMaker{}.MakeAssertion(req, &Session{ID: "session", NameID: "alice"}))
+	assert.Equal(t, req.Assertion.Issuer.Value, entityIDTestValue)
+	assert.Equal(t, req.Assertion.Subject.NameID.NameQualifier, entityIDTestValue)
 
-	assert.NilError(t, req.MakeResponse())
+	require.NoError(t, req.MakeResponse())
 	issuer := req.ResponseEl.FindElement("./Issuer")
-	assert.Assert(t, issuer != nil)
-	assert.Check(t, is.Equal(issuer.Text(), entityIDTestValue))
+	require.NotNil(t, issuer)
+	assert.Equal(t, issuer.Text(), entityIDTestValue)
 }
 
 func TestIDPEntityIDInErrorResponse(t *testing.T) {
 	_, req := entityIDRequest(t, entityIDTestValue)
 
 	w := httptest.NewRecorder()
-	assert.NilError(t, req.WriteErrorResponse(w, ErrNoPassive))
+	require.NoError(t, req.WriteErrorResponse(w, ErrNoPassive))
 
 	_, response := postedResponse(t, w.Body.String())
-	assert.Assert(t, response.Issuer != nil)
-	assert.Check(t, is.Equal(response.Issuer.Value, entityIDTestValue))
+	require.NotNil(t, response.Issuer)
+	assert.Equal(t, response.Issuer.Value, entityIDTestValue)
 }
 
 func TestIDPEntityIDInLogoutResponse(t *testing.T) {
@@ -80,10 +80,10 @@ func TestIDPEntityIDInLogoutResponse(t *testing.T) {
 
 	r, id := postLogoutRequest(t, &test.SP, nil)
 	encoded, _, response := postedLogoutResponse(t, serveSLO(test, r))
-	assert.Assert(t, response.Issuer != nil)
-	assert.Check(t, is.Equal(response.Issuer.Value, entityIDTestValue))
+	require.NotNil(t, response.Issuer)
+	assert.Equal(t, response.Issuer.Value, entityIDTestValue)
 	// The service provider compares the Issuer with the entity ID in the metadata.
-	assert.Check(t, test.SP.ValidateLogoutResponseForm(encoded, []string{id}))
+	assert.NoError(t, test.SP.ValidateLogoutResponseForm(encoded, []string{id}))
 }
 
 func TestIDPEntityIDInLogoutRequest(t *testing.T) {
@@ -94,9 +94,9 @@ func TestIDPEntityIDInLogoutRequest(t *testing.T) {
 	participant := &LogoutParticipant{NameID: NameID{Value: "alice"}}
 
 	request, err := test.IDP.makeLogoutRequest(httptest.NewRequest(http.MethodGet, "https://idp.example.com/saml/slo", nil), state, participant, nil, &Endpoint{Location: "https://sp.example.com/saml2/slo"})
-	assert.NilError(t, err)
-	assert.Assert(t, request.Issuer != nil)
-	assert.Check(t, is.Equal(request.Issuer.Value, entityIDTestValue))
+	require.NoError(t, err)
+	require.NotNil(t, request.Issuer)
+	assert.Equal(t, request.Issuer.Value, entityIDTestValue)
 }
 
 // SAMLBind §3.6.4 makes the SourceID of an artifact the SHA-1 of the entity ID, which a service provider computes
@@ -108,9 +108,9 @@ func TestIDPEntityIDInArtifactSourceID(t *testing.T) {
 	message := etree.NewElement("samlp:Response")
 
 	artifact, _, err := test.IDP.issueArtifact(t.Context(), test.SP.EntityID, message)
-	assert.NilError(t, err)
-	assert.Check(t, is.Equal(artifact.SourceID, ArtifactSourceID(test.IDP.Metadata().EntityID)))
-	assert.Check(t, is.Equal(artifact.SourceID, ArtifactSourceID(entityIDTestValue)))
+	require.NoError(t, err)
+	assert.Equal(t, artifact.SourceID, ArtifactSourceID(test.IDP.Metadata().EntityID))
+	assert.Equal(t, artifact.SourceID, ArtifactSourceID(entityIDTestValue))
 }
 
 // SAML2Int SDP-G04 requires an entity identifier to be an absolute URI of no more than 256 characters, which is
@@ -126,15 +126,15 @@ func TestIDPRefusesInvalidEntityID(t *testing.T) {
 
 			w := httptest.NewRecorder()
 			test.IDP.ServeMetadata(w, httptest.NewRequest(http.MethodGet, test.IDP.MetadataURL.String(), nil))
-			assert.Check(t, is.Equal(w.Code, http.StatusInternalServerError))
-			assert.Check(t, !strings.Contains(w.Body.String(), "EntityDescriptor"))
+			assert.Equal(t, w.Code, http.StatusInternalServerError)
+			assert.False(t, strings.Contains(w.Body.String(), "EntityDescriptor"))
 
-			assert.NilError(t, DefaultAssertionMaker{}.MakeAssertion(req, &Session{ID: "session", NameID: "alice"}))
-			assert.Check(t, is.ErrorContains(req.MakeAssertionEl(), "entity ID"))
+			require.NoError(t, DefaultAssertionMaker{}.MakeAssertion(req, &Session{ID: "session", NameID: "alice"}))
+			assert.ErrorContains(t, req.MakeAssertionEl(), "entity ID")
 
 			w = httptest.NewRecorder()
-			assert.Check(t, is.ErrorContains(req.WriteErrorResponse(w, ErrServerError), "entity ID"))
-			assert.Check(t, is.Equal(w.Body.Len(), 0))
+			assert.ErrorContains(t, req.WriteErrorResponse(w, ErrServerError), "entity ID")
+			assert.Equal(t, w.Body.Len(), 0)
 		})
 	}
 }
@@ -144,9 +144,9 @@ func TestIDPAcceptsLongestEntityID(t *testing.T) {
 	_, req := entityIDRequest(t, entityID)
 
 	w := httptest.NewRecorder()
-	assert.NilError(t, req.WriteErrorResponse(w, ErrServerError))
+	require.NoError(t, req.WriteErrorResponse(w, ErrServerError))
 	_, response := postedResponse(t, w.Body.String())
-	assert.Check(t, is.Equal(response.Issuer.Value, entityID))
+	assert.Equal(t, response.Issuer.Value, entityID)
 }
 
 func TestIDPRefusesInvalidEntityIDInLogoutResponse(t *testing.T) {
@@ -155,6 +155,6 @@ func TestIDPRefusesInvalidEntityIDInLogoutResponse(t *testing.T) {
 	test.IDP.EntityID = "idp"
 
 	w := serveSLO(test, r)
-	assert.Check(t, is.Equal(w.Code, http.StatusInternalServerError))
-	assert.Check(t, !strings.Contains(w.Body.String(), "SAMLResponse"))
+	assert.Equal(t, w.Code, http.StatusInternalServerError)
+	assert.False(t, strings.Contains(w.Body.String(), "SAMLResponse"))
 }

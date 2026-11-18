@@ -9,8 +9,8 @@ import (
 	"testing"
 
 	"github.com/beevik/etree"
-	"gotest.tools/assert"
-	is "gotest.tools/assert/cmp"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 const handlerTestSharedURL = "https://idp.example.com/saml/sso"
@@ -70,11 +70,11 @@ func handlerSOAPPost(body []byte) *http.Request {
 func handlerAnswer(t *testing.T, w *httptest.ResponseRecorder) *etree.Element {
 	t.Helper()
 
-	assert.Assert(t, is.Equal(w.Code, http.StatusOK), "body: %s", w.Body.String())
+	require.Equal(t, w.Code, http.StatusOK, "body: %s", w.Body.String())
 
 	_, _, message, err := parseSOAPEnvelope(w.Body.Bytes())
-	assert.NilError(t, err)
-	assert.Assert(t, is.Equal(message.NamespaceURI(), samlProtocolNS))
+	require.NoError(t, err)
+	require.Equal(t, message.NamespaceURI(), samlProtocolNS)
 
 	return message
 }
@@ -107,7 +107,7 @@ func TestHandlerServesSOAPServicesAtOnePath(t *testing.T) {
 
 			response := f.answer(t, serve(queryPost(t, handlerTestSharedURL, signQueryElement(t, sp, message))))
 			assertQueryStatus(t, response, StatusSuccess, "")
-			assert.Check(t, is.Len(response.Assertions, 1))
+			assert.Len(t, response.Assertions, 1)
 		})
 	}
 
@@ -115,8 +115,8 @@ func TestHandlerServesSOAPServicesAtOnePath(t *testing.T) {
 		el, id := soapLogoutRequestElement(t, sp, func(request *LogoutRequest) { request.Destination = handlerTestSharedURL })
 
 		message := handlerAnswer(t, serve(handlerSOAPPost(soapLogoutEnvelope(t, el))))
-		assert.Check(t, is.Equal(message.Tag, "LogoutResponse"))
-		assert.Check(t, is.Equal(message.SelectAttrValue("InResponseTo", ""), id))
+		assert.Equal(t, message.Tag, "LogoutResponse")
+		assert.Equal(t, message.SelectAttrValue("InResponseTo", ""), id)
 	})
 
 	t.Run("AuthnRequest", func(t *testing.T) {
@@ -124,18 +124,18 @@ func TestHandlerServesSOAPServicesAtOnePath(t *testing.T) {
 
 		response := parseECPResponse(t, serve(handlerSOAPPost(ecpEnvelope(t, request.Element()))))
 		assertECPResponseHeader(t, response, ecpTestPAOSURL)
-		assert.Check(t, response.header("RequestAuthenticated") != nil)
-		assert.Check(t, is.Equal(response.Response.InResponseTo, request.ID))
-		assert.Check(t, is.Equal(response.Response.Status.StatusCode.Value, StatusSuccess))
+		assert.NotNil(t, response.header("RequestAuthenticated"))
+		assert.Equal(t, response.Response.InResponseTo, request.ID)
+		assert.Equal(t, response.Response.Status.StatusCode.Value, StatusSuccess)
 	})
 
 	t.Run("ArtifactResolve", func(t *testing.T) {
 		request, err := sp.MakeArtifactResolveRequest("unknown")
-		assert.NilError(t, err)
+		require.NoError(t, err)
 
 		message := handlerAnswer(t, serve(handlerSOAPPost(soapLogoutEnvelope(t, request.Element()))))
-		assert.Check(t, is.Equal(message.Tag, "ArtifactResponse"))
-		assert.Check(t, is.Equal(message.SelectAttrValue("InResponseTo", ""), request.ID))
+		assert.Equal(t, message.Tag, "ArtifactResponse")
+		assert.Equal(t, message.SelectAttrValue("InResponseTo", ""), request.ID)
 	})
 
 	// The first service on the SOAP binding, which is the logout service, refuses what none of them is for.
@@ -144,8 +144,8 @@ func TestHandlerServesSOAPServicesAtOnePath(t *testing.T) {
 		el.Tag = "ManageNameIDRequest"
 
 		message := handlerAnswer(t, serve(handlerSOAPPost(soapLogoutEnvelope(t, el))))
-		assert.Check(t, is.Equal(message.Tag, "LogoutResponse"))
-		assert.Check(t, is.Equal(message.FindElement("./Status/StatusCode/StatusCode").SelectAttrValue("Value", ""), StatusRequestUnsupported))
+		assert.Equal(t, message.Tag, "LogoutResponse")
+		assert.Equal(t, message.FindElement("./Status/StatusCode/StatusCode").SelectAttrValue("Value", ""), StatusRequestUnsupported)
 	})
 
 	t.Run("message of another namespace", func(t *testing.T) {
@@ -153,13 +153,13 @@ func TestHandlerServesSOAPServicesAtOnePath(t *testing.T) {
 		el.CreateAttr("xmlns:x", "urn:example")
 
 		message := handlerAnswer(t, serve(handlerSOAPPost(soapLogoutEnvelope(t, el))))
-		assert.Check(t, is.Equal(message.Tag, "LogoutResponse"))
+		assert.Equal(t, message.Tag, "LogoutResponse")
 	})
 
 	t.Run("not an envelope", func(t *testing.T) {
 		w := serve(handlerSOAPPost([]byte("<not-soap/>")))
-		assert.Check(t, is.Equal(w.Code, http.StatusInternalServerError))
-		assert.Check(t, is.Contains(w.Body.String(), "soapenv:Client"))
+		assert.Equal(t, w.Code, http.StatusInternalServerError)
+		assert.Contains(t, w.Body.String(), "soapenv:Client")
 	})
 
 	// A body over the limit is not parsed to choose a service, and the service refuses it for its size.
@@ -168,29 +168,29 @@ func TestHandlerServesSOAPServicesAtOnePath(t *testing.T) {
 		message.CreateElement("saml:Padding").SetText(strings.Repeat("a", soapMaxMessageSize))
 
 		w := serve(queryPost(t, handlerTestSharedURL, message))
-		assert.Check(t, is.Equal(w.Code, http.StatusInternalServerError))
-		assert.Check(t, is.Contains(w.Body.String(), "soapenv:Client"))
+		assert.Equal(t, w.Code, http.StatusInternalServerError)
+		assert.Contains(t, w.Body.String(), "soapenv:Client")
 	})
 
 	// Requests that are not SOAP requests reach the single sign-on service, which refuses these as they hold no
 	// request.
 	t.Run("front channel", func(t *testing.T) {
 		w := serve(httptest.NewRequest(http.MethodGet, handlerTestSharedURL, nil))
-		assert.Check(t, is.Equal(w.Code, http.StatusBadRequest))
-		assert.Check(t, !strings.Contains(w.Body.String(), "soapenv"))
+		assert.Equal(t, w.Code, http.StatusBadRequest)
+		assert.False(t, strings.Contains(w.Body.String(), "soapenv"))
 
 		r := httptest.NewRequest(http.MethodPost, handlerTestSharedURL, strings.NewReader(url.Values{"SAMLRequest": {"AAAA"}}.Encode()))
 		r.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 
 		w = serve(r)
-		assert.Check(t, is.Equal(w.Code, http.StatusBadRequest))
-		assert.Check(t, !strings.Contains(w.Body.String(), "soapenv"))
+		assert.Equal(t, w.Code, http.StatusBadRequest)
+		assert.False(t, strings.Contains(w.Body.String(), "soapenv"))
 	})
 
 	t.Run("metadata", func(t *testing.T) {
 		w := serve(httptest.NewRequest(http.MethodGet, "https://idp.example.com/saml/metadata", nil))
-		assert.Check(t, is.Equal(w.Code, http.StatusOK))
-		assert.Check(t, is.Contains(w.Body.String(), "EntityDescriptor"))
+		assert.Equal(t, w.Code, http.StatusOK)
+		assert.Contains(t, w.Body.String(), "EntityDescriptor")
 	})
 }
 
@@ -212,16 +212,16 @@ func TestHandlerSOAPServicesWithoutFrontChannel(t *testing.T) {
 
 	w := httptest.NewRecorder()
 	handler.ServeHTTP(w, httptest.NewRequest(http.MethodGet, soapURL, nil))
-	assert.Check(t, is.Equal(w.Code, http.StatusMethodNotAllowed))
-	assert.Check(t, is.Equal(w.Header().Get("Allow"), http.MethodPost))
+	assert.Equal(t, w.Code, http.StatusMethodNotAllowed)
+	assert.Equal(t, w.Header().Get("Allow"), http.MethodPost)
 
 	r := httptest.NewRequest(http.MethodPost, soapURL, strings.NewReader("SAMLRequest=AAAA"))
 	r.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 
 	w = httptest.NewRecorder()
 	handler.ServeHTTP(w, r)
-	assert.Check(t, is.Equal(w.Code, http.StatusInternalServerError))
-	assert.Check(t, is.Contains(w.Body.String(), "soapenv:Client"))
+	assert.Equal(t, w.Code, http.StatusInternalServerError)
+	assert.Contains(t, w.Body.String(), "soapenv:Client")
 
 	message := queryServices[1].message(f)
 	message.CreateAttr("Destination", soapURL)
@@ -234,7 +234,7 @@ func TestHandlerSOAPServicesWithoutFrontChannel(t *testing.T) {
 // No configuration makes Handler panic, as registering a path twice with a mux would.
 func TestHandlerDoesNotPanicOnSharedPaths(t *testing.T) {
 	t.Run("nothing set", func(t *testing.T) {
-		assert.Check(t, (&IdentityProvider{}).Handler() != nil)
+		assert.True(t, (&IdentityProvider{}).Handler() != nil)
 
 		f := newQueryFixture(t)
 		f.test.IDP.MetadataURL, f.test.IDP.SSOURL = url.URL{}, url.URL{}
@@ -245,8 +245,8 @@ func TestHandlerDoesNotPanicOnSharedPaths(t *testing.T) {
 		f.test.IDP.Handler().ServeHTTP(w, httptest.NewRequest(http.MethodGet, "https://idp.example.com/anything", nil))
 
 		// Both URLs are served at "/", where the metadata comes first.
-		assert.Check(t, is.Equal(w.Code, http.StatusOK))
-		assert.Check(t, is.Contains(w.Body.String(), "EntityDescriptor"))
+		assert.Equal(t, w.Code, http.StatusOK)
+		assert.Contains(t, w.Body.String(), "EntityDescriptor")
 	})
 
 	t.Run("every URL the same", func(t *testing.T) {
@@ -255,7 +255,7 @@ func TestHandlerDoesNotPanicOnSharedPaths(t *testing.T) {
 
 		w := httptest.NewRecorder()
 		handler.ServeHTTP(w, httptest.NewRequest(http.MethodGet, handlerTestSharedURL, nil))
-		assert.Check(t, is.Contains(w.Body.String(), "EntityDescriptor"))
+		assert.Contains(t, w.Body.String(), "EntityDescriptor")
 
 		message := queryServices[0].message(f)
 		message.CreateAttr("Destination", handlerTestSharedURL)

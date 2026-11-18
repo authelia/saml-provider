@@ -14,8 +14,8 @@ import (
 	"testing"
 
 	"github.com/beevik/etree"
-	"gotest.tools/assert"
-	is "gotest.tools/assert/cmp"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"authelia.com/provider/saml/internal/dsig"
 )
@@ -54,17 +54,17 @@ func signElementWithMethods(t *testing.T, el *etree.Element, key crypto.Signer, 
 	t.Helper()
 
 	signingContext, err := dsig.NewSigningContext(key, [][]byte{cert.Raw})
-	assert.NilError(t, err)
+	require.NoError(t, err)
 
 	signingContext.Canonicalizer = dsig.MakeC14N10ExclusiveCanonicalizerWithPrefixList("")
 	signingContext.Hash = signatureMethodTestHashes[digestMethod]
 
 	signed, err := signingContext.SignEnveloped(el)
-	assert.NilError(t, err)
+	require.NoError(t, err)
 
 	signature := signed.ChildElements()[len(signed.ChildElements())-1]
 	signedInfo := signature.ChildElements()[0]
-	assert.Assert(t, is.Equal(signedInfo.Tag, dsig.SignedInfoTag))
+	require.Equal(t, signedInfo.Tag, dsig.SignedInfoTag)
 	signedInfo.FindElement("./SignatureMethod").CreateAttr("Algorithm", signatureMethod)
 
 	if mutate != nil {
@@ -75,14 +75,14 @@ func signElementWithMethods(t *testing.T, el *etree.Element, key crypto.Signer, 
 	detached.CreateAttr("xmlns:ds", dsig.Namespace)
 
 	canonical, err := signingContext.Canonicalizer.Canonicalize(detached)
-	assert.NilError(t, err)
+	require.NoError(t, err)
 
 	hash := signatureMethodTestHashes[signatureMethod]
 	h := hash.New()
 	h.Write(canonical)
 
 	value, err := key.Sign(rand.Reader, h.Sum(nil), hash)
-	assert.NilError(t, err)
+	require.NoError(t, err)
 
 	signature.FindElement("./SignatureValue").SetText(base64.StdEncoding.EncodeToString(value))
 
@@ -103,7 +103,7 @@ func elementBytes(t *testing.T, el *etree.Element) []byte {
 	doc := etree.NewDocument()
 	doc.SetRoot(el)
 	buf, err := doc.WriteToBytes()
-	assert.NilError(t, err)
+	require.NoError(t, err)
 
 	return buf
 }
@@ -120,7 +120,7 @@ func unsignedTestLogoutRequest(t *testing.T, test *IdentityProviderTest, destina
 	t.Helper()
 
 	request, err := unsignedSP(test).MakeLogoutRequest(destination, "alice")
-	assert.NilError(t, err)
+	require.NoError(t, err)
 
 	return request.Element()
 }
@@ -133,7 +133,7 @@ var envelopedSignaturePaths = map[string]func(t *testing.T, configure func(*Iden
 		configure(&test.IDP)
 
 		request, err := unsignedSP(test).MakeAuthenticationRequest(signatureTestSSOURL, HTTPPostBinding, HTTPPostBinding)
-		assert.NilError(t, err)
+		require.NoError(t, err)
 
 		return validatePost(t, test, elementBytes(t, signAsTestSP(t, test, request.Element(), signature, digest)))
 	},
@@ -144,7 +144,7 @@ var envelopedSignaturePaths = map[string]func(t *testing.T, configure func(*Iden
 		el := signAsTestSP(t, test, unsignedTestLogoutRequest(t, test, logoutTestSLOURL), signature, digest)
 
 		req, err := NewIdpLogoutRequest(&test.IDP, postLogoutBody(elementBytes(t, el)))
-		assert.NilError(t, err)
+		require.NoError(t, err)
 
 		return req.Validate()
 	},
@@ -153,7 +153,7 @@ var envelopedSignaturePaths = map[string]func(t *testing.T, configure func(*Iden
 		configure(&test.IDP)
 
 		response, err := unsignedSP(test).MakeLogoutResponse(logoutTestSLOURL, logoutResponseTestRequestID)
-		assert.NilError(t, err)
+		require.NoError(t, err)
 
 		body := elementBytes(t, signAsTestSP(t, test, response.Element(), signature, digest))
 		form := url.Values{"SAMLResponse": {base64.StdEncoding.EncodeToString(body)}, "RelayState": {"state-id"}}
@@ -174,10 +174,10 @@ var envelopedSignaturePaths = map[string]func(t *testing.T, configure func(*Iden
 		if err != nil {
 			var statusErr *StatusError
 
-			assert.Assert(t, errors.As(err, &statusErr))
-			assert.Check(t, errors.Is(err, ErrInvalidSignature), "%v", err)
-			assert.Check(t, is.Equal(statusErr.TopLevelField, StatusRequester))
-			assert.Check(t, is.Equal(statusErr.SecondLevelField, StatusRequestDenied))
+			require.True(t, errors.As(err, &statusErr))
+			assert.True(t, errors.Is(err, ErrInvalidSignature), "%v", err)
+			assert.Equal(t, statusErr.TopLevelField, StatusRequester)
+			assert.Equal(t, statusErr.SecondLevelField, StatusRequestDenied)
 		}
 
 		return err
@@ -200,7 +200,7 @@ var envelopedSignaturePaths = map[string]func(t *testing.T, configure func(*Iden
 		el := signAsTestSP(t, test, response.Element(), signature, digest)
 
 		policy, err := test.IDP.signaturePolicy()
-		assert.NilError(t, err)
+		require.NoError(t, err)
 
 		_, err = verifyManageNameIDResponseSignature(el, response, true, test.SP.Metadata(), policy)
 
@@ -222,7 +222,7 @@ var envelopedSignaturePaths = map[string]func(t *testing.T, configure func(*Iden
 		NewIdentityProviderTest(t)
 
 		doc := etree.NewDocument()
-		assert.NilError(t, doc.ReadFromString(testAggregate))
+		require.NoError(t, doc.ReadFromString(testAggregate))
 
 		signed := signElementWithMethods(t, doc.Root(), key, cert, signature, digest, nil)
 		last := len(signed.Child) - 1
@@ -242,15 +242,15 @@ func TestEnvelopedSignatureMethods(t *testing.T) {
 			t.Run(path+"/"+tc.name, func(t *testing.T) {
 				err := verify(t, func(*IdentityProvider) {}, tc.signature, tc.digest)
 				if tc.sha1 {
-					assert.Check(t, is.Contains(errorText(err), "is not allowed"))
-					assert.Check(t, is.ErrorContains(err, "signature"))
+					assert.Contains(t, errorText(err), "is not allowed")
+					assert.ErrorContains(t, err, "signature")
 				} else {
-					assert.Check(t, err)
+					assert.NoError(t, err)
 				}
 			})
 
 			t.Run(path+"/"+tc.name+" with sha-1 allowed", func(t *testing.T) {
-				assert.Check(t, verify(t, allowSHA1, tc.signature, tc.digest))
+				assert.NoError(t, verify(t, allowSHA1, tc.signature, tc.digest))
 			})
 		}
 
@@ -258,12 +258,12 @@ func TestEnvelopedSignatureMethods(t *testing.T) {
 			err := verify(t, func(idp *IdentityProvider) {
 				idp.SignatureMethods = []string{dsig.RSASHA512SignatureMethod}
 			}, dsig.RSASHA256SignatureMethod, dsig.SHA256DigestMethod)
-			assert.Check(t, is.Contains(errorText(err), "is not allowed"))
+			assert.Contains(t, errorText(err), "is not allowed")
 
 			err = verify(t, func(idp *IdentityProvider) {
 				idp.DigestMethods = []string{dsig.SHA512DigestMethod}
 			}, dsig.RSASHA256SignatureMethod, dsig.SHA256DigestMethod)
-			assert.Check(t, is.Contains(errorText(err), "is not allowed"))
+			assert.Contains(t, errorText(err), "is not allowed")
 		})
 	}
 }
@@ -274,7 +274,7 @@ func TestEnvelopedSignatureRefusesSHA1DigestOfAnotherReference(t *testing.T) {
 	test := signatureTestIDP(t)
 
 	request, err := unsignedSP(test).MakeAuthenticationRequest(signatureTestSSOURL, HTTPPostBinding, HTTPPostBinding)
-	assert.NilError(t, err)
+	require.NoError(t, err)
 
 	sign := func(mutate func(*etree.Element)) []byte {
 		return elementBytes(t, signElementWithMethods(t, request.Element(), test.SP.Key, test.SP.Certificate,
@@ -290,8 +290,8 @@ func TestEnvelopedSignatureRefusesSHA1DigestOfAnotherReference(t *testing.T) {
 		}
 	}
 
-	assert.Check(t, validatePost(t, test, sign(otherReference(dsig.SHA256DigestMethod))))
-	assert.Check(t, is.Contains(errorText(validatePost(t, test, sign(otherReference(dsig.SHA1DigestMethod)))), "is not allowed"))
+	assert.NoError(t, validatePost(t, test, sign(otherReference(dsig.SHA256DigestMethod))))
+	assert.Contains(t, errorText(validatePost(t, test, sign(otherReference(dsig.SHA1DigestMethod)))), "is not allowed")
 }
 
 func TestRedirectSignatureMethods(t *testing.T) {
@@ -311,7 +311,7 @@ func TestRedirectSignatureMethods(t *testing.T) {
 			r, _ := redirectLogoutRequest(t, &test.SP, nil)
 
 			req, err := NewIdpLogoutRequest(&test.IDP, r)
-			assert.NilError(t, err)
+			require.NoError(t, err)
 
 			return req.Validate()
 		},
@@ -341,21 +341,21 @@ func TestRedirectSignatureMethods(t *testing.T) {
 
 	for path, verify := range paths {
 		t.Run(path+"/sha-256", func(t *testing.T) {
-			assert.Check(t, verify(t, func(*IdentityProvider) {}, dsig.RSASHA256SignatureMethod))
+			assert.NoError(t, verify(t, func(*IdentityProvider) {}, dsig.RSASHA256SignatureMethod))
 		})
 
 		t.Run(path+"/sha-1", func(t *testing.T) {
 			err := verify(t, func(*IdentityProvider) {}, dsig.RSASHA1SignatureMethod)
-			assert.Check(t, is.Contains(errorText(err), "signature: signature method "+dsig.RSASHA1SignatureMethod+" is not allowed"))
+			assert.Contains(t, errorText(err), "signature: signature method "+dsig.RSASHA1SignatureMethod+" is not allowed")
 		})
 
 		t.Run(path+"/sha-1 allowed", func(t *testing.T) {
-			assert.Check(t, verify(t, allowSHA1, dsig.RSASHA1SignatureMethod))
+			assert.NoError(t, verify(t, allowSHA1, dsig.RSASHA1SignatureMethod))
 		})
 
 		// The digest methods have no part in a signature of the query, which has no Reference.
 		t.Run(path+"/sha-1 signature allowed without its digest", func(t *testing.T) {
-			assert.Check(t, verify(t, func(idp *IdentityProvider) {
+			assert.NoError(t, verify(t, func(idp *IdentityProvider) {
 				idp.SignatureMethods = []string{dsig.RSASHA1SignatureMethod}
 			}, dsig.RSASHA1SignatureMethod))
 		})
@@ -364,7 +364,7 @@ func TestRedirectSignatureMethods(t *testing.T) {
 			err := verify(t, func(idp *IdentityProvider) {
 				idp.SignatureMethods = []string{dsig.RSASHA512SignatureMethod}
 			}, dsig.RSASHA256SignatureMethod)
-			assert.Check(t, is.Contains(errorText(err), "is not allowed"))
+			assert.Contains(t, errorText(err), "is not allowed")
 		})
 	}
 }
@@ -377,7 +377,7 @@ func TestRefusedSignatureMethodIsAnsweredAsAnInvalidSignature(t *testing.T) {
 
 		w := httptest.NewRecorder()
 		test.IDP.ServeSSO(w, httptest.NewRequest(http.MethodGet, signedRedirectURL(t, test).String(), nil))
-		assert.Check(t, is.Equal(w.Code, http.StatusBadRequest))
+		assert.Equal(t, w.Code, http.StatusBadRequest)
 	})
 
 	t.Run("ServeSLO", func(t *testing.T) {
@@ -387,8 +387,8 @@ func TestRefusedSignatureMethodIsAnsweredAsAnInvalidSignature(t *testing.T) {
 		for _, request := range []func(*testing.T, *ServiceProvider, func(*LogoutRequest)) (*http.Request, string){redirectLogoutRequest, postLogoutRequest} {
 			r, _ := request(t, &test.SP, nil)
 			w := serveSLO(test, r)
-			assert.Check(t, is.Equal(w.Code, http.StatusBadRequest))
-			assert.Check(t, is.Len(provider.terminated, 0))
+			assert.Equal(t, w.Code, http.StatusBadRequest)
+			assert.Len(t, provider.terminated, 0)
 		}
 	})
 
@@ -398,35 +398,35 @@ func TestRefusedSignatureMethodIsAnsweredAsAnInvalidSignature(t *testing.T) {
 
 		r, _ := soapLogoutRequest(t, &test.SP, nil)
 		response := soapLogoutResponse(t, serveSOAPLogout(test, r))
-		assert.Check(t, is.Equal(response.Status.StatusCode.Value, StatusRequester))
-		assert.Assert(t, response.Status.StatusCode.StatusCode != nil)
-		assert.Check(t, is.Equal(response.Status.StatusCode.StatusCode.Value, StatusRequestDenied))
-		assert.Check(t, is.Len(provider.terminated, 0))
+		assert.Equal(t, response.Status.StatusCode.Value, StatusRequester)
+		require.NotNil(t, response.Status.StatusCode.StatusCode)
+		assert.Equal(t, response.Status.StatusCode.StatusCode.Value, StatusRequestDenied)
+		assert.Len(t, provider.terminated, 0)
 	})
 }
 
 func TestDefaultSignatureMethodsExcludeSHA1(t *testing.T) {
 	policy, err := (&IdentityProvider{}).signaturePolicy()
-	assert.NilError(t, err)
+	require.NoError(t, err)
 
-	assert.Check(t, is.DeepEqual(policy.signatureMethods, []string{
+	assert.Equal(t, policy.signatureMethods, []string{
 		dsig.RSASHA256SignatureMethod, dsig.RSASHA384SignatureMethod, dsig.RSASHA512SignatureMethod,
 		dsig.ECDSASHA256SignatureMethod, dsig.ECDSASHA384SignatureMethod, dsig.ECDSASHA512SignatureMethod,
-	}))
-	assert.Check(t, is.DeepEqual(policy.digestMethods, []string{
+	})
+	assert.Equal(t, policy.digestMethods, []string{
 		dsig.SHA256DigestMethod, dsig.SHA384DigestMethod, dsig.SHA512DigestMethod,
-	}))
+	})
 
 	// Whatever can be verified can be listed, and no more.
 	for _, method := range []string{dsig.RSASHA1SignatureMethod, dsig.ECDSASHA1SignatureMethod} {
-		assert.Check(t, !slices.Contains(policy.signatureMethods, method))
+		assert.False(t, slices.Contains(policy.signatureMethods, method))
 
 		_, err = (&IdentityProvider{SignatureMethods: []string{method}}).signaturePolicy()
-		assert.Check(t, err)
+		assert.NoError(t, err)
 	}
 
 	_, err = (&IdentityProvider{DigestMethods: []string{dsig.SHA1DigestMethod}}).signaturePolicy()
-	assert.Check(t, err)
+	assert.NoError(t, err)
 }
 
 func TestUnsupportedSignatureMethodsAreAConfigurationError(t *testing.T) {
@@ -437,7 +437,7 @@ func TestUnsupportedSignatureMethodsAreAConfigurationError(t *testing.T) {
 		test.IDP.SignatureMethods = []string{dsig.RSASHA256SignatureMethod, dsaSHA1}
 
 		err := validateURL(t, test, signedRedirectURL(t, test).String())
-		assert.Check(t, is.Contains(errorText(err), `IdentityProvider.SignatureMethods: unsupported algorithm "`+dsaSHA1+`"`))
+		assert.Contains(t, errorText(err), `IdentityProvider.SignatureMethods: unsupported algorithm "`+dsaSHA1+`"`)
 	})
 
 	t.Run("digest method", func(t *testing.T) {
@@ -446,7 +446,7 @@ func TestUnsupportedSignatureMethodsAreAConfigurationError(t *testing.T) {
 		test.IDP.DigestMethods = []string{dsig.RSASHA256SignatureMethod}
 
 		err := validateURL(t, test, signedRedirectURL(t, test).String())
-		assert.Check(t, is.Contains(errorText(err), `IdentityProvider.DigestMethods: unsupported algorithm "`+dsig.RSASHA256SignatureMethod+`"`))
+		assert.Contains(t, errorText(err), `IdentityProvider.DigestMethods: unsupported algorithm "`+dsig.RSASHA256SignatureMethod+`"`)
 	})
 
 	t.Run("SOAP", func(t *testing.T) {
@@ -459,34 +459,34 @@ func TestUnsupportedSignatureMethodsAreAConfigurationError(t *testing.T) {
 
 		var statusErr *StatusError
 
-		assert.Assert(t, errors.As(err, &statusErr))
-		assert.Check(t, errors.Is(err, ErrServerError), "%v", err)
-		assert.Check(t, is.Equal(statusErr.TopLevelField, StatusResponder))
+		require.True(t, errors.As(err, &statusErr))
+		assert.True(t, errors.Is(err, ErrServerError), "%v", err)
+		assert.Equal(t, statusErr.TopLevelField, StatusResponder)
 	})
 
 	t.Run("metadata verifier", func(t *testing.T) {
 		test, verifier := metadataSigningTest(t)
 		signed, err := test.IDP.SignedMetadata()
-		assert.NilError(t, err)
+		require.NoError(t, err)
 
 		verifier.SignatureMethods = []string{dsaSHA1}
 		_, err = verifier.Verify(signed)
-		assert.Check(t, is.ErrorContains(err, `MetadataVerifier.SignatureMethods: unsupported algorithm "`+dsaSHA1+`"`))
+		assert.ErrorContains(t, err, `MetadataVerifier.SignatureMethods: unsupported algorithm "`+dsaSHA1+`"`)
 
 		verifier.SignatureMethods = nil
 		verifier.DigestMethods = []string{"sha256"}
 		_, err = verifier.Verify(signed)
-		assert.Check(t, is.ErrorContains(err, `MetadataVerifier.DigestMethods: unsupported algorithm "sha256"`))
+		assert.ErrorContains(t, err, `MetadataVerifier.DigestMethods: unsupported algorithm "sha256"`)
 	})
 }
 
 // The lists are for what the identity provider receives. The service provider of this package is not changed.
 func TestServiceProviderSignaturePolicyIsNotRestricted(t *testing.T) {
 	for _, method := range []string{dsig.RSASHA1SignatureMethod, dsig.ECDSASHA1SignatureMethod, dsig.RSASHA256SignatureMethod} {
-		assert.Check(t, slices.Contains(anySignaturePolicy.signatureMethods, method))
+		assert.True(t, slices.Contains(anySignaturePolicy.signatureMethods, method))
 	}
 
 	// Left nil, so that the digest of every Reference isn't checked as it is for the identity provider.
-	assert.Check(t, anySignaturePolicy.digestMethods == nil)
-	assert.Check(t, slices.Contains(supportedDigestMethods, dsig.SHA1DigestMethod))
+	assert.Nil(t, anySignaturePolicy.digestMethods)
+	assert.True(t, slices.Contains(supportedDigestMethods, dsig.SHA1DigestMethod))
 }

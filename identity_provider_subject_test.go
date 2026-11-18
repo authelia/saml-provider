@@ -11,8 +11,8 @@ import (
 	"time"
 
 	"github.com/beevik/etree"
-	"gotest.tools/assert"
-	is "gotest.tools/assert/cmp"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 const holderOfKeyMethod = "urn:oasis:names:tc:SAML:2.0:cm:holder-of-key"
@@ -32,7 +32,7 @@ func serveSSOWithSubject(t *testing.T, test *IdentityProviderTest, session *Sess
 	}
 
 	request, err := test.SP.MakeAuthenticationRequest("https://idp.example.com/saml/sso", HTTPPostBinding, HTTPPostBinding)
-	assert.NilError(t, err)
+	require.NoError(t, err)
 
 	// The format is left open, so that the emailAddress NameID of a subjectSession is asserted.
 	request.NameIDPolicy = nil
@@ -40,7 +40,7 @@ func serveSSOWithSubject(t *testing.T, test *IdentityProviderTest, session *Sess
 	doc := etree.NewDocument()
 	doc.SetRoot(request.Element())
 	body, err := doc.WriteToBytes()
-	assert.NilError(t, err)
+	require.NoError(t, err)
 
 	form := url.Values{"SAMLRequest": {base64.StdEncoding.EncodeToString(body)}}
 	r := httptest.NewRequest(http.MethodPost, "https://idp.example.com/saml/sso", strings.NewReader(form.Encode()))
@@ -59,7 +59,7 @@ func subjectSession() *Session {
 
 func subjectResponse(t *testing.T, w *httptest.ResponseRecorder) Response {
 	t.Helper()
-	assert.Assert(t, is.Equal(w.Code, http.StatusOK), "body: %s", w.Body.String())
+	require.Equal(t, w.Code, http.StatusOK, "body: %s", w.Body.String())
 	_, response := postedResponse(t, w.Body.String())
 
 	return response
@@ -67,11 +67,11 @@ func subjectResponse(t *testing.T, w *httptest.ResponseRecorder) Response {
 
 func assertAuthnFailed(t *testing.T, response Response) {
 	t.Helper()
-	assert.Check(t, is.Equal(response.Status.StatusCode.Value, StatusResponder))
-	assert.Assert(t, response.Status.StatusCode.StatusCode != nil)
-	assert.Check(t, is.Equal(response.Status.StatusCode.StatusCode.Value, StatusAuthnFailed))
-	assert.Check(t, response.Assertion == nil)
-	assert.Check(t, response.EncryptedAssertion == nil)
+	assert.Equal(t, response.Status.StatusCode.Value, StatusResponder)
+	require.NotNil(t, response.Status.StatusCode.StatusCode)
+	assert.Equal(t, response.Status.StatusCode.StatusCode.Value, StatusAuthnFailed)
+	assert.Nil(t, response.Assertion)
+	assert.Nil(t, response.EncryptedAssertion)
 }
 
 type assertionMakerFunc func(*IdpAuthnRequest, *Session) error
@@ -105,7 +105,7 @@ func TestServeSSOAcceptsMatchingSubject(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			test := NewIdentityProviderTest(t, applyKey)
 			w := serveSSOWithSubject(t, test, subjectSession(), subject)
-			assert.Check(t, is.Equal(subjectResponse(t, w).Status.StatusCode.Value, StatusSuccess))
+			assert.Equal(t, subjectResponse(t, w).Status.StatusCode.Value, StatusSuccess)
 		})
 	}
 }
@@ -176,7 +176,7 @@ func TestServeSSOMatchesSubjectConfirmation(t *testing.T) {
 
 			response := subjectResponse(t, w)
 			if tc.success {
-				assert.Check(t, is.Equal(response.Status.StatusCode.Value, StatusSuccess))
+				assert.Equal(t, response.Status.StatusCode.Value, StatusSuccess)
 			} else {
 				assertAuthnFailed(t, response)
 			}
@@ -233,7 +233,7 @@ func TestSatisfiesConfirmationDataPeriod(t *testing.T) {
 	} {
 		t.Run(name, func(t *testing.T) {
 			requested := tc.requested
-			assert.Check(t, is.Equal(satisfiesConfirmationData(&requested, tc.asserted), tc.satisfied))
+			assert.Equal(t, satisfiesConfirmationData(&requested, tc.asserted), tc.satisfied)
 		})
 	}
 }
@@ -244,7 +244,7 @@ func TestServeSSOUsesConfiguredSubjectEnforcer(t *testing.T) {
 		test.IDP.SubjectEnforcer = subjectEnforcerFunc(func(*IdpAuthnRequest, *Session) error { return nil })
 		w := serveSSOWithSubject(t, test, subjectSession(),
 			&Subject{NameID: &NameID{Format: string(EmailAddressNameIDFormat), Value: "alice@example.com"}})
-		assert.Check(t, is.Equal(subjectResponse(t, w).Status.StatusCode.Value, StatusSuccess))
+		assert.Equal(t, subjectResponse(t, w).Status.StatusCode.Value, StatusSuccess)
 	})
 
 	t.Run("refuses", func(t *testing.T) {
@@ -260,8 +260,8 @@ func TestServeSSOUsesConfiguredSubjectEnforcer(t *testing.T) {
 		w := serveSSOWithSubject(t, test, session, &Subject{NameID: &NameID{Value: "alice"}})
 		response := subjectResponse(t, w)
 		assertAuthnFailed(t, response)
-		assert.Check(t, statusSaysNothingOfTheRequest(response.Status))
-		assert.Check(t, seen == session)
+		assert.True(t, statusSaysNothingOfTheRequest(response.Status))
+		assert.True(t, seen == session)
 	})
 
 	t.Run("not used without a subject", func(t *testing.T) {
@@ -270,7 +270,7 @@ func TestServeSSOUsesConfiguredSubjectEnforcer(t *testing.T) {
 			return errors.New("called")
 		})
 		w := serveSSOWithSubject(t, test, subjectSession(), nil)
-		assert.Check(t, is.Equal(subjectResponse(t, w).Status.StatusCode.Value, StatusSuccess))
+		assert.Equal(t, subjectResponse(t, w).Status.StatusCode.Value, StatusSuccess)
 	})
 }
 
@@ -278,12 +278,12 @@ func TestServeSSOUsesConfiguredSubjectEnforcer(t *testing.T) {
 func TestServeSSORejectsEmptySubject(t *testing.T) {
 	test := NewIdentityProviderTest(t, applyKey)
 	w := serveSSOWithSubject(t, test, &Session{ID: "s"}, &Subject{NameID: &NameID{}})
-	assert.Check(t, is.Equal(w.Code, http.StatusOK))
+	assert.Equal(t, w.Code, http.StatusOK)
 
 	response := subjectResponse(t, w)
-	assert.Check(t, is.Equal(response.Status.StatusCode.Value, StatusResponder))
-	assert.Check(t, response.Assertion == nil)
-	assert.Check(t, response.EncryptedAssertion == nil)
+	assert.Equal(t, response.Status.StatusCode.Value, StatusResponder)
+	assert.Nil(t, response.Assertion)
+	assert.Nil(t, response.EncryptedAssertion)
 }
 
 // A request that leaves the format open but names a Subject with a format is for a NameID of that format, so it
@@ -304,10 +304,10 @@ func TestServeSSOSubjectFormatIsFirstCandidate(t *testing.T) {
 			captured := captureNameID(test)
 
 			w := serveSSOWithSubject(t, test, session, subject)
-			assert.Check(t, is.Equal(subjectResponse(t, w).Status.StatusCode.Value, StatusSuccess))
-			assert.Assert(t, *captured != nil)
-			assert.Check(t, is.Equal((*captured).Format, email))
-			assert.Check(t, is.Equal((*captured).Value, "alice@example.com"))
+			assert.Equal(t, subjectResponse(t, w).Status.StatusCode.Value, StatusSuccess)
+			require.NotNil(t, *captured)
+			assert.Equal(t, (*captured).Format, email)
+			assert.Equal(t, (*captured).Value, "alice@example.com")
 		})
 	}
 

@@ -19,8 +19,8 @@ import (
 	"testing"
 	"time"
 
-	"gotest.tools/assert"
-	is "gotest.tools/assert/cmp"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 var (
@@ -65,9 +65,9 @@ func makeSPCert(t *testing.T, tmpl spCertTemplate) *x509.Certificate {
 		KeyUsage:     tmpl.keyUsage,
 	}
 	der, err := x509.CreateCertificate(rand.Reader, template, template, tmpl.key.Public(), tmpl.key)
-	assert.NilError(t, err)
+	require.NoError(t, err)
 	cert, err := x509.ParseCertificate(der)
-	assert.NilError(t, err)
+	require.NoError(t, err)
 
 	return cert
 }
@@ -148,15 +148,15 @@ func TestIDPEncryptionCertificatePolicy(t *testing.T) {
 
 			cert, err := req.spEncryptionKey()
 			if tc.err == "" {
-				assert.Check(t, err)
-				assert.Check(t, cert != nil)
+				assert.NoError(t, err)
+				assert.NotNil(t, cert)
 
 				return
 			}
 
-			assert.Check(t, is.ErrorContains(err, tc.err))
-			assert.Check(t, !errors.Is(err, os.ErrNotExist), "a rejected certificate must not fall back to plaintext")
-			assert.Check(t, cert == nil)
+			assert.ErrorContains(t, err, tc.err)
+			assert.False(t, errors.Is(err, os.ErrNotExist), "a rejected certificate must not fall back to plaintext")
+			assert.Nil(t, cert)
 		})
 	}
 }
@@ -175,8 +175,8 @@ func TestIDPEncryptionCertificateRejectionDoesNotFallBack(t *testing.T) {
 	for _, use := range []string{"encryption", ""} {
 		req := spCertRequest(&test.IDP, expired, KeyDescriptor{Use: use, KeyInfo: KeyInfo{X509Data: X509Data{X509Certificates: []X509Certificate{{Data: validData}}}}})
 		cert, err := req.spEncryptionKey()
-		assert.Check(t, is.ErrorContains(err, "expired"), "use=%q", use)
-		assert.Check(t, cert == nil)
+		assert.ErrorContains(t, err, "expired", "use=%q", use)
+		assert.Nil(t, cert)
 	}
 }
 
@@ -186,10 +186,10 @@ func TestIDPEncryptionCertificateElliptic(t *testing.T) {
 	now := TimeNow()
 
 	p224, err := ecdsa.GenerateKey(elliptic.P224(), rand.Reader)
-	assert.NilError(t, err)
+	require.NoError(t, err)
 
 	p256, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
-	assert.NilError(t, err)
+	require.NoError(t, err)
 
 	for name, tc := range map[string]struct {
 		template spCertTemplate
@@ -212,14 +212,14 @@ func TestIDPEncryptionCertificateElliptic(t *testing.T) {
 
 			err := req.MakeAssertionEl()
 			if tc.err != "" {
-				assert.Check(t, is.ErrorContains(err, tc.err))
-				assert.Check(t, req.AssertionEl == nil)
+				assert.ErrorContains(t, err, tc.err)
+				assert.Nil(t, req.AssertionEl)
 
 				return
 			}
 
-			assert.NilError(t, err)
-			assert.Check(t, is.Equal(req.AssertionEl.Tag, "EncryptedAssertion"))
+			require.NoError(t, err)
+			assert.Equal(t, req.AssertionEl.Tag, "EncryptedAssertion")
 		})
 	}
 
@@ -229,7 +229,7 @@ func TestIDPEncryptionCertificateElliptic(t *testing.T) {
 
 	req := spCertRequest(&test.IDP, makeSPCert(t, spCertTemplate{key: p256, notBefore: now.Add(-time.Hour), notAfter: now.Add(time.Hour)}))
 	_, err = req.spEncryptionKey()
-	assert.Check(t, is.ErrorContains(err, "256-bit curve, smaller than the minimum of 384 bits"))
+	assert.ErrorContains(t, err, "256-bit curve, smaller than the minimum of 384 bits")
 }
 
 // entityEnforcer allows weak certificates for one service provider only.
@@ -256,13 +256,13 @@ func TestIDPEncryptionKeyEnforcerPerServiceProvider(t *testing.T) {
 	legacy := spCertRequest(&test.IDP, test.SPCertificate)
 	legacy.ServiceProviderMetadata.EntityID = enforcer.legacy
 	_, err := legacy.spEncryptionKey()
-	assert.Check(t, err)
+	assert.NoError(t, err)
 
 	other := spCertRequest(&test.IDP, test.SPCertificate)
 	_, err = other.spEncryptionKey()
-	assert.Check(t, is.ErrorContains(err, "expired"))
+	assert.ErrorContains(t, err, "expired")
 
-	assert.Check(t, is.DeepEqual([]string{enforcer.legacy, "https://sp.example.com/saml2/metadata"}, enforcer.seen))
+	assert.Equal(t, []string{enforcer.legacy, "https://sp.example.com/saml2/metadata"}, enforcer.seen)
 }
 
 func TestIDPServeSSORefusesRejectedEncryptionCertificate(t *testing.T) {
@@ -284,25 +284,25 @@ func TestIDPServeSSORefusesRejectedEncryptionCertificate(t *testing.T) {
 	test.SP.Certificate = makeSPCert(t, spCertTemplate{key: rsa2048, notBefore: now.Add(-48 * time.Hour), notAfter: now.Add(-24 * time.Hour)})
 
 	requestURL, err := test.SP.MakeRedirectAuthenticationRequest("ThisIsTheRelayState")
-	assert.NilError(t, err)
+	require.NoError(t, err)
 
 	r, _ := http.NewRequest("GET", requestURL.String(), nil)
 	w := httptest.NewRecorder()
 	test.IDP.ServeSSO(w, r)
 
-	assert.Check(t, is.Equal(http.StatusOK, w.Code))
+	assert.Equal(t, http.StatusOK, w.Code)
 
 	_, refused := postedResponse(t, w.Body.String())
-	assert.Check(t, is.Equal(refused.Status.StatusCode.Value, StatusResponder))
-	assert.Check(t, refused.Assertion == nil)
-	assert.Check(t, refused.EncryptedAssertion == nil)
-	assert.Check(t, is.Contains(logs.String(), "encryption key"))
-	assert.Check(t, is.Contains(logs.String(), "expired"))
+	assert.Equal(t, refused.Status.StatusCode.Value, StatusResponder)
+	assert.Nil(t, refused.Assertion)
+	assert.Nil(t, refused.EncryptedAssertion)
+	assert.Contains(t, logs.String(), "encryption key")
+	assert.Contains(t, logs.String(), "expired")
 
 	// The same service provider gets an encrypted assertion once the operator allows it.
 	test.IDP.EncryptionKeyEnforcer = DefaultEncryptionKeyEnforcer{IgnoreValidityPeriod: true}
 	w = httptest.NewRecorder()
 	test.IDP.ServeSSO(w, r)
-	assert.Check(t, is.Equal(http.StatusOK, w.Code))
-	assert.Check(t, is.Contains(w.Body.String(), "SAMLResponse"))
+	assert.Equal(t, http.StatusOK, w.Code)
+	assert.Contains(t, w.Body.String(), "SAMLResponse")
 }

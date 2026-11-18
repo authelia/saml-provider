@@ -11,8 +11,8 @@ import (
 	"testing"
 
 	"github.com/beevik/etree"
-	"gotest.tools/assert"
-	is "gotest.tools/assert/cmp"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 // serveSSOModified posts a request made by the test service provider after modify has changed it,
@@ -21,14 +21,14 @@ func serveSSOModified(t *testing.T, test *IdentityProviderTest, modify func(*Aut
 	t.Helper()
 
 	request, err := test.SP.MakeAuthenticationRequest("https://idp.example.com/saml/sso", HTTPPostBinding, HTTPPostBinding)
-	assert.NilError(t, err)
+	require.NoError(t, err)
 
 	modify(request)
 
 	doc := etree.NewDocument()
 	doc.SetRoot(request.Element())
 	body, err := doc.WriteToBytes()
-	assert.NilError(t, err)
+	require.NoError(t, err)
 
 	form := url.Values{"SAMLRequest": {base64.StdEncoding.EncodeToString(body)}}
 	r := httptest.NewRequest(http.MethodPost, "https://idp.example.com/saml/sso", strings.NewReader(form.Encode()))
@@ -44,23 +44,23 @@ func serveSSOModified(t *testing.T, test *IdentityProviderTest, modify func(*Aut
 func assertRequestStatus(t *testing.T, w *httptest.ResponseRecorder, id, top, second string) {
 	t.Helper()
 
-	assert.Assert(t, is.Equal(w.Code, http.StatusOK), "body: %s", w.Body.String())
+	require.Equal(t, w.Code, http.StatusOK, "body: %s", w.Body.String())
 
 	_, response := postedResponse(t, w.Body.String())
 
-	assert.Check(t, is.Equal(response.InResponseTo, id))
-	assert.Check(t, is.Equal(response.Status.StatusCode.Value, top))
+	assert.Equal(t, response.InResponseTo, id)
+	assert.Equal(t, response.Status.StatusCode.Value, top)
 
 	if second == "" {
-		assert.Check(t, response.Status.StatusCode.StatusCode == nil)
+		assert.Nil(t, response.Status.StatusCode.StatusCode)
 	} else {
-		assert.Assert(t, response.Status.StatusCode.StatusCode != nil)
-		assert.Check(t, is.Equal(response.Status.StatusCode.StatusCode.Value, second))
+		require.NotNil(t, response.Status.StatusCode.StatusCode)
+		assert.Equal(t, response.Status.StatusCode.StatusCode.Value, second)
 	}
 
-	assert.Check(t, statusSaysNothingOfTheRequest(response.Status))
-	assert.Check(t, response.Assertion == nil)
-	assert.Check(t, response.EncryptedAssertion == nil)
+	assert.True(t, statusSaysNothingOfTheRequest(response.Status))
+	assert.Nil(t, response.Assertion)
+	assert.Nil(t, response.EncryptedAssertion)
 }
 
 func TestServeSSOVersionMismatch(t *testing.T) {
@@ -112,7 +112,7 @@ func TestServeSSOUnsupportedProtocolBinding(t *testing.T) {
 
 			// The status goes to the HTTP-POST endpoint of the metadata.
 			_, response := postedResponse(t, w.Body.String())
-			assert.Check(t, is.Equal(response.Destination, test.SP.AcsURL.String()))
+			assert.Equal(t, response.Destination, test.SP.AcsURL.String())
 		})
 	}
 }
@@ -124,16 +124,16 @@ func TestServeSSOVersionMismatchGoesToMetadataACS(t *testing.T) {
 		r.AssertionConsumerServiceURL = "https://attacker.example.com/acs"
 	})
 
-	assert.Check(t, is.Equal(w.Code, http.StatusBadRequest))
-	assert.Check(t, !strings.Contains(w.Body.String(), "SAMLResponse"))
+	assert.Equal(t, w.Code, http.StatusBadRequest)
+	assert.False(t, strings.Contains(w.Body.String(), "SAMLResponse"))
 }
 
 func TestServeSSOInvalidRequestIDStays400(t *testing.T) {
 	test := NewIdentityProviderTest(t, applyKey)
 	w, _ := serveSSOModified(t, test, func(r *AuthnRequest) { r.ID = "bad id" })
 
-	assert.Check(t, is.Equal(w.Code, http.StatusBadRequest))
-	assert.Check(t, !strings.Contains(w.Body.String(), "SAMLResponse"))
+	assert.Equal(t, w.Code, http.StatusBadRequest)
+	assert.False(t, strings.Contains(w.Body.String(), "SAMLResponse"))
 }
 
 func TestServeSSOSignedRequestFailsRequestStage(t *testing.T) {
@@ -190,7 +190,7 @@ func TestServeSSOResponderWhenAssertionMakerFails(t *testing.T) {
 
 	w, id := serveSSOModified(t, test, func(*AuthnRequest) {})
 	assertRequestStatus(t, w, id, StatusResponder, "")
-	assert.Check(t, !strings.Contains(w.Body.String(), "boom"))
+	assert.False(t, strings.Contains(w.Body.String(), "boom"))
 }
 
 func TestServeSSOResponderWhenEncryptionFails(t *testing.T) {
@@ -206,9 +206,9 @@ func TestServeSSOResponderWhenEncryptionFails(t *testing.T) {
 	})
 
 	w, id := serveSSOModified(t, test, func(*AuthnRequest) {})
-	assert.Check(t, called)
+	assert.True(t, called)
 	assertRequestStatus(t, w, id, StatusResponder, "")
-	assert.Check(t, !strings.Contains(w.Body.String(), "boom"))
+	assert.False(t, strings.Contains(w.Body.String(), "boom"))
 }
 
 func TestServeSSOInvalidNameIDPolicyFromAssertionMaker(t *testing.T) {
@@ -237,8 +237,8 @@ func TestErrorStatusCodes(t *testing.T) {
 	} {
 		t.Run(name, func(t *testing.T) {
 			top, second := statusCodes(idp.ErrorStatus(tc.err))
-			assert.Check(t, is.Equal(top, tc.top))
-			assert.Check(t, is.Equal(second, tc.second))
+			assert.Equal(t, top, tc.top)
+			assert.Equal(t, second, tc.second)
 		})
 	}
 }
@@ -250,13 +250,13 @@ func TestRespondableAfterValidate(t *testing.T) {
 
 		test := NewIdentityProviderTest(t, applyKey)
 		request, err := test.SP.MakeAuthenticationRequest("https://idp.example.com/saml/sso", HTTPPostBinding, HTTPPostBinding)
-		assert.NilError(t, err)
+		require.NoError(t, err)
 		modify(request)
 
 		doc := etree.NewDocument()
 		doc.SetRoot(request.Element())
 		body, err := doc.WriteToBytes()
-		assert.NilError(t, err)
+		require.NoError(t, err)
 
 		req := &IdpAuthnRequest{IDP: &test.IDP, HTTPRequest: httptest.NewRequest(http.MethodPost, "https://idp.example.com/saml/sso", nil), RequestBuffer: body, Now: TimeNow()}
 
@@ -264,13 +264,13 @@ func TestRespondableAfterValidate(t *testing.T) {
 	}
 
 	req, err := validate(t, func(r *AuthnRequest) { r.ID = "bad id" })
-	assert.Check(t, errors.Is(err, ErrMalformedRequest), "%v", err)
-	assert.Check(t, !req.Respondable(), "a request that fails before its endpoint is known must not get a SAML response")
-	assert.Check(t, req.MakeErrorResponse(err) != nil)
+	assert.True(t, errors.Is(err, ErrMalformedRequest), "%v", err)
+	assert.False(t, req.Respondable(), "a request that fails before its endpoint is known must not get a SAML response")
+	assert.NotNil(t, req.MakeErrorResponse(err))
 
 	req, err = validate(t, func(r *AuthnRequest) { r.Version = "3.0" })
-	assert.Check(t, errors.Is(err, ErrRequestVersionTooHigh), "%v", err)
-	assert.Check(t, req.Respondable())
-	assert.Check(t, is.Equal(req.IDP.ErrorStatus(err).StatusCode.Value, StatusVersionMismatch))
-	assert.NilError(t, req.MakeErrorResponse(err))
+	assert.True(t, errors.Is(err, ErrRequestVersionTooHigh), "%v", err)
+	assert.True(t, req.Respondable())
+	assert.Equal(t, req.IDP.ErrorStatus(err).StatusCode.Value, StatusVersionMismatch)
+	require.NoError(t, req.MakeErrorResponse(err))
 }

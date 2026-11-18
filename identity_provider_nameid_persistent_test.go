@@ -10,8 +10,8 @@ import (
 	"strings"
 	"testing"
 
-	"gotest.tools/assert"
-	is "gotest.tools/assert/cmp"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 const (
@@ -69,21 +69,21 @@ func TestPersistentNameIDIsStableAndQualified(t *testing.T) {
 	test.IDP.NameIDProvider = persistentTestProvider()
 
 	first, err := nameIDTestRequest(test, persistentPolicy(true)).resolveNameID(&Session{ID: "one", Index: "i1", UserName: "alice", UserEmail: "alice@example.com"})
-	assert.NilError(t, err)
+	require.NoError(t, err)
 
 	// Another session, an address that changed, and no AllowCreate.
 	second, err := nameIDTestRequest(test, persistentPolicy(false)).resolveNameID(&Session{ID: "two", Index: "i2", UserName: "alice", UserEmail: "alice@example.org"})
-	assert.NilError(t, err)
+	require.NoError(t, err)
 
-	assert.Check(t, is.DeepEqual(first, second))
-	assert.Check(t, is.Equal(first.Format, string(PersistentNameIDFormat)))
-	assert.Check(t, is.Equal(first.NameQualifier, persistentTestIDP))
-	assert.Check(t, is.Equal(first.SPNameQualifier, persistentTestSP))
-	assert.Check(t, is.Equal(first.SPProvidedID, ""))
+	assert.Equal(t, first, second)
+	assert.Equal(t, first.Format, string(PersistentNameIDFormat))
+	assert.Equal(t, first.NameQualifier, persistentTestIDP)
+	assert.Equal(t, first.SPNameQualifier, persistentTestSP)
+	assert.Equal(t, first.SPProvidedID, "")
 
 	// Opaque, not longer than 256 characters, and nothing of the principal.
-	assert.Check(t, persistentValue.MatchString(first.Value), first.Value)
-	assert.Check(t, !strings.Contains(first.Value, "alice"))
+	assert.True(t, persistentValue.MatchString(first.Value), first.Value)
+	assert.False(t, strings.Contains(first.Value, "alice"))
 }
 
 // The derivation must never change, as every service provider keeps what it produced. These values were computed
@@ -95,18 +95,18 @@ func TestPersistentNameIDKnownAnswer(t *testing.T) {
 	alice := &Session{UserName: "alice"}
 
 	first, err := provider.NameID(nil, persistentRequest(persistentTestSP, true), alice)
-	assert.NilError(t, err)
-	assert.Check(t, is.Equal(first.Value, "m7gc2dz7n2xz56d2h6dwa5oqt4exvqgayhr3ypq3roachqp3ttka"))
+	require.NoError(t, err)
+	assert.Equal(t, first.Value, "m7gc2dz7n2xz56d2h6dwa5oqt4exvqgayhr3ypq3roachqp3ttka")
 
-	assert.NilError(t, provider.TerminateNameID(nil, &IdpManageNameIDRequest{
+	require.NoError(t, provider.TerminateNameID(nil, &IdpManageNameIDRequest{
 		IDP:                     &IdentityProvider{EntityID: persistentTestIDP},
 		ServiceProviderMetadata: &EntityDescriptor{EntityID: persistentTestSP},
 		Request:                 ManageNameIDRequest{NameID: first, Terminate: true},
 	}))
 
 	second, err := provider.NameID(nil, persistentRequest(persistentTestSP, true), alice)
-	assert.NilError(t, err)
-	assert.Check(t, is.Equal(second.Value, "5shklk6ovey5fwl4w53cuaiq7437drgedu4blmvucdm67r3numyq"))
+	require.NoError(t, err)
+	assert.Equal(t, second.Value, "5shklk6ovey5fwl4w53cuaiq7437drgedu4blmvucdm67r3numyq")
 }
 
 func TestPersistentNameIDDiffers(t *testing.T) {
@@ -116,19 +116,19 @@ func TestPersistentNameIDDiffers(t *testing.T) {
 	alice := &Session{ID: "s", UserName: "alice"}
 
 	base, err := nameIDTestRequest(test, persistentPolicy(true)).resolveNameID(alice)
-	assert.NilError(t, err)
+	require.NoError(t, err)
 
 	t.Run("for each service provider", func(t *testing.T) {
 		other, err := nameIDTestRequestFrom(test, persistentTestOther, persistentPolicy(true)).resolveNameID(alice)
-		assert.NilError(t, err)
-		assert.Check(t, other.Value != base.Value)
-		assert.Check(t, is.Equal(other.SPNameQualifier, persistentTestOther))
+		require.NoError(t, err)
+		assert.True(t, other.Value != base.Value)
+		assert.Equal(t, other.SPNameQualifier, persistentTestOther)
 	})
 
 	t.Run("for each principal", func(t *testing.T) {
 		other, err := nameIDTestRequest(test, persistentPolicy(true)).resolveNameID(&Session{ID: "s", UserName: "bob"})
-		assert.NilError(t, err)
-		assert.Check(t, other.Value != base.Value)
+		require.NoError(t, err)
+		assert.True(t, other.Value != base.Value)
 	})
 
 	t.Run("for each identity provider", func(t *testing.T) {
@@ -139,17 +139,17 @@ func TestPersistentNameIDDiffers(t *testing.T) {
 		req.IDP = &idp
 
 		other, err := req.resolveNameID(alice)
-		assert.NilError(t, err)
-		assert.Check(t, other.Value != base.Value)
-		assert.Check(t, is.Equal(other.NameQualifier, "https://login.example.com"))
+		require.NoError(t, err)
+		assert.True(t, other.Value != base.Value)
+		assert.Equal(t, other.NameQualifier, "https://login.example.com")
 	})
 
 	t.Run("for each secret", func(t *testing.T) {
 		test.IDP.NameIDProvider = PersistentNameIDProvider{Secret: []byte("another secret of thirty-two byte")}
 
 		other, err := nameIDTestRequest(test, persistentPolicy(true)).resolveNameID(alice)
-		assert.NilError(t, err)
-		assert.Check(t, other.Value != base.Value)
+		require.NoError(t, err)
+		assert.True(t, other.Value != base.Value)
 	})
 
 	// The fields are delimited, so no part of one can pass for part of the next.
@@ -157,11 +157,11 @@ func TestPersistentNameIDDiffers(t *testing.T) {
 		provider := persistentTestProvider()
 
 		a, err := provider.NameID(nil, persistentRequest("https://sp.example.com/a", true), &Session{UserName: "lice"})
-		assert.NilError(t, err)
+		require.NoError(t, err)
 
 		b, err := provider.NameID(nil, persistentRequest("https://sp.example.com/", true), &Session{UserName: "alice"})
-		assert.NilError(t, err)
-		assert.Check(t, a.Value != b.Value)
+		require.NoError(t, err)
+		assert.True(t, a.Value != b.Value)
 	})
 }
 
@@ -180,18 +180,18 @@ func TestPersistentNameIDAffiliation(t *testing.T) {
 	policy.SPNameQualifier = &affiliation
 
 	first, err := nameIDTestRequest(test, policy).resolveNameID(alice)
-	assert.NilError(t, err)
+	require.NoError(t, err)
 
 	second, err := nameIDTestRequestFrom(test, persistentTestOther, policy).resolveNameID(alice)
-	assert.NilError(t, err)
+	require.NoError(t, err)
 
-	assert.Check(t, is.DeepEqual(first, second))
-	assert.Check(t, is.Equal(first.SPNameQualifier, testAffiliationID))
-	assert.Check(t, is.Equal(first.NameQualifier, persistentTestIDP))
+	assert.Equal(t, first, second)
+	assert.Equal(t, first.SPNameQualifier, testAffiliationID)
+	assert.Equal(t, first.NameQualifier, persistentTestIDP)
 
 	own, err := nameIDTestRequest(test, persistentPolicy(true)).resolveNameID(alice)
-	assert.NilError(t, err)
-	assert.Check(t, own.Value != first.Value)
+	require.NoError(t, err)
+	assert.True(t, own.Value != first.Value)
 }
 
 func TestPersistentNameIDPrincipal(t *testing.T) {
@@ -199,32 +199,32 @@ func TestPersistentNameIDPrincipal(t *testing.T) {
 	req := persistentRequest(persistentTestSP, true)
 
 	byName, err := provider.NameID(nil, req, &Session{UserName: "alice"})
-	assert.NilError(t, err)
+	require.NoError(t, err)
 
 	t.Run("the subject identifier comes first", func(t *testing.T) {
 		bySubject, err := provider.NameID(nil, req, &Session{UserName: "alice", SubjectID: "u1234@example.com"})
-		assert.NilError(t, err)
-		assert.Check(t, bySubject.Value != byName.Value)
+		require.NoError(t, err)
+		assert.True(t, bySubject.Value != byName.Value)
 
 		// It doesn't change when the user is renamed.
 		renamed, err := provider.NameID(nil, req, &Session{UserName: "alicia", SubjectID: "u1234@example.com"})
-		assert.NilError(t, err)
-		assert.Check(t, is.Equal(renamed.Value, bySubject.Value))
+		require.NoError(t, err)
+		assert.Equal(t, renamed.Value, bySubject.Value)
 	})
 
 	t.Run("custom", func(t *testing.T) {
 		provider.Principal = func(session *Session) string { return session.UserEmail }
 
 		byEmail, err := provider.NameID(nil, req, &Session{UserName: "alice", UserEmail: "alice@example.com"})
-		assert.NilError(t, err)
-		assert.Check(t, byEmail.Value != byName.Value)
+		require.NoError(t, err)
+		assert.True(t, byEmail.Value != byName.Value)
 	})
 
 	// The session is incomplete, which a format left open must not hide by falling back to transient.
 	t.Run("none", func(t *testing.T) {
 		_, err := persistentTestProvider().NameID(nil, req, &Session{ID: "s", NameID: "alice", UserEmail: "alice@example.com"})
-		assert.Check(t, is.ErrorContains(err, "principal"))
-		assert.Check(t, !errors.Is(err, ErrInvalidNameIDPolicy))
+		assert.ErrorContains(t, err, "principal")
+		assert.False(t, errors.Is(err, ErrInvalidNameIDPolicy))
 	})
 }
 
@@ -234,11 +234,11 @@ func TestPersistentNameIDConfiguration(t *testing.T) {
 
 	t.Run("short secret", func(t *testing.T) {
 		provider := PersistentNameIDProvider{Secret: []byte("short")}
-		assert.Check(t, is.ErrorContains(provider.Validate(), "Secret"))
+		assert.ErrorContains(t, provider.Validate(), "Secret")
 
 		_, err := provider.NameID(nil, req, alice)
-		assert.Check(t, is.ErrorContains(err, "Secret"))
-		assert.Check(t, !errors.Is(err, ErrInvalidNameIDPolicy))
+		assert.ErrorContains(t, err, "Secret")
+		assert.False(t, errors.Is(err, ErrInvalidNameIDPolicy))
 	})
 
 	t.Run("no name qualifier", func(t *testing.T) {
@@ -246,32 +246,32 @@ func TestPersistentNameIDConfiguration(t *testing.T) {
 		req.NameQualifier = ""
 
 		_, err := persistentTestProvider().NameID(nil, req, alice)
-		assert.Check(t, is.ErrorContains(err, "NameQualifier"))
+		assert.ErrorContains(t, err, "NameQualifier")
 	})
 
 	t.Run("scope", func(t *testing.T) {
 		provider := persistentTestProvider()
-		assert.Check(t, provider.Validate())
+		assert.NoError(t, provider.Validate())
 
 		provider.Scope = "example.com"
-		assert.Check(t, provider.Validate())
+		assert.NoError(t, provider.Validate())
 
 		provider.Scope = "example com"
-		assert.Check(t, is.ErrorContains(provider.Validate(), "Scope"))
+		assert.ErrorContains(t, provider.Validate(), "Scope")
 	})
 
 	t.Run("managed without a store", func(t *testing.T) {
 		provider := ManagedPersistentNameIDProvider{PersistentNameIDProvider: persistentTestProvider()}
-		assert.Check(t, is.ErrorContains(provider.Validate(), "Store"))
+		assert.ErrorContains(t, provider.Validate(), "Store")
 
 		_, err := provider.NameID(nil, req, alice)
-		assert.Check(t, is.ErrorContains(err, "Store"))
-		assert.Check(t, !errors.Is(err, ErrInvalidNameIDPolicy))
+		assert.ErrorContains(t, err, "Store")
+		assert.False(t, errors.Is(err, ErrInvalidNameIDPolicy))
 	})
 
 	t.Run("managed", func(t *testing.T) {
 		provider, _ := managedTestProvider()
-		assert.Check(t, provider.Validate())
+		assert.NoError(t, provider.Validate())
 	})
 }
 
@@ -285,19 +285,19 @@ func TestPersistentNameIDProviderFallback(t *testing.T) {
 
 	t.Run("transient", func(t *testing.T) {
 		first, err := nameIDTestRequest(test, &NameIDPolicy{Format: &transient}).resolveNameID(session)
-		assert.NilError(t, err)
+		require.NoError(t, err)
 		second, err := nameIDTestRequest(test, &NameIDPolicy{Format: &transient}).resolveNameID(session)
-		assert.NilError(t, err)
+		require.NoError(t, err)
 
-		assert.Check(t, is.Equal(first.Format, transient))
-		assert.Check(t, first.Value != second.Value)
+		assert.Equal(t, first.Format, transient)
+		assert.True(t, first.Value != second.Value)
 	})
 
 	t.Run("session format", func(t *testing.T) {
 		nameID, err := nameIDTestRequest(test, &NameIDPolicy{Format: &email}).resolveNameID(session)
-		assert.NilError(t, err)
-		assert.Check(t, is.Equal(nameID.Format, email))
-		assert.Check(t, is.Equal(nameID.Value, "alice@example.com"))
+		require.NoError(t, err)
+		assert.Equal(t, nameID.Format, email)
+		assert.Equal(t, nameID.Value, "alice@example.com")
 	})
 
 	t.Run("open format prefers the metadata of the service provider", func(t *testing.T) {
@@ -307,15 +307,15 @@ func TestPersistentNameIDProviderFallback(t *testing.T) {
 		req.ServiceProviderMetadata.SPSSODescriptors[0].NameIDFormats = []NameIDFormat{PersistentNameIDFormat}
 
 		nameID, err := req.resolveNameID(session)
-		assert.NilError(t, err)
-		assert.Check(t, is.Equal(nameID.Format, string(PersistentNameIDFormat)))
+		require.NoError(t, err)
+		assert.Equal(t, nameID.Format, string(PersistentNameIDFormat))
 	})
 
 	t.Run("unknown format", func(t *testing.T) {
 		kerberos := "urn:oasis:names:tc:SAML:2.0:nameid-format:kerberos"
 
 		_, err := nameIDTestRequest(test, &NameIDPolicy{Format: &kerberos}).resolveNameID(session)
-		assert.Check(t, errors.Is(err, ErrInvalidNameIDPolicy), "%v", err)
+		assert.True(t, errors.Is(err, ErrInvalidNameIDPolicy), "%v", err)
 	})
 
 	// A persistent session NameID would be the same for every service provider.
@@ -323,15 +323,15 @@ func TestPersistentNameIDProviderFallback(t *testing.T) {
 		nameID, err := nameIDTestRequest(test, persistentPolicy(true)).resolveNameID(&Session{
 			ID: "s", UserName: "alice", NameID: "alice-everywhere", NameIDFormat: string(PersistentNameIDFormat),
 		})
-		assert.NilError(t, err)
-		assert.Check(t, persistentValue.MatchString(nameID.Value), nameID.Value)
+		require.NoError(t, err)
+		assert.True(t, persistentValue.MatchString(nameID.Value), nameID.Value)
 	})
 
 	t.Run("custom fallback", func(t *testing.T) {
 		provider := persistentTestProvider()
 		provider.Fallback = DefaultNameIDProvider{Formats: []string{email, transient}}
 
-		assert.Check(t, is.DeepEqual(provider.NameIDFormats(), []string{string(PersistentNameIDFormat), email, transient}))
+		assert.Equal(t, provider.NameIDFormats(), []string{string(PersistentNameIDFormat), email, transient})
 	})
 }
 
@@ -342,14 +342,14 @@ func TestPersistentNameIDMetadata(t *testing.T) {
 		test := NewIdentityProviderTest(t, applyKey)
 		test.IDP.NameIDProvider = persistentTestProvider()
 
-		assert.Check(t, is.DeepEqual(test.IDP.Metadata().IDPSSODescriptors[0].NameIDFormats, []NameIDFormat{persistent, transient}))
+		assert.Equal(t, test.IDP.Metadata().IDPSSODescriptors[0].NameIDFormats, []NameIDFormat{persistent, transient})
 	})
 
 	t.Run("managed", func(t *testing.T) {
 		test := NewIdentityProviderTest(t, applyKey)
 		test.IDP.NameIDProvider, _ = managedTestProvider()
 
-		assert.Check(t, is.DeepEqual(test.IDP.Metadata().IDPSSODescriptors[0].NameIDFormats, []NameIDFormat{persistent, transient}))
+		assert.Equal(t, test.IDP.Metadata().IDPSSODescriptors[0].NameIDFormats, []NameIDFormat{persistent, transient})
 	})
 
 	// A persistent format that the fallback also lists is advertised once.
@@ -357,7 +357,7 @@ func TestPersistentNameIDMetadata(t *testing.T) {
 		provider := persistentTestProvider()
 		provider.Fallback = DefaultNameIDProvider{Formats: []string{string(PersistentNameIDFormat), string(TransientNameIDFormat)}}
 
-		assert.Check(t, is.DeepEqual(provider.NameIDFormats(), []string{string(PersistentNameIDFormat), string(TransientNameIDFormat)}))
+		assert.Equal(t, provider.NameIDFormats(), []string{string(PersistentNameIDFormat), string(TransientNameIDFormat)})
 	})
 }
 
@@ -376,8 +376,8 @@ func TestPersistentNameIDDerivedIgnoresAllowCreate(t *testing.T) {
 	} {
 		t.Run(name, func(t *testing.T) {
 			nameID, err := nameIDTestRequest(test, policy).resolveNameID(alice)
-			assert.NilError(t, err)
-			assert.Check(t, is.Equal(nameID.Format, persistent))
+			require.NoError(t, err)
+			assert.Equal(t, nameID.Format, persistent)
 		})
 	}
 }
@@ -393,20 +393,20 @@ func TestManagedPersistentNameIDAllowCreate(t *testing.T) {
 		test.IDP.NameIDProvider = provider
 
 		_, err := nameIDTestRequest(test, persistentPolicy(false)).resolveNameID(alice)
-		assert.Check(t, errors.Is(err, ErrInvalidNameIDPolicy), "%v", err)
-		assert.Check(t, is.Equal(store.Len(), 0), "nothing is created by a refusal")
+		assert.True(t, errors.Is(err, ErrInvalidNameIDPolicy), "%v", err)
+		assert.Equal(t, store.Len(), 0, "nothing is created by a refusal")
 
 		created, err := nameIDTestRequest(test, persistentPolicy(true)).resolveNameID(alice)
-		assert.NilError(t, err)
-		assert.Check(t, is.Equal(store.Len(), 1))
+		require.NoError(t, err)
+		assert.Equal(t, store.Len(), 1)
 
 		again, err := nameIDTestRequest(test, persistentPolicy(false)).resolveNameID(alice)
-		assert.NilError(t, err)
-		assert.Check(t, is.DeepEqual(again, created))
+		require.NoError(t, err)
+		assert.Equal(t, again, created)
 
 		// Another service provider has no identifier yet.
 		_, err = nameIDTestRequestFrom(test, persistentTestOther, persistentPolicy(false)).resolveNameID(alice)
-		assert.Check(t, errors.Is(err, ErrInvalidNameIDPolicy), "%v", err)
+		assert.True(t, errors.Is(err, ErrInvalidNameIDPolicy), "%v", err)
 	})
 
 	// The first identifier is the one that the provider without a store derives, so a store can be added later.
@@ -414,11 +414,11 @@ func TestManagedPersistentNameIDAllowCreate(t *testing.T) {
 		managed, _ := managedTestProvider()
 
 		stored, err := managed.NameID(nil, persistentRequest(persistentTestSP, true), alice)
-		assert.NilError(t, err)
+		require.NoError(t, err)
 
 		derived, err := persistentTestProvider().NameID(nil, persistentRequest(persistentTestSP, true), alice)
-		assert.NilError(t, err)
-		assert.Check(t, is.DeepEqual(stored, derived))
+		require.NoError(t, err)
+		assert.Equal(t, stored, derived)
 	})
 
 	t.Run("open format falls back to transient", func(t *testing.T) {
@@ -429,8 +429,8 @@ func TestManagedPersistentNameIDAllowCreate(t *testing.T) {
 		req.ServiceProviderMetadata.SPSSODescriptors[0].NameIDFormats = []NameIDFormat{PersistentNameIDFormat}
 
 		nameID, err := req.resolveNameID(alice)
-		assert.NilError(t, err)
-		assert.Check(t, is.Equal(nameID.Format, string(TransientNameIDFormat)))
+		require.NoError(t, err)
+		assert.Equal(t, nameID.Format, string(TransientNameIDFormat))
 	})
 
 	t.Run("ignored", func(t *testing.T) {
@@ -440,9 +440,9 @@ func TestManagedPersistentNameIDAllowCreate(t *testing.T) {
 		test.IDP.NameIDProvider = provider
 
 		nameID, err := nameIDTestRequest(test, persistentPolicy(false)).resolveNameID(alice)
-		assert.NilError(t, err)
-		assert.Check(t, is.Equal(nameID.Format, string(PersistentNameIDFormat)))
-		assert.Check(t, is.Equal(store.Len(), 1))
+		require.NoError(t, err)
+		assert.Equal(t, nameID.Format, string(PersistentNameIDFormat))
+		assert.Equal(t, store.Len(), 1)
 	})
 
 	// The stored identifier is what is issued, so the secret can change without changing it.
@@ -450,21 +450,21 @@ func TestManagedPersistentNameIDAllowCreate(t *testing.T) {
 		provider, store := managedTestProvider()
 
 		before, err := provider.NameID(nil, persistentRequest(persistentTestSP, true), alice)
-		assert.NilError(t, err)
+		require.NoError(t, err)
 
 		provider.Secret = []byte("another secret of thirty-two byte")
 
 		after, err := provider.NameID(nil, persistentRequest(persistentTestSP, false), alice)
-		assert.NilError(t, err)
-		assert.Check(t, is.DeepEqual(after, before))
+		require.NoError(t, err)
+		assert.Equal(t, after, before)
 
 		created, err := provider.NameID(nil, persistentRequest(persistentTestOther, true), alice)
-		assert.NilError(t, err)
-		assert.Check(t, is.Equal(store.Len(), 2))
+		require.NoError(t, err)
+		assert.Equal(t, store.Len(), 2)
 
 		derived, err := persistentTestProvider().NameID(nil, persistentRequest(persistentTestOther, true), alice)
-		assert.NilError(t, err)
-		assert.Check(t, created.Value != derived.Value)
+		require.NoError(t, err)
+		assert.True(t, created.Value != derived.Value)
 	})
 
 	t.Run("store failure", func(t *testing.T) {
@@ -472,8 +472,8 @@ func TestManagedPersistentNameIDAllowCreate(t *testing.T) {
 		provider := ManagedPersistentNameIDProvider{PersistentNameIDProvider: persistentTestProvider(), Store: failingPersistentNameIDStore{boom}}
 
 		_, err := provider.NameID(nil, persistentRequest(persistentTestSP, true), alice)
-		assert.Check(t, errors.Is(err, boom))
-		assert.Check(t, !errors.Is(err, ErrInvalidNameIDPolicy))
+		assert.True(t, errors.Is(err, boom))
+		assert.False(t, errors.Is(err, ErrInvalidNameIDPolicy))
 	})
 }
 
@@ -495,38 +495,38 @@ func TestMemoryPersistentNameIDStore(t *testing.T) {
 	store := &MemoryPersistentNameIDStore{}
 
 	_, err := store.GetPersistentNameID(nil, "idp", "sp", "alice")
-	assert.Check(t, errors.Is(err, os.ErrNotExist))
+	assert.True(t, errors.Is(err, os.ErrNotExist))
 
 	_, err = store.FindPersistentNameID(nil, "idp", "sp", "v1")
-	assert.Check(t, errors.Is(err, os.ErrNotExist))
+	assert.True(t, errors.Is(err, os.ErrNotExist))
 
 	record := PersistentNameIDRecord{NameQualifier: "idp", SPNameQualifier: "sp", Principal: "alice", Value: "v1", SPProvidedIDs: map[string]string{"sp": "a"}}
-	assert.NilError(t, store.SavePersistentNameID(nil, record))
+	require.NoError(t, store.SavePersistentNameID(nil, record))
 
 	// The store keeps a copy.
 	record.SPProvidedIDs["sp"] = "changed"
 
 	got, err := store.GetPersistentNameID(nil, "idp", "sp", "alice")
-	assert.NilError(t, err)
-	assert.Check(t, is.Equal(got.SPProvidedIDs["sp"], "a"))
+	require.NoError(t, err)
+	assert.Equal(t, got.SPProvidedIDs["sp"], "a")
 
 	got.SPProvidedIDs["sp"] = "changed"
 
 	found, err := store.FindPersistentNameID(nil, "idp", "sp", "v1")
-	assert.NilError(t, err)
-	assert.Check(t, is.Equal(found.Principal, "alice"))
-	assert.Check(t, is.Equal(found.SPProvidedIDs["sp"], "a"))
+	require.NoError(t, err)
+	assert.Equal(t, found.Principal, "alice")
+	assert.Equal(t, found.SPProvidedIDs["sp"], "a")
 
 	// A value is found in its own namespace only.
 	_, err = store.FindPersistentNameID(nil, "idp", "other", "v1")
-	assert.Check(t, errors.Is(err, os.ErrNotExist))
+	assert.True(t, errors.Is(err, os.ErrNotExist))
 
 	// A record is replaced by its key, and the value it had is no longer found.
-	assert.NilError(t, store.SavePersistentNameID(nil, PersistentNameIDRecord{NameQualifier: "idp", SPNameQualifier: "sp", Principal: "alice", Value: "v2", Generation: 1}))
-	assert.Check(t, is.Equal(store.Len(), 1))
+	require.NoError(t, store.SavePersistentNameID(nil, PersistentNameIDRecord{NameQualifier: "idp", SPNameQualifier: "sp", Principal: "alice", Value: "v2", Generation: 1}))
+	assert.Equal(t, store.Len(), 1)
 
 	_, err = store.FindPersistentNameID(nil, "idp", "sp", "v1")
-	assert.Check(t, errors.Is(err, os.ErrNotExist))
+	assert.True(t, errors.Is(err, os.ErrNotExist))
 }
 
 // The identifier that is sent as an EncryptedID is the persistent one.
@@ -541,17 +541,17 @@ func TestPersistentNameIDEncrypted(t *testing.T) {
 	body := respond(t, req)
 
 	want, err := persistentTestProvider().NameID(nil, persistentRequest(persistentTestSP, true), encryptedPartsSession)
-	assert.NilError(t, err)
+	require.NoError(t, err)
 
 	sent := sentAssertionElement(t, test, body)
-	assert.Check(t, sent.FindElement("./Subject/NameID") == nil)
-	assert.Check(t, sent.FindElement("./Subject/EncryptedID") != nil)
-	assert.Check(t, !strings.Contains(elementToString(sent.FindElement("./Subject")), want.Value))
+	assert.Nil(t, sent.FindElement("./Subject/NameID"))
+	assert.NotNil(t, sent.FindElement("./Subject/EncryptedID"))
+	assert.False(t, strings.Contains(elementToString(sent.FindElement("./Subject")), want.Value))
 
 	assertion, err := test.SP.ParseXMLResponse([]byte(body), []string{"id-request"}, test.SP.AcsURL)
-	assert.NilError(t, err)
-	assert.Assert(t, assertion.Subject != nil && assertion.Subject.NameID != nil)
-	assert.Check(t, is.DeepEqual(*assertion.Subject.NameID, *want))
+	require.NoError(t, err)
+	require.True(t, assertion.Subject != nil && assertion.Subject.NameID != nil)
+	assert.Equal(t, *assertion.Subject.NameID, *want)
 }
 
 // A logout by the persistent NameID finds the session through the participant that it was asserted to.
@@ -561,12 +561,12 @@ func TestPersistentNameIDLogoutMatchesSession(t *testing.T) {
 	test.IDP.NameIDProvider = persistentTestProvider()
 
 	w := serveParticipantSSO(t, test, persistentPolicy(true))
-	assert.Assert(t, is.Equal(w.Code, http.StatusOK), w.Body.String())
-	assert.Assert(t, is.Len(provider.added, 1))
+	require.Equal(t, w.Code, http.StatusOK, w.Body.String())
+	require.Len(t, provider.added, 1)
 
 	asserted := *capture.assertion.Subject.NameID
-	assert.Check(t, is.Equal(asserted.Format, string(PersistentNameIDFormat)))
-	assert.Check(t, is.DeepEqual(provider.added[0].participant.NameID, asserted))
+	assert.Equal(t, asserted.Format, string(PersistentNameIDFormat))
+	assert.Equal(t, provider.added[0].participant.NameID, asserted)
 
 	r := httptest.NewRequest(http.MethodGet, "https://idp.example.com/saml/slo", nil)
 	logout := func(nameID NameID) error {
@@ -575,19 +575,19 @@ func TestPersistentNameIDLogoutMatchesSession(t *testing.T) {
 		return req.MatchesSession(r, session)
 	}
 
-	assert.Check(t, logout(asserted))
+	assert.NoError(t, logout(asserted))
 
 	// A later session of the principal is found by the same identifier.
 	later := &Session{ID: "later", Index: "i2", UserName: "alice"}
 	provider.GetSessionFunc = func(http.ResponseWriter, *http.Request, *IdpAuthnRequest) *Session { return later }
 
 	serveParticipantSSO(t, test, persistentPolicy(true))
-	assert.Assert(t, is.Len(provider.added, 2))
-	assert.Check(t, is.DeepEqual(provider.added[1].participant.NameID, asserted))
+	require.Len(t, provider.added, 2)
+	assert.Equal(t, provider.added[1].participant.NameID, asserted)
 
 	other := asserted
 	other.Value = strings.Repeat("a", 52)
-	assert.Check(t, logout(other) != nil)
+	assert.NotNil(t, logout(other))
 }
 
 // managedManageNameIDTest is an identity provider for name identifier management whose provider is the managed one, with
@@ -600,7 +600,7 @@ func managedManageNameIDTest(t *testing.T) (*IdentityProviderTest, ManagedPersis
 	test.IDP.NameIDProvider = provider
 
 	issued, err := nameIDTestRequest(test, persistentPolicy(true)).resolveNameID(&Session{ID: "s", UserName: "alice"})
-	assert.NilError(t, err)
+	require.NoError(t, err)
 
 	return test, provider, store, issued
 }
@@ -612,29 +612,29 @@ func TestManagedPersistentNameIDSetSPProvidedID(t *testing.T) {
 			test, provider, _, issued := managedManageNameIDTest(t)
 
 			result := send(t, test, manageNameIDOptions{mutate: func(request *ManageNameIDRequest) { request.NameID = issued }})
-			assert.Assert(t, result.Response != nil, "HTTP status %d", result.Code)
+			require.True(t, result.Response != nil, "HTTP status %d", result.Code)
 			checkStatus(t, result.Response.Status, StatusSuccess, "")
 
 			again, err := nameIDTestRequest(test, persistentPolicy(false)).resolveNameID(&Session{ID: "s2", UserName: "alice"})
-			assert.NilError(t, err)
-			assert.Check(t, is.Equal(again.Value, issued.Value))
-			assert.Check(t, is.Equal(again.SPProvidedID, "sp-alias"))
+			require.NoError(t, err)
+			assert.Equal(t, again.Value, issued.Value)
+			assert.Equal(t, again.SPProvidedID, "sp-alias")
 
 			alias, err := provider.SPProvidedID(nil, persistentTestSP, issued)
-			assert.NilError(t, err)
-			assert.Check(t, is.Equal(alias, "sp-alias"))
+			require.NoError(t, err)
+			assert.Equal(t, alias, "sp-alias")
 
 			// It is the alias of that service provider, and of that identifier.
 			alias, err = provider.SPProvidedID(nil, persistentTestOther, issued)
-			assert.NilError(t, err)
-			assert.Check(t, is.Equal(alias, ""))
+			require.NoError(t, err)
+			assert.Equal(t, alias, "")
 
 			unknown := *issued
 			unknown.Value = strings.Repeat("a", 52)
 
 			alias, err = provider.SPProvidedID(nil, persistentTestSP, &unknown)
-			assert.Check(t, err == nil || errors.Is(err, ErrUnknownPrincipal), "%v", err)
-			assert.Check(t, is.Equal(alias, ""))
+			assert.True(t, err == nil || errors.Is(err, ErrUnknownPrincipal), "%v", err)
+			assert.Equal(t, alias, "")
 		})
 	}
 }
@@ -657,26 +657,26 @@ func TestManagedPersistentNameIDTerminate(t *testing.T) {
 	checkStatus(t, result.Response.Status, StatusSuccess, "")
 
 	alias, err := provider.SPProvidedID(nil, persistentTestSP, issued)
-	assert.Check(t, err == nil || errors.Is(err, ErrUnknownPrincipal), "%v", err)
-	assert.Check(t, is.Equal(alias, ""))
+	assert.True(t, err == nil || errors.Is(err, ErrUnknownPrincipal), "%v", err)
+	assert.Equal(t, alias, "")
 
 	// The identifier that was terminated is no longer recognized.
 	result = send(t, test, manageNameIDOptions{mutate: terminate})
 	checkStatus(t, result.Response.Status, StatusRequester, StatusUnknownPrincipal)
 
 	_, err = nameIDTestRequest(test, persistentPolicy(false)).resolveNameID(alice)
-	assert.Check(t, errors.Is(err, ErrInvalidNameIDPolicy), "%v", err)
+	assert.True(t, errors.Is(err, ErrInvalidNameIDPolicy), "%v", err)
 
 	replacement, err := nameIDTestRequest(test, persistentPolicy(true)).resolveNameID(alice)
-	assert.NilError(t, err)
-	assert.Check(t, replacement.Value != issued.Value)
-	assert.Check(t, persistentValue.MatchString(replacement.Value), replacement.Value)
-	assert.Check(t, is.Equal(replacement.SPProvidedID, ""))
+	require.NoError(t, err)
+	assert.True(t, replacement.Value != issued.Value)
+	assert.True(t, persistentValue.MatchString(replacement.Value), replacement.Value)
+	assert.Equal(t, replacement.SPProvidedID, "")
 
 	// The replacement is stable, and is the one that can be managed now.
 	again, err := nameIDTestRequest(test, persistentPolicy(false)).resolveNameID(alice)
-	assert.NilError(t, err)
-	assert.Check(t, is.DeepEqual(again, replacement))
+	require.NoError(t, err)
+	assert.Equal(t, again, replacement)
 
 	result = send(t, test, manageNameIDOptions{mutate: func(request *ManageNameIDRequest) { request.NameID = replacement }})
 	checkStatus(t, result.Response.Status, StatusSuccess, "")
@@ -707,7 +707,7 @@ func TestManagedPersistentNameIDManagementUnknown(t *testing.T) {
 				checkStatus(t, result.Response.Status, StatusRequester, StatusUnknownPrincipal)
 			}
 
-			assert.Check(t, is.Equal(store.Len(), 1))
+			assert.Equal(t, store.Len(), 1)
 		})
 	}
 
@@ -716,13 +716,13 @@ func TestManagedPersistentNameIDManagementUnknown(t *testing.T) {
 		test, provider, store, _ := managedManageNameIDTest(t)
 
 		other, err := provider.NameID(nil, persistentRequest(persistentTestOther, true), &Session{UserName: "alice"})
-		assert.NilError(t, err)
+		require.NoError(t, err)
 
 		other.SPNameQualifier = persistentTestSP
 
 		result := manageNameIDBindings["soap"](t, test, manageNameIDOptions{mutate: func(request *ManageNameIDRequest) { request.NameID = other }})
 		checkStatus(t, result.Response.Status, StatusRequester, StatusUnknownPrincipal)
-		assert.Check(t, is.Equal(store.Len(), 2))
+		assert.Equal(t, store.Len(), 2)
 	})
 }
 
@@ -750,33 +750,33 @@ func TestManagedPersistentNameIDManagementAffiliation(t *testing.T) {
 	}
 
 	issued, err := provider.NameID(nil, request(persistentTestSP), alice)
-	assert.NilError(t, err)
-	assert.Check(t, is.Equal(issued.SPNameQualifier, testAffiliationID))
+	require.NoError(t, err)
+	assert.Equal(t, issued.SPNameQualifier, testAffiliationID)
 
-	assert.NilError(t, provider.SetSPProvidedID(nil, manage(persistentTestSP, issued, false), "alias-one"))
-	assert.NilError(t, provider.SetSPProvidedID(nil, manage(persistentTestOther, issued, false), "alias-two"))
+	require.NoError(t, provider.SetSPProvidedID(nil, manage(persistentTestSP, issued, false), "alias-one"))
+	require.NoError(t, provider.SetSPProvidedID(nil, manage(persistentTestOther, issued, false), "alias-two"))
 
 	one, err := provider.NameID(nil, request(persistentTestSP), alice)
-	assert.NilError(t, err)
-	assert.Check(t, is.Equal(one.SPProvidedID, "alias-one"))
+	require.NoError(t, err)
+	assert.Equal(t, one.SPProvidedID, "alias-one")
 
 	two, err := provider.NameID(nil, request(persistentTestOther), alice)
-	assert.NilError(t, err)
-	assert.Check(t, is.Equal(two.SPProvidedID, "alias-two"))
-	assert.Check(t, is.Equal(two.Value, one.Value))
+	require.NoError(t, err)
+	assert.Equal(t, two.SPProvidedID, "alias-two")
+	assert.Equal(t, two.Value, one.Value)
 
-	assert.NilError(t, provider.TerminateNameID(nil, manage(persistentTestSP, issued, true)))
+	require.NoError(t, provider.TerminateNameID(nil, manage(persistentTestSP, issued, true)))
 
 	one, err = provider.NameID(nil, request(persistentTestSP), alice)
-	assert.NilError(t, err)
-	assert.Check(t, is.Equal(one.SPProvidedID, ""))
-	assert.Check(t, is.Equal(one.Value, issued.Value))
+	require.NoError(t, err)
+	assert.Equal(t, one.SPProvidedID, "")
+	assert.Equal(t, one.Value, issued.Value)
 
 	two, err = provider.NameID(nil, request(persistentTestOther), alice)
-	assert.NilError(t, err)
-	assert.Check(t, is.Equal(two.SPProvidedID, "alias-two"))
-	assert.Check(t, is.Equal(two.Value, issued.Value))
-	assert.Check(t, is.Equal(store.Len(), 1))
+	require.NoError(t, err)
+	assert.Equal(t, two.SPProvidedID, "alias-two")
+	assert.Equal(t, two.Value, issued.Value)
+	assert.Equal(t, store.Len(), 1)
 }
 
 // managedMappingFixture is the fixture of name identifier mapping with the managed provider, and the identifier
@@ -789,7 +789,7 @@ func managedMappingFixture(t *testing.T) (*nameIDMappingFixture, ManagedPersiste
 	f.test.IDP.NameIDProvider = provider
 
 	issued, err := provider.NameID(nil, persistentRequest(f.a.MetadataURL.String(), true), &Session{UserName: "alice"})
-	assert.NilError(t, err)
+	require.NoError(t, err)
 
 	return f, provider, issued
 }
@@ -818,16 +818,16 @@ func TestManagedPersistentNameIDMapping(t *testing.T) {
 		checkStatus(t, result.Response.Status, StatusSuccess, "")
 
 		mapped, err := f.b.DecryptNameID(reparse(t, result.Element.FindElement("./EncryptedID")))
-		assert.NilError(t, err)
+		require.NoError(t, err)
 
 		// It is the identifier that single sign-on to the target asserts.
 		want, err := provider.NameID(nil, persistentRequest(f.b.MetadataURL.String(), false), &Session{UserName: "alice"})
-		assert.NilError(t, err)
-		assert.Check(t, is.DeepEqual(mapped, want))
-		assert.Check(t, mapped.Value != issued.Value)
+		require.NoError(t, err)
+		assert.Equal(t, mapped, want)
+		assert.True(t, mapped.Value != issued.Value)
 
 		// Now that it exists, it is mapped to without AllowCreate, with the alias of the target.
-		assert.NilError(t, provider.SetSPProvidedID(nil, &IdpManageNameIDRequest{
+		require.NoError(t, provider.SetSPProvidedID(nil, &IdpManageNameIDRequest{
 			IDP:                     &f.test.IDP,
 			ServiceProviderMetadata: f.b.Metadata(),
 			Request:                 ManageNameIDRequest{NameID: mapped},
@@ -837,9 +837,9 @@ func TestManagedPersistentNameIDMapping(t *testing.T) {
 		checkStatus(t, result.Response.Status, StatusSuccess, "")
 
 		mapped, err = f.b.DecryptNameID(reparse(t, result.Element.FindElement("./EncryptedID")))
-		assert.NilError(t, err)
-		assert.Check(t, is.Equal(mapped.Value, want.Value))
-		assert.Check(t, is.Equal(mapped.SPProvidedID, "b-alias"))
+		require.NoError(t, err)
+		assert.Equal(t, mapped.Value, want.Value)
+		assert.Equal(t, mapped.SPProvidedID, "b-alias")
 	})
 
 	t.Run("unknown principal", func(t *testing.T) {
@@ -865,7 +865,7 @@ func TestManagedPersistentNameIDMapping(t *testing.T) {
 	t.Run("terminated", func(t *testing.T) {
 		f, provider, issued := managedMappingFixture(t)
 
-		assert.NilError(t, provider.TerminateNameID(nil, &IdpManageNameIDRequest{
+		require.NoError(t, provider.TerminateNameID(nil, &IdpManageNameIDRequest{
 			IDP:                     &f.test.IDP,
 			ServiceProviderMetadata: f.a.Metadata(),
 			Request:                 ManageNameIDRequest{NameID: issued, Terminate: true},
@@ -897,26 +897,26 @@ func TestPersistentNameIDProviderInterfaces(t *testing.T) {
 	var derived NameIDProvider = persistentTestProvider()
 
 	_, ok := derived.(NameIDManagementProvider)
-	assert.Check(t, !ok)
+	assert.False(t, ok)
 
 	_, ok = derived.(NameIDMappingProvider)
-	assert.Check(t, !ok)
+	assert.False(t, ok)
 
 	_, ok = derived.(PairwiseIDProvider)
-	assert.Check(t, ok)
+	assert.True(t, ok)
 
 	managed, _ := managedTestProvider()
 
 	var provider NameIDProvider = managed
 
 	_, ok = provider.(NameIDManagementProvider)
-	assert.Check(t, ok)
+	assert.True(t, ok)
 
 	_, ok = provider.(NameIDMappingProvider)
-	assert.Check(t, ok)
+	assert.True(t, ok)
 
 	_, ok = provider.(PairwiseIDProvider)
-	assert.Check(t, ok)
+	assert.True(t, ok)
 }
 
 func TestValidateSubjectIdentifier(t *testing.T) {
@@ -953,11 +953,11 @@ func TestValidateSubjectIdentifier(t *testing.T) {
 	}
 
 	for _, value := range valid {
-		assert.Check(t, ValidateSubjectIdentifier(value), value)
+		assert.NoError(t, ValidateSubjectIdentifier(value), value)
 	}
 
 	for _, value := range invalid {
-		assert.Check(t, ValidateSubjectIdentifier(value) != nil, "%q", value)
+		assert.True(t, ValidateSubjectIdentifier(value) != nil, "%q", value)
 	}
 }
 
@@ -988,41 +988,41 @@ func TestPairwiseIDRelease(t *testing.T) {
 
 		req := attributeReleaseRequest(t, test, "", service(0, nil, requested(PairwiseIDAttributeName, uriAttrNameFormat)))
 		attributes := releasedAttributes(t, req, session)
-		assert.Assert(t, is.Len(attributes, 1))
+		require.Len(t, attributes, 1)
 
 		attribute := attributes[0]
-		assert.Check(t, is.Equal(attribute.Name, "urn:oasis:names:tc:SAML:attribute:pairwise-id"))
-		assert.Check(t, is.Equal(attribute.NameFormat, "urn:oasis:names:tc:SAML:2.0:attrname-format:uri"))
-		assert.Assert(t, is.Len(attribute.Values, 1))
-		assert.Check(t, is.Equal(attribute.Values[0].Type, "xs:string"))
+		assert.Equal(t, attribute.Name, "urn:oasis:names:tc:SAML:attribute:pairwise-id")
+		assert.Equal(t, attribute.NameFormat, "urn:oasis:names:tc:SAML:2.0:attrname-format:uri")
+		require.Len(t, attribute.Values, 1)
+		assert.Equal(t, attribute.Values[0].Type, "xs:string")
 
 		value := attribute.Values[0].Value
-		assert.Check(t, ValidateSubjectIdentifier(value), value)
+		assert.NoError(t, ValidateSubjectIdentifier(value), value)
 
 		uniqueID, scope, _ := strings.Cut(value, "@")
-		assert.Check(t, is.Equal(scope, "example.com"))
-		assert.Check(t, persistentValue.MatchString(uniqueID), uniqueID)
-		assert.Check(t, !strings.Contains(value, "alice"))
+		assert.Equal(t, scope, "example.com")
+		assert.True(t, persistentValue.MatchString(uniqueID), uniqueID)
+		assert.False(t, strings.Contains(value, "alice"))
 
 		// It is the pseudonym that the service provider knows the principal by as a persistent NameID.
 		nameID, err := pairwiseTestProvider().NameID(nil, persistentRequest(persistentTestSP, true), session)
-		assert.NilError(t, err)
-		assert.Check(t, is.Equal(uniqueID, nameID.Value))
+		require.NoError(t, err)
+		assert.Equal(t, uniqueID, nameID.Value)
 
 		// It is the same in another session.
 		again := releasedAttributes(t, req, &Session{ID: "later", UserName: "alice"})
-		assert.Assert(t, is.Len(again, 1))
-		assert.Check(t, is.Equal(again[0].Values[0].Value, value))
+		require.Len(t, again, 1)
+		assert.Equal(t, again[0].Values[0].Value, value)
 	})
 
 	t.Run("not requested", func(t *testing.T) {
 		test := NewIdentityProviderTest(t, applyKey)
 		test.IDP.NameIDProvider = pairwiseTestProvider()
 
-		assert.Check(t, is.Len(releasedAttributes(t, attributeReleaseRequest(t, test, ""), session), 0))
+		assert.Len(t, releasedAttributes(t, attributeReleaseRequest(t, test, ""), session), 0)
 
 		req := attributeReleaseRequest(t, test, "", service(0, nil, requested(mailAttributeName, uriAttrNameFormat)))
-		assert.Check(t, is.DeepEqual(attributeNames(releasedAttributes(t, req, session)), []string{mailAttributeName}))
+		assert.Equal(t, attributeNames(releasedAttributes(t, req, session)), []string{mailAttributeName})
 	})
 
 	t.Run("differs for each service provider", func(t *testing.T) {
@@ -1032,14 +1032,14 @@ func TestPairwiseIDRelease(t *testing.T) {
 		wanted := service(0, nil, requested(PairwiseIDAttributeName, uriAttrNameFormat))
 
 		one := releasedAttributes(t, attributeReleaseRequest(t, test, "", wanted), session)
-		assert.Assert(t, is.Len(one, 1))
+		require.Len(t, one, 1)
 
 		req := attributeReleaseRequest(t, test, "", wanted)
 		req.ServiceProviderMetadata.EntityID = persistentTestOther
 
 		two := releasedAttributes(t, req, session)
-		assert.Assert(t, is.Len(two, 1))
-		assert.Check(t, one[0].Values[0].Value != two[0].Values[0].Value)
+		require.Len(t, two, 1)
+		assert.True(t, one[0].Values[0].Value != two[0].Values[0].Value)
 	})
 
 	t.Run("a custom policy decides", func(t *testing.T) {
@@ -1055,8 +1055,8 @@ func TestPairwiseIDRelease(t *testing.T) {
 		})
 
 		req := attributeReleaseRequest(t, test, "", service(0, nil, requested(PairwiseIDAttributeName, uriAttrNameFormat)))
-		assert.Check(t, is.Len(releasedAttributes(t, req, session), 0))
-		assert.Check(t, is.Contains(candidates, PairwiseIDAttributeName))
+		assert.Len(t, releasedAttributes(t, req, session), 0)
+		assert.Contains(t, candidates, PairwiseIDAttributeName)
 	})
 
 	t.Run("no scope", func(t *testing.T) {
@@ -1064,14 +1064,14 @@ func TestPairwiseIDRelease(t *testing.T) {
 		test.IDP.NameIDProvider = persistentTestProvider()
 
 		req := attributeReleaseRequest(t, test, "", service(0, nil, requested(PairwiseIDAttributeName, uriAttrNameFormat)))
-		assert.Check(t, is.Len(releasedAttributes(t, req, session), 0))
+		assert.Len(t, releasedAttributes(t, req, session), 0)
 	})
 
 	t.Run("default provider", func(t *testing.T) {
 		test := NewIdentityProviderTest(t, applyKey)
 
 		req := attributeReleaseRequest(t, test, "", service(0, nil, requested(PairwiseIDAttributeName, uriAttrNameFormat)))
-		assert.Check(t, is.Len(releasedAttributes(t, req, session), 0))
+		assert.Len(t, releasedAttributes(t, req, session), 0)
 	})
 
 	// The attribute is optional, so a session with nothing to derive it from has none.
@@ -1083,7 +1083,7 @@ func TestPairwiseIDRelease(t *testing.T) {
 		req := attributeReleaseRequest(t, test, "", service(0, nil, requested(PairwiseIDAttributeName, uriAttrNameFormat)))
 		req.Request.NameIDPolicy = &NameIDPolicy{Format: &transient}
 
-		assert.Check(t, is.Len(releasedAttributes(t, req, &Session{ID: "s"}), 0))
+		assert.Len(t, releasedAttributes(t, req, &Session{ID: "s"}), 0)
 	})
 
 	t.Run("invalid scope", func(t *testing.T) {
@@ -1093,7 +1093,7 @@ func TestPairwiseIDRelease(t *testing.T) {
 		test.IDP.NameIDProvider = provider
 
 		req := attributeReleaseRequest(t, test, "", service(0, nil, requested(PairwiseIDAttributeName, uriAttrNameFormat)))
-		assert.Check(t, is.ErrorContains(DefaultAssertionMaker{}.MakeAssertion(req, session), "pairwise-id"))
+		assert.ErrorContains(t, DefaultAssertionMaker{}.MakeAssertion(req, session), "pairwise-id")
 	})
 
 	t.Run("managed provider derives it without the store", func(t *testing.T) {
@@ -1108,9 +1108,9 @@ func TestPairwiseIDRelease(t *testing.T) {
 		req.Request.NameIDPolicy = &NameIDPolicy{Format: &transient}
 
 		attributes := releasedAttributes(t, req, session)
-		assert.Assert(t, is.Len(attributes, 1))
-		assert.Check(t, ValidateSubjectIdentifier(attributes[0].Values[0].Value))
-		assert.Check(t, is.Equal(store.Len(), 0))
+		require.Len(t, attributes, 1)
+		assert.NoError(t, ValidateSubjectIdentifier(attributes[0].Values[0].Value))
+		assert.Equal(t, store.Len(), 0)
 	})
 }
 
@@ -1135,8 +1135,8 @@ func TestPairwiseIDProviderResult(t *testing.T) {
 		test.IDP.NameIDProvider = pairwiseIDProviderFunc{value: "abc@example.com"}
 
 		attributes := releasedAttributes(t, attributeReleaseRequest(t, test, "", wanted), session)
-		assert.Assert(t, is.Len(attributes, 1))
-		assert.Check(t, is.Equal(attributes[0].Values[0].Value, "abc@example.com"))
+		require.Len(t, attributes, 1)
+		assert.Equal(t, attributes[0].Values[0].Value, "abc@example.com")
 	})
 
 	t.Run("invalid", func(t *testing.T) {
@@ -1144,7 +1144,7 @@ func TestPairwiseIDProviderResult(t *testing.T) {
 		test.IDP.NameIDProvider = pairwiseIDProviderFunc{value: "abc"}
 
 		err := DefaultAssertionMaker{}.MakeAssertion(attributeReleaseRequest(t, test, "", wanted), session)
-		assert.Check(t, is.ErrorContains(err, "pairwise-id"))
+		assert.ErrorContains(t, err, "pairwise-id")
 	})
 
 	t.Run("error", func(t *testing.T) {
@@ -1153,7 +1153,7 @@ func TestPairwiseIDProviderResult(t *testing.T) {
 		test.IDP.NameIDProvider = pairwiseIDProviderFunc{err: boom}
 
 		err := DefaultAssertionMaker{}.MakeAssertion(attributeReleaseRequest(t, test, "", wanted), session)
-		assert.Check(t, errors.Is(err, boom))
+		assert.True(t, errors.Is(err, boom))
 	})
 }
 
@@ -1165,18 +1165,18 @@ func TestSubjectIDRelease(t *testing.T) {
 		test := NewIdentityProviderTest(t, applyKey)
 
 		attributes := releasedAttributes(t, attributeReleaseRequest(t, test, "", wanted), &Session{ID: "s", NameID: "alice", SubjectID: "u1234@example.com"})
-		assert.Assert(t, is.Len(attributes, 1))
-		assert.Check(t, is.Equal(attributes[0].Name, "urn:oasis:names:tc:SAML:attribute:subject-id"))
-		assert.Check(t, is.Equal(attributes[0].NameFormat, uriAttrNameFormat))
-		assert.Assert(t, is.Len(attributes[0].Values, 1))
-		assert.Check(t, is.Equal(attributes[0].Values[0].Value, "u1234@example.com"))
+		require.Len(t, attributes, 1)
+		assert.Equal(t, attributes[0].Name, "urn:oasis:names:tc:SAML:attribute:subject-id")
+		assert.Equal(t, attributes[0].NameFormat, uriAttrNameFormat)
+		require.Len(t, attributes[0].Values, 1)
+		assert.Equal(t, attributes[0].Values[0].Value, "u1234@example.com")
 	})
 
 	t.Run("not requested", func(t *testing.T) {
 		test := NewIdentityProviderTest(t, applyKey)
 
 		attributes := releasedAttributes(t, attributeReleaseRequest(t, test, ""), &Session{ID: "s", NameID: "alice", SubjectID: "u1234@example.com"})
-		assert.Check(t, is.Len(attributes, 0))
+		assert.Len(t, attributes, 0)
 	})
 
 	t.Run("invalid is left out", func(t *testing.T) {
@@ -1188,9 +1188,9 @@ func TestSubjectIDRelease(t *testing.T) {
 			test.IDP.Observer = logObserver(&logged)
 
 			attributes := releasedAttributes(t, attributeReleaseRequest(t, test, "", wanted), &Session{ID: "s", NameID: "alice", SubjectID: value})
-			assert.Check(t, is.Len(attributes, 0), value)
-			assert.Check(t, is.Contains(logged.String(), "subject-id"))
-			assert.Check(t, !strings.Contains(logged.String(), value), "the value is not logged")
+			assert.Len(t, attributes, 0, value)
+			assert.Contains(t, logged.String(), "subject-id")
+			assert.False(t, strings.Contains(logged.String(), value), "the value is not logged")
 		}
 	})
 }
@@ -1205,20 +1205,20 @@ func TestServeAttributeQueryPairwiseID(t *testing.T) {
 
 		response := f.queryAttributes(t, f.attributeQuery())
 		assertQueryStatus(t, response, StatusSuccess, "")
-		assert.Assert(t, is.Len(response.Assertions, 1))
+		require.Len(t, response.Assertions, 1)
 
 		attributes := response.Assertions[0].AttributeStatements[0].Attributes
 
 		pairwise := attributeNamed(attributes, PairwiseIDAttributeName)
-		assert.Assert(t, pairwise != nil)
+		require.NotNil(t, pairwise)
 
 		want, err := pairwiseTestProvider().PairwiseID(nil, f.test.IDP.MetadataURL.String(), f.test.SP.Metadata(), f.provider.subject)
-		assert.NilError(t, err)
-		assert.Check(t, is.DeepEqual(queryAttributeValues(*pairwise), []string{want}))
+		require.NoError(t, err)
+		assert.Equal(t, queryAttributeValues(*pairwise), []string{want})
 
 		subject := attributeNamed(attributes, SubjectIDAttributeName)
-		assert.Assert(t, subject != nil)
-		assert.Check(t, is.DeepEqual(queryAttributeValues(*subject), []string{"alice@example.com"}))
+		require.NotNil(t, subject)
+		assert.Equal(t, queryAttributeValues(*subject), []string{"alice@example.com"})
 	})
 
 	t.Run("not requested", func(t *testing.T) {
@@ -1226,7 +1226,7 @@ func TestServeAttributeQueryPairwiseID(t *testing.T) {
 
 		response := f.queryAttributes(t, f.attributeQuery())
 		assertQueryStatus(t, response, StatusSuccess, "")
-		assert.Assert(t, is.Len(response.Assertions, 1))
-		assert.Check(t, attributeNamed(response.Assertions[0].AttributeStatements[0].Attributes, PairwiseIDAttributeName) == nil)
+		require.Len(t, response.Assertions, 1)
+		assert.True(t, attributeNamed(response.Assertions[0].AttributeStatements[0].Attributes, PairwiseIDAttributeName) == nil)
 	})
 }
