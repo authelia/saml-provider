@@ -15,6 +15,7 @@ from xml.etree import ElementTree
 
 import freezegun
 from saml2 import BINDING_HTTP_POST
+from saml2.response import StatusError
 
 import config
 
@@ -28,18 +29,71 @@ def check(condition, message):
         raise Failure(message)
 
 
+SAMLP = "{urn:oasis:names:tc:SAML:2.0:protocol}"
+
+
+def check_error_status(case, sent):
+    """Checks that the StatusCode of the Response and the one nested in it are those the case expects."""
+    top = sent.find(f"{SAMLP}Status/{SAMLP}StatusCode")
+    check(top is not None, "no StatusCode")
+    check(top.get("Value") == case["expect"]["outcome"], f"StatusCode is {top.get('Value')!r}")
+
+    if case["expect"].get("second_level"):
+        second = top.find(f"{SAMLP}StatusCode")
+        got = second.get("Value") if second is not None else None
+        check(got == case["expect"]["second_level"], f"second-level StatusCode is {got!r}")
+
+    check(sent.find(f"{SAML}Assertion") is None and sent.find(f"{SAML}EncryptedAssertion") is None,
+          "an assertion in a Response that reports an error")
+
+
+def verify_pysaml2_error(case, encoded, client):
+    """Checks a Response that reports an error: its StatusCodes as sent, and that pysaml2, having verified its
+    signature, reports it as a StatusError. Any other exception, or none, fails the case."""
+    sent = ElementTree.fromstring(base64.b64decode(encoded))
+    check_error_status(case, sent)
+
+    try:
+        client.parse_authn_request_response(encoded, BINDING_HTTP_POST, outstanding={case["request_id"]: "/"})
+    except StatusError:
+        pass
+    except Exception as e:  # noqa: BLE001 - only the StatusError of the expected status passes.
+        raise Failure(f"pysaml2 rejected the response other than by its status: {type(e).__name__}: {e}") from e
+    else:
+        raise Failure("pysaml2 accepted a Response that reports an error")
+
+    for name in case["verify"]:
+        if name == "signature":
+            # parse_authn_request_response verifies the signature, which want_response_signed requires, before it
+            # looks at the status.
+            check(sent.find("{http://www.w3.org/2000/09/xmldsig#}Signature") is not None, "the Response is not signed")
+        elif name == "in-response-to":
+            check(sent.get("InResponseTo") == case["request_id"], f"InResponseTo is {sent.get('InResponseTo')!r}")
+        elif name != "error-status":
+            raise Failure(f"check {name!r} doesn't apply to a Response that reports an error")
+
+
 def verify_pysaml2(case, encoded):
     """Runs each check of case["verify"] on what pysaml2 makes of the response."""
     client = config.client(case["sp"])
+
+    if "error-status" in case["verify"]:
+        return verify_pysaml2_error(case, encoded, client)
 
     try:
         response = client.parse_authn_request_response(
             encoded, BINDING_HTTP_POST, outstanding={case["request_id"]: "/"}
         )
+        check(response is not None, "pysaml2 returned no response")
+        run_pysaml2_checks(case, encoded, response)
+    except Failure:
+        raise
     except Exception as e:  # noqa: BLE001 - any rejection by pysaml2 is the failure being looked for.
         raise Failure(f"pysaml2 rejected the response: {type(e).__name__}: {e}") from e
 
-    check(response is not None, "pysaml2 returned no response")
+
+def run_pysaml2_checks(case, encoded, response):
+    """Runs each check of case["verify"] on the response pysaml2 parsed."""
 
     for name in case["verify"]:
         if name == "signature":
@@ -51,6 +105,28 @@ def verify_pysaml2(case, encoded):
             subject = response.get_subject()
             check(subject is not None and subject.text, "no NameID in the subject")
             check(subject.format == case["expect"]["name_id_format"], f"NameID format is {subject.format!r}")
+            if case["expect"].get("name_id"):
+                check(subject.text == case["expect"]["name_id"], f"NameID is {subject.text!r}")
+        elif name == "decrypt-name-id":
+            sent = ElementTree.fromstring(base64.b64decode(encoded))
+            check(sent.find(f".//{SAML}Subject/{SAML}EncryptedID") is not None, "the NameID was not encrypted")
+            check(sent.find(f".//{SAML}Subject/{SAML}NameID") is None, "a plaintext NameID beside the EncryptedID")
+            subject = response.get_subject()
+            check(subject is not None and subject.text, "pysaml2 decrypted no NameID")
+            check(subject.format == case["expect"]["name_id_format"], f"NameID format is {subject.format!r}")
+            if case["expect"].get("name_id"):
+                check(subject.text == case["expect"]["name_id"], f"NameID is {subject.text!r}")
+        elif name == "decrypt-attributes":
+            sent = ElementTree.fromstring(base64.b64decode(encoded))
+            check(sent.find(f".//{SAML}EncryptedAttribute") is not None, "no attribute was encrypted")
+            check_no_plaintext_attributes(case, sent)
+            # pysaml2 appends what it decrypts to the attributes of the AttributeStatement.
+            got = {}
+            for statement in response.assertion.attribute_statement:
+                for attribute in statement.attribute:
+                    got.setdefault(attribute.name, []).extend(v.text for v in attribute.attribute_value)
+            for attribute, value in case["expect"]["encrypted_attributes"].items():
+                check(got.get(attribute) == [value], f"attribute {attribute} is {got.get(attribute)!r}")
         elif name == "decrypt-assertion":
             # pysaml2 empties encrypted_assertion once it has decrypted it, so the response as sent is looked at.
             sent = ElementTree.fromstring(base64.b64decode(encoded))
@@ -62,6 +138,48 @@ def verify_pysaml2(case, encoded):
 
 
 SAML = "{urn:oasis:names:tc:SAML:2.0:assertion}"
+XENC_DATA = "{http://www.w3.org/2001/04/xmlenc#}EncryptedData"
+
+
+def check_no_plaintext_attributes(case, element):
+    """Fails the case if an attribute it expects to be encrypted is anywhere in the element in plaintext."""
+    for attribute in element.iter(f"{SAML}Attribute"):
+        check(attribute.get("Name") not in case["expect"]["encrypted_attributes"],
+              f"attribute {attribute.get('Name')} in plaintext")
+
+
+def xmlsec1_decrypt(case, path):
+    """Decrypts the first EncryptedData of the file with xmlsec1 and the encryption key of the case's SP, and returns
+    the document xmlsec1 writes, with the plaintext in place of the EncryptedData."""
+    # The key data of ECDH-ES, agreement-method, is not enabled unless it is named, and its AgreementMethod is
+    # nested one level below the EncryptedKey that holds it. xmlsec1 doesn't resolve the RecipientKeyInfo of the
+    # agreement to the key loaded, so the search for the key is lax.
+    key = config.SERVICE_PROVIDERS[case["sp"]]["encryption_key"]
+    result = subprocess.run(
+        [
+            "xmlsec1", "--decrypt", "--lax-key-search",
+            "--enabled-key-data", "agreement-method,enc-key,key-value,key-name,ec,rsa,x509",
+            "--max-encrypted-key-level", "3",
+            "--privkey-pem", f"keys/{key}.key,keys/{key}.crt", path,
+        ],
+        capture_output=True,
+    )
+    check(result.returncode == 0, f"xmlsec1 could not decrypt: {result.stderr.decode().strip()}")
+
+    return ElementTree.fromstring(result.stdout)
+
+
+def xmlsec1_decrypt_element(case, encrypted):
+    """Decrypts an EncryptedID or EncryptedAttribute on its own, and returns the element it held."""
+    with tempfile.TemporaryDirectory() as tmp:
+        path = os.path.join(tmp, "element.xml")
+        with open(path, "wb") as f:
+            f.write(ElementTree.tostring(encrypted))
+
+        decrypted = xmlsec1_decrypt(case, path)
+
+    check(decrypted.find(XENC_DATA) is None and len(decrypted) == 1, "xmlsec1 left the element encrypted")
+    return decrypted[0]
 
 
 def verify_xmlsec1(case, encoded):
@@ -93,23 +211,44 @@ def verify_xmlsec1(case, encoded):
         assertion = response.find(SAML + "Assertion")
 
         if response.find(SAML + "EncryptedAssertion") is not None:
-            result = subprocess.run(
-                ["xmlsec1", "--decrypt", "--lax-key-search", "--privkey-pem", f"keys/{case['sp']}.key", path],
-                capture_output=True,
-            )
-            check(result.returncode == 0, f"xmlsec1 could not decrypt: {result.stderr.decode().strip()}")
-            assertion = ElementTree.fromstring(result.stdout).find(f"{SAML}EncryptedAssertion/{SAML}Assertion")
+            assertion = xmlsec1_decrypt(case, path).find(f"{SAML}EncryptedAssertion/{SAML}Assertion")
 
     for name in case["verify"]:
         if name == "signature":
             pass  # xmlsec1 --verify succeeded above.
+        elif name == "error-status":
+            check_error_status(case, response)
         elif name == "in-response-to":
             got = response.get("InResponseTo")
             check(got == case["request_id"], f"InResponseTo is {got!r}")
+        elif name == "decrypt-name-id":
+            encrypted = assertion.find(f"{SAML}Subject/{SAML}EncryptedID") if assertion is not None else None
+            check(encrypted is not None, "the NameID was not encrypted")
+            check(assertion.find(f"{SAML}Subject/{SAML}NameID") is None, "a plaintext NameID beside the EncryptedID")
+            name_id = xmlsec1_decrypt_element(case, encrypted)
+            check(name_id.tag == SAML + "NameID" and name_id.text, "no NameID in the EncryptedID")
+            check(name_id.get("Format") == case["expect"]["name_id_format"], f"NameID format is {name_id.get('Format')!r}")
+            if case["expect"].get("name_id"):
+                check(name_id.text == case["expect"]["name_id"], f"NameID is {name_id.text!r}")
+        elif name == "decrypt-attributes":
+            encrypted = assertion.findall(f"{SAML}AttributeStatement/{SAML}EncryptedAttribute") if assertion is not None else []
+            check(encrypted, "no attribute was encrypted")
+            check_no_plaintext_attributes(case, assertion)
+            got = {}
+            for el in encrypted:
+                attribute = xmlsec1_decrypt_element(case, el)
+                check(attribute.tag == SAML + "Attribute", f"an EncryptedAttribute holds {attribute.tag}")
+                got.setdefault(attribute.get("Name"), []).extend(
+                    v.text for v in attribute.findall(f"{SAML}AttributeValue")
+                )
+            for attribute, value in case["expect"]["encrypted_attributes"].items():
+                check(got.get(attribute) == [value], f"attribute {attribute} is {got.get(attribute)!r}")
         elif name == "subject":
             name_id = assertion.find(f"{SAML}Subject/{SAML}NameID") if assertion is not None else None
             check(name_id is not None and name_id.text, "no NameID in the subject")
             check(name_id.get("Format") == case["expect"]["name_id_format"], f"NameID format is {name_id.get('Format')!r}")
+            if case["expect"].get("name_id"):
+                check(name_id.text == case["expect"]["name_id"], f"NameID is {name_id.text!r}")
         elif name == "decrypt-assertion":
             check(response.find(SAML + "EncryptedAssertion") is not None, "the assertion was not encrypted")
             check(assertion is not None, "the assertion was not decrypted")
@@ -123,15 +262,32 @@ FALLBACKS = {"xmlsec1": verify_xmlsec1}
 
 def verifier(case):
     """Returns the verifier of a case and the label its pass is printed with, or fails the case for a verify_with that
-    names no fallback: null, a value that is not a string, or a string that is not a name in FALLBACKS."""
+    names no fallback: null, a value that is not a string, or a string that is not a name in FALLBACKS. A fallback
+    also needs a verify_reason, and the pysaml2_error that pysaml2 raises for the case."""
     if "verify_with" not in case:
         return verify_pysaml2, ""
 
     verify_with = case["verify_with"]
     check(isinstance(verify_with, str) and verify_with in FALLBACKS, f"unknown verify_with {verify_with!r}")
     check(isinstance(case.get("verify_reason"), str) and case["verify_reason"], "verify_with without a verify_reason")
+    check(isinstance(case.get("pysaml2_error"), str) and case["pysaml2_error"], "verify_with without a pysaml2_error")
 
-    return FALLBACKS[verify_with], f" ({verify_with}: {case['verify_reason']})"
+    def verify(case, encoded):
+        check_pysaml2_still_fails(case, encoded)
+        FALLBACKS[verify_with](case, encoded)
+
+    return verify, f" ({verify_with}: {case['verify_reason']})"
+
+
+def check_pysaml2_still_fails(case, encoded):
+    """Fails the case unless pysaml2 still fails to verify it with the error it declares, so that a fallback can't
+    outlive its reason, nor hide a failure of pysaml2's for another one."""
+    try:
+        verify_pysaml2(case, encoded)
+    except Failure as e:
+        check(case["pysaml2_error"] in str(e), f"pysaml2 fails other than as declared: {e}")
+    else:
+        raise Failure("pysaml2 now verifies the response: remove its verify_with")
 
 
 def main(directory):
@@ -160,6 +316,9 @@ def main(directory):
             except Failure as e:
                 failed += 1
                 print(f"{case['id']}: FAIL {e}")
+            except Exception as e:  # noqa: BLE001 - a case that breaks the verifier fails, and the rest still run.
+                failed += 1
+                print(f"{case['id']}: FAIL {type(e).__name__}: {e}")
 
     return 1 if failed else 0
 

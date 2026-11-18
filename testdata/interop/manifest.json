@@ -14,6 +14,8 @@
       "made_by": "pysaml2",
       "request": "sp/requests/authn-request-redirect-rsa-sha256.query",
       "request_id": "id-authn-request-redirect-rsa-sha256",
+      "request_sha256": "e8f4524b7796711e9ff469e2cc5af8e2a929d34ec79561f31acb2a2d6b81f9be",
+      "source": "2e5e3ce468e45b5139b0f87f8f83075217e36fe0d7952e46fbdce762cb5eaf10",
       "sp": "sp-rsa",
       "verify": [
         "signature",
@@ -35,6 +37,8 @@
       "made_by": "pysaml2",
       "request": "sp/requests/authn-request-post-rsa-sha256.form",
       "request_id": "id-authn-request-post-rsa-sha256",
+      "request_sha256": "59c9c406bd37619c9b063bc1c58ea026024e626e55acc14496352f626eb73ed2",
+      "source": "8af3da34f1cdbfde53e67f34c58194c4b54e057ead42dc897ffa7e9be5ccfd8f",
       "sp": "sp-rsa",
       "verify": [
         "signature",
@@ -99,6 +103,8 @@
       "made_by": "pysaml2",
       "request": "sp/requests/assertion-encrypted-rsa-oaep-mgf1p.form",
       "request_id": "id-assertion-encrypted-rsa-oaep-mgf1p",
+      "request_sha256": "b3dd0fe0a649f2598489699aed2a28076f8c674849195c7e22812acf05869554",
+      "source": "1735d04cf4fbe7ce94fdec5554c6b6c5698adae2777c19a13db4b26ee4cffc3a",
       "sp": "sp-rsa",
       "verify": [
         "signature",
@@ -106,9 +112,261 @@
         "subject",
         "decrypt-assertion"
       ]
+    },
+    {
+      "binding": "post-signed",
+      "expect": {
+        "content_encryption_method": "http://www.w3.org/2009/xmlenc11#aes256-gcm",
+        "digest_method": "http://www.w3.org/2001/04/xmldsig-more#sha384",
+        "encrypted_assertion": true,
+        "key_transport_digest_method": "http://www.w3.org/2001/04/xmlenc#sha256",
+        "key_transport_method": "http://www.w3.org/2009/xmlenc11#rsa-oaep",
+        "key_transport_mgf": "http://www.w3.org/2009/xmlenc11#mgf1sha256",
+        "name_id_format": "urn:oasis:names:tc:SAML:2.0:nameid-format:transient",
+        "outcome": "success",
+        "signature_method": "http://www.w3.org/2001/04/xmldsig-more#rsa-sha512"
+      },
+      "feature": "assertion-encryption/negotiated",
+      "id": "assertion-encrypted-negotiated",
+      "idp_profile": "rsa-encrypt-assertion",
+      "made_by": "pysaml2+transform",
+      "request": "sp/requests/assertion-encrypted-negotiated.form",
+      "request_id": "id-assertion-encrypted-negotiated",
+      "request_sha256": "1389b908525e39f553b227d61bc0d580dca1ba5784581715f3a29caf1d159019",
+      "source": "2e1238678492eda0f6290545c79b02d0a47db4375883191034910aa372a22c1f",
+      "sp": "sp-rsa-negotiate",
+      "verify": [
+        "signature",
+        "in-response-to",
+        "subject",
+        "decrypt-assertion"
+      ]
+    },
+    {
+      "binding": "post-signed",
+      "expect": {
+        "content_encryption_method": "http://www.w3.org/2001/04/xmlenc#aes256-cbc",
+        "encrypted_assertion": true,
+        "key_transport_method": "http://www.w3.org/2001/04/xmlenc#rsa-oaep-mgf1p",
+        "name_id_format": "urn:oasis:names:tc:SAML:2.0:nameid-format:transient",
+        "outcome": "success",
+        "signature_method": "http://www.w3.org/2001/04/xmldsig-more#rsa-sha256"
+      },
+      "feature": "assertion-encryption/cbc",
+      "id": "assertion-encrypted-aes256-cbc",
+      "idp_profile": "rsa-encrypt-assertion",
+      "made_by": "pysaml2+transform",
+      "request": "sp/requests/assertion-encrypted-aes256-cbc.form",
+      "request_id": "id-assertion-encrypted-aes256-cbc",
+      "request_sha256": "abddfcee438b989304c423f59f70abbeadaf225f92c330870ddc820a9949fbc0",
+      "source": "82375cf27904bbd76056a8b0dbcb1597c0494dc42411f4f6e970c123fa9d81ef",
+      "sp": "sp-rsa-cbc",
+      "verify": [
+        "signature",
+        "in-response-to",
+        "subject",
+        "decrypt-assertion"
+      ]
+    },
+    {
+      "binding": "post-signed",
+      "expect": {
+        "content_encryption_method": "http://www.w3.org/2009/xmlenc11#aes128-gcm",
+        "encrypted_assertion": true,
+        "key_transport_method": "http://www.w3.org/2001/04/xmlenc#rsa-oaep-mgf1p",
+        "name_id_format": "urn:oasis:names:tc:SAML:2.0:nameid-format:transient",
+        "outcome": "success",
+        "signature_method": "http://www.w3.org/2001/04/xmldsig-more#rsa-sha256"
+      },
+      "feature": "assertion-encryption/key-value",
+      "id": "assertion-encrypted-key-value",
+      "idp_profile": "rsa-encrypt-assertion",
+      "made_by": "pysaml2+transform",
+      "request": "sp/requests/assertion-encrypted-key-value.form",
+      "request_id": "id-assertion-encrypted-key-value",
+      "request_sha256": "c5345a3883b7ed4638049099abc8a859a360735fe9cd51d3899679b430ea4ec1",
+      "source": "3b2c88e2f23f329b506a3133da3758eb5fd8df7917c513ed0484072ba7ac9abe",
+      "sp": "sp-rsa-keyvalue",
+      "verify": [
+        "signature",
+        "in-response-to",
+        "subject",
+        "decrypt-assertion"
+      ]
+    },
+    {
+      "binding": "post-signed",
+      "expect": {
+        "content_encryption_method": "http://www.w3.org/2009/xmlenc11#aes128-gcm",
+        "encrypted_assertion": true,
+        "key_agreement_method": "http://www.w3.org/2009/xmlenc11#ECDH-ES",
+        "key_wrap_method": "http://www.w3.org/2001/04/xmlenc#kw-aes256",
+        "name_id_format": "urn:oasis:names:tc:SAML:2.0:nameid-format:transient",
+        "outcome": "success",
+        "signature_method": "http://www.w3.org/2001/04/xmldsig-more#rsa-sha256"
+      },
+      "feature": "assertion-encryption/ecdh-es",
+      "id": "assertion-encrypted-ecdh-es",
+      "idp_profile": "rsa-encrypt-assertion",
+      "made_by": "pysaml2",
+      "pysaml2_error": "ValueError: Missing assertion",
+      "request": "sp/requests/assertion-encrypted-ecdh-es.form",
+      "request_id": "id-assertion-encrypted-ecdh-es",
+      "request_sha256": "0bf1cc17cbe9720df2b5bc6145092287e722d5cbdf5684d16e84b487fc35e93f",
+      "source": "0f7c6e80da59e20da7d31204c2973ef3c3030c841978508c807383fdd95dab36",
+      "sp": "sp-ecdh",
+      "verify": [
+        "signature",
+        "in-response-to",
+        "subject",
+        "decrypt-assertion"
+      ],
+      "verify_reason": "pysaml2 7.5.5 decrypts with a fixed xmlsec1 --decrypt --privkey-pem command (saml2/sigver.py CryptoBackendXmlSec1.decrypt), and xmlsec1 only decrypts ECDH-ES with the agreement-method key data enabled, --max-encrypted-key-level 3 for the AgreementMethod nested in the EncryptedKey, and --lax-key-search, as it doesn't resolve the RecipientKeyInfo; without them it fails with KEY-NOT-FOUND and pysaml2 finds no assertion",
+      "verify_with": "xmlsec1"
+    },
+    {
+      "binding": "post-signed",
+      "expect": {
+        "encrypted_assertion": false,
+        "encrypted_name_id": true,
+        "name_id_format": "urn:oasis:names:tc:SAML:2.0:nameid-format:transient",
+        "outcome": "success",
+        "signature_method": "http://www.w3.org/2001/04/xmldsig-more#rsa-sha256"
+      },
+      "feature": "encrypted-id/assertion",
+      "id": "assertion-encrypted-name-id",
+      "idp_profile": "rsa-encrypt-name-id",
+      "made_by": "pysaml2",
+      "request": "sp/requests/assertion-encrypted-name-id.form",
+      "request_id": "id-assertion-encrypted-name-id",
+      "request_sha256": "8000a820539c5ccbe2ac0782969a02abfae57ff7f389ccbde009d628ee6ba4bd",
+      "source": "78a4a9c19e5f3187e559257d700f256eea44df879ead9e0221f8e5701817d900",
+      "sp": "sp-rsa-mail",
+      "verify": [
+        "signature",
+        "in-response-to",
+        "decrypt-name-id"
+      ]
+    },
+    {
+      "binding": "post-signed",
+      "expect": {
+        "encrypted_assertion": false,
+        "encrypted_attributes": {
+          "urn:oid:0.9.2342.19200300.100.1.3": "alice@example.com"
+        },
+        "name_id_format": "urn:oasis:names:tc:SAML:2.0:nameid-format:transient",
+        "outcome": "success",
+        "signature_method": "http://www.w3.org/2001/04/xmldsig-more#rsa-sha256"
+      },
+      "feature": "encrypted-attribute/assertion",
+      "id": "assertion-encrypted-attribute",
+      "idp_profile": "rsa-encrypt-attribute",
+      "made_by": "pysaml2",
+      "pysaml2_error": "TypeError: object of type 'EncryptedData' has no len()",
+      "request": "sp/requests/assertion-encrypted-attribute.form",
+      "request_id": "id-assertion-encrypted-attribute",
+      "request_sha256": "9bf229504e46b597995615d74daa24816bb3bf2a97c56bb7cc2d2bea8910aee4",
+      "source": "ccaaf3bf2256c514655b83c0182f2d2ae87d050262cb0df64895eede269f7df6",
+      "sp": "sp-rsa-mail",
+      "verify": [
+        "signature",
+        "in-response-to",
+        "subject",
+        "decrypt-attributes"
+      ],
+      "verify_reason": "pysaml2 7.5.5 can't decrypt an EncryptedAttribute: AuthnResponse.decrypt_attributes (saml2/response.py) passes the EncryptedData object to decrypt_keys, where its EncryptedID path passes to_string(), and xmlsec1's decrypt then fails with TypeError: object of type 'EncryptedData' has no len()",
+      "verify_with": "xmlsec1"
+    },
+    {
+      "binding": "post-signed",
+      "encrypt_subject": {
+        "name_id": "alice@example.com",
+        "template": "oaep",
+        "to": "idp/idp-rsa.xml"
+      },
+      "expect": {
+        "encrypted_assertion": false,
+        "encrypted_name_id": true,
+        "name_id": "alice@example.com",
+        "name_id_format": "urn:oasis:names:tc:SAML:1.1:nameid-format:emailAddress",
+        "outcome": "success",
+        "signature_method": "http://www.w3.org/2001/04/xmldsig-more#rsa-sha256"
+      },
+      "feature": "encrypted-id/authn-request",
+      "id": "authn-request-encrypted-subject-rsa-oaep",
+      "idp_profile": "rsa-subject",
+      "made_by": "pysaml2+xmlsec1",
+      "request": "sp/requests/authn-request-encrypted-subject-rsa-oaep.form",
+      "request_id": "id-authn-request-encrypted-subject-rsa-oaep",
+      "request_sha256": "acb25897e568d7d291e568c5a3ed685ef27186e8d401ea2ee815148aa8481580",
+      "source": "f59760f197a21e91e473c1fb85c4dce0a98186d2165cc3902f028d4eb9765d2b",
+      "sp": "sp-rsa",
+      "verify": [
+        "signature",
+        "in-response-to",
+        "decrypt-name-id"
+      ]
+    },
+    {
+      "binding": "post-signed",
+      "encrypt_subject": {
+        "name_id": "alice@example.com",
+        "template": "ecdh-es",
+        "to": "idp/idp-rsa-ec-encryption.xml"
+      },
+      "expect": {
+        "encrypted_assertion": false,
+        "encrypted_name_id": true,
+        "name_id": "alice@example.com",
+        "name_id_format": "urn:oasis:names:tc:SAML:1.1:nameid-format:emailAddress",
+        "outcome": "success",
+        "signature_method": "http://www.w3.org/2001/04/xmldsig-more#rsa-sha256"
+      },
+      "feature": "encrypted-id/authn-request/ecdh-es",
+      "id": "authn-request-encrypted-subject-ecdh-es",
+      "idp_profile": "rsa-ec-encryption-subject",
+      "made_by": "pysaml2+xmlsec1",
+      "request": "sp/requests/authn-request-encrypted-subject-ecdh-es.form",
+      "request_id": "id-authn-request-encrypted-subject-ecdh-es",
+      "request_sha256": "e0deff7895d55464b16817b55fbe9c386acfbe69be19ffeef2c6d1983761b9eb",
+      "source": "4022a6eba33d7df07fbdcf1fc9b15dd3f2ad589ad600b2847c054f2299381a56",
+      "sp": "sp-rsa",
+      "verify": [
+        "signature",
+        "in-response-to",
+        "decrypt-name-id"
+      ]
+    },
+    {
+      "binding": "post-signed",
+      "encrypt_subject": {
+        "name_id": "bob@example.com",
+        "template": "oaep",
+        "to": "idp/idp-rsa.xml"
+      },
+      "expect": {
+        "outcome": "urn:oasis:names:tc:SAML:2.0:status:Responder",
+        "second_level": "urn:oasis:names:tc:SAML:2.0:status:AuthnFailed",
+        "signature_method": "http://www.w3.org/2001/04/xmldsig-more#rsa-sha256"
+      },
+      "feature": "encrypted-id/authn-request/mismatch",
+      "id": "authn-request-encrypted-subject-other-principal",
+      "idp_profile": "rsa-subject",
+      "made_by": "pysaml2+xmlsec1",
+      "request": "sp/requests/authn-request-encrypted-subject-other-principal.form",
+      "request_id": "id-authn-request-encrypted-subject-other-principal",
+      "request_sha256": "e34f2b08bc5206412e25b876633b09412d0e16823929cf6684a4a8153fe6b986",
+      "source": "b6f72ec300f4138c42618d4157274f2d8b33eb7ce2e5b28fbe985ab739ced25d",
+      "sp": "sp-rsa",
+      "verify": [
+        "signature",
+        "in-response-to",
+        "error-status"
+      ]
     }
   ],
   "instant": "2026-01-01T00:00:00Z",
   "pysaml2": "7.5.5",
-  "xmlsec1": "xmlsec1 1.3.7 (openssl)"
+  "xmlsec1": "xmlsec1 1.3.13 (openssl)"
 }
