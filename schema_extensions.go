@@ -6,10 +6,19 @@ import (
 	"fmt"
 	"slices"
 	"strconv"
+	"strings"
+	"time"
 	"unicode"
 	"unicode/utf8"
 
 	"github.com/beevik/etree"
+)
+
+// attributeExtNamespace is the namespace of the XML attributes of the SAML V2.0 Attribute Extensions, and
+// attributeExtPrefix the prefix they are marshalled with, which is the one their specification uses.
+const (
+	attributeExtNamespace = "urn:oasis:names:tc:SAML:attribute:ext"
+	attributeExtPrefix    = "ext"
 )
 
 // ProtocolExtensions represents the samlp:Extensions element of a request or a response, which holds extensions
@@ -276,4 +285,124 @@ func setNamespacedAttrs(el *etree.Element, attrs []xml.Attr) {
 			el.CreateAttr(prefix+":"+attr.Name.Local, attr.Value)
 		}
 	}
+}
+
+// attributeExtensionAttrs returns the XML attributes of the Attribute Extensions that a has, OriginalIssuer and
+// LastModified, with the prefix ext, which they declare when declare is true.
+func (a *Attribute) attributeExtensionAttrs(declare bool) []xml.Attr {
+	if a.OriginalIssuer == "" && a.LastModified.IsZero() {
+		return nil
+	}
+
+	var attrs []xml.Attr
+
+	if declare {
+		attrs = append(attrs, extAttr("xmlns:"+attributeExtPrefix, attributeExtNamespace))
+	}
+
+	if a.OriginalIssuer != "" {
+		attrs = append(attrs, extAttr(attributeExtPrefix+":OriginalIssuer", a.OriginalIssuer))
+	}
+
+	if !a.LastModified.IsZero() {
+		attrs = append(attrs, extAttr(attributeExtPrefix+":LastModified", RelaxedTime(a.LastModified).String()))
+	}
+
+	return attrs
+}
+
+// MarshalXML implements [xml.Marshaler]. It marshals the attributes of the Attribute Extensions with the prefix
+// ext, and every other XML attribute in Attrs with a prefix that the encoder declares.
+func (a Attribute) MarshalXML(e *xml.Encoder, start xml.StartElement) error {
+	return a.marshalXML(e, start, nil)
+}
+
+// marshalXML marshals a as the element start, with extra as further XML attributes of it.
+func (a Attribute) marshalXML(e *xml.Encoder, start xml.StartElement, extra []xml.Attr) error {
+	start.Attr = append(start.Attr,
+		extAttr("FriendlyName", a.FriendlyName),
+		extAttr("Name", a.Name),
+		extAttr("NameFormat", a.NameFormat))
+	start.Attr = append(start.Attr, a.attributeExtensionAttrs(true)...)
+	start.Attr = append(start.Attr, a.Attrs...)
+	start.Attr = append(start.Attr, extra...)
+
+	aux := struct {
+		Values []AttributeValue `xml:"AttributeValue"`
+	}{
+		Values: a.Values,
+	}
+
+	return e.EncodeElement(aux, start)
+}
+
+// UnmarshalXML implements [xml.Unmarshaler]. A LastModified that isn't a time is kept in Attrs, as it is in an
+// extension which is not critical, and an aggregate of metadata is not refused for it.
+func (a *Attribute) UnmarshalXML(d *xml.Decoder, start xml.StartElement) error {
+	type alias Attribute
+
+	aux := struct {
+		*alias
+		OriginalIssuer string `xml:"urn:oasis:names:tc:SAML:attribute:ext OriginalIssuer,attr"`
+		LastModified   string `xml:"urn:oasis:names:tc:SAML:attribute:ext LastModified,attr"`
+	}{
+		alias: (*alias)(a),
+	}
+
+	if err := d.DecodeElement(&aux, &start); err != nil {
+		return err
+	}
+
+	a.OriginalIssuer = aux.OriginalIssuer
+	a.Attrs = withoutNamespaceDeclarations(a.Attrs)
+
+	if lastModified := strings.TrimSpace(aux.LastModified); lastModified != "" {
+		var t RelaxedTime
+		if err := t.UnmarshalText([]byte(lastModified)); err == nil {
+			a.LastModified = time.Time(t)
+		} else {
+			a.Attrs = append(a.Attrs, xml.Attr{
+				Name:  xml.Name{Space: attributeExtNamespace, Local: "LastModified"},
+				Value: aux.LastModified,
+			})
+		}
+	}
+
+	return nil
+}
+
+// MarshalXML implements [xml.Marshaler]. It is needed as Attribute, which is embedded, has its own.
+func (m RequestedAttribute) MarshalXML(e *xml.Encoder, start xml.StartElement) error {
+	var extra []xml.Attr
+	if m.IsRequired != nil {
+		extra = append(extra, extAttr("isRequired", strconv.FormatBool(*m.IsRequired)))
+	}
+
+	return m.marshalXML(e, start, extra)
+}
+
+// UnmarshalXML implements [xml.Unmarshaler]. It is needed as Attribute, which is embedded, has its own.
+func (m *RequestedAttribute) UnmarshalXML(d *xml.Decoder, start xml.StartElement) error {
+	m.IsRequired = nil
+
+	attrs := make([]xml.Attr, 0, len(start.Attr))
+
+	for _, attr := range start.Attr {
+		if attr.Name.Space != "" || attr.Name.Local != "isRequired" {
+			attrs = append(attrs, attr)
+
+			continue
+		}
+
+		isRequired, err := strconv.ParseBool(strings.TrimSpace(attr.Value))
+		if err != nil {
+			return fmt.Errorf("invalid isRequired %q: %w", attr.Value, err)
+		}
+
+		m.IsRequired = &isRequired
+	}
+
+	start.Attr = attrs
+
+	return m.Attribute.UnmarshalXML(d, start)
 }

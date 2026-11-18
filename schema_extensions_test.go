@@ -2,6 +2,7 @@ package saml
 
 import (
 	"encoding/xml"
+	"strings"
 	"testing"
 	"time"
 
@@ -251,4 +252,123 @@ func TestProtocolExtensionsCloneSharesNothing(t *testing.T) {
 	clone.Elements[0].Children[0].Content = "changed"
 
 	assert.Check(t, is.DeepEqual(original, extensionsTestValue()))
+}
+
+const attributeExtRaw = `<saml:Attribute xmlns:saml="urn:oasis:names:tc:SAML:2.0:assertion"
+	xmlns:ext="urn:oasis:names:tc:SAML:attribute:ext" xmlns:x500="urn:oasis:names:tc:SAML:2.0:profiles:attribute:X500"
+	NameFormat="urn:oasis:names:tc:SAML:2.0:attrname-format:uri" Name="urn:oid:2.5.4.42" FriendlyName="givenName"
+	ext:OriginalIssuer="https://idp.example.com/saml" ext:LastModified="2008-10-31T12:46:02Z" x500:Encoding="LDAP">
+	<saml:AttributeValue>Scott</saml:AttributeValue>
+</saml:Attribute>`
+
+// attributeExtValue is the Attribute of attributeExtRaw.
+func attributeExtValue() Attribute {
+	return Attribute{
+		FriendlyName:   "givenName",
+		Name:           "urn:oid:2.5.4.42",
+		NameFormat:     "urn:oasis:names:tc:SAML:2.0:attrname-format:uri",
+		OriginalIssuer: "https://idp.example.com/saml",
+		LastModified:   time.Date(2008, 10, 31, 12, 46, 2, 0, time.UTC),
+		Attrs:          []xml.Attr{{Name: xml.Name{Space: x500Namespace, Local: "Encoding"}, Value: "LDAP"}},
+		Values:         []AttributeValue{{Value: "Scott"}},
+	}
+}
+
+func TestAttributeExtensionsParsed(t *testing.T) {
+	var attribute Attribute
+	assert.NilError(t, xml.Unmarshal([]byte(attributeExtRaw), &attribute))
+	assert.Check(t, is.DeepEqual(attribute, attributeExtValue()))
+}
+
+func TestAttributeExtensionsInvalidLastModifiedIsKept(t *testing.T) {
+	raw := strings.Replace(attributeExtRaw, "2008-10-31T12:46:02Z", "yesterday", 1)
+
+	var attribute Attribute
+	assert.NilError(t, xml.Unmarshal([]byte(raw), &attribute))
+	assert.Check(t, attribute.LastModified.IsZero())
+	assert.Check(t, is.DeepEqual(attribute.Attrs, []xml.Attr{
+		{Name: xml.Name{Space: x500Namespace, Local: "Encoding"}, Value: "LDAP"},
+		{Name: xml.Name{Space: attributeExtNamespace, Local: "LastModified"}, Value: "yesterday"},
+	}))
+}
+
+func TestAttributeExtensionsElement(t *testing.T) {
+	attribute := attributeExtValue()
+
+	doc := etree.NewDocument()
+	doc.SetRoot(attribute.Element())
+
+	buf, err := doc.WriteToBytes()
+	assert.NilError(t, err)
+
+	el := doc.Root()
+	assert.Check(t, is.Equal(el.SelectAttrValue("xmlns:ext", ""), attributeExtNamespace))
+	assert.Check(t, is.Equal(el.SelectAttrValue("ext:OriginalIssuer", ""), "https://idp.example.com/saml"))
+	assert.Check(t, is.Equal(el.SelectAttrValue("ext:LastModified", ""), "2008-10-31T12:46:02Z"))
+
+	var parsed Attribute
+	assert.NilError(t, xml.Unmarshal(buf, &parsed), string(buf))
+	assert.Check(t, is.DeepEqual(parsed, attribute))
+}
+
+func TestAttributeWithoutExtensionsElementIsUnchanged(t *testing.T) {
+	attribute := Attribute{Name: "urn:oid:2.5.4.42", NameFormat: "urn:oasis:names:tc:SAML:2.0:attrname-format:uri"}
+
+	doc := etree.NewDocument()
+	doc.SetRoot(attribute.Element())
+
+	out, err := doc.WriteToString()
+	assert.NilError(t, err)
+	assert.Check(t, is.Equal(out, `<saml:Attribute Name="urn:oid:2.5.4.42" NameFormat="urn:oasis:names:tc:SAML:2.0:attrname-format:uri"/>`))
+}
+
+func TestAttributeExtensionsMarshalXML(t *testing.T) {
+	attribute := attributeExtValue()
+
+	buf, err := xml.Marshal(attribute)
+	assert.NilError(t, err)
+	assert.Check(t, is.Contains(string(buf), `xmlns:ext="urn:oasis:names:tc:SAML:attribute:ext"`))
+	assert.Check(t, is.Contains(string(buf), `ext:OriginalIssuer="https://idp.example.com/saml"`))
+
+	var parsed Attribute
+	assert.NilError(t, xml.Unmarshal(buf, &parsed), string(buf))
+	assert.Check(t, is.DeepEqual(parsed, attribute))
+}
+
+func TestRequestedAttributeKeepsIsRequiredAndExtensions(t *testing.T) {
+	required := true
+	requested := RequestedAttribute{Attribute: attributeExtValue(), IsRequired: &required}
+
+	buf, err := xml.Marshal(requested)
+	assert.NilError(t, err)
+	assert.Check(t, is.Contains(string(buf), `isRequired="true"`))
+
+	var parsed RequestedAttribute
+	assert.NilError(t, xml.Unmarshal(buf, &parsed), string(buf))
+	assert.Check(t, is.DeepEqual(parsed, requested))
+
+	var optional RequestedAttribute
+	assert.NilError(t, xml.Unmarshal([]byte(`<RequestedAttribute Name="a"/>`), &optional))
+	assert.Check(t, optional.IsRequired == nil)
+
+	assert.Check(t, is.ErrorContains(xml.Unmarshal([]byte(`<RequestedAttribute Name="a" isRequired="maybe"/>`), &optional), "isRequired"))
+}
+
+func TestEntityAttributesMarshalAttributeExtensions(t *testing.T) {
+	extensions := Extensions{EntityAttributes: &EntityAttributes{Attributes: []Attribute{attributeExtValue()}}}
+
+	buf, err := xml.Marshal(struct {
+		XMLName    xml.Name    `xml:"urn:oasis:names:tc:SAML:2.0:metadata EntityDescriptor"`
+		Extensions *Extensions `xml:"urn:oasis:names:tc:SAML:2.0:metadata Extensions"`
+	}{Extensions: &extensions})
+	assert.NilError(t, err)
+	assert.Check(t, is.Contains(string(buf), `ext:OriginalIssuer="https://idp.example.com/saml"`))
+	assert.Check(t, is.Contains(string(buf), `ext:LastModified="2008-10-31T12:46:02Z"`))
+
+	var parsed struct {
+		Extensions Extensions `xml:"urn:oasis:names:tc:SAML:2.0:metadata Extensions"`
+	}
+	assert.NilError(t, xml.Unmarshal(buf, &parsed), string(buf))
+	assert.Assert(t, parsed.Extensions.EntityAttributes != nil, string(buf))
+	assert.Check(t, is.DeepEqual(parsed.Extensions.EntityAttributes.Attributes[0], attributeExtValue()))
 }

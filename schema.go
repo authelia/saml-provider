@@ -1576,10 +1576,26 @@ func (a *AttributeStatement) Element() *etree.Element {
 //
 // See http://docs.oasis-open.org/security/saml/v2.0/saml-core-2.0-os.pdf §2.7.3.1.
 type Attribute struct {
-	FriendlyName string           `xml:",attr"`
-	Name         string           `xml:",attr"`
-	NameFormat   string           `xml:",attr"`
-	Values       []AttributeValue `xml:"AttributeValue"`
+	FriendlyName string `xml:",attr"`
+	Name         string `xml:",attr"`
+	NameFormat   string `xml:",attr"`
+
+	// OriginalIssuer is the entity ID of the entity that first issued the attribute and its values, for one that
+	// is passed on by a proxy, or empty. It is the ext:OriginalIssuer of the SAML V2.0 Attribute Extensions §2.3,
+	// and is only informational.
+	OriginalIssuer string `xml:"-"`
+
+	// LastModified is when the values of the attribute last changed at their source, or the zero time if that is
+	// not stated. It is the ext:LastModified of the SAML V2.0 Attribute Extensions §2.4, and is only
+	// informational.
+	LastModified time.Time `xml:"-"`
+
+	// Attrs are the other XML attributes of the element, such as x500:Encoding, which SAMLCore §2.7.3.1 allows
+	// in any namespace other than that of SAML assertions. The name of each holds its namespace, not its prefix,
+	// and namespace declarations are not kept.
+	Attrs []xml.Attr `xml:",any,attr"`
+
+	Values []AttributeValue `xml:"AttributeValue"`
 }
 
 // Element returns an etree.Element representing the object in XML form.
@@ -1596,6 +1612,12 @@ func (a *Attribute) Element() *etree.Element {
 	if a.NameFormat != "" {
 		el.CreateAttr("NameFormat", a.NameFormat)
 	}
+
+	for _, attr := range a.attributeExtensionAttrs(true) {
+		el.CreateAttr(attr.Name.Local, attr.Value)
+	}
+
+	setNamespacedAttrs(el, a.Attrs)
 
 	for _, v := range a.Values {
 		el.AddChild(v.Element())
