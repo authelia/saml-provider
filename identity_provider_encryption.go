@@ -174,8 +174,10 @@ func lookupKeyTransportDigest(digests []keyTransportDigest, algorithm string) (k
 	return keyTransportDigest{}, false
 }
 
-// assertionEncrypter returns the encrypter for an assertion to the service provider, with the algorithms
-// negotiated from the EncryptionMethods of its encryption key.
+// assertionEncrypter returns the encrypter for an assertion to the service provider, with the algorithms that
+// the IssuancePolicy chose for it, and otherwise those negotiated from the EncryptionMethods of its encryption
+// key. What the policy chose is used whatever the key lists, as the policy is how the operator says what the
+// metadata doesn't, or says wrongly.
 //
 // The Metadata Profile for Algorithm Support §2.5 requires a metadata consumer to use the intersection of the
 // algorithms and parameters it and its peer support, and to select the first the peer lists that it supports,
@@ -193,9 +195,131 @@ func (req *IdpAuthnRequest) assertionEncrypter() (xmlenc.RSA, error) {
 		methods = keyDescriptor.EncryptionMethods
 	}
 
-	encrypter, err := policy.encrypter(methods)
+	issuance, err := req.Issuance(req.Session)
+	if err != nil {
+		return xmlenc.RSA{}, err
+	}
+
+	encrypter, err := policy.encrypterFor(methods, issuance)
 	if err != nil {
 		return xmlenc.RSA{}, fmt.Errorf("%s: %w", req.ServiceProviderMetadata.EntityID, err)
+	}
+
+	return encrypter, nil
+}
+
+// encrypterFor returns the encrypter for the key whose KeyDescriptor lists methods, with the content encryption
+// and the key transport that issuance chooses, and the one that it doesn't choose negotiated from methods as
+// encrypter does. It returns an error if what issuance chooses is not supported or the policy doesn't allow it.
+func (policy *encryptionPolicy) encrypterFor(methods []EncryptionMethod, issuance Issuance) (xmlenc.RSA, error) {
+	var (
+		content   xmlenc.BlockCipher
+		encrypter xmlenc.RSA
+		err       error
+	)
+
+	// Both choices are checked before anything is negotiated, so that what is refused doesn't depend on the
+	// metadata of the service provider.
+	if issuance.ContentEncryptionMethod != "" {
+		if content, err = policy.chosenContentEncryption(issuance.ContentEncryptionMethod); err != nil {
+			return xmlenc.RSA{}, err
+		}
+	}
+
+	if issuance.KeyTransportMethod != "" {
+		if encrypter, err = policy.chosenKeyTransport(issuance); err != nil {
+			return xmlenc.RSA{}, err
+		}
+	} else if issuance.KeyTransportDigestMethod != "" || issuance.KeyTransportMGF != "" {
+		return xmlenc.RSA{}, errors.New("a KeyTransportDigestMethod or KeyTransportMGF without a KeyTransportMethod")
+	}
+
+	if content == nil {
+		if content, err = policy.contentEncryption(methods); err != nil {
+			return xmlenc.RSA{}, err
+		}
+	}
+
+	if issuance.KeyTransportMethod == "" {
+		if encrypter, err = policy.keyTransport(methods); err != nil {
+			return xmlenc.RSA{}, err
+		}
+	}
+
+	encrypter.BlockCipher = content
+
+	return encrypter, nil
+}
+
+// chosenContentEncryption returns the block cipher with the identifier algorithm, or an error if there is none or
+// the policy doesn't allow it.
+func (policy *encryptionPolicy) chosenContentEncryption(algorithm string) (xmlenc.BlockCipher, error) {
+	if !slices.ContainsFunc(contentEncryptionCiphers, func(c xmlenc.BlockCipher) bool { return c.Algorithm() == algorithm }) {
+		return nil, fmt.Errorf("unsupported content encryption method %q", algorithm)
+	}
+
+	for _, cipher := range policy.content {
+		if cipher.Algorithm() == algorithm {
+			return cipher, nil
+		}
+	}
+
+	return nil, fmt.Errorf("the content encryption method %q is not one of IdentityProvider.ContentEncryptionMethods", algorithm)
+}
+
+// chosenKeyTransport returns an encrypter for the key transport of issuance, which is read as the EncryptionMethod
+// of a key that names the same is, or an error which says what of it is not supported or not allowed.
+func (policy *encryptionPolicy) chosenKeyTransport(issuance Issuance) (xmlenc.RSA, error) {
+	method := EncryptionMethod{Algorithm: issuance.KeyTransportMethod}
+
+	if !slices.Contains(keyTransportAlgorithms, method.Algorithm) {
+		return xmlenc.RSA{}, fmt.Errorf("unsupported key transport method %q", method.Algorithm)
+	}
+
+	if !slices.Contains(policy.keyTransports, method.Algorithm) {
+		return xmlenc.RSA{}, fmt.Errorf("the key transport method %q is not one of IdentityProvider.KeyTransportMethods", method.Algorithm)
+	}
+
+	digestAlgorithm := keyTransportDigests[0].method.Algorithm()
+
+	if issuance.KeyTransportDigestMethod != "" {
+		digestAlgorithm = issuance.KeyTransportDigestMethod
+		method.DigestMethod = &DigestMethod{Algorithm: digestAlgorithm}
+	}
+
+	if _, ok := lookupKeyTransportDigest(keyTransportDigests, digestAlgorithm); !ok {
+		return xmlenc.RSA{}, fmt.Errorf("unsupported key transport digest method %q", digestAlgorithm)
+	}
+
+	if _, ok := lookupKeyTransportDigest(policy.digests, digestAlgorithm); !ok {
+		return xmlenc.RSA{}, fmt.Errorf("the key transport digest method %q is not one of IdentityProvider.KeyTransportDigestMethods", digestAlgorithm)
+	}
+
+	mgfAlgorithm := keyTransportDigests[0].mgf
+
+	if issuance.KeyTransportMGF != "" {
+		mgfAlgorithm = issuance.KeyTransportMGF
+		method.MGF = &MGF{Algorithm: mgfAlgorithm}
+	}
+
+	hasMGF := func(digests []keyTransportDigest) bool {
+		return slices.ContainsFunc(digests, func(d keyTransportDigest) bool { return d.mgf == mgfAlgorithm })
+	}
+
+	switch {
+	case method.Algorithm == algorithmRSAOAEPMGF1P:
+		if mgfAlgorithm != keyTransportDigests[0].mgf {
+			return xmlenc.RSA{}, fmt.Errorf("the key transport method %q has no other mask generation function than %q", method.Algorithm, keyTransportDigests[0].mgf)
+		}
+	case !hasMGF(keyTransportDigests):
+		return xmlenc.RSA{}, fmt.Errorf("unsupported key transport mask generation function %q", mgfAlgorithm)
+	case !hasMGF(policy.digests):
+		return xmlenc.RSA{}, fmt.Errorf("the hash of the key transport mask generation function %q is not one of IdentityProvider.KeyTransportDigestMethods", mgfAlgorithm)
+	}
+
+	encrypter, ok := policy.keyTransportFor(method)
+	if !ok {
+		return xmlenc.RSA{}, fmt.Errorf("the key transport method %q can't be used with its parameters", method.Algorithm)
 	}
 
 	return encrypter, nil

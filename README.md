@@ -174,10 +174,10 @@ without acting on it. See **`Scoping` and `ProxyRestriction`** below.
     | SDP-MD06 RSA 2048 bits        | Default    | Enforced for the keys of the IdP that are decrypted with, and by default for the key of an SP that is encrypted to. Not checked for the signing key of the IdP or of an SP |
     | SDP-MD07 EC 256 bits          | Enforced   | For the key the IdP signs with. Not checked for `RolloverCertificates` or the signing key of an SP |
     | SDP-MD09 to SDP-MD12          | Deployment | `MetadataInfo`; what is set is validated, nothing is required         |
-    | SDP-ALG01 algorithms          | Default    | RSA-SHA256 or ECDSA-SHA256 with the SHA-256 digest (an ECDSA key on a larger curve needs `SignatureMethod` set to ECDSA-SHA256), AES-128-GCM, RSA-OAEP-MGF1P with SHA-1. An SP gets another algorithm only if its metadata lists it first |
+    | SDP-ALG01 algorithms          | Default    | RSA-SHA256 or ECDSA-SHA256 with the SHA-256 digest (an ECDSA key on a larger curve needs `SignatureMethod` set to ECDSA-SHA256), AES-128-GCM, RSA-OAEP-MGF1P with SHA-1. An SP gets another algorithm only if its metadata lists it first or `IssuancePolicy` names it |
     | SDP-IDP02 to SDP-IDP08        | Enforced   | An http endpoint needs `AllowInsecureServiceProviderEndpoints`; `ForceAuthn` needs a `ForceAuthnSessionProvider` |
     | SDP-IDP09, SDP-IDP10          | Default    | `IssuancePolicy` may sign only the assertion for an SP                |
-    | SDP-IDP11 encrypted assertion | Default    | Encrypted whenever the SP has an encryption key, and sent in plaintext to one that has none. An `EncryptedID` or `EncryptedAttribute` is only sent on request or by `ElementEncryptionPolicy` |
+    | SDP-IDP11 encrypted assertion | Default    | Encrypted whenever the SP has an encryption key, and sent in plaintext to one that has none unless `IssuancePolicy` sets `RequireEncryption`, which refuses it. An `EncryptedID` or `EncryptedAttribute` is only sent on request or by `ElementEncryptionPolicy` |
     | SDP-IDP12 transient `NameID`  | Deployment | The `NameIDProvider` and the formats of the SP decide                 |
     | SDP-IDP13 to SDP-IDP17        | Enforced   | When the `Session` has a `SubjectID` or the `NameIDProvider` supplies a `pairwise-id`, see **Subject identifier requirement** |
     | SDP-IDP18 to SDP-IDP20        | Default    | For the attributes `DefaultAssertionMaker` makes; `Session.CustomAttributes` are sent as they are |
@@ -598,7 +598,7 @@ without acting on it. See **`Scoping` and `ProxyRestriction`** below.
   SHA-512 digest and MGF1 hash the SP names in `ds:DigestMethod` and `xenc11:MGF`. An SP that lists nothing of a type
   receives the first the IdP allows, which is AES-128-GCM and RSA-OAEP-MGF1P with SHA-1 by default, as SAML2Int
   SDP-ALG01 requires. An SP that can only decrypt CBC must list it in the `EncryptionMethod` elements of its key, or
-  the `ServiceProviderProvider` must add it to the metadata it returns for that SP. Set
+  the `IssuancePolicy` must name it for that SP (see **Issuance for each service provider**). Set
   `IdentityProvider.ContentEncryptionMethods`, `KeyTransportMethods` and `KeyTransportDigestMethods` to restrict or
   reorder them for every SP; without them GCM comes before CBC. 3DES, RSA PKCS#1 v1.5, key agreement and an OAEP label (`OAEPparams`) are never used, and
   algorithms the IdP doesn't recognise as either type are ignored. SAMLConformance §4.2 lists 3DES and RSA PKCS#1 v1.5 as
@@ -868,6 +868,30 @@ without acting on it. See **`Scoping` and `ProxyRestriction`** below.
     `ProxyRestriction` states what an SP that is a proxy may issue on the basis of them, see **`Scoping` and
     `ProxyRestriction`**. They are applied by `DefaultAssertionMaker`; another `AssertionMaker` reads them from
     `IdpAuthnRequest.Issuance`.
+  - `ContentEncryptionMethod` is the block cipher, and `KeyTransportMethod` with `KeyTransportDigestMethod` and
+    `KeyTransportMGF` the key transport, that the IdP encrypts with for that SP, whatever the `EncryptionMethod`
+    elements of its key list, for an SP whose metadata lists nothing or the wrong thing and can't be changed:
+
+    ```go
+    "https://legacy.example.com/metadata": {
+        ContentEncryptionMethod: "http://www.w3.org/2001/04/xmlenc#aes128-cbc",
+    },
+    ```
+
+    They apply to everything the IdP encrypts for the SP: the `EncryptedAssertion` of single sign-on on every
+    binding, of the answer to a query and of an `AssertionIDRequest`, an `EncryptedID` and `EncryptedAttribute` in
+    it, and the `EncryptedID` of a `LogoutRequest`, a `ManageNameIDRequest` (with its `NewEncryptedID`) and a
+    `NameIDMappingResponse`. The two are chosen separately, and the one that isn't named is still negotiated from
+    metadata. The key transport is read like an `EncryptionMethod` of metadata, so a digest or mask generation
+    function that isn't named is SHA-1 or MGF1 with SHA-1, and neither can be named without the method. Each
+    must be supported and within `ContentEncryptionMethods`, `KeyTransportMethods` and
+    `KeyTransportDigestMethods`, which stay the limit of what the IdP ever encrypts with: 3DES, RSA PKCS#1 v1.5 or
+    a cipher those lists exclude sends nothing to that SP, signed or encrypted, and is not replaced by another.
+  - `RequireEncryption` refuses to issue an assertion in plaintext: an SP with no encryption key gets a `Response`
+    with the `Responder` status in place of it, and no assertion in answer to a query (SAML2Int SDP-IDP11). It is
+    off by default. `DefaultIssuancePolicy.RequireEncryption` sets it for every SP, and the `RequireEncryption` of
+    an entry in `ServiceProviders` for one, or exempts one from it. An SP that has a key is always encrypted to;
+    there is no setting that sends it plaintext.
   - With `SignAssertion` and an encrypted assertion, nothing the IdP signs covers the ciphertext, so prefer a GCM
     cipher in `ContentEncryptionMethods` for such an SP (errata E93). With `SignResponse` the assertion that
     `AssertionStore` keeps, and an `AssertionIDRequest` returns in a signed `Response`, is not signed itself.

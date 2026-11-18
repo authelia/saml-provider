@@ -76,6 +76,34 @@ type Issuance struct {
 	// ProxyCount="0" still has to issue its own assertion. A policy that knows the proxy finds the Scoping in
 	// IssuanceRequest.AuthnRequest.
 	ProxyRestriction *ProxyRestriction
+
+	// ContentEncryptionMethod is the identifier of the block cipher that the assertion, and every other element
+	// that the identity provider encrypts for the service provider, is encrypted with, such as
+	// http://www.w3.org/2001/04/xmlenc#aes256-cbc. It is used whatever the EncryptionMethods of the key of the
+	// service provider list, and must be one that IdentityProvider.ContentEncryptionMethods allows. Empty, as it
+	// is in IssuanceRequest.Defaults, means the one negotiated from those EncryptionMethods, as
+	// IdentityProvider.ContentEncryptionMethods describes.
+	ContentEncryptionMethod string
+
+	// KeyTransportMethod is the identifier of the algorithm that the key of what is encrypted is itself encrypted
+	// with, such as http://www.w3.org/2001/04/xmlenc#rsa-oaep-mgf1p. It is used whatever the EncryptionMethods of
+	// the key of the service provider list, and must be one that IdentityProvider.KeyTransportMethods allows.
+	// Empty, as it is in IssuanceRequest.Defaults, means the one negotiated from those EncryptionMethods, with its
+	// digest and mask generation function.
+	KeyTransportMethod string
+
+	// KeyTransportDigestMethod is the identifier of the digest of KeyTransportMethod, and KeyTransportMGF that of
+	// its mask generation function, such as http://www.w3.org/2009/xmlenc11#mgf1sha256. They are read like the
+	// DigestMethod and MGF of an EncryptionMethod in metadata: empty means the default of the algorithm, SHA-1 and
+	// MGF1 with SHA-1, RSA-OAEP-MGF1P has no other mask generation function, and each must be one that
+	// IdentityProvider.KeyTransportDigestMethods allows. They must be empty if KeyTransportMethod is.
+	KeyTransportDigestMethod string
+	KeyTransportMGF          string
+
+	// RequireEncryption is whether an assertion is only issued to the service provider encrypted. One that has no
+	// encryption key is then issued none, in place of an assertion in plaintext (SAML2Int SDP-IDP11). A Response
+	// that reports an error has no assertion and is still sent.
+	RequireEncryption bool
 }
 
 // IssuanceRequest describes what an IssuancePolicy is asked about: a Response of single sign-on, or another
@@ -133,6 +161,11 @@ type IssuancePolicy interface {
 	// ServiceProviderMetadata and Defaults. The metadata of the identity provider is not signed for any one
 	// service provider, and always uses IdentityProvider.SignatureMethod.
 	//
+	// It is asked as well before anything is encrypted for a service provider: an assertion, and the EncryptedID
+	// of a LogoutRequest, a ManageNameIDRequest or a NameIDMappingResponse, with its NewEncryptedID. Outside single
+	// sign-on only the ContentEncryptionMethod and the key transport of the answer are then used, and req has the
+	// SPSSODescriptor whose key is encrypted to, and an HTTPRequest that the identity provider made itself.
+	//
 	// Whatever is returned, the Assertion is signed if the SPSSODescriptor of the service provider sets
 	// WantAssertionsSigned.
 	Issuance(req IssuanceRequest) (Issuance, error)
@@ -164,11 +197,30 @@ type ServiceProviderIssuance struct {
 	// ProxyRestriction limits the assertions that the service provider may issue on the basis of the one it is
 	// given. See Issuance.ProxyRestriction.
 	ProxyRestriction *ProxyRestriction
+
+	// ContentEncryptionMethod is the identifier of the block cipher. See Issuance.ContentEncryptionMethod. It is
+	// used whatever the metadata of the service provider lists.
+	ContentEncryptionMethod string
+
+	// KeyTransportMethod is the identifier of the key transport algorithm, KeyTransportDigestMethod that of its
+	// digest and KeyTransportMGF that of its mask generation function. See Issuance.KeyTransportMethod. They are
+	// used whatever the metadata of the service provider lists.
+	KeyTransportMethod       string
+	KeyTransportDigestMethod string
+	KeyTransportMGF          string
+
+	// RequireEncryption replaces DefaultIssuancePolicy.RequireEncryption, unless it is nil.
+	RequireEncryption *bool
 }
 
 // DefaultIssuancePolicy is the default IssuancePolicy. With no options set it issues to every service provider
 // with the settings of the identity provider, and signs both the Response and the Assertion.
 type DefaultIssuancePolicy struct {
+	// RequireEncryption is whether an assertion is only issued encrypted, so that a service provider with no
+	// encryption key is issued none. See Issuance.RequireEncryption. It is for every service provider, unless
+	// its entry in ServiceProviders says otherwise.
+	RequireEncryption bool
+
 	// ServiceProviders holds what differs for a service provider, by its entity ID.
 	ServiceProviders map[string]ServiceProviderIssuance
 }
@@ -176,6 +228,7 @@ type DefaultIssuancePolicy struct {
 // Issuance implements IssuancePolicy.
 func (p DefaultIssuancePolicy) Issuance(req IssuanceRequest) (Issuance, error) {
 	issuance := req.Defaults
+	issuance.RequireEncryption = p.RequireEncryption
 
 	if req.ServiceProviderMetadata == nil {
 		return issuance, nil
@@ -204,6 +257,21 @@ func (p DefaultIssuancePolicy) Issuance(req IssuanceRequest) (Issuance, error) {
 
 	if override.IncludeSessionNotOnOrAfter != nil {
 		issuance.IncludeSessionNotOnOrAfter = *override.IncludeSessionNotOnOrAfter
+	}
+
+	if override.ContentEncryptionMethod != "" {
+		issuance.ContentEncryptionMethod = override.ContentEncryptionMethod
+	}
+
+	// The key transport is chosen as a whole, as its digest and mask generation function mean nothing without it.
+	if override.KeyTransportMethod != "" || override.KeyTransportDigestMethod != "" || override.KeyTransportMGF != "" {
+		issuance.KeyTransportMethod = override.KeyTransportMethod
+		issuance.KeyTransportDigestMethod = override.KeyTransportDigestMethod
+		issuance.KeyTransportMGF = override.KeyTransportMGF
+	}
+
+	if override.RequireEncryption != nil {
+		issuance.RequireEncryption = *override.RequireEncryption
 	}
 
 	return issuance, nil
@@ -368,7 +436,37 @@ func (idp *IdentityProvider) completeIssuance(req IssuanceRequest, issuance Issu
 		}
 	}
 
+	if err := idp.checkIssuanceEncryption(issuance); err != nil {
+		return Issuance{}, err
+	}
+
 	return completeIssuanceConditions(req.ServiceProviderMetadata, issuance)
+}
+
+// checkIssuanceEncryption returns an error if issuance chooses an encryption algorithm that the identity provider
+// can't or may not encrypt with. It is checked for every message, and not when something is encrypted, so that a
+// choice that can't be carried out is found before the service provider it is for is sent an assertion in
+// plaintext, or one encrypted with something else. An issuance that chooses none is not checked: the algorithms
+// of the identity provider are then looked at when they are negotiated with.
+func (idp *IdentityProvider) checkIssuanceEncryption(issuance Issuance) error {
+	if !issuance.choosesEncryption() {
+		return nil
+	}
+
+	policy, err := idp.encryptionPolicy()
+	if err != nil {
+		return err
+	}
+
+	_, err = policy.encrypterFor(nil, issuance)
+
+	return err
+}
+
+// choosesEncryption returns whether the issuance names an encryption algorithm or a parameter of one.
+func (issuance Issuance) choosesEncryption() bool {
+	return issuance.ContentEncryptionMethod != "" || issuance.KeyTransportMethod != "" ||
+		issuance.KeyTransportDigestMethod != "" || issuance.KeyTransportMGF != ""
 }
 
 // completeIssuanceConditions returns issuance with the AdditionalAudiences that the assertion states for the
