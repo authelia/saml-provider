@@ -517,9 +517,10 @@ type IdentityProvider struct {
 	DecryptionKeys []DecryptionKey
 
 	// MaxAuthnRequestAge is the oldest AuthnRequest that will be accepted, which must allow for a
-	// SessionProvider that re-presents the request after a login form. Defaults to MaxIssueDelay. The ID
-	// of a request that was answered stays in the ReplayStore for this long after its IssueInstant, and
-	// MaxClockSkew longer.
+	// SessionProvider that re-presents the request after a login form. Defaults to MaxIssueDelay. MaxClockSkew
+	// is allowed on top of it, as for every other message: a request is accepted from MaxClockSkew before its
+	// IssueInstant until MaxAuthnRequestAge and MaxClockSkew after it (SAML2Int SDP-G01). The ID of a request
+	// that was answered stays in the ReplayStore until then, and MaxClockSkew longer.
 	//
 	// It is independent of AssertionLifetime: MaxAuthnRequestAge bounds the time from the issue of the request to
 	// the response, and AssertionLifetime the time from the response to its delivery at the service provider. An
@@ -1702,16 +1703,8 @@ func (req *IdpAuthnRequest) checkRequestStage() error {
 		return statusErr
 	}
 
-	maxAge := req.IDP.maxAuthnRequestAge()
-
-	if req.Request.IssueInstant.Add(maxAge).Before(req.Now) {
-		return &statusError{StatusRequester, StatusRequestDenied,
-			fmt.Errorf("request expired at %s", req.Request.IssueInstant.Add(maxAge))}
-	}
-
-	if req.Request.IssueInstant.After(req.Now.Add(MaxClockSkew)) {
-		return &statusError{StatusRequester, StatusRequestDenied,
-			fmt.Errorf("request issued in the future at %s", req.Request.IssueInstant)}
+	if err := checkIssueInstant("request", req.Request.IssueInstant, req.Now, req.IDP.maxAuthnRequestAge()); err != nil {
+		return &statusError{StatusRequester, StatusRequestDenied, err}
 	}
 
 	// In http://docs.oasis-open.org/security/saml/v2.0/saml-bindings-2.0-os.pdf §3.4.5.2

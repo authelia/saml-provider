@@ -158,6 +158,8 @@ func TestMetadataVerifierRefuses(t *testing.T) {
 
 	unsignedEntity := `<EntityDescriptor xmlns="urn:oasis:names:tc:SAML:2.0:metadata" ID="e" entityID="https://sp.example.org/"/>`
 
+	validUntil := func(d time.Duration) string { return TimeNow().Add(d).UTC().Format(time.RFC3339) }
+
 	testCases := map[string]struct {
 		data     string
 		verifier *MetadataVerifier
@@ -202,7 +204,7 @@ func TestMetadataVerifierRefuses(t *testing.T) {
 			err:  "metadata must be an EntityDescriptor or an EntitiesDescriptor",
 		},
 		"expired": {
-			data: signMetadataXML(t, `<EntityDescriptor xmlns="urn:oasis:names:tc:SAML:2.0:metadata" ID="e" entityID="https://sp.example.org/" validUntil="2015-12-01T01:57:09Z"/>`),
+			data: signMetadataXML(t, `<EntityDescriptor xmlns="urn:oasis:names:tc:SAML:2.0:metadata" ID="e" entityID="https://sp.example.org/" validUntil="`+validUntil(-MaxClockSkew)+`"/>`),
 			err:  "signed metadata has expired",
 		},
 		"no validUntil with MaxValidity": {
@@ -211,7 +213,7 @@ func TestMetadataVerifierRefuses(t *testing.T) {
 			err:      "signed metadata has no validUntil",
 		},
 		"validUntil beyond MaxValidity": {
-			data:     signMetadataXML(t, `<EntityDescriptor xmlns="urn:oasis:names:tc:SAML:2.0:metadata" ID="e" entityID="https://sp.example.org/" validUntil="2016-12-01T00:00:00Z"/>`),
+			data:     signMetadataXML(t, `<EntityDescriptor xmlns="urn:oasis:names:tc:SAML:2.0:metadata" ID="e" entityID="https://sp.example.org/" validUntil="`+validUntil(14*24*time.Hour+MaxClockSkew+time.Second)+`"/>`),
 			verifier: &MetadataVerifier{Certificates: verifier.Certificates, MaxValidity: 14 * 24 * time.Hour},
 			err:      "signed metadata is valid for longer than 336h0m0s",
 		},
@@ -342,4 +344,42 @@ func TestMetadataVerifierAcceptsXMLSec1Signature(t *testing.T) {
 
 	_, err = verifier.Verify([]byte(strings.Replace(string(signed), "https://sp3.example.org/acs", "https://evil.example.org/acs", 1)))
 	assert.Check(t, is.ErrorContains(err, "cannot verify the signature of the metadata"))
+}
+
+// SAML2Int SDP-G01 requires clock skew to be allowed for in either direction when a validUntil is enforced: the
+// clock of the publisher may be behind, so that its metadata seems to have expired, or ahead, so that it seems to
+// be valid for longer than it was made to be.
+func TestMetadataVerifierAllowsClockSkew(t *testing.T) {
+	_, verifier := metadataSigningTest(t)
+
+	const maxValidity = 14 * 24 * time.Hour
+
+	for name, tc := range map[string]struct {
+		validUntil  time.Duration
+		maxValidity time.Duration
+		err         string
+	}{
+		"expired within the clock skew":          {validUntil: -MaxClockSkew + time.Second},
+		"expired the clock skew ago":             {validUntil: -MaxClockSkew, err: "signed metadata has expired"},
+		"at MaxValidity":                         {validUntil: maxValidity, maxValidity: maxValidity},
+		"beyond MaxValidity, within the skew":    {validUntil: maxValidity + MaxClockSkew, maxValidity: maxValidity},
+		"beyond MaxValidity and the clock skew":  {validUntil: maxValidity + MaxClockSkew + time.Second, maxValidity: maxValidity, err: "signed metadata is valid for longer than 336h0m0s"},
+		"expired within the skew, MaxValidity":   {validUntil: -MaxClockSkew + time.Second, maxValidity: maxValidity},
+		"expired the skew ago, with MaxValidity": {validUntil: -MaxClockSkew, maxValidity: maxValidity, err: "signed metadata has expired"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			v := &MetadataVerifier{Certificates: verifier.Certificates, MaxValidity: tc.maxValidity}
+
+			data := signMetadataXML(t, `<EntityDescriptor xmlns="urn:oasis:names:tc:SAML:2.0:metadata" ID="e" entityID="https://sp.example.org/" validUntil="`+
+				TimeNow().Add(tc.validUntil).UTC().Format(time.RFC3339)+`"/>`)
+
+			_, err := v.Verify([]byte(data))
+			if tc.err == "" {
+				assert.Check(t, err)
+				return
+			}
+
+			assert.Check(t, is.ErrorContains(err, tc.err))
+		})
+	}
 }

@@ -75,6 +75,10 @@ type MetadataVerifier struct {
 	// MaxValidity, when it isn't zero, refuses metadata which has no validUntil, or whose validUntil is further
 	// than MaxValidity in the future. Signed metadata that never expires can be replayed with a key that has
 	// since been withdrawn (SAMLMetaIOP §2.7), so a federation sets it to bound how old the metadata may be.
+	//
+	// MaxClockSkew is allowed for in both checks of the validUntil (SAML2Int SDP-G01): metadata is refused as
+	// expired once its validUntil is MaxClockSkew ago, and as valid for too long if its validUntil is further
+	// than MaxValidity and MaxClockSkew ahead.
 	MaxValidity time.Duration
 
 	// SignatureMethods and DigestMethods list the identifiers of the signature algorithms the metadata may be
@@ -181,7 +185,7 @@ func checkMetadataSignature(root *etree.Element) error {
 }
 
 // checkValidUntil returns an error if the validUntil of the verified metadata has passed, or if MaxValidity is set
-// and it has none, or one that is too far in the future.
+// and it has none, or one that is too far in the future. MaxClockSkew is allowed for in both directions.
 func (v *MetadataVerifier) checkValidUntil(verified *etree.Element) error {
 	attr := verified.SelectAttrValue("validUntil", "")
 	if attr == "" {
@@ -203,7 +207,7 @@ func (v *MetadataVerifier) checkValidUntil(verified *etree.Element) error {
 		return errors.New("signed metadata has expired")
 	}
 
-	if v.MaxValidity != 0 && time.Time(validUntil).After(now.Add(v.MaxValidity)) {
+	if v.MaxValidity != 0 && validBeyond(time.Time(validUntil), now, v.MaxValidity) {
 		return fmt.Errorf("signed metadata is valid for longer than %s", v.MaxValidity)
 	}
 

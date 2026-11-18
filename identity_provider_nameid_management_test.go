@@ -916,7 +916,7 @@ func TestManageNameIDRequestStatus(t *testing.T) {
 		},
 		"expired": {
 			options: manageNameIDOptions{mutate: func(request *ManageNameIDRequest) {
-				request.IssueInstant = TimeNow().Add(-MaxIssueDelay - time.Second)
+				request.IssueInstant = TimeNow().Add(-MaxIssueDelay - MaxClockSkew)
 			}},
 			top: StatusRequester, second: StatusRequestDenied,
 		},
@@ -1244,7 +1244,7 @@ func TestManageNameIDRefusesReplay(t *testing.T) {
 		checkStatus(t, serve(older.Copy()).Status, StatusSuccess, "")
 		assert.Assert(t, is.Equal(store.calls(), 1))
 		assert.Check(t, strings.HasPrefix(store.keys[0], replayKindManageNameIDRequest+":"))
-		assert.Check(t, store.expiries[0].Equal(TimeNow().Add(MaxIssueDelay+MaxClockSkew)))
+		assert.Check(t, store.expiries[0].Equal(TimeNow().Add(MaxIssueDelay+2*MaxClockSkew)))
 
 		newer, _ := manageNameIDRequestElement(test, soapManageNameIDTestURL, newID("alias-two"))
 		checkStatus(t, serve(signTestElement(t, &test.SP, newer)).Status, StatusSuccess, "")

@@ -591,7 +591,7 @@ func TestServeQueryRejects(t *testing.T) {
 		{
 			name: "expired",
 			request: mutated(func(_ *queryFixture, message *etree.Element) {
-				message.CreateAttr("IssueInstant", TimeNow().Add(-MaxIssueDelay-time.Second).Format(timeFormat))
+				message.CreateAttr("IssueInstant", TimeNow().Add(-MaxIssueDelay-MaxClockSkew).Format(timeFormat))
 			}),
 			top: StatusRequester, second: StatusRequestDenied,
 		},
@@ -1818,7 +1818,7 @@ func TestServeQueryRefusesReplay(t *testing.T) {
 			// SAMLSec §6.1.2: the request is answered once, and is a replay after that.
 			assertQueryStatus(t, f.query(t, service, message), StatusSuccess, "")
 			assert.Assert(t, is.Equal(store.calls(), 1))
-			assert.Check(t, store.expiries[0].Equal(TimeNow().Add(MaxIssueDelay+MaxClockSkew)))
+			assert.Check(t, store.expiries[0].Equal(TimeNow().Add(MaxIssueDelay+2*MaxClockSkew)))
 
 			assertQueryStatus(t, f.query(t, service, message), StatusRequester, StatusRequestDenied)
 			assert.Check(t, is.Contains(f.log.String(), "is a replay"))

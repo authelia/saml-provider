@@ -1288,7 +1288,7 @@ func TestServeArtifactResolutionEmptyResponses(t *testing.T) {
 		"expired request": {
 			request: func(t *testing.T, f *fixture) (*http.Request, string) {
 				return artifactResolvePost(t, &f.test.SP, f.artifact, func(request *ArtifactResolve) {
-					request.IssueInstant = TimeNow().Add(-MaxIssueDelay - time.Second)
+					request.IssueInstant = TimeNow().Add(-MaxIssueDelay - MaxClockSkew)
 				})
 			},
 			usable: true,

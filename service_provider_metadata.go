@@ -13,10 +13,11 @@ import (
 	xrv "github.com/mattermost/xml-roundtrip-validator"
 )
 
-// CurrentMetadata returns metadata without the service provider descriptors whose validUntil is not
-// after now, or nil if the metadata itself has expired or has no descriptor left, SAMLMeta §2.3.2 and
-// §2.4.1. The zero time counts as no validUntil, as earlier versions of this package wrote it for a
-// descriptor that had none.
+// CurrentMetadata returns metadata without the service provider descriptors whose validUntil has
+// passed, or nil if the metadata itself has expired or has no descriptor left, SAMLMeta §2.3.2 and
+// §2.4.1. A validUntil has passed once it is MaxClockSkew before now, as the clock of whoever published
+// the metadata may be behind (SAML2Int SDP-G01). The zero time counts as no validUntil, as earlier
+// versions of this package wrote it for a descriptor that had none.
 func CurrentMetadata(metadata *EntityDescriptor, now time.Time) *EntityDescriptor {
 	if metadata == nil {
 		return nil
@@ -36,12 +37,6 @@ func CurrentMetadata(metadata *EntityDescriptor, now time.Time) *EntityDescripto
 	}
 
 	return &current
-}
-
-// expiredAt reports whether a validUntil is not after now (SAMLMeta §2.3.2). The zero time counts as no
-// validUntil.
-func expiredAt(validUntil, now time.Time) bool {
-	return !validUntil.IsZero() && !now.Before(validUntil)
 }
 
 // serviceProvider returns the current metadata of the service provider from the ServiceProviderProvider,

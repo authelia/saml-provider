@@ -263,12 +263,8 @@ func validateManageNameIDResponse(buf []byte, overTLS bool, requestID string, me
 		return nil, fmt.Errorf("expected SAML response version 2.0 got %v", response.Version)
 	}
 
-	if response.IssueInstant.Add(MaxIssueDelay).Before(now) {
-		return nil, fmt.Errorf("response expired at %s", response.IssueInstant.Add(MaxIssueDelay))
-	}
-
-	if response.IssueInstant.After(now.Add(MaxClockSkew)) {
-		return nil, fmt.Errorf("response issued in the future at %s", response.IssueInstant)
+	if err := checkIssueInstant("response", response.IssueInstant, now, MaxIssueDelay); err != nil {
+		return nil, err
 	}
 
 	return response, nil

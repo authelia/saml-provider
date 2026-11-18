@@ -184,14 +184,22 @@ type ServiceProvider struct {
 	ValidateRequestID func(response Response, possibleRequestIDs []string) error
 }
 
-// MaxIssueDelay is the longest allowed time between when a SAML assertion is
-// issued by the IDP and the time it is received by ParseResponse. This is used
-// to prevent old responses from being replayed (while allowing for some clock
-// drift between the SP and IDP).
+// MaxIssueDelay is the longest allowed time between the IssueInstant of a message or an assertion and the time at
+// which it is received, by the service provider and by the identity provider. This is used to prevent old messages
+// from being replayed. MaxClockSkew is allowed on top of it, at both ends: a message is accepted from MaxClockSkew
+// before its IssueInstant until MaxIssueDelay and MaxClockSkew after it.
 var MaxIssueDelay = time.Second * 90
 
-// MaxClockSkew allows for leeway for clock skew between the IDP and SP when
-// validating assertions. It defaults to 180 seconds (matches shibboleth).
+// MaxClockSkew is how far the clock of another party may be behind or ahead of the clock of this one. It is
+// allowed for, in either direction, wherever a time that another party stated is checked: an IssueInstant, a
+// NotBefore, a NotOnOrAfter, and the validUntil of metadata (SAML2Int SDP-G01). It defaults to 180 seconds
+// (matches shibboleth).
+//
+// SAML2Int SDP-G01 requires a deployment to allow between three and five minutes. The value is used as it is set
+// and is not held to that range: zero checks every time exactly, which tests and a deployment whose parties share
+// a clock may want, and a deployment whose peers keep time badly may need more than five minutes. Outside the
+// range the deployment is outside the profile. It must not be negative, and must be set before any request is
+// served.
 var MaxClockSkew = time.Second * 180
 
 // DefaultValidDuration is how long we assert that the SP metadata is valid.
@@ -995,8 +1003,8 @@ func (sp *ServiceProvider) parseArtifactResponse(artifactResponseEl *etree.Eleme
 			return nil, retErr
 		}
 
-		if artifactResponse.IssueInstant.Add(MaxIssueDelay).Before(now) {
-			retErr.PrivateErr = fmt.Errorf("response IssueInstant expired at %s", artifactResponse.IssueInstant.Add(MaxIssueDelay))
+		if err := checkIssueInstant("response", artifactResponse.IssueInstant, now, MaxIssueDelay); err != nil {
+			retErr.PrivateErr = err
 			return nil, retErr
 		}
 
@@ -1144,8 +1152,8 @@ func (sp *ServiceProvider) parseResponse(responseEl *etree.Element, possibleRequ
 			return nil, err
 		}
 
-		if response.IssueInstant.Add(MaxIssueDelay).Before(now) {
-			return nil, fmt.Errorf("response IssueInstant expired at %s", response.IssueInstant.Add(MaxIssueDelay))
+		if err := checkIssueInstant("response", response.IssueInstant, now, MaxIssueDelay); err != nil {
+			return nil, err
 		}
 
 		if response.Issuer != nil && response.Issuer.Value != sp.IDPMetadata.EntityID {
@@ -1438,8 +1446,8 @@ func (sp *ServiceProvider) idpElementEncrypter() (*elementEncrypter, error) {
 // the failure. (The digital signature on the assertion is not checked -- this
 // should be done before calling this function).
 func (sp *ServiceProvider) validateAssertion(assertion *Assertion, possibleRequestIDs []string, now time.Time) error {
-	if assertion.IssueInstant.Add(MaxIssueDelay).Before(now) {
-		return fmt.Errorf("expired on %s", assertion.IssueInstant.Add(MaxIssueDelay))
+	if err := checkIssueInstant("assertion", assertion.IssueInstant, now, MaxIssueDelay); err != nil {
+		return err
 	}
 
 	if assertion.Issuer.Value != sp.IDPMetadata.EntityID {
@@ -1451,11 +1459,11 @@ func (sp *ServiceProvider) validateAssertion(assertion *Assertion, possibleReque
 	}
 
 	if assertion.Conditions != nil {
-		if assertion.Conditions.NotBefore.Add(-MaxClockSkew).After(now) {
+		if beforeValidity(assertion.Conditions.NotBefore, now) {
 			return fmt.Errorf("assertion Conditions is not yet valid")
 		}
 
-		if assertion.Conditions.NotOnOrAfter.Add(MaxClockSkew).Before(now) {
+		if pastValidity(assertion.Conditions.NotOnOrAfter, now) {
 			return fmt.Errorf("assertion Conditions is expired")
 		}
 	}
@@ -1512,7 +1520,7 @@ func (sp *ServiceProvider) validateBearerSubjectConfirmation(subjectConfirmation
 		return fmt.Errorf("assertion SubjectConfirmation Recipient is not %s", sp.AcsURL.String())
 	}
 
-	if data.NotOnOrAfter.Add(MaxClockSkew).Before(now) {
+	if pastValidity(data.NotOnOrAfter, now) {
 		return fmt.Errorf("assertion SubjectConfirmationData is expired")
 	}
 
@@ -2144,9 +2152,8 @@ func (sp *ServiceProvider) validateLogoutResponse(resp *LogoutResponse, possible
 		return fmt.Errorf("`Destination` does not match SloURL (expected %q)", sp.SloURL.String())
 	}
 
-	now := TimeNow()
-	if resp.IssueInstant.Add(MaxIssueDelay).Before(now) {
-		return fmt.Errorf("issueInstant expired at %s", resp.IssueInstant.Add(MaxIssueDelay))
+	if err := checkIssueInstant("response", resp.IssueInstant, TimeNow(), MaxIssueDelay); err != nil {
+		return err
 	}
 
 	if resp.Issuer == nil || resp.Issuer.Value != sp.IDPMetadata.EntityID {

@@ -18,7 +18,8 @@ func TestCurrentMetadataNil(t *testing.T) {
 
 func TestCurrentMetadata(t *testing.T) {
 	now := time.Date(2015, 12, 1, 1, 57, 9, 0, time.UTC)
-	before, after := now.Add(-time.Second), now.Add(time.Second)
+	// SAML2Int SDP-G01: a validUntil has passed once it is MaxClockSkew ago, and not a second sooner.
+	before, after := now.Add(-MaxClockSkew), now.Add(-MaxClockSkew+time.Second)
 
 	descriptor := func(validUntil *time.Time, acs string) SPSSODescriptor {
 		d := SPSSODescriptor{AssertionConsumerServices: []IndexedEndpoint{{Binding: HTTPPostBinding, Location: acs, Index: 1}}}
@@ -37,9 +38,9 @@ func TestCurrentMetadata(t *testing.T) {
 		"no expiry":              {descriptors: []SPSSODescriptor{descriptor(nil, "a")}, locations: []string{"a"}},
 		"entity not expired":     {entity: after, descriptors: []SPSSODescriptor{descriptor(nil, "a")}, locations: []string{"a"}},
 		"entity expired":         {entity: before, descriptors: []SPSSODescriptor{descriptor(nil, "a")}},
-		"entity expires now":     {entity: now, descriptors: []SPSSODescriptor{descriptor(nil, "a")}},
+		"entity expires now":     {entity: now, descriptors: []SPSSODescriptor{descriptor(nil, "a")}, locations: []string{"a"}},
 		"descriptor expired":     {descriptors: []SPSSODescriptor{descriptor(&before, "a")}},
-		"descriptor expires now": {descriptors: []SPSSODescriptor{descriptor(&now, "a")}},
+		"descriptor expires now": {descriptors: []SPSSODescriptor{descriptor(&now, "a")}, locations: []string{"a"}},
 		"one of two expired":     {descriptors: []SPSSODescriptor{descriptor(&before, "a"), descriptor(&after, "b")}, locations: []string{"b"}},
 		"zero time is none":      {descriptors: []SPSSODescriptor{descriptor(&zero, "a")}, locations: []string{"a"}},
 		"no descriptors":         {},
@@ -73,7 +74,7 @@ func TestCurrentMetadata(t *testing.T) {
 func TestIDPRefusesExpiredServiceProviderMetadata(t *testing.T) {
 	expire := func(test *IdentityProviderTest) {
 		metadata := test.SP.Metadata()
-		expired := TimeNow().Add(-time.Minute)
+		expired := TimeNow().Add(-MaxClockSkew)
 		metadata.ValidUntil = expired
 		test.IDP.ServiceProviderProvider = &mockServiceProviderProvider{
 			GetServiceProviderFunc: func(*http.Request, string) (*EntityDescriptor, error) { return metadata, nil },
@@ -179,7 +180,8 @@ func TestParseServiceProviderMetadataGroupValidUntil(t *testing.T) {
 
 func TestCheckServiceProviderMetadata(t *testing.T) {
 	now := time.Date(2015, 12, 1, 1, 57, 9, 0, time.UTC)
-	before, after := now.Add(-time.Second), now.Add(time.Second)
+	// SAML2Int SDP-G01: a validUntil has passed once it is MaxClockSkew ago, and not a second sooner.
+	before, after := now.Add(-MaxClockSkew), now.Add(-MaxClockSkew+time.Second)
 
 	descriptor := func(validUntil *time.Time, acs string) SPSSODescriptor {
 		d := SPSSODescriptor{AssertionConsumerServices: []IndexedEndpoint{{Binding: HTTPPostBinding, Location: acs, Index: 1}}}

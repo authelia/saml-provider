@@ -95,8 +95,9 @@ func (idp *IdentityProvider) replayStore() ReplayStore {
 }
 
 // checkReplay consumes the ID of a message of the kind, which issuer sent to this identity provider, in the
-// ReplayStore, where it stays until expires: the time after which the message is refused for its age anyway,
-// with MaxClockSkew added for instances whose clocks differ. An ID is unique to the party that assigned it
+// ReplayStore. The message states that it is valid until expires, which is its IssueInstant and its maximum age,
+// or its NotOnOrAfter. It is accepted until MaxClockSkew after that (SAML2Int SDP-G01), and the ID stays in the
+// store for MaxClockSkew longer still, for instances whose clocks differ. An ID is unique to the party that assigned it
 // (SAMLCore §1.3.4), so it is recorded for the issuer, and one service provider can't use up the IDs of another.
 //
 // It must only be called for a message that is authenticated, or that the identity provider is about to act on
@@ -111,7 +112,7 @@ func (idp *IdentityProvider) replayStore() ReplayStore {
 func (idp *IdentityProvider) checkReplay(ctx context.Context, kind, issuer, id string, expires time.Time) error {
 	key := replayKey(kind, idp.entityID(), issuer, id)
 
-	err := idp.replayStore().Consume(ctx, key, expires.Add(MaxClockSkew))
+	err := idp.replayStore().Consume(ctx, key, expires.Add(2*MaxClockSkew))
 
 	switch {
 	case err == nil:
@@ -248,7 +249,7 @@ func (q *memoryReplayQueue) Pop() any {
 // when the form is posted, perhaps several times, which is not a replay: the request is only used up when it is
 // answered for a session. That also means the store only ever holds requests of authenticated users, as an
 // AuthnRequest need not be signed. The ID is recorded for the issuer until the request would be refused for its
-// age, which is MaxAuthnRequestAge after its IssueInstant, and MaxClockSkew longer.
+// age, which is MaxAuthnRequestAge and MaxClockSkew after its IssueInstant, and MaxClockSkew longer.
 //
 // It must only be called after Validate has returned nil. The error carries a status for RequestStatus: Requester
 // with RequestDenied for a replay, which wraps ErrReplayed, and Responder if the store failed, in which case the
@@ -260,8 +261,8 @@ func (req *IdpAuthnRequest) CheckReplay() error {
 
 // checkReplay consumes the ID of the request in the ReplayStore of the identity provider. It is the last check of
 // Validate, so the request is verified and its response endpoint resolved. The ID is recorded until the request
-// would be refused for its age, which is MaxIssueDelay after its IssueInstant or at its NotOnOrAfter if that is
-// sooner, and MaxClockSkew longer.
+// would be refused for its age, which is MaxClockSkew after the sooner of its NotOnOrAfter and MaxIssueDelay after
+// its IssueInstant, and MaxClockSkew longer.
 func (req *IdpLogoutRequest) checkReplay() error {
 	expires := req.Request.IssueInstant.Add(MaxIssueDelay)
 	if notOnOrAfter := req.Request.NotOnOrAfter; notOnOrAfter != nil && notOnOrAfter.Before(expires) {

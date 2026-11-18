@@ -302,7 +302,8 @@ func TestLoginFormCanBeSubmittedAfterRequestDelay(t *testing.T) {
 	}{
 		{name: "past the issue delay", delay: saml.MaxIssueDelay + time.Second},
 		{name: "at the limit", delay: maxLoginDuration},
-		{name: "past the limit", delay: maxLoginDuration + time.Second, denied: true},
+		{name: "past the limit, within the clock skew", delay: maxLoginDuration + saml.MaxClockSkew - time.Second},
+		{name: "past the limit and the clock skew", delay: maxLoginDuration + saml.MaxClockSkew, denied: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			test := NewServerTest(t)

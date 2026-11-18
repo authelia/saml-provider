@@ -1194,7 +1194,7 @@ func TestSPInvalidAssertions(t *testing.T) {
 	assert.Check(t, err)
 
 	err = s.validateAssertion(&assertion, []string{"id-9e61753d64e928af5a7a341a97f420c9"}, TimeNow().Add(time.Hour))
-	assert.Check(t, is.Error(err, "expired on 2015-12-01 01:57:51.375 +0000 UTC"))
+	assert.Check(t, is.Error(err, "assertion expired at 2015-12-01 01:57:51.375 +0000 UTC"))
 
 	assertion.Issuer.Value = "bob"
 	err = s.validateAssertion(&assertion, []string{"id-9e61753d64e928af5a7a341a97f420c9"}, TimeNow())
@@ -2325,7 +2325,7 @@ func TestParseBadXMLArtifactResponse(t *testing.T) {
 
 	assertion, err = sp.ParseXMLArtifactResponse(samlResponse, possibleReqIDs, reqID, sp.AcsURL)
 	assert.Check(t, is.Error(err.(*InvalidResponseError).PrivateErr,
-		"response IssueInstant expired at 2021-08-17 10:28:50.146 +0000 UTC"))
+		"response expired at 2021-08-17 10:28:50.146 +0000 UTC"))
 	assert.Check(t, is.Nil(assertion))
 
 	// Clock is used to verify the certificate.
@@ -2510,7 +2510,7 @@ func TestSPInvalidResponses(t *testing.T) {
 	req.PostForm.Set("SAMLResponse", base64.StdEncoding.EncodeToString(test.SamlResponse))
 	_, err = s.ParseResponse(&req, []string{"id-9e61753d64e928af5a7a341a97f420c9"})
 	assert.Check(t, is.Error(err.(*InvalidResponseError).PrivateErr,
-		"response IssueInstant expired at 2015-12-01 01:57:51.375 +0000 UTC"))
+		"response expired at 2015-12-01 01:57:51.375 +0000 UTC"))
 
 	TimeNow = func() time.Time {
 		rv, _ := time.Parse("Mon Jan 2 15:04:05 MST 2006", "Mon Dec 1 01:57:09 UTC 2015")

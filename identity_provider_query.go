@@ -311,7 +311,7 @@ func (req *IdpQueryRequest) validate() error {
 // checkReplay consumes the ID of the request in the ReplayStore of the identity provider (SAMLSec §6.1.2). It is
 // the last check of validate, so the request is verified, and only a registered service provider can add to the
 // store. The ID is recorded for the kind of the message until the request would be refused for its age, which is
-// MaxIssueDelay after its IssueInstant, and MaxClockSkew longer. The error is a *statusError: Requester with
+// MaxIssueDelay and MaxClockSkew after its IssueInstant, and MaxClockSkew longer. The error is a *statusError: Requester with
 // RequestDenied for a replay, and Responder if the store failed.
 func (req *IdpQueryRequest) checkReplay() error {
 	header := req.header()
@@ -409,14 +409,8 @@ func (req *IdpQueryRequest) checkRequestStage() error {
 		return statusErr
 	}
 
-	if header.IssueInstant.Add(MaxIssueDelay).Before(req.Now) {
-		return &statusError{StatusRequester, StatusRequestDenied,
-			fmt.Errorf("request expired at %s", header.IssueInstant.Add(MaxIssueDelay))}
-	}
-
-	if header.IssueInstant.After(req.Now.Add(MaxClockSkew)) {
-		return &statusError{StatusRequester, StatusRequestDenied,
-			fmt.Errorf("request issued in the future at %s", header.IssueInstant)}
+	if err := checkIssueInstant("request", header.IssueInstant, req.Now, MaxIssueDelay); err != nil {
+		return &statusError{StatusRequester, StatusRequestDenied, err}
 	}
 
 	// SAMLBind §3.2 doesn't require a Destination on SOAP, but SAMLCore §3.2.1 requires one that is present to

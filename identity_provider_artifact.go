@@ -694,12 +694,8 @@ func (req *artifactResolveRequest) checkRequestStage() error {
 		return statusErr
 	}
 
-	if req.Request.IssueInstant.Add(MaxIssueDelay).Before(req.Now) {
-		return artifactNotResolved("the request of %s expired at %s", issuer, req.Request.IssueInstant.Add(MaxIssueDelay))
-	}
-
-	if req.Request.IssueInstant.After(req.Now.Add(MaxClockSkew)) {
-		return artifactNotResolved("the request of %s was issued in the future at %s", issuer, req.Request.IssueInstant)
+	if err := checkIssueInstant("request", req.Request.IssueInstant, req.Now, MaxIssueDelay); err != nil {
+		return artifactNotResolved("%s sent a request that is not current: %w", issuer, err)
 	}
 
 	// SAMLBind §3.2 doesn't require a Destination on SOAP, but one that is present must be this endpoint.

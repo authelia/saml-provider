@@ -100,7 +100,7 @@ func TestParseResponseUsesSignedAttributesWhenSignaturePrefixIsRebound(t *testin
 
 			var invalid *InvalidResponseError
 			assert.Assert(t, errors.As(err, &invalid), "got %v", err)
-			assert.Check(t, is.ErrorContains(invalid.PrivateErr, "response IssueInstant expired"))
+			assert.Check(t, is.ErrorContains(invalid.PrivateErr, "response expired"))
 		})
 	}
 }
@@ -113,7 +113,7 @@ func TestParseAssertionUsesSignedAttributesWhenSignaturePrefixIsRebound(t *testi
 	doc.Root().RemoveChild(doc.Root().SelectElement("Signature"))
 
 	issued := TimeNow()
-	later := issued.Add(MaxIssueDelay + time.Second)
+	later := issued.Add(MaxIssueDelay + MaxClockSkew)
 	now := later.UTC().Format(time.RFC3339)
 	doc.Root().CreateAttr("IssueInstant", now)
 	unsigned, err := doc.WriteToString()
@@ -126,7 +126,7 @@ func TestParseAssertionUsesSignedAttributesWhenSignaturePrefixIsRebound(t *testi
 
 	var invalid *InvalidResponseError
 	assert.Assert(t, errors.As(err, &invalid), "got %v", err)
-	assert.Check(t, is.ErrorContains(invalid.PrivateErr, "expired on"))
+	assert.Check(t, is.ErrorContains(invalid.PrivateErr, "assertion expired at"))
 }
 
 // recordingVerifier verifies in the same way as the default, as an implementation outside of this
@@ -209,7 +209,7 @@ func TestParseArtifactResponseUsesSignedAttributes(t *testing.T) {
 
 	var invalid *InvalidResponseError
 	assert.Assert(t, errors.As(err, &invalid), "got %v", err)
-	assert.Check(t, is.ErrorContains(invalid.PrivateErr, "response IssueInstant expired"))
+	assert.Check(t, is.ErrorContains(invalid.PrivateErr, "response expired"))
 }
 
 func TestVerifySignatureReturnsOnlyWhatTheSignatureCovers(t *testing.T) {

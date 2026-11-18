@@ -673,7 +673,7 @@ func TestNameIDMappingRequestStatus(t *testing.T) {
 		},
 		"expired": {
 			options: nameIDMappingOptions{mutate: func(request *NameIDMappingRequest) {
-				request.IssueInstant = TimeNow().Add(-MaxIssueDelay - time.Second)
+				request.IssueInstant = TimeNow().Add(-MaxIssueDelay - MaxClockSkew)
 			}},
 			top: StatusRequester, second: StatusRequestDenied,
 		},

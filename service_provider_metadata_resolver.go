@@ -64,14 +64,16 @@ type MetadataSource struct {
 	AllowUnsigned bool
 
 	// MaxValidity is how far in the future the validUntil of the root element may be. Metadata that is valid for
-	// longer is refused (SAML2Int SDP-MD03). Zero means DefaultMetadataMaxValidity.
+	// longer is refused (SAML2Int SDP-MD03). Zero means DefaultMetadataMaxValidity. MaxClockSkew is allowed on
+	// top of it, as the clock of the publisher may be ahead (SAML2Int SDP-G01), so a publisher that issues
+	// metadata for exactly MaxValidity is not refused.
 	MaxValidity time.Duration
 
 	// AllowMissingValidUntil accepts metadata whose root element has no validUntil, which SAML2Int SDP-MD03
 	// requires to be refused and which is refused by default, from a URL and from a file. It is for the
 	// metadata of a single service provider that is maintained by hand. Such metadata never expires: a key in
-	// it is trusted until a refresh succeeds that no longer has it. A validUntil that is there must still be in
-	// the future, and no further than MaxValidity.
+	// it is trusted until a refresh succeeds that no longer has it. A validUntil that is there must still not
+	// have passed, and be no further ahead than MaxValidity, allowing for MaxClockSkew.
 	AllowMissingValidUntil bool
 
 	// Filter, when it isn't nil, is called for each service provider in the metadata, and one that it returns
@@ -140,8 +142,8 @@ type MetadataSourceStatus struct {
 // ServiceProviderMetadataResolver is a ServiceProviderProvider which loads the metadata of service providers from
 // URLs and files, and keeps it fresh. For each source it verifies the signature of the metadata, refuses metadata
 // that doesn't expire or expires too late (SAML2Int SDP-MD03), and asks again when the cacheDuration of the
-// metadata has passed and before its validUntil. When a refresh fails, what was loaded last is served until its
-// validUntil. It is safe for concurrent use.
+// metadata has passed and before its validUntil. When a refresh fails, what was loaded last is served until
+// MaxClockSkew after its validUntil (SAML2Int SDP-G01). It is safe for concurrent use.
 //
 // Refresh loads every source once. Start refreshes them in the background, until Close.
 type ServiceProviderMetadataResolver struct {
@@ -340,7 +342,8 @@ func checkMetadataSourceURL(source MetadataSource, name string) error {
 }
 
 // GetServiceProvider returns the metadata of the service provider from the first source that has it and has not
-// expired, or [os.ErrNotExist]. The metadata is shared with every other caller and must not be changed.
+// expired, which it has MaxClockSkew after its validUntil, or [os.ErrNotExist]. The metadata is shared with every
+// other caller and must not be changed.
 func (r *ServiceProviderMetadataResolver) GetServiceProvider(_ *http.Request, serviceProviderID string) (*EntityDescriptor, error) {
 	now := r.clock.Now()
 
@@ -697,7 +700,8 @@ func (s *metadataSource) parse(data []byte, now time.Time) (*metadataSnapshot, e
 }
 
 // checkValidUntil returns an error if the validUntil of the root element is missing, unless the source allows
-// that, or is not after now, or is further than MaxValidity after it (SAML2Int SDP-MD03).
+// that, or has passed, or is further than MaxValidity after now (SAML2Int SDP-MD03), allowing for MaxClockSkew in
+// both directions (SAML2Int SDP-G01).
 func (s *metadataSource) checkValidUntil(validUntil, now time.Time) error {
 	switch {
 	case validUntil.IsZero():
@@ -708,7 +712,7 @@ func (s *metadataSource) checkValidUntil(validUntil, now time.Time) error {
 		return errors.New("metadata has no validUntil")
 	case expiredAt(validUntil, now):
 		return errors.New("metadata has expired")
-	case validUntil.After(now.Add(s.MaxValidity)):
+	case validBeyond(validUntil, now, s.MaxValidity):
 		return fmt.Errorf("metadata is valid for longer than %s", s.MaxValidity)
 	}
 

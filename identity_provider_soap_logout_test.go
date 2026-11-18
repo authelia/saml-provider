@@ -11,7 +11,6 @@ import (
 	"os"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/beevik/etree"
 	"gotest.tools/assert"
@@ -268,7 +267,7 @@ func TestServeSOAPLogoutRejects(t *testing.T) {
 			name: "expired",
 			request: func(t *testing.T, test *IdentityProviderTest) (*http.Request, string) {
 				return soapLogoutRequest(t, &test.SP, func(request *LogoutRequest) {
-					request.IssueInstant = TimeNow().Add(-MaxIssueDelay - time.Second)
+					request.IssueInstant = TimeNow().Add(-MaxIssueDelay - MaxClockSkew)
 				})
 			},
 			top: StatusRequester, second: StatusRequestDenied,
