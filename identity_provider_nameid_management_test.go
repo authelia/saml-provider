@@ -9,7 +9,6 @@ import (
 	"fmt"
 	"html"
 	"io"
-	"log"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -139,7 +138,7 @@ func manageNameIDTestIDP(t *testing.T, bindings ...string) (*IdentityProviderTes
 	}
 
 	test := signatureTestIDP(t)
-	test.IDP.Logger = log.New(io.Discard, "", 0)
+	test.IDP.Observer = logObserver(io.Discard)
 	test.IDP.ManageNameIDURL = mustParseURL(manageNameIDTestURL)
 	test.IDP.SOAPManageNameIDURL = mustParseURL(soapManageNameIDTestURL)
 
@@ -420,7 +419,7 @@ func checkStatus(t *testing.T, status Status, top, second string) {
 		assert.Check(t, is.Equal(status.StatusCode.StatusCode.Value, second))
 	}
 
-	assert.Check(t, status.StatusMessage == nil)
+	assert.Check(t, statusSaysNothingOfTheRequest(status))
 	assert.Check(t, status.StatusDetail == nil)
 }
 
@@ -759,7 +758,9 @@ func TestManageNameIDUnidentifiedNeverReachesProvider(t *testing.T) {
 			NameIDEncrypted:         true,
 		}
 
-		checkStatus(t, test.IDP.manageNameIDStatus(httptest.NewRequest(http.MethodPost, "/", nil), req), StatusRequester, StatusUnknownPrincipal)
+		err := test.IDP.manageNameID(httptest.NewRequest(http.MethodPost, "/", nil), req)
+		assert.Check(t, errors.Is(err, ErrUnknownPrincipal), "%v", err)
+		checkStatus(t, test.IDP.ErrorStatus(err), StatusRequester, StatusUnknownPrincipal)
 	}
 
 	assert.Check(t, is.Len(provider.calls, 0))

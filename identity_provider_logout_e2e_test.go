@@ -635,7 +635,7 @@ func TestServeSLOResponderWhenTerminationFails(t *testing.T) {
 	_, response := redirectedLogoutResponse(t, w)
 	assert.Check(t, is.Equal(response.InResponseTo, id))
 	assert.Check(t, is.Equal(response.Status.StatusCode.Value, StatusResponder))
-	assert.Check(t, response.Status.StatusMessage == nil)
+	assert.Check(t, statusSaysNothingOfTheRequest(response.Status))
 }
 
 func TestServeSLOWithoutPropagationInterfacesUnchanged(t *testing.T) {

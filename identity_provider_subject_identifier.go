@@ -71,14 +71,16 @@ func subjectIdentifierAttribute(name, value string) Attribute {
 // service requests under a name of its own, those of the session, and the pairwise-id, if the NameIDProvider is a
 // PairwiseIDProvider.
 //
-// A Session.SubjectID that doesn't have the syntax of a subject-id is left out, and logged without the value, as
-// the attribute is optional and the service provider would refuse it or, worse, accept it.
-func (idp *IdentityProvider) principalAttributes(r *http.Request, serviceProvider *EntityDescriptor, service *AttributeConsumingService, session *Session) ([]Attribute, error) {
+// A Session.SubjectID that doesn't have the syntax of a subject-id is left out, and reported without the value, as
+// the attribute is optional and the service provider would refuse it or, worse, accept it, as a warning of the
+// request in state.
+func (idp *IdentityProvider) principalAttributes(r *http.Request, state requestState, serviceProvider *EntityDescriptor, service *AttributeConsumingService, session *Session) ([]Attribute, error) {
 	attributes := append(requestedNameAttributes(service, session), sessionAttributes(session)...)
 
 	if session.SubjectID != "" {
 		if err := ValidateSubjectIdentifier(session.SubjectID); err != nil {
-			idp.logger().Printf("not stating the subject-id of the session: %s", err)
+			idp.observe(r, state.warning(EventAttributeRelease,
+				ErrServerError.WithDebugf("not stating the subject-id of the session: %s", err).WithWrap(err)))
 		} else {
 			attributes = append(attributes, subjectIdentifierAttribute(SubjectIDAttributeName, session.SubjectID))
 		}

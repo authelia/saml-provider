@@ -3,6 +3,7 @@ package saml
 import (
 	"encoding/base64"
 	"encoding/xml"
+	"errors"
 	"html"
 	"net/http/httptest"
 	"strings"
@@ -52,7 +53,7 @@ func TestWriteErrorResponseWritesSignedStatus(t *testing.T) {
 	test, req := errorResponseRequest(t)
 
 	w := httptest.NewRecorder()
-	assert.NilError(t, req.WriteErrorResponse(w, StatusResponder, StatusNoPassive, "cannot <authenticate> passively"))
+	assert.NilError(t, req.WriteErrorResponse(w, ErrNoPassive.WithStatusMessage("cannot <authenticate> passively")))
 
 	assert.Check(t, is.Contains(w.Body.String(), `action="https://sp.example.com/saml2/acs"`))
 	assert.Check(t, is.Contains(w.Body.String(), `name="RelayState" value="relay-&lt;state&gt;"`))
@@ -85,12 +86,32 @@ func TestWriteErrorResponseOmitsOptionalStatusParts(t *testing.T) {
 	_, req := errorResponseRequest(t)
 
 	w := httptest.NewRecorder()
-	assert.NilError(t, req.WriteErrorResponse(w, StatusRequester, "", ""))
+	assert.NilError(t, req.WriteErrorResponse(w, ErrInvalidRequest.WithStatusMessage("").WithDebug("never sent")))
 
-	_, response := postedResponse(t, w.Body.String())
+	doc, response := postedResponse(t, w.Body.String())
 	assert.Check(t, is.Equal(response.Status.StatusCode.Value, StatusRequester))
 	assert.Check(t, response.Status.StatusCode.StatusCode == nil)
 	assert.Check(t, response.Status.StatusMessage == nil)
+	assert.Check(t, doc.Root().FindElement("./Status/StatusDetail") == nil)
+}
+
+// An error that is not a StatusError is a failure of the identity provider, and nothing of its text is sent.
+func TestWriteErrorResponseOfPlainError(t *testing.T) {
+	_, req := errorResponseRequest(t)
+
+	w := httptest.NewRecorder()
+	assert.NilError(t, req.WriteErrorResponse(w, errors.New("the database at 10.0.0.1 is down")))
+
+	doc, response := postedResponse(t, w.Body.String())
+	assert.Check(t, is.Equal(response.Status.StatusCode.Value, StatusResponder))
+	assert.Check(t, response.Status.StatusCode.StatusCode == nil)
+	assert.Check(t, is.Equal(response.Status.StatusMessage.Value, ErrServerError.StatusMessageField))
+
+	decoded, err := doc.WriteToString()
+	assert.NilError(t, err)
+	assert.Check(t, !strings.Contains(decoded, "10.0.0.1"))
+
+	assert.Check(t, is.ErrorContains(req.WriteErrorResponse(httptest.NewRecorder(), nil), "without an error"))
 }
 
 // An assertion made before the failure was found must not reach the service provider.
@@ -100,7 +121,7 @@ func TestWriteErrorResponseDropsExistingAssertion(t *testing.T) {
 	assert.NilError(t, req.MakeResponse())
 
 	w := httptest.NewRecorder()
-	assert.NilError(t, req.WriteErrorResponse(w, StatusResponder, StatusRequestDenied, ""))
+	assert.NilError(t, req.WriteErrorResponse(w, ErrServerError.WithSecondLevel(StatusRequestDenied)))
 
 	doc, response := postedResponse(t, w.Body.String())
 	assert.Check(t, is.Equal(response.Status.StatusCode.Value, StatusResponder))
@@ -118,22 +139,29 @@ func TestWriteErrorResponseRequiresValidatedACS(t *testing.T) {
 	req.Request.AssertionConsumerServiceURL = "https://attacker.example.com/acs"
 
 	w := httptest.NewRecorder()
-	err := req.WriteErrorResponse(w, StatusRequester, "", "")
+	err := req.WriteErrorResponse(w, ErrInvalidRequest)
 
 	assert.Check(t, is.ErrorContains(err, "assertion consumer service"))
 	assert.Check(t, is.Equal(w.Body.Len(), 0))
+	assert.Check(t, !req.Respondable())
 }
 
-func TestWriteErrorResponseRejectsInvalidTopLevelStatus(t *testing.T) {
+// SAMLCore §3.2.2.2 allows three top-level codes for a failure. An error with another one, which Validate
+// refuses, is never sent as it is: it would be Success, or not a status at all.
+func TestWriteErrorResponseNeverSendsInvalidTopLevelStatus(t *testing.T) {
 	for _, status := range []string{"", StatusSuccess, StatusNoPassive} {
 		t.Run(status, func(t *testing.T) {
 			_, req := errorResponseRequest(t)
 
-			w := httptest.NewRecorder()
-			err := req.WriteErrorResponse(w, status, "", "")
+			failure := &StatusError{ErrorField: "custom", TopLevelField: status, SecondLevelField: StatusNoPassive, HTTPStatusField: 400}
+			assert.Check(t, is.ErrorContains(failure.Validate(), "top-level status"))
 
-			assert.Check(t, is.ErrorContains(err, "top-level status"))
-			assert.Check(t, is.Equal(w.Body.Len(), 0))
+			w := httptest.NewRecorder()
+			assert.NilError(t, req.WriteErrorResponse(w, failure))
+
+			_, response := postedResponse(t, w.Body.String())
+			assert.Check(t, is.Equal(response.Status.StatusCode.Value, StatusResponder))
+			assert.Check(t, response.Status.StatusCode.StatusCode == nil)
 		})
 	}
 }

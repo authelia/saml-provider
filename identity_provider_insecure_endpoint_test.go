@@ -156,7 +156,7 @@ func TestIDPRefusesInsecureACS(t *testing.T) {
 			assert.Check(t, errors.Is(err, ErrInsecureEndpoint), "error: %v", err)
 			assert.Check(t, req.ACSEndpoint == nil, "an insecure endpoint must not be selected")
 			// A SAML error response goes to the ACS, so none can be sent either.
-			assert.Check(t, req.WriteErrorResponse(httptest.NewRecorder(), StatusResponder, "", "") != nil)
+			assert.Check(t, req.WriteErrorResponse(httptest.NewRecorder(), ErrServerError) != nil)
 		})
 	}
 }
@@ -321,7 +321,7 @@ func TestIDPPostBindingRefusesInsecureACS(t *testing.T) {
 	assert.Check(t, req.ResponseEl == nil, "no response must be made for an insecure endpoint")
 
 	w := httptest.NewRecorder()
-	err = req.WriteErrorResponse(w, StatusResponder, "", "")
+	err = req.WriteErrorResponse(w, ErrServerError)
 	assert.Check(t, errors.Is(err, ErrInsecureEndpoint), "error: %v", err)
 	assert.Check(t, is.Equal(w.Body.Len(), 0))
 }

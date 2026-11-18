@@ -203,7 +203,7 @@ func TestValidateRequiresSignatureWhenDeclaredBySP(t *testing.T) {
 	u, err := request.Redirect("relay", &unsigned)
 	assert.NilError(t, err)
 
-	assert.Check(t, is.ErrorContains(validateURL(t, test, u.String()), "not signed"))
+	assert.Check(t, is.Contains(errorText(validateURL(t, test, u.String())), "not signed"))
 }
 
 // The descriptor in use is selected by the unauthenticated request, so it must not be able to choose
@@ -227,7 +227,7 @@ func TestValidateRequiresSignatureWhenDeclaredByAnyDescriptor(t *testing.T) {
 	u, err := request.Redirect("", &unsigned)
 	assert.NilError(t, err)
 
-	assert.Check(t, is.ErrorContains(validateURL(t, test, u.String()), "not signed"))
+	assert.Check(t, is.Contains(errorText(validateURL(t, test, u.String())), "not signed"))
 }
 
 func TestValidateRequiresSignatureWhenWantedByIDP(t *testing.T) {
@@ -240,7 +240,7 @@ func TestValidateRequiresSignatureWhenWantedByIDP(t *testing.T) {
 	u, err := request.Redirect("", &test.SP)
 	assert.NilError(t, err)
 
-	assert.Check(t, is.ErrorContains(validateURL(t, test, u.String()), "not signed"))
+	assert.Check(t, is.Contains(errorText(validateURL(t, test, u.String())), "not signed"))
 }
 
 func TestValidateAcceptsSignedRequestWhenWantedByIDP(t *testing.T) {
@@ -371,7 +371,7 @@ func TestValidateRequiresSignatureOnPostWhenDeclaredBySP(t *testing.T) {
 	body, err := doc.WriteToBytes()
 	assert.NilError(t, err)
 
-	assert.Check(t, is.ErrorContains(validatePost(t, test, body), "not signed"))
+	assert.Check(t, is.Contains(errorText(validatePost(t, test, body)), "not signed"))
 }
 
 // SAMLBind §3.5.5.2 requires a signed message to carry the Destination.
@@ -379,7 +379,7 @@ func TestValidateRequiresDestinationOnSignedRequest(t *testing.T) {
 	test := signatureTestIDP(t)
 	body := signedPostBody(t, &test.SP, func(r *AuthnRequest) { r.Destination = "" })
 
-	assert.Check(t, is.ErrorContains(validatePost(t, test, body), "destination"))
+	assert.Check(t, is.Contains(errorText(validatePost(t, test, body)), "destination"))
 }
 
 // The login form carries the signed query, because the signature doesn't survive as a POST.

@@ -263,16 +263,24 @@ func (req *IdpLogoutRequest) matchesSessionNameIDValue(r *http.Request, session 
 // LogoutResponse for a logout that can't be found or has expired gets a StatusBadRequest response.
 //
 // A request that is invalid, can't be verified, or comes from a service provider with no
-// SingleLogoutService for a supported binding gets a StatusBadRequest response. A verified request
-// from a service provider with such an endpoint that is expired, for another destination or of
-// another version is answered there with an error status, and its session is not ended. Nor is it when
-// the request is a replay of one that was already verified, on any binding, which is answered with
+// SingleLogoutService for a supported binding gets the HTTP status of the error, which is StatusBadRequest,
+// or StatusInternalServerError if the service provider could not be looked up, from the HTTPErrorHandler if
+// there is one. A verified request from a service provider with such an endpoint that is expired, for another
+// destination or of another version is answered there with an error status, and its session is not ended. Nor
+// is it when the request is a replay of one that was already verified, on any binding, which is answered with
 // Requester and RequestDenied, or when the ReplayStore fails, which is answered with Responder.
+// IdpLogoutRequest.Respondable describes the rule.
+//
+// Each LogoutRequest that is answered is reported to the Observer as one EventLogout, when it is answered:
+// OutcomeFailure if the session was not ended, OutcomeWarning if the answer is a partial logout, and
+// OutcomeSuccess otherwise. Each participant of a propagated logout is reported as an EventLogoutPropagation.
 func (idp *IdentityProvider) ServeSLO(w http.ResponseWriter, r *http.Request) {
 	isResponse, err := isLogoutResponse(r)
 	if err != nil {
-		idp.logger().Printf("failed to parse logout message: %s", err)
-		http.Error(w, http.StatusText(http.StatusBadRequest), http.StatusBadRequest)
+		e := ErrMalformedRequest.WithDebugf("failed to parse logout message: %s", err).WithWrap(err)
+
+		idp.observe(r, requestState{}.event(EventLogout, e))
+		idp.writeHTTPError(w, r, e)
 
 		return
 	}
@@ -285,50 +293,159 @@ func (idp *IdentityProvider) ServeSLO(w http.ResponseWriter, r *http.Request) {
 
 	req, err := NewIdpLogoutRequest(idp, r)
 	if err != nil {
-		idp.logger().Printf("failed to parse logout request: %s", err)
-		http.Error(w, http.StatusText(http.StatusBadRequest), http.StatusBadRequest)
+		idp.observe(r, requestState{}.event(EventLogout, err))
+		idp.writeHTTPError(w, r, err)
 
 		return
 	}
 
 	if err := req.Validate(); err != nil {
-		idp.logger().Printf("failed to validate logout request: %s", err)
-
-		if status, ok := RequestStatus(err); ok {
-			idp.writeLogoutResponse(w, req, status)
-
-			return
-		}
-
-		http.Error(w, http.StatusText(http.StatusBadRequest), http.StatusBadRequest)
+		req.fail(w, err)
 
 		return
 	}
 
-	status := Status{StatusCode: StatusCode{Value: StatusSuccess}}
+	provider, ok := idp.SessionProvider.(LogoutSessionProvider)
+	if !ok {
+		req.fail(w, ErrServerError.WithDebug("cannot terminate session: the session provider does not implement LogoutSessionProvider"))
 
-	if provider, ok := idp.SessionProvider.(LogoutSessionProvider); !ok {
-		idp.logger().Printf("cannot terminate session: the session provider does not implement LogoutSessionProvider")
+		return
+	}
 
-		status.StatusCode.Value = StatusResponder
-	} else if sessions, err := req.logoutSessions(r, provider); err != nil {
-		idp.logger().Printf("cannot find sessions to terminate: %s", err)
+	sessions, err := req.logoutSessions(r, provider)
+	if err != nil {
+		req.fail(w, ErrServerError.WithDebugf("cannot find sessions to terminate: %s", err).WithWrap(err))
 
-		status.StatusCode.Value = StatusResponder
-	} else if _, _, _, err := idp.logoutProviders(); err != nil || len(sessions) == 0 {
+		return
+	}
+
+	if _, _, _, err := idp.logoutProviders(); err != nil || len(sessions) == 0 {
 		// Without the interfaces of a propagated logout, or without a session to propagate, the sessions
 		// are ended and the requester is answered at once.
-		status = idp.terminateSessions(w, r, provider, sessions)
-	} else if err := idp.beginLogout(w, r, sessions, req.ServiceProviderMetadata.EntityID, "", req.logoutOrigin()); err != nil {
-		idp.logger().Printf("cannot begin logout: %s", err)
+		req.answer(w, idp.terminateSessions(w, r, provider, sessions, req.state()), nil)
 
-		// The sessions are still ended, but the other participants were not told, so a Success is partial.
-		status = withPartialLogout(idp.terminateSessions(w, r, provider, sessions))
-	} else {
 		return
 	}
 
-	idp.writeLogoutResponse(w, req, status)
+	if err := idp.beginLogout(w, r, sessions, req.ServiceProviderMetadata.EntityID, "", req.logoutOrigin()); err != nil {
+		// The sessions are still ended, but the other participants were not told, so a Success is partial.
+		req.answer(w, withPartialLogout(idp.terminateSessions(w, r, provider, sessions, req.state())),
+			fmt.Errorf("cannot begin logout: %w", err))
+	}
+}
+
+// Respondable reports whether a failure of the request may be answered with a LogoutResponse that says what
+// failed. On the front channel that is once SLOEndpoint is set: the service provider was found, the signature
+// of the request verified, and the endpoint for the response chosen from the metadata of the service provider.
+// Until then the request must not be answered with a SAML response, but with an HTTP error, which has the
+// HTTPStatus of the error, as IdpAuthnRequest.Respondable describes.
+//
+// On the SOAP binding the response goes back on the connection of the request, and SAMLBind §3.2.3.3 requires
+// a SAML processing error to be answered with a status, so every request is answered. It is respondable once its
+// signature is verified. Until then the answer has the status codes of the error and nothing else.
+func (req *IdpLogoutRequest) Respondable() bool {
+	if req.binding == SOAPBinding {
+		return req.verifiedEl != nil
+	}
+
+	return req.SLOEndpoint != nil
+}
+
+// state returns what is established of the request.
+func (req *IdpLogoutRequest) state() requestState {
+	state := requestState{respondable: req.Respondable(), verified: req.verifiedEl != nil}
+
+	if isValidAuthnRequestID(req.Request.ID) {
+		state.requestID = req.Request.ID
+	}
+
+	switch {
+	case req.ServiceProviderMetadata != nil:
+		state.serviceProvider = req.ServiceProviderMetadata.EntityID
+	case req.Request.Issuer != nil:
+		state.serviceProvider = req.Request.Issuer.Value
+	}
+
+	return state
+}
+
+// fail answers a request that failed with err and reports the failure as the event of the operation. On the
+// front channel a request that is not Respondable gets an HTTP error, and any other a LogoutResponse with the
+// status of the error.
+func (req *IdpLogoutRequest) fail(w http.ResponseWriter, err error) {
+	idp, state := req.IDP, req.state()
+
+	if req.binding != SOAPBinding && !state.respondable {
+		idp.observe(req.HTTPRequest, state.event(EventLogout, err))
+		idp.writeHTTPError(w, req.HTTPRequest, err)
+
+		return
+	}
+
+	if writeErr := req.writeResponse(w, idp.status(req.HTTPRequest, err, state)); writeErr != nil {
+		err = ErrServerError.WithDebugf("failed to write logout response: %s", writeErr).WithWrap(errors.Join(writeErr, err))
+	}
+
+	idp.observe(req.HTTPRequest, state.event(EventLogout, err))
+}
+
+// answer writes the LogoutResponse with the status of a request that was acted on, and reports the outcome as
+// the event of the operation. A status that is not a success is a failure, and a success with a second-level
+// status, which is PartialLogout, is a warning: it is a result and not an error, so it is never a StatusError
+// that is returned. The reason says why the outcome is not a success, if that is known.
+func (req *IdpLogoutRequest) answer(w http.ResponseWriter, status Status, reason error) {
+	event := logoutStatusEvent(req.state(), status, reason)
+
+	if err := req.writeResponse(w, status); err != nil {
+		event.Outcome = OutcomeFailure
+		event.Err = ErrServerError.WithDebugf("failed to write logout response: %s", err).WithWrap(err)
+	}
+
+	req.IDP.observe(req.HTTPRequest, event)
+}
+
+// writeResponse is WriteResponse, which completes the HTTP request with a StatusInternalServerError, or a Server
+// fault on the SOAP binding, if it fails.
+func (req *IdpLogoutRequest) writeResponse(w http.ResponseWriter, status Status) error {
+	err := req.WriteResponse(w, status)
+
+	switch {
+	case err == nil:
+	case req.binding == SOAPBinding:
+		writeSOAPFault(w, &soapFault{Code: "Server", String: soapFaultStringProcessing})
+	default:
+		req.IDP.writeHTTPError(w, req.HTTPRequest, ErrServerError.WithDebugError(err))
+	}
+
+	return err
+}
+
+// logoutStatusEvent returns the EventLogout for a logout that ended with status: a failure if it is not a
+// success, a warning if it is a success with a second-level status, and otherwise a success. The reason, or
+// else what the status says, is the error of an event that is not a success.
+func logoutStatusEvent(state requestState, status Status, reason error) Event {
+	event := state.event(EventLogout, nil)
+
+	switch {
+	case status.StatusCode.Value != StatusSuccess:
+		if reason == nil {
+			reason = ErrServerError.WithDebug("the session was not ended")
+		}
+
+		event.Outcome = OutcomeFailure
+	case status.StatusCode.StatusCode != nil:
+		if reason == nil {
+			reason = ErrPartialLogout
+		}
+
+		event.Outcome = OutcomeWarning
+	default:
+		return event
+	}
+
+	event.Err = ToStatusError(reason)
+
+	return event
 }
 
 // logoutSessions returns the sessions that the request names, from provider. A request whose EncryptedID couldn't
@@ -350,7 +467,7 @@ func (req *IdpLogoutRequest) logoutSessions(r *http.Request, provider LogoutSess
 // processes encrypted data. The EncryptedID must be encrypted with algorithms that the identity provider allows.
 //
 // It returns an error for a request with no identifier, or with both. A request whose EncryptedID can't be
-// decrypted is not an error: it is marked Unidentified and given a random NameID, and the reason is only logged.
+// decrypted is not an error: it is marked Unidentified and given a random NameID, and the reason is only reported to the Observer.
 func (req *IdpLogoutRequest) identifyPrincipal() error {
 	var (
 		encryptedIDEl *etree.Element
@@ -384,7 +501,8 @@ func (req *IdpLogoutRequest) identifyPrincipal() error {
 	}
 
 	if err != nil {
-		req.IDP.logger().Printf("cannot decrypt the EncryptedID of the logout request from %s: %s", req.Request.Issuer.Value, err)
+		req.IDP.observe(req.HTTPRequest, req.state().warning(EventPrincipalUnidentified,
+			ErrUnknownPrincipal.WithDebugf("cannot decrypt the EncryptedID of the logout request: %s", err).WithWrap(err)))
 
 		// The stand-in is 256 bits from RandReader, so it is not the identifier of anyone.
 		req.Unidentified = true
@@ -404,14 +522,6 @@ func withPartialLogout(status Status) Status {
 	}
 
 	return status
-}
-
-// writeLogoutResponse answers req with status, or with a StatusInternalServerError if that fails.
-func (idp *IdentityProvider) writeLogoutResponse(w http.ResponseWriter, req *IdpLogoutRequest, status Status) {
-	if err := req.WriteResponse(w, status); err != nil {
-		idp.logger().Printf("failed to write logout response: %s", err)
-		http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
-	}
 }
 
 // logoutOrigin returns the LogoutOrigin which a propagated logout answers the request with. It is only for a
@@ -455,19 +565,27 @@ func isLogoutResponse(r *http.Request) (bool, error) {
 // request, whose ID is unique and is no longer outstanding once the state is saved, which the LogoutStateProvider
 // does atomically, so a replayed response is uncorrelated wherever it arrives. A response over SOAP is read from the
 // connection that the identity provider opened, and can't be presented again (SAMLBind §3.2.4).
+//
+// A response that is refused is answered with an HTTP error, as there is nobody to send a SAML response to: it
+// is itself a response. Each response is reported to the Observer as one EventLogoutPropagation, with the
+// participant as its ServiceProvider once the response is correlated with it.
 func (idp *IdentityProvider) serveLogoutResponse(w http.ResponseWriter, r *http.Request) {
+	refuse := func(err *StatusError) {
+		idp.observe(r, requestState{}.event(EventLogoutPropagation, err))
+		idp.writeHTTPError(w, r, err)
+	}
+
 	provider, ok := idp.SessionProvider.(LogoutStateProvider)
 	if !ok {
-		idp.logger().Printf("cannot handle logout response: the session provider does not implement LogoutStateProvider")
-		http.Error(w, http.StatusText(http.StatusBadRequest), http.StatusBadRequest)
+		refuse(ErrNotImplemented.WithHTTPStatus(http.StatusBadRequest).
+			WithDebug("cannot handle logout response: the session provider does not implement LogoutStateProvider"))
 
 		return
 	}
 
 	resp, err := NewIdpLogoutResponse(idp, r)
 	if err != nil {
-		idp.logger().Printf("failed to parse logout response: %s", err)
-		http.Error(w, http.StatusText(http.StatusBadRequest), http.StatusBadRequest)
+		refuse(ErrMalformedRequest.WithDebugf("failed to parse logout response: %s", err).WithWrap(err))
 
 		return
 	}
@@ -476,53 +594,52 @@ func (idp *IdentityProvider) serveLogoutResponse(w http.ResponseWriter, r *http.
 
 	switch {
 	case errors.Is(err, os.ErrNotExist):
-		idp.logger().Printf("cannot handle logout response: the logout is unknown")
-		http.Error(w, http.StatusText(http.StatusBadRequest), http.StatusBadRequest)
+		refuse(ErrLogoutNotFound.WithDebug("cannot handle logout response: the logout is unknown"))
 
 		return
 	case err != nil:
-		idp.logger().Printf("cannot load logout state: %s", err)
-		http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
+		refuse(ErrServerError.WithDebugf("cannot load logout state: %s", err).WithWrap(err))
 
 		return
 	case !resp.Now.Before(state.ExpireTime):
-		idp.logger().Printf("cannot handle logout response: the logout expired at %s", state.ExpireTime)
-		http.Error(w, http.StatusText(http.StatusBadRequest), http.StatusBadRequest)
+		refuse(ErrLogoutNotFound.WithDebugf("cannot handle logout response: the logout expired at %s", state.ExpireTime))
 
 		return
 	case state.Current < 0 || state.Current >= len(state.Participants):
-		idp.logger().Printf("cannot handle logout response: the logout has no outstanding request")
-		http.Error(w, http.StatusText(http.StatusBadRequest), http.StatusBadRequest)
+		refuse(ErrLogoutNotFound.WithDebug("cannot handle logout response: the logout has no outstanding request"))
 
 		return
 	}
 
+	participant := &state.Participants[state.Current]
+
 	if err = resp.Validate(state); errors.Is(err, ErrLogoutResponseUncorrelated) {
 		// A stale or replayed response, such as one from an earlier participant, says nothing of the current one,
 		// which is left outstanding.
-		idp.logger().Printf("cannot handle logout response: %s", err)
-		http.Error(w, http.StatusText(http.StatusBadRequest), http.StatusBadRequest)
+		refuse(statusErrorOr(err, ErrLogoutResponseUncorrelated))
 
 		return
 	} else if err != nil {
-		idp.logger().Printf("failed to validate logout response: %s", err)
-
-		participant := &state.Participants[state.Current]
 		participant.Outcome, participant.Reason = LogoutOutcomeFailed, err.Error()
+
+		idp.observeLogoutParticipant(r, state, participant, false, ErrInvalidResponse.WithDebugf("failed to validate logout response: %s", err).WithWrap(err))
 	} else {
 		resp.outcome(state)
+
+		idp.observeLogoutParticipant(r, state, participant, true, resp.statusError())
 	}
 
 	state.PendingRequestID = ""
 
 	if err = idp.continueLogout(w, r, provider, state); err != nil {
-		idp.writeContinueLogoutError(w, err)
+		idp.writeContinueLogoutError(w, r, state, err)
 	}
 }
 
 // terminateSessions ends each of the sessions, and returns the status of the LogoutResponse. A failure
-// of one session doesn't stop the others from being ended.
-func (idp *IdentityProvider) terminateSessions(w http.ResponseWriter, r *http.Request, provider LogoutSessionProvider, sessions []*Session) Status {
+// of one session doesn't stop the others from being ended, and is reported as an EventSessionTermination for the
+// request in state.
+func (idp *IdentityProvider) terminateSessions(w http.ResponseWriter, r *http.Request, provider LogoutSessionProvider, sessions []*Session, state requestState) Status {
 	var failed, partial bool
 
 	for _, session := range sessions {
@@ -533,7 +650,7 @@ func (idp *IdentityProvider) terminateSessions(w http.ResponseWriter, r *http.Re
 		case errors.Is(err, ErrPartialLogout):
 			partial = true
 		default:
-			idp.logger().Printf("cannot terminate session: %s", err)
+			idp.observe(r, state.warning(EventSessionTermination, ErrServerError.WithDebugf("cannot terminate session: %s", err).WithWrap(err)))
 
 			failed = true
 		}
@@ -550,8 +667,18 @@ func (idp *IdentityProvider) terminateSessions(w http.ResponseWriter, r *http.Re
 }
 
 // NewIdpLogoutRequest returns a new IdpLogoutRequest for the given HTTP request to the single logout
-// service.
+// service. The error is ErrMalformedRequest, and such a request is never answered with a SAML response.
 func NewIdpLogoutRequest(idp *IdentityProvider, r *http.Request) (*IdpLogoutRequest, error) {
+	req, err := newIdpLogoutRequest(idp, r)
+	if err != nil {
+		return nil, ErrMalformedRequest.WithDebugf("failed to parse logout request: %s", err).WithWrap(err)
+	}
+
+	return req, nil
+}
+
+// newIdpLogoutRequest is NewIdpLogoutRequest with the errors of what it reads.
+func newIdpLogoutRequest(idp *IdentityProvider, r *http.Request) (*IdpLogoutRequest, error) {
 	req := &IdpLogoutRequest{
 		IDP:         idp,
 		HTTPRequest: r,
@@ -603,23 +730,26 @@ func NewIdpLogoutRequest(idp *IdentityProvider, r *http.Request) (*IdpLogoutRequ
 // Requester status with RequestDenied. A failure of the store is an error with a Responder status. Nothing
 // is recorded for a request that fails any other check, so only a registered service provider can add to
 // the store.
+//
+// The error is a StatusError, as for IdpAuthnRequest.Validate, and how it must be answered depends on whether
+// the request is Respondable.
 func (req *IdpLogoutRequest) Validate() error {
 	// This code runs before any authentication, and the cost of the XML parsing below is
 	// proportional to the size of the request.
 	if err := checkAuthnRequestSize(req.RequestBuffer); err != nil {
-		return err
+		return ErrMalformedRequest.WithDebugError(err)
 	}
 
 	if err := xrv.Validate(bytes.NewReader(req.RequestBuffer)); err != nil {
-		return err
+		return ErrMalformedRequest.WithDebugError(err)
 	}
 	//nolint:gosec // G709: the size is limited and the XML validated above, as for an AuthnRequest, into a fixed type.
 	if err := xml.Unmarshal(req.RequestBuffer, &req.Request); err != nil {
-		return err
+		return ErrMalformedRequest.WithDebugError(err)
 	}
 
 	if err := req.checkTrust(); err != nil {
-		return err
+		return ErrMalformedRequest.WithDebugError(err)
 	}
 
 	if req.binding == SOAPBinding {
@@ -630,23 +760,23 @@ func (req *IdpLogoutRequest) Validate() error {
 
 	serviceProvider, err := req.IDP.serviceProvider(req.HTTPRequest, serviceProviderID)
 	if errors.Is(err, os.ErrNotExist) {
-		return fmt.Errorf("cannot handle request from unknown service provider %s", serviceProviderID)
+		return ErrUnknownServiceProvider.WithDebugf("cannot handle request from unknown service provider %s", serviceProviderID)
 	} else if err != nil {
-		return fmt.Errorf("cannot find service provider %s: %v", serviceProviderID, err)
+		return ErrServerError.WithDebugf("cannot find service provider %s: %v", serviceProviderID, err).WithWrap(err)
 	}
 
 	req.ServiceProviderMetadata = serviceProvider
 
 	if err := req.verifySignature(); err != nil {
-		return err
+		return statusErrorOr(err, ErrInvalidSignature)
 	}
 
 	if err := req.identifyPrincipal(); err != nil {
-		return err
+		return statusErrorOr(err, ErrRequestDenied)
 	}
 
 	if err := req.getSLOEndpoint(); err != nil {
-		return err
+		return ErrNoResponseEndpoint.WithDebugError(err)
 	}
 
 	if err := req.checkRequestStage(); err != nil {
@@ -661,11 +791,11 @@ func (req *IdpLogoutRequest) Validate() error {
 func (req *IdpLogoutRequest) validateSOAP() error {
 	doc := etree.NewDocument()
 	if err := doc.ReadFromBytes(req.RequestBuffer); err != nil {
-		return err
+		return ErrMalformedRequest.WithDebugError(err)
 	}
 
 	if doc.Root() == nil {
-		return errors.New("request has no root element")
+		return ErrMalformedRequest.WithDebug("request has no root element")
 	}
 
 	metadata, verified, err := req.IDP.verifySOAPRequester(req.HTTPRequest, doc.Root(), req.Request.Issuer.Value)
@@ -676,13 +806,13 @@ func (req *IdpLogoutRequest) validateSOAP() error {
 	req.ServiceProviderMetadata = metadata
 
 	if err = req.useVerifiedRequest(verified); err != nil {
-		return err
+		return statusErrorOr(err, ErrInvalidSignature)
 	}
 
 	req.verifiedEl = verified
 
 	if err = req.identifyPrincipal(); err != nil {
-		return err
+		return statusErrorOr(err, ErrRequestDenied)
 	}
 
 	if err := req.checkRequestStage(); err != nil {
@@ -697,7 +827,7 @@ func (req *IdpLogoutRequest) validateSOAP() error {
 // sent for a request that fails them.
 func (req *IdpLogoutRequest) checkTrust() error {
 	if !isValidAuthnRequestID(req.Request.ID) {
-		// The value is not included because this error is logged without authentication.
+		// The value is not included: it is arbitrary text of a request that is not authenticated.
 		return fmt.Errorf("invalid request ID")
 	}
 
@@ -711,20 +841,19 @@ func (req *IdpLogoutRequest) checkTrust() error {
 // checkRequestStage makes the checks on the content of the request that are reported to the service
 // provider as a SAML status. It must only run once the SLO endpoint has been resolved from metadata, or
 // on the SOAP binding the requester verified, and on the content that the signature covers. The error
-// is a *statusError.
+// is a StatusError.
 func (req *IdpLogoutRequest) checkRequestStage() error {
-	if statusErr := versionStatus(req.Request.Version); statusErr != nil {
-		return statusErr
+	if err := versionError(req.Request.Version); err != nil {
+		return err
 	}
 
 	if err := checkIssueInstant("request", req.Request.IssueInstant, req.Now, MaxIssueDelay); err != nil {
-		return &statusError{StatusRequester, StatusRequestDenied, err}
+		return ErrRequestNotCurrent.WithDebugError(err)
 	}
 
 	// SAML2Int SDP-G01 requires clock skew to be allowed for when a NotOnOrAfter is enforced.
 	if req.Request.NotOnOrAfter != nil && pastValidity(*req.Request.NotOnOrAfter, req.Now) {
-		return &statusError{StatusRequester, StatusRequestDenied,
-			fmt.Errorf("request expired at %s", *req.Request.NotOnOrAfter)}
+		return ErrRequestNotCurrent.WithDebugf("request expired at %s", *req.Request.NotOnOrAfter)
 	}
 
 	// The request must be signed, so SAMLBind §3.4.5.2 and §3.5.5.2 require the destination, and
@@ -741,8 +870,7 @@ func (req *IdpLogoutRequest) checkRequestStage() error {
 	}
 
 	if req.Request.Destination != destination {
-		return &statusError{StatusRequester, StatusRequestDenied,
-			fmt.Errorf("expected destination to be %q, not %q", destination, req.Request.Destination)}
+		return ErrDestinationMismatch.WithDebugf("expected destination to be %q, not %q", destination, req.Request.Destination)
 	}
 
 	return nil
@@ -767,21 +895,22 @@ func (req *IdpLogoutRequest) verifySignature() error {
 	}
 
 	if req.RedirectQuery == "" && signatureEl == nil {
-		return errors.New("request is not signed")
+		return ErrSignatureRequired.WithDebug("request is not signed")
 	}
 
 	certificates, err := serviceProviderSigningCertificates(req.ServiceProviderMetadata)
 	if err != nil {
-		return err
+		return ErrServerError.WithDebugError(err)
 	}
 
 	if len(certificates) == 0 {
 		return errors.New("request is signed but the service provider has no signing certificate")
 	}
 
+	// A list that can't be used is a fault of the identity provider, and not of the requester.
 	policy, err := req.IDP.signaturePolicy()
 	if err != nil {
-		return err
+		return ErrServerError.WithDebugError(err)
 	}
 
 	if req.RedirectQuery != "" {

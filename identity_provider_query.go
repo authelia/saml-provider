@@ -72,7 +72,7 @@ type AssertionStore interface {
 	// The assertion is a bearer token until then, and holds the attributes of the principal, so it must be
 	// stored as carefully as a session.
 	//
-	// An error is logged and doesn't fail the request that issued the assertion.
+	// An error is reported to the Observer and doesn't fail the request that issued the assertion.
 	SaveAssertion(r *http.Request, serviceProviderEntityID string, assertion *etree.Element, notOnOrAfter time.Time) error
 
 	// GetAssertion returns the saved assertion with that ID and the entity ID of the service provider it
@@ -184,8 +184,21 @@ func (idp *IdentityProvider) ServeAssertionIDRequest(w http.ResponseWriter, r *h
 
 // serveQuery handles a request of the assertion query and request protocol whose local name must be message, at
 // the service with the URL endpoint.
+//
+// Each request is reported to the Observer as one event of the kind of its service. A request whose sender is not
+// verified gets the status codes of its error and nothing else, as SAMLBind §3.2.3.3 has a SAML processing error
+// on the SOAP binding answered with a status, and there is nobody yet to say more to.
 func (idp *IdentityProvider) serveQuery(w http.ResponseWriter, r *http.Request, message string, endpoint url.URL) {
-	soap, ok := idp.receiveSOAPRequest(w, r)
+	kind := EventAssertionIDRequest
+
+	switch message {
+	case attributeQueryMessage:
+		kind = EventAttributeQuery
+	case authnQueryMessage:
+		kind = EventAuthnQuery
+	}
+
+	soap, ok := idp.receiveSOAPRequest(w, r, kind)
 	if !ok {
 		return
 	}
@@ -207,38 +220,55 @@ func (idp *IdentityProvider) serveQuery(w http.ResponseWriter, r *http.Request, 
 	if soap.Message.Tag != message || soap.Message.NamespaceURI() != samlProtocolNS {
 		// The response answers it only if the ID is valid.
 		req.id = soap.Message.SelectAttrValue("ID", "")
-		err = &statusError{StatusRequester, StatusRequestUnsupported, fmt.Errorf("the message is not an %s", message)}
+		err = ErrRequestUnsupported.WithDebugf("the message is not an %s", message)
 	} else {
 		assertions, err = req.answer()
 	}
 
-	status := Status{StatusCode: StatusCode{Value: StatusSuccess}}
+	status, state := Status{StatusCode: StatusCode{Value: StatusSuccess}}, req.state()
 
 	if err != nil {
-		idp.logger().Printf("failed to handle SOAP %s: %s", message, err)
-
-		// An error that carries no status is not the fault of the requester, and its text is never sent.
-		if status, ok = RequestStatus(err); !ok {
-			status = Status{StatusCode: StatusCode{Value: StatusResponder}}
-		}
+		// An error that is not a StatusError is not the fault of the requester, and its text is never sent.
+		status = idp.status(r, err, state)
 	}
 
-	if err = req.writeResponse(w, status, assertions); err != nil {
-		idp.logger().Printf("failed to write SOAP %s response: %s", message, err)
+	if writeErr := req.writeResponse(w, status, assertions); writeErr != nil {
+		err = ErrServerError.WithDebugf("failed to write SOAP %s response: %s", message, writeErr).WithWrap(writeErr)
+
 		writeSOAPFault(w, &soapFault{Code: "Server", String: soapFaultStringProcessing})
 	}
+
+	idp.observe(r, state.event(kind, err))
+}
+
+// state returns what is established of the request. The requester is established once its signature is verified.
+func (req *IdpQueryRequest) state() requestState {
+	header := req.header()
+
+	state := requestState{verified: req.verified != nil, respondable: req.verified != nil, requestID: req.id}
+
+	if isValidAuthnRequestID(header.ID) {
+		state.requestID = header.ID
+	} else if !isValidAuthnRequestID(state.requestID) {
+		state.requestID = ""
+	}
+
+	switch {
+	case req.ServiceProviderMetadata != nil:
+		state.serviceProvider = req.ServiceProviderMetadata.EntityID
+	case header.Issuer != nil:
+		state.serviceProvider = header.Issuer.Value
+	}
+
+	return state
 }
 
 // answer validates the request and returns the assertions that answer it, each signed and possibly encrypted,
-// which may be none. An error that carries no status means Responder.
+// which may be none. An error that is not a StatusError means Responder.
 func (req *IdpQueryRequest) answer() ([]*etree.Element, error) {
 	if err := req.validate(); err != nil {
-		if _, ok := RequestStatus(err); ok {
-			return nil, err
-		}
-
 		// Anything that failed before the request stage is a request that can't be trusted.
-		return nil, &statusError{StatusRequester, StatusRequestDenied, err}
+		return nil, statusErrorOr(err, ErrMalformedRequest)
 	}
 
 	switch req.message {
@@ -253,7 +283,7 @@ func (req *IdpQueryRequest) answer() ([]*etree.Element, error) {
 
 // validate checks that the request is valid and signed by its service provider, and assigns
 // ServiceProviderMetadata and the request field from the content that the signature covers. An error that is
-// not a *statusError happened before the requester was verified.
+// not a StatusError is of a request that could not be read, which is ErrMalformedRequest to the caller.
 func (req *IdpQueryRequest) validate() error {
 	// This code runs before any authentication. The size of the request is limited by soapMaxMessageSize.
 	if err := xrv.Validate(bytes.NewReader(req.RequestBuffer)); err != nil {
@@ -311,7 +341,7 @@ func (req *IdpQueryRequest) validate() error {
 // checkReplay consumes the ID of the request in the ReplayStore of the identity provider (SAMLSec §6.1.2). It is
 // the last check of validate, so the request is verified, and only a registered service provider can add to the
 // store. The ID is recorded for the kind of the message until the request would be refused for its age, which is
-// MaxIssueDelay and MaxClockSkew after its IssueInstant, and MaxClockSkew longer. The error is a *statusError: Requester with
+// MaxIssueDelay and MaxClockSkew after its IssueInstant, and MaxClockSkew longer. The error is a StatusError: Requester with
 // RequestDenied for a replay, and Responder if the store failed.
 func (req *IdpQueryRequest) checkReplay() error {
 	header := req.header()
@@ -388,7 +418,7 @@ func (req *IdpQueryRequest) checkTrust() error {
 	header := req.header()
 
 	if !isValidAuthnRequestID(header.ID) {
-		// The value is not included because this error is logged without authentication.
+		// The value is not included: it is arbitrary text of a request that is not authenticated.
 		return errors.New("invalid request ID")
 	}
 
@@ -401,51 +431,48 @@ func (req *IdpQueryRequest) checkTrust() error {
 
 // checkRequestStage makes the checks on the content of the request that are reported to the service provider
 // with a status of their own. It must only run once the requester is verified, on the content that the
-// signature covers. The error is a *statusError.
+// signature covers. The error is a StatusError.
 func (req *IdpQueryRequest) checkRequestStage() error {
 	header := req.header()
 
-	if statusErr := versionStatus(header.Version); statusErr != nil {
-		return statusErr
+	if err := versionError(header.Version); err != nil {
+		return err
 	}
 
 	if err := checkIssueInstant("request", header.IssueInstant, req.Now, MaxIssueDelay); err != nil {
-		return &statusError{StatusRequester, StatusRequestDenied, err}
+		return ErrRequestNotCurrent.WithDebugError(err)
 	}
 
 	// SAMLBind §3.2 doesn't require a Destination on SOAP, but SAMLCore §3.2.1 requires one that is present to
 	// be the location the message was received at.
 	if header.Destination != "" && header.Destination != req.endpoint {
-		return &statusError{StatusRequester, StatusRequestDenied,
-			fmt.Errorf("expected destination to be %q, not %q", req.endpoint, header.Destination)}
+		return ErrDestinationMismatch.WithDebugf("expected destination to be %q, not %q", req.endpoint, header.Destination)
 	}
 
 	return nil
 }
 
 // subjectNameID returns a copy of the NameID that the Subject of a query names the principal with, which the
-// assertions in answer to it must carry unchanged (SAMLCore §3.3.4). The error is a *statusError, or means
+// assertions in answer to it must carry unchanged (SAMLCore §3.3.4). The error is a StatusError, or means
 // Responder.
 func (req *IdpQueryRequest) subjectNameID(subject *Subject) (*NameID, error) {
 	// SAMLCore §3.3.2.1 requires the Subject.
 	if subject == nil {
-		return nil, &statusError{StatusRequester, "", errors.New("the query has no Subject")}
+		return nil, ErrInvalidRequest.WithDebug("the query has no Subject")
 	}
 
 	if identifier := unsupportedSubjectIdentifier(req.verified); identifier != "" {
-		return nil, &statusError{StatusRequester, StatusRequestUnsupported,
-			fmt.Errorf("the Subject of the query has a %s, which is not supported", identifier)}
+		return nil, ErrRequestUnsupported.WithDebugf("the Subject of the query has a %s, which is not supported", identifier)
 	}
 
 	// SAMLCore §3.3.4 requires the Subject of the assertion to be confirmable in a manner that the query
 	// lists, and the assertions made here have no SubjectConfirmation at all.
 	if len(subject.SubjectConfirmations) != 0 {
-		return nil, &statusError{StatusRequester, StatusRequestUnsupported,
-			errors.New("the Subject of the query has a SubjectConfirmation, which is not supported")}
+		return nil, ErrRequestUnsupported.WithDebug("the Subject of the query has a SubjectConfirmation, which is not supported")
 	}
 
 	if subject.NameID == nil || subject.NameID.Value == "" {
-		return nil, &statusError{StatusRequester, StatusUnknownPrincipal, errors.New("the Subject of the query has no NameID")}
+		return nil, ErrUnknownPrincipal.WithDebug("the Subject of the query has no NameID")
 	}
 
 	nameID := *subject.NameID
@@ -459,8 +486,7 @@ func (req *IdpQueryRequest) subjectNameID(subject *Subject) (*NameID, error) {
 
 		switch {
 		case errors.Is(err, ErrInvalidNameIDPolicy):
-			return nil, &statusError{StatusRequester, StatusRequestDenied,
-				errors.New("the SPNameQualifier of the NameID is not the service provider or an affiliation it is a member of")}
+			return nil, ErrRequestDenied.WithDebugf("the SPNameQualifier of the NameID is not the service provider or an affiliation it is a member of: %s", err)
 		case err != nil:
 			return nil, err
 		}
@@ -493,8 +519,7 @@ func unsupportedSubjectIdentifier(query *etree.Element) string {
 func (req *IdpQueryRequest) answerAttributeQuery() ([]*etree.Element, error) {
 	provider, ok := req.IDP.SessionProvider.(QuerySessionProvider)
 	if !ok {
-		return nil, &statusError{StatusResponder, StatusRequestUnsupported,
-			errors.New("the session provider does not implement QuerySessionProvider")}
+		return nil, ErrNotImplemented.WithDebug("the session provider does not implement QuerySessionProvider")
 	}
 
 	query := req.AttributeQuery
@@ -523,7 +548,7 @@ func (req *IdpQueryRequest) answerAttributeQuery() ([]*etree.Element, error) {
 	// A query is never answered with more than single sign-on states without an AttributeConsumingServiceIndex.
 	ceiling := defaultAttributeConsumingService(req.spSSODescriptor().AttributeConsumingServices)
 
-	candidates, err := req.IDP.principalAttributes(req.HTTPRequest, req.ServiceProviderMetadata, ceiling, session)
+	candidates, err := req.IDP.principalAttributes(req.HTTPRequest, req.state(), req.ServiceProviderMetadata, ceiling, session)
 	if err != nil {
 		return nil, fmt.Errorf("cannot collect attributes: %w", err)
 	}
@@ -560,13 +585,13 @@ func (req *IdpQueryRequest) answerAttributeQuery() ([]*etree.Element, error) {
 func checkQueriedAttributes(queried []Attribute) error {
 	for i, attribute := range queried {
 		if attribute.Name == "" {
-			return &statusError{StatusRequester, StatusInvalidAttrNameOrValue, errors.New("the query lists an attribute with no Name")}
+			return ErrInvalidAttribute.WithDebug("the query lists an attribute with no Name")
 		}
 
 		if slices.ContainsFunc(queried[:i], func(other Attribute) bool {
 			return other.Name == attribute.Name && cmpAttrNameFormat(other.NameFormat) == cmpAttrNameFormat(attribute.NameFormat)
 		}) {
-			return &statusError{StatusRequester, StatusInvalidAttrNameOrValue, errors.New("the query lists an attribute twice")}
+			return ErrInvalidAttribute.WithDebug("the query lists an attribute twice")
 		}
 	}
 
@@ -607,8 +632,7 @@ func narrowToQueriedAttributes(queried, attributes []Attribute) []Attribute {
 func (req *IdpQueryRequest) answerAuthnQuery() ([]*etree.Element, error) {
 	provider, ok := req.IDP.SessionProvider.(QuerySessionProvider)
 	if !ok {
-		return nil, &statusError{StatusResponder, StatusRequestUnsupported,
-			errors.New("the session provider does not implement QuerySessionProvider")}
+		return nil, ErrNotImplemented.WithDebug("the session provider does not implement QuerySessionProvider")
 	}
 
 	query := req.AuthnQuery
@@ -675,7 +699,7 @@ func sessionSubjectLocality(session *Session) *SubjectLocality {
 func (req *IdpQueryRequest) answerAssertionIDRequest() ([]*etree.Element, error) {
 	store := req.IDP.AssertionStore
 	if store == nil {
-		return nil, &statusError{StatusResponder, StatusRequestUnsupported, errors.New("the identity provider has no AssertionStore")}
+		return nil, ErrNotImplemented.WithDebug("the identity provider has no AssertionStore")
 	}
 
 	refs := req.AssertionIDRequest.AssertionIDRefs
@@ -683,10 +707,9 @@ func (req *IdpQueryRequest) answerAssertionIDRequest() ([]*etree.Element, error)
 	switch {
 	case len(refs) == 0:
 		// SAMLCore §3.3.1 requires at least one.
-		return nil, &statusError{StatusRequester, "", errors.New("the request has no AssertionIDRef")}
+		return nil, ErrInvalidRequest.WithDebug("the request has no AssertionIDRef")
 	case len(refs) > maxAssertionIDRefs:
-		return nil, &statusError{StatusResponder, StatusTooManyResponses,
-			fmt.Errorf("the request has more than %d AssertionIDRef elements", maxAssertionIDRefs)}
+		return nil, ErrTooManyResponses.WithDebugf("the request has more than %d AssertionIDRef elements", maxAssertionIDRefs)
 	}
 
 	var (
@@ -752,6 +775,7 @@ func (req *IdpQueryRequest) authnRequest() *IdpAuthnRequest {
 		ServiceProviderMetadata: req.ServiceProviderMetadata,
 		SPSSODescriptor:         req.spSSODescriptor(),
 		Now:                     req.Now,
+		serviceProviderChosen:   req.verified != nil,
 	}
 }
 
@@ -846,7 +870,7 @@ func (req *IdpQueryRequest) writeResponse(w http.ResponseWriter, status Status, 
 }
 
 // saveAssertion saves the signed assertion of req in the AssertionStore of the identity provider, if it has
-// one. A failure is logged, and doesn't stop the assertion being issued.
+// one. A failure is reported as an EventStore, and doesn't stop the assertion being issued.
 func (req *IdpAuthnRequest) saveAssertion(signedAssertionEl *etree.Element) {
 	if req.IDP == nil || req.IDP.AssertionStore == nil || req.ServiceProviderMetadata == nil {
 		return
@@ -859,7 +883,7 @@ func (req *IdpAuthnRequest) saveAssertion(signedAssertionEl *etree.Element) {
 
 	err := req.IDP.AssertionStore.SaveAssertion(req.HTTPRequest, req.ServiceProviderMetadata.EntityID, signedAssertionEl.Copy(), notOnOrAfter)
 	if err != nil {
-		req.IDP.logger().Printf("failed to save assertion: %s", err)
+		req.warn(EventStore, ErrServerError.WithDebugf("failed to save assertion: %s", err).WithWrap(err))
 	}
 }
 

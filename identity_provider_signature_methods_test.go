@@ -172,11 +172,12 @@ var envelopedSignaturePaths = map[string]func(t *testing.T, configure func(*Iden
 
 		_, _, err := test.IDP.verifySOAPRequester(soapLogoutPost(nil), el, test.SP.MetadataURL.String())
 		if err != nil {
-			var statusErr *statusError
+			var statusErr *StatusError
 
 			assert.Assert(t, errors.As(err, &statusErr))
-			assert.Check(t, is.Equal(statusErr.TopLevel, StatusRequester))
-			assert.Check(t, is.Equal(statusErr.SecondLevel, StatusRequestDenied))
+			assert.Check(t, errors.Is(err, ErrInvalidSignature), "%v", err)
+			assert.Check(t, is.Equal(statusErr.TopLevelField, StatusRequester))
+			assert.Check(t, is.Equal(statusErr.SecondLevelField, StatusRequestDenied))
 		}
 
 		return err
@@ -241,7 +242,7 @@ func TestEnvelopedSignatureMethods(t *testing.T) {
 			t.Run(path+"/"+tc.name, func(t *testing.T) {
 				err := verify(t, func(*IdentityProvider) {}, tc.signature, tc.digest)
 				if tc.sha1 {
-					assert.Check(t, is.ErrorContains(err, "is not allowed"))
+					assert.Check(t, is.Contains(errorText(err), "is not allowed"))
 					assert.Check(t, is.ErrorContains(err, "signature"))
 				} else {
 					assert.Check(t, err)
@@ -257,12 +258,12 @@ func TestEnvelopedSignatureMethods(t *testing.T) {
 			err := verify(t, func(idp *IdentityProvider) {
 				idp.SignatureMethods = []string{dsig.RSASHA512SignatureMethod}
 			}, dsig.RSASHA256SignatureMethod, dsig.SHA256DigestMethod)
-			assert.Check(t, is.ErrorContains(err, "is not allowed"))
+			assert.Check(t, is.Contains(errorText(err), "is not allowed"))
 
 			err = verify(t, func(idp *IdentityProvider) {
 				idp.DigestMethods = []string{dsig.SHA512DigestMethod}
 			}, dsig.RSASHA256SignatureMethod, dsig.SHA256DigestMethod)
-			assert.Check(t, is.ErrorContains(err, "is not allowed"))
+			assert.Check(t, is.Contains(errorText(err), "is not allowed"))
 		})
 	}
 }
@@ -290,7 +291,7 @@ func TestEnvelopedSignatureRefusesSHA1DigestOfAnotherReference(t *testing.T) {
 	}
 
 	assert.Check(t, validatePost(t, test, sign(otherReference(dsig.SHA256DigestMethod))))
-	assert.Check(t, is.ErrorContains(validatePost(t, test, sign(otherReference(dsig.SHA1DigestMethod))), "is not allowed"))
+	assert.Check(t, is.Contains(errorText(validatePost(t, test, sign(otherReference(dsig.SHA1DigestMethod)))), "is not allowed"))
 }
 
 func TestRedirectSignatureMethods(t *testing.T) {
@@ -345,7 +346,7 @@ func TestRedirectSignatureMethods(t *testing.T) {
 
 		t.Run(path+"/sha-1", func(t *testing.T) {
 			err := verify(t, func(*IdentityProvider) {}, dsig.RSASHA1SignatureMethod)
-			assert.Check(t, is.ErrorContains(err, "signature: signature method "+dsig.RSASHA1SignatureMethod+" is not allowed"))
+			assert.Check(t, is.Contains(errorText(err), "signature: signature method "+dsig.RSASHA1SignatureMethod+" is not allowed"))
 		})
 
 		t.Run(path+"/sha-1 allowed", func(t *testing.T) {
@@ -363,7 +364,7 @@ func TestRedirectSignatureMethods(t *testing.T) {
 			err := verify(t, func(idp *IdentityProvider) {
 				idp.SignatureMethods = []string{dsig.RSASHA512SignatureMethod}
 			}, dsig.RSASHA256SignatureMethod)
-			assert.Check(t, is.ErrorContains(err, "is not allowed"))
+			assert.Check(t, is.Contains(errorText(err), "is not allowed"))
 		})
 	}
 }
@@ -436,7 +437,7 @@ func TestUnsupportedSignatureMethodsAreAConfigurationError(t *testing.T) {
 		test.IDP.SignatureMethods = []string{dsig.RSASHA256SignatureMethod, dsaSHA1}
 
 		err := validateURL(t, test, signedRedirectURL(t, test).String())
-		assert.Check(t, is.ErrorContains(err, `IdentityProvider.SignatureMethods: unsupported algorithm "`+dsaSHA1+`"`))
+		assert.Check(t, is.Contains(errorText(err), `IdentityProvider.SignatureMethods: unsupported algorithm "`+dsaSHA1+`"`))
 	})
 
 	t.Run("digest method", func(t *testing.T) {
@@ -445,7 +446,7 @@ func TestUnsupportedSignatureMethodsAreAConfigurationError(t *testing.T) {
 		test.IDP.DigestMethods = []string{dsig.RSASHA256SignatureMethod}
 
 		err := validateURL(t, test, signedRedirectURL(t, test).String())
-		assert.Check(t, is.ErrorContains(err, `IdentityProvider.DigestMethods: unsupported algorithm "`+dsig.RSASHA256SignatureMethod+`"`))
+		assert.Check(t, is.Contains(errorText(err), `IdentityProvider.DigestMethods: unsupported algorithm "`+dsig.RSASHA256SignatureMethod+`"`))
 	})
 
 	t.Run("SOAP", func(t *testing.T) {
@@ -456,10 +457,11 @@ func TestUnsupportedSignatureMethodsAreAConfigurationError(t *testing.T) {
 
 		_, _, err := test.IDP.verifySOAPRequester(soapLogoutPost(nil), el, test.SP.MetadataURL.String())
 
-		var statusErr *statusError
+		var statusErr *StatusError
 
 		assert.Assert(t, errors.As(err, &statusErr))
-		assert.Check(t, is.Equal(statusErr.TopLevel, StatusResponder))
+		assert.Check(t, errors.Is(err, ErrServerError), "%v", err)
+		assert.Check(t, is.Equal(statusErr.TopLevelField, StatusResponder))
 	})
 
 	t.Run("metadata verifier", func(t *testing.T) {

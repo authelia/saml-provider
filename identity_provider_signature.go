@@ -111,7 +111,8 @@ func (idp *IdentityProvider) signaturePolicy() (*signaturePolicy, error) {
 }
 
 // verifyAuthnRequestSignature verifies any signature on the request, and returns an error if there is
-// none and one is required. ServiceProviderMetadata must be set.
+// none and one is required. ServiceProviderMetadata must be set. An error that is not a StatusError is
+// ErrInvalidSignature to the caller.
 //
 //nolint:gocyclo // Complexity is inherent to the specification being implemented.
 func (req *IdpAuthnRequest) verifyAuthnRequestSignature() error {
@@ -131,7 +132,7 @@ func (req *IdpAuthnRequest) verifyAuthnRequestSignature() error {
 
 	if req.RedirectQuery == "" && signatureEl == nil {
 		if req.IDP.WantAuthnRequestsSigned || req.serviceProviderSignsAuthnRequests() {
-			return errors.New("request is not signed")
+			return ErrSignatureRequired.WithDebug("request is not signed")
 		}
 
 		return nil
@@ -139,16 +140,17 @@ func (req *IdpAuthnRequest) verifyAuthnRequestSignature() error {
 
 	certificates, err := req.serviceProviderSigningCertificates()
 	if err != nil {
-		return err
+		return ErrServerError.WithDebugError(err)
 	}
 
 	if len(certificates) == 0 {
 		return errors.New("request is signed but the service provider has no signing certificate")
 	}
 
+	// A list that can't be used is a fault of the identity provider, and not of the requester.
 	policy, err := req.IDP.signaturePolicy()
 	if err != nil {
-		return err
+		return ErrServerError.WithDebugError(err)
 	}
 
 	if req.RedirectQuery != "" {

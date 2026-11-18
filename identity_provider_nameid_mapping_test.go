@@ -4,7 +4,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"log"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -62,7 +61,7 @@ func newNameIDMappingFixture(t *testing.T) *nameIDMappingFixture {
 	t.Helper()
 
 	test := signatureTestIDP(t)
-	test.IDP.Logger = log.New(io.Discard, "", 0)
+	test.IDP.Observer = logObserver(io.Discard)
 	test.IDP.NameIDMappingURL = mustParseURL(nameIDMappingTestURL)
 
 	f := &nameIDMappingFixture{test: test, a: &test.SP}

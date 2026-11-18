@@ -68,14 +68,15 @@ func (idp *IdentityProvider) logoutRequestEndpoint(metadata *EntityDescriptor, b
 //
 // The NameID is the one that was asserted to the participant, with the SPProvidedID that it has registered
 // since with a ManageNameIDRequest, if any, which SAMLCore §3.6.3 requires the identity provider to include from
-// then on (see NameIDManagementProvider.SPProvidedID). If that can't be found, the failure is logged and the
-// NameID is sent as it was asserted, rather than the participant being left logged in.
+// then on (see NameIDManagementProvider.SPProvidedID). If that can't be found, the failure is reported as an
+// EventStore and the NameID is sent as it was asserted, rather than the participant being left logged in.
 func (idp *IdentityProvider) makeLogoutRequest(r *http.Request, state *LogoutState, p *LogoutParticipant, metadata *EntityDescriptor, endpoint *Endpoint) (*LogoutRequest, error) {
 	nameID := p.NameID
 
 	switch alias, err := idp.spProvidedID(r, p.ServiceProviderEntityID, &nameID); {
 	case err != nil:
-		idp.logger().Printf("cannot find the SPProvidedID of the NameID of %s: %s", p.ServiceProviderEntityID, err)
+		idp.observe(r, requestState{serviceProvider: p.ServiceProviderEntityID, verified: true, requestID: state.ID}.
+			warning(EventStore, ErrServerError.WithDebugf("cannot find the SPProvidedID of the NameID: %s", err).WithWrap(err)))
 	case alias != "":
 		nameID.SPProvidedID = alias
 	}
@@ -142,14 +143,14 @@ func (idp *IdentityProvider) continueLogout(w http.ResponseWriter, r *http.Reque
 
 		metadata, err := idp.serviceProvider(r, participant.ServiceProviderEntityID)
 		if err != nil {
-			skipLogoutParticipant(participant, err)
+			idp.skipLogoutParticipant(r, state, participant, err)
 
 			continue
 		}
 
 		endpoint, err := idp.logoutRequestEndpoint(metadata, frontChannelLogoutBindings...)
 		if err != nil {
-			skipLogoutParticipant(participant, err)
+			idp.skipLogoutParticipant(r, state, participant, err)
 
 			continue
 		}
@@ -162,14 +163,14 @@ func (idp *IdentityProvider) continueLogout(w http.ResponseWriter, r *http.Reque
 
 		request, err := idp.makeLogoutRequest(r, state, participant, metadata, endpoint)
 		if err != nil {
-			skipLogoutParticipant(participant, err)
+			idp.skipLogoutParticipant(r, state, participant, err)
 
 			continue
 		}
 
 		write, err := idp.prepareLogoutRequest(w, r, state, request, metadata, endpoint)
 		if err != nil {
-			idp.abandonLogout(state, fmt.Errorf("cannot make the logout request: %w", err))
+			idp.abandonLogout(r, state, fmt.Errorf("cannot make the logout request: %w", err))
 
 			continue
 		}
@@ -180,7 +181,7 @@ func (idp *IdentityProvider) continueLogout(w http.ResponseWriter, r *http.Reque
 		if err = saveLogoutState(r, provider, state); errors.Is(err, ErrLogoutStateConflict) {
 			return err
 		} else if err != nil {
-			idp.abandonLogout(state, fmt.Errorf("cannot save the logout state: %w", err))
+			idp.abandonLogout(r, state, fmt.Errorf("cannot save the logout state: %w", err))
 
 			continue
 		}
@@ -202,36 +203,81 @@ func saveLogoutState(r *http.Request, provider LogoutStateProvider, state *Logou
 	return nil
 }
 
-// writeContinueLogoutError writes the error of continueLogout, which has written nothing to w.
-func (idp *IdentityProvider) writeContinueLogoutError(w http.ResponseWriter, err error) {
-	idp.logger().Printf("failed to continue logout: %s", err)
+// writeContinueLogoutError writes the error of continueLogout, which has written nothing to w, and reports it as
+// the failure of the logout of state: StatusConflict if the state was changed by another request, and otherwise
+// StatusInternalServerError.
+func (idp *IdentityProvider) writeContinueLogoutError(w http.ResponseWriter, r *http.Request, state *LogoutState, err error) {
+	e := ErrServerError.WithDebugf("failed to continue logout: %s", err).WithWrap(err)
 
 	if errors.Is(err, ErrLogoutStateConflict) {
-		http.Error(w, http.StatusText(http.StatusConflict), http.StatusConflict)
-
-		return
+		e = e.WithHTTPStatus(http.StatusConflict)
 	}
 
-	http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
+	idp.observe(r, state.requestState().event(EventLogout, e))
+	idp.writeHTTPError(w, r, e)
 }
 
 // abandonLogout marks every pending participant of state Failed with err as Reason, and clears the outstanding
-// request, so that the logout finishes without sending another LogoutRequest.
-func (idp *IdentityProvider) abandonLogout(state *LogoutState, err error) {
-	idp.logger().Printf("abandoning the logout: %s", err)
-
+// request, so that the logout finishes without sending another LogoutRequest. Each of them is reported as an
+// EventLogoutPropagation that failed.
+func (idp *IdentityProvider) abandonLogout(r *http.Request, state *LogoutState, err error) {
 	for i := range state.Participants {
-		if state.Participants[i].Outcome == LogoutOutcomePending {
-			state.Participants[i].Outcome, state.Participants[i].Reason = LogoutOutcomeFailed, err.Error()
+		if participant := &state.Participants[i]; participant.Outcome == LogoutOutcomePending {
+			participant.Outcome, participant.Reason = LogoutOutcomeFailed, err.Error()
+
+			idp.observeLogoutParticipant(r, state, participant, true,
+				ErrServerError.WithDebugf("abandoning the logout: %s", err).WithWrap(err))
 		}
 	}
 
 	state.Current, state.PendingRequestID = -1, ""
 }
 
-func skipLogoutParticipant(participant *LogoutParticipant, err error) {
+// skipLogoutParticipant marks participant Skipped with err as Reason, which is reported as an
+// EventLogoutPropagation with a warning: the participant was sent nothing, and may still be logged in.
+func (idp *IdentityProvider) skipLogoutParticipant(r *http.Request, state *LogoutState, participant *LogoutParticipant, err error) {
 	participant.Outcome = LogoutOutcomeSkipped
 	participant.Reason = err.Error()
+
+	event := state.requestState().warning(EventLogoutPropagation,
+		ErrServerError.WithDebugf("the session participant was not sent a logout request: %s", err).WithWrap(err))
+	event.ServiceProvider, event.Verified = participant.ServiceProviderEntityID, true
+
+	idp.observe(r, event)
+}
+
+// observeLogoutParticipant reports the logout of participant, which is done with, as an EventLogoutPropagation: a
+// success if err is nil, a warning if err is the PartialLogout of a verified response, which is a success with a
+// second-level status, and otherwise a failure. Whether the participant is verified is whether its response was.
+// The participant keeps its outcome, so a partial logout still makes the logout as a whole partial.
+func (idp *IdentityProvider) observeLogoutParticipant(r *http.Request, state *LogoutState, participant *LogoutParticipant, verified bool, err *StatusError) {
+	event := Event{
+		Kind:            EventLogoutPropagation,
+		Outcome:         OutcomeSuccess,
+		ServiceProvider: participant.ServiceProviderEntityID,
+		Verified:        verified,
+		RequestID:       state.ID,
+	}
+
+	switch {
+	case err == nil:
+	case verified && err.TopLevelField == StatusSuccess && err.SecondLevelField == StatusPartialLogout:
+		event.Outcome, event.Err = OutcomeWarning, err
+	default:
+		event.Outcome, event.Err = OutcomeFailure, err
+	}
+
+	idp.observe(r, event)
+}
+
+// requestState returns the state for the events of the logout: the service provider that asked for it and the ID
+// of its LogoutRequest, or the ID of the logout if the identity provider started it.
+func (s *LogoutState) requestState() requestState {
+	if s.Origin != nil {
+		return requestState{serviceProvider: s.Origin.ServiceProviderEntityID, verified: true, requestID: s.Origin.RequestID, respondable: true}
+	}
+
+	return requestState{requestID: s.ID}
 }
 
 // prepareLogoutRequest signs the request, with the algorithms that the IssuancePolicy gives for the service
@@ -407,11 +453,11 @@ func (idp *IdentityProvider) beginLogout(w http.ResponseWriter, r *http.Request,
 		return fmt.Errorf("cannot save the logout state: %w", err)
 	}
 
-	idp.terminateLogoutSessions(w, r, sessionProvider, sessions, state)
+	idp.terminateLogoutSessions(w, r, sessionProvider, sessions, state, state.requestState())
 
 	// continueLogout saves the state again, with the result of the termination, before it writes.
 	if err = idp.continueLogout(w, r, stateProvider, state); err != nil {
-		idp.writeContinueLogoutError(w, err)
+		idp.writeContinueLogoutError(w, r, state, err)
 	}
 
 	return nil
@@ -436,8 +482,9 @@ func closeSessionParticipants(r *http.Request, provider SessionParticipantProvid
 
 // terminateLogoutSessions ends the sessions and records SessionTerminated and PartialLogout on state, for beginLogout
 // and soapLogoutStatus. A failure to end a session doesn't stop the logout: the service providers are still logged
-// out, and the result reports that the session was not ended.
-func (idp *IdentityProvider) terminateLogoutSessions(w http.ResponseWriter, r *http.Request, provider LogoutSessionProvider, sessions []*Session, state *LogoutState) {
+// out, and the result reports that the session was not ended. It is reported as an EventSessionTermination for the
+// request in requestState.
+func (idp *IdentityProvider) terminateLogoutSessions(w http.ResponseWriter, r *http.Request, provider LogoutSessionProvider, sessions []*Session, state *LogoutState, requestState requestState) {
 	state.SessionTerminated = true
 
 	for _, session := range sessions {
@@ -448,7 +495,7 @@ func (idp *IdentityProvider) terminateLogoutSessions(w http.ResponseWriter, r *h
 		case errors.Is(err, ErrPartialLogout):
 			state.PartialLogout = true
 		default:
-			idp.logger().Printf("cannot terminate session: %s", err)
+			idp.observe(r, requestState.warning(EventSessionTermination, ErrServerError.WithDebugf("cannot terminate session: %s", err).WithWrap(err)))
 
 			state.SessionTerminated = false
 		}
@@ -463,6 +510,9 @@ func (idp *IdentityProvider) terminateLogoutSessions(w http.ResponseWriter, r *h
 // one finishes the logout, and a stale copy can't save it again once it is deleted. It is deleted only if that save
 // succeeds: when the save fails for another reason the logout is still finished, so the browser isn't stranded, but
 // the stored state is left to expire, as it may be a newer revision which another request saved.
+//
+// This is where a propagated logout is reported to the Observer as an EventLogout, with the outcome that
+// IdpLogoutRequest.answer describes.
 func (idp *IdentityProvider) finishLogout(w http.ResponseWriter, r *http.Request, provider LogoutStateProvider, state *LogoutState) error {
 	state.Current, state.PendingRequestID = -1, ""
 
@@ -470,10 +520,12 @@ func (idp *IdentityProvider) finishLogout(w http.ResponseWriter, r *http.Request
 	case errors.Is(err, ErrLogoutStateConflict):
 		return err
 	case err != nil:
-		idp.logger().Printf("failed to save logout state before finishing, leaving it to expire: %s", err)
+		idp.observe(r, state.requestState().warning(EventStore,
+			ErrServerError.WithDebugf("failed to save logout state before finishing, leaving it to expire: %s", err).WithWrap(err)))
 	default:
 		if err = provider.DeleteLogoutState(r, state.ID); err != nil {
-			idp.logger().Printf("failed to delete logout state: %s", err)
+			idp.observe(r, state.requestState().warning(EventStore,
+				ErrServerError.WithDebugf("failed to delete logout state: %s", err).WithWrap(err)))
 		}
 	}
 
@@ -496,8 +548,18 @@ func (idp *IdentityProvider) finishLogout(w http.ResponseWriter, r *http.Request
 			Now:                     TimeNow(),
 		}
 
-		return req.WriteResponse(w, state.status())
+		status := state.status()
+
+		if err = req.WriteResponse(w, status); err != nil {
+			return err
+		}
+
+		idp.observe(r, logoutStatusEvent(state.requestState(), status, nil))
+
+		return nil
 	}
+
+	idp.observe(r, logoutStatusEvent(state.requestState(), state.status(), nil))
 
 	if handler, ok := idp.SessionProvider.(LogoutResultHandler); ok {
 		handler.FinishLogout(w, r, state.result())

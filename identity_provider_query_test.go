@@ -6,7 +6,7 @@ import (
 	"encoding/base64"
 	"encoding/xml"
 	"errors"
-	"log"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -176,7 +176,7 @@ func newQueryFixture(t *testing.T) *queryFixture {
 	idp.AssertionIDRequestServiceURL = mustParseURL(assertionIDRequestTestURL)
 	idp.SessionProvider = f.provider
 	idp.AssertionStore = f.store
-	idp.Logger = log.New(f.log, "", 0)
+	idp.Observer = logObserver(f.log)
 	idp.ServiceProviderProvider = &mockServiceProviderProvider{
 		GetServiceProviderFunc: func(_ *http.Request, serviceProviderID string) (*EntityDescriptor, error) {
 			if f.providerErr != nil {
@@ -455,7 +455,7 @@ func assertQueryStatus(t *testing.T, response *queryResponse, top, second string
 	status := response.Response.Status
 
 	assert.Check(t, is.Equal(status.StatusCode.Value, top))
-	assert.Check(t, status.StatusMessage == nil, "a StatusMessage is never sent")
+	assert.Check(t, statusSaysNothingOfTheRequest(status), "a StatusMessage is never sent")
 
 	if second == "" {
 		assert.Check(t, status.StatusCode.StatusCode == nil)
@@ -741,10 +741,27 @@ func TestServeQueryLogsNoUnverifiedContent(t *testing.T) {
 				el.SetText(marker)
 			}
 
+			observer := &RecordingObserver{}
+			f.test.IDP.Observer = observer
+
 			response := f.answer(t, f.serve(service, queryPost(t, service.url, message)))
 			assertQueryStatus(t, response, StatusRequester, StatusRequestDenied)
-			assert.Check(t, f.log.Len() != 0)
-			assert.Check(t, !strings.Contains(f.log.String(), marker), "log: %s", f.log.String())
+
+			// The Issuer and the ID of a request that is not verified are only reported as what they are: the
+			// service provider of an event that is not verified, and the ID of its request. Nothing else of the
+			// request is reported, and none of it is in the text of the error.
+			events := observer.Events()
+			assert.Assert(t, is.Len(events, 1))
+
+			event := events[0]
+			assert.Check(t, is.Equal(event.Outcome, OutcomeFailure))
+			assert.Check(t, !event.Verified)
+			assert.Check(t, is.Equal(event.ServiceProvider, "https://"+marker+".example.com"))
+			assert.Check(t, is.Equal(event.RequestID, "id-"+marker))
+			assert.Check(t, errors.Is(event.Err, ErrUnknownServiceProvider))
+
+			event.ServiceProvider, event.RequestID = "", ""
+			assert.Check(t, !strings.Contains(fmt.Sprintf("%+v", event), marker), "event: %+v", event)
 		})
 	}
 }

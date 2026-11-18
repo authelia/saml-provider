@@ -507,7 +507,7 @@ func TestServeSLOLookupFailure(t *testing.T) {
 	r, _ := redirectLogoutRequest(t, &test.SP, nil)
 	_, response := redirectedLogoutResponse(t, serveSLO(test, r))
 	assert.Check(t, is.Equal(response.Status.StatusCode.Value, StatusResponder))
-	assert.Check(t, response.Status.StatusMessage == nil)
+	assert.Check(t, statusSaysNothingOfTheRequest(response.Status))
 	assert.Check(t, is.Len(provider.terminated, 0))
 }
 
@@ -530,7 +530,7 @@ func TestServeSLOReportsTerminationFailure(t *testing.T) {
 		r, _ := redirectLogoutRequest(t, &test.SP, nil)
 		_, response := redirectedLogoutResponse(t, serveSLO(test, r))
 		assert.Check(t, is.Equal(response.Status.StatusCode.Value, StatusResponder))
-		assert.Check(t, response.Status.StatusMessage == nil)
+		assert.Check(t, statusSaysNothingOfTheRequest(response.Status))
 	})
 
 	t.Run("partial", func(t *testing.T) {

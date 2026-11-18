@@ -73,3 +73,15 @@ func TestDefaultOnErrorKeepsShortResponse(t *testing.T) {
 	assert.Check(t, strings.Contains(output, "<samlp:Response/>"), output)
 	assert.Check(t, !strings.Contains(output, "truncated"), output)
 }
+
+func TestDefaultOnErrorLimitsLoggedStatus(t *testing.T) {
+	err := saml.ErrRequestDenied.WithStatusMessage("denied").WithDebug(strings.Repeat("d", 10*1024*1024)).
+		WithWrap(errors.New(strings.Repeat("c", 10*1024*1024)))
+
+	output := captureDefaultOnError(t, err)
+	assert.Check(t, len(output) < 4*8192, "logged %d bytes", len(output))
+	assert.Check(t, strings.Contains(output, "truncated"), output)
+	assert.Check(t, strings.Contains(output, "request_denied"), output)
+	assert.Check(t, strings.Contains(output, "denied"), output)
+	assert.Check(t, is.Len(err.Debug(), 10*1024*1024), "the error is unchanged")
+}

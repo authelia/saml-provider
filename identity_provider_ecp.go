@@ -2,7 +2,6 @@ package saml
 
 import (
 	"encoding/xml"
-	"errors"
 	"fmt"
 	"net/http"
 
@@ -52,9 +51,10 @@ var ecpUnderstoodHeaders = []xml.Name{{Space: channelBindingNS, Local: "ChannelB
 // fault; the client must have removed those of the service provider (SAMLProf §4.2.3.4). Any later failure is a
 // Response with an error status, as for ServeSSO. A request with channel bindings, which are not verified, gets
 // Requester with RequestUnsupported (ECP v2.0 §2.3.6.2), and holder-of-key confirmation is not supported. A Response
-// that can't be signed gets a Server fault.
+// that can't be signed gets a Server fault, and so does a request for which the service provider could not be
+// looked up. Each request that is answered is reported to the Observer as one EventECP.
 func (idp *IdentityProvider) ServeECP(w http.ResponseWriter, r *http.Request) {
-	soap, ok := idp.receiveSOAPRequest(w, r, ecpUnderstoodHeaders...)
+	soap, ok := idp.receiveSOAPRequest(w, r, EventECP, ecpUnderstoodHeaders...)
 	if !ok {
 		return
 	}
@@ -68,24 +68,14 @@ func (idp *IdentityProvider) ServeECP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := req.validateECP(soap); err != nil {
-		idp.logger().Printf("failed to validate ECP request: %s", err)
-
-		if top, second, ok := requestStatus(err); ok {
-			req.writeErrorStatus(w, top, second)
-
-			return
-		}
-
-		writeSOAPFault(w, &soapFault{Code: "Client", String: soapFaultStringAuthnRequest})
+		req.fail(w, EventECP, err)
 
 		return
 	}
 
 	provider, ok := idp.SessionProvider.(ECPSessionProvider)
 	if !ok {
-		idp.logger().Printf("cannot serve ECP request: the session provider does not implement ECPSessionProvider")
-
-		req.writeErrorStatus(w, StatusResponder, StatusRequestUnsupported)
+		req.fail(w, EventECP, ErrNotImplemented.WithDebug("cannot serve ECP request: the session provider does not implement ECPSessionProvider"))
 
 		return
 	}
@@ -93,7 +83,7 @@ func (idp *IdentityProvider) ServeECP(w http.ResponseWriter, r *http.Request) {
 	// The principal is authenticated with credentials, which a passive request rules out. This comes before
 	// ForceAuthn, as for the browser (SAMLCore §3.4.1).
 	if req.Request.IsPassive != nil && *req.Request.IsPassive {
-		req.writeErrorStatus(w, StatusResponder, StatusNoPassive)
+		req.fail(w, EventECP, ErrNoPassive)
 
 		return
 	}
@@ -103,15 +93,15 @@ func (idp *IdentityProvider) ServeECP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	req.respond(w, session)
+	req.respond(w, session, EventECP)
 }
 
 // validateECP is Validate for the message of a SOAP request, with the checks that only apply to the Enhanced Client
-// or Proxy profile. As for Validate, an error that carries no status means that the request must not be answered
-// with a Response.
+// or Proxy profile. As for Validate, an error of a request that is not Respondable means that it must not be
+// answered with a Response.
 func (req *IdpAuthnRequest) validateECP(soap *soapRequest) error {
 	if soap.Message.Tag != "AuthnRequest" || soap.Message.NamespaceURI() != samlProtocolNS {
-		return errors.New("the message is not an AuthnRequest")
+		return ErrMalformedRequest.WithDebug("the message is not an AuthnRequest")
 	}
 
 	if err := req.Validate(); err != nil {
@@ -123,14 +113,12 @@ func (req *IdpAuthnRequest) validateECP(soap *soapRequest) error {
 	// some. The raw message is searched, as the extensions aren't parsed; one that a signature doesn't cover
 	// would already have failed Validate.
 	if hasChannelBindings(soap.Headers) {
-		return &statusError{StatusRequester, StatusRequestUnsupported,
-			errors.New("the client sent channel bindings, which are not supported")}
+		return ErrRequestUnsupported.WithDebug("the client sent channel bindings, which are not supported")
 	}
 
 	for _, extensions := range soap.Message.ChildElements() {
 		if extensions.Tag == "Extensions" && extensions.NamespaceURI() == samlProtocolNS && hasChannelBindings(extensions.ChildElements()) {
-			return &statusError{StatusRequester, StatusRequestUnsupported,
-				errors.New("the request has channel bindings, which are not supported")}
+			return ErrRequestUnsupported.WithDebug("the request has channel bindings, which are not supported")
 		}
 	}
 

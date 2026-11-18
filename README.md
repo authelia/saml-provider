@@ -423,8 +423,9 @@ without acting on it. See **`Scoping` and `ProxyRestriction`** below.
   `AssertionConsumerServiceURL` of the request is listed there. A failure of `AssertionMaker` is `Responder`, or
   `Requester` with `InvalidNameIDPolicy` if it wraps `ErrInvalidNameIDPolicy`. A failure to sign or encrypt the response
   or to render the template is `Responder`. An application with its own handler gets the same mapping from
-  `RequestStatus`, and `WriteResponse` wraps `ErrResponseNotBuilt` when nothing has been written. IdP-initiated SSO has
-  no request to answer, so its failures are HTTP errors.
+  `IdpAuthnRequest.Respondable` and `WriteErrorResponse` (see **Errors**), and `WriteResponse` wraps
+  `ErrResponseNotBuilt` when nothing has been written. IdP-initiated SSO has no request to answer, so its failures
+  are HTTP errors.
 - **`ForceAuthn` / `IsPassive`:** a `SessionProvider` must also implement `ForceAuthnSessionProvider` or
   `PassiveSessionProvider` to serve these requests. Otherwise they receive an `AuthnFailed` or `NoPassive` status.
   `samlidp` implements both, resuming its login form with `IdpAuthnRequest.ResumeFormValues`, and returns `NoPassive`
@@ -448,7 +449,7 @@ without acting on it. See **`Scoping` and `ProxyRestriction`** below.
     ```go
     if scoping := req.Request.Scoping; scoping != nil && scoping.IDPList != nil &&
         scoping.IDPList.GetComplete == "" && !scoping.IDPList.Contains(idpEntityID) {
-        _ = req.WriteErrorResponse(w, saml.StatusResponder, saml.StatusNoSupportedIDP, "")
+        _ = req.WriteErrorResponse(w, saml.ErrNoSupportedIDP)
         return nil
     }
     ```
@@ -552,7 +553,7 @@ without acting on it. See **`Scoping` and `ProxyRestriction`** below.
   `PersistentNameIDProvider` with a `Scope` states the identifier it derives for the SP, which is the value of the
   persistent NameID it issues to that SP, followed by `@` and the scope. It is always derived, so it changes with
   `Secret` and not with `Terminate`. Both values must be `uniqueID@scope` with the characters and lengths of the
-  profile (`ValidateSubjectIdentifier`): a `Session.SubjectID` that isn't is left out and logged, and an invalid
+  profile (`ValidateSubjectIdentifier`): a `Session.SubjectID` that isn't is left out and reported to the `Observer`, and an invalid
   `pairwise-id` or `Scope` fails the request. The IdP metadata lists that `Scope`, and those of
   `IdentityProvider.MetadataInfo.Scopes`, as `shibmd:Scope`.
 - **Subject identifier requirement:** `DefaultAttributeReleasePolicy` honours the `subject-id:req` entity attribute
@@ -564,7 +565,7 @@ without acting on it. See **`Scoping` and `ProxyRestriction`** below.
   or a category bundle holds it. An SP that signals nothing, more than one value, or a value the profile doesn't
   define, receives the two attributes like any other: only if it requests them or a listed category releases them
   (SDP-IDP17). If the identifier that is required can't be stated, because there is no `Session.SubjectID` or no
-  `PairwiseIDProvider`, the assertion is made without it and that is logged; with
+  `PairwiseIDProvider`, the assertion is made without it and that is reported to the `Observer`; with
   `DefaultAttributeReleasePolicy{EnforceSubjectIDRequirement: true}` the request is refused with a `Responder` status
   and an error that wraps `ErrRequiredAttributeUnavailable` (SDP-IDP16 allows either). An `AttributeReleasePolicy`
   is now given every candidate for an `AttributeQuery`, not only those the query names, and what it returns is
@@ -592,10 +593,102 @@ without acting on it. See **`Scoping` and `ProxyRestriction`** below.
 - **`SessionNotOnOrAfter`:** only stated when `IdentityProvider.IncludeSessionNotOnOrAfter` is set, as
   `Session.ExpireTime`, and omitted if that is zero. An SP that honours it ends its session when the IdP's ends. With
   it set, `DefaultAssertionMaker` refuses a session that has already expired. `samlsp` does not honour it.
-- **Error status responses:** `IdpAuthnRequest.WriteErrorResponse` sends a SAML `Response` with a non-success status once
-  the ACS has been validated, and `Subject`, `NameIDPolicy`, `ForceAuthn`, `IsPassive` and `RequestedAuthnContext`
-  refusals use it.
-  Other failures produce an HTTP error.
+- **Errors:** every failure of the IdP is a `*StatusError`, which is shaped like the `RFC6749Error` of
+  `authelia.com/provider/oauth2` and built around the `Status` of SAMLCore §3.2.2. `IdpAuthnRequest.WriteErrorResponse`
+  sends one as a signed SAML `Response` once the ACS has been validated, and `Subject`, `NameIDPolicy`, `ForceAuthn`,
+  `IsPassive` and `RequestedAuthnContext` refusals use it.
+  - **What it carries:** `ErrorField` (a stable name such as `request_denied`, for `errors.Is` and for logs, which is
+    never sent), `TopLevelField` and `SecondLevelField` (the status codes), `StatusMessageField`, `StatusDetailField`,
+    `DebugField`, `HTTPStatusField` and a cause. The package has an error for each failure it reports
+    (`ErrRequestDenied`, `ErrRequestNotCurrent`, `ErrReplayed`, `ErrUnknownServiceProvider`, `ErrInvalidSignature`,
+    `ErrSignatureRequired`, `ErrNoResponseEndpoint`, `ErrMalformedRequest`, `ErrDestinationMismatch`,
+    `ErrUnsupportedBinding`, `ErrInvalidNameIDPolicy`, `ErrUnknownPrincipal`, `ErrAuthnFailed`, `ErrNoPassive`,
+    `ErrNoAuthnContext`, `ErrRequestVersionTooHigh` and the rest, see `status_error.go`). They are never changed: the
+    `With` methods (`WithDebugf`, `WithWrap`, `WithStatusMessage`, `WithStatusDetail`, `WithSecondLevel`,
+    `WithHTTPStatus`) return a copy, and `errors.Is` matches by name, so a copy is still that error. Many of them
+    share `Requester` with `RequestDenied`, which is why the name and not the codes tells them apart.
+    `ToStatusError` makes any other error `ErrServerError`, which is `Responder` and HTTP 500, with the error as its
+    cause. `NewStatusError` makes one of your own, whose second-level code may be any absolute URI.
+
+    ```go
+    return saml.ErrAuthnFailed.WithDebugf("the account of %s is locked", name)
+    ```
+
+  - **HTTP or SAML is decided by the request, not by the error.** A request that fails before the SP is found, its
+    signature verified and the endpoint for the response chosen from its metadata must never be answered with a SAML
+    response: it gets `StatusError.HTTPStatus`. One that fails later gets a signed response with the status of the
+    error. The same error can occur on either side, so an application with its own handler asks the request:
+
+    ```go
+    if err := req.Validate(); err != nil {
+        if req.Respondable() {
+            _ = req.WriteErrorResponse(w, err)
+        } else {
+            http.Error(w, http.StatusText(saml.ToStatusError(err).HTTPStatus()), saml.ToStatusError(err).HTTPStatus())
+        }
+        return
+    }
+    ```
+
+    `ServeSSO`, `ServeSLO`, `ServeManageNameID` and `ServeECP` do this. The HTTP answer is the status text alone;
+    set `IdentityProvider.HTTPErrorHandler` to render your own page. On the SOAP binding the response goes back on
+    the connection of the request, and SAMLBind §3.2.3.3 has a SAML processing error answered with a status and a
+    SOAP fault kept for errors of SOAP itself, so every SAML message is answered: with the status codes alone until
+    the requester is verified (so that `unknown_service_provider` and `invalid_signature` are the same answer), and
+    with everything once it is. An artifact that isn't resolved is `Success` with no message, as before.
+  - **Only the debug message holds text of the other party.** The status codes, the `StatusMessage` and the
+    `StatusDetail` are text that the package or the application chose: there is no `WithStatusMessagef`, and
+    `WithStatusMessage` must be given constant text. Entity IDs, IDs, URLs and the text of parser errors go in
+    `WithDebugf`. `Error()` is the name and the `StatusMessage`, and never the debug message.
+  - **`ExposeDebug`:** off by default. With `IdentityProvider.ExposeDebug` the debug message is added to the response
+    as `<Debug xmlns="urn:authelia:saml:2.0:status-detail">` in the `StatusDetail`, and the `StatusMessage` stays the
+    constant text. The response is signed by the IdP and carried by the browser of the user, so this lets whoever
+    can send a request have text of their choosing signed by the IdP. It is for setting up an SP, not for
+    production. It is never added for a requester that isn't established.
+  - **`StatusDetail`:** `WithStatusDetail` adds copies of your elements. Each must be in a namespace that it
+    declares itself, as it is placed in a signed document with other prefixes; one that isn't is left out and
+    reported, and `StatusError.Validate` refuses it.
+  - **A status that is received is untrusted.** `StatusErrorFromStatus` makes the error for the status of another
+    party: its codes become `TopLevelField` and `SecondLevelField`, and its `StatusMessage` and `StatusDetail` go in
+    the debug message. It matches `ErrReceivedStatus`. `SendManageNameIDRequest` returns it, a session participant
+    that answers a `LogoutRequest` with an error is reported with it, and on the SP side it is the `PrivateErr` of
+    the `InvalidResponseError` for a `Response` that is not a success, which `errors.As` finds:
+
+    ```go
+    var statusErr *saml.StatusError
+    if errors.As(err, &statusErr) && statusErr.SecondLevelField == saml.StatusNoPassive { /* not logged in */ }
+    ```
+
+- **Observer:** the package logs nothing. `IdentityProvider.Observer` receives an `Event` for each operation that
+  completes, whether it succeeds or fails, which makes it the audit trail, and for each thing that goes wrong
+  without failing one. If it is nil the events are logged with `slog.Default()`, so a failure is never silent.
+  - **`Event`:** `Kind` (`sso`, `idp_initiated_sso`, `ecp`, `logout`, `logout_propagation`, `artifact_resolve`,
+    `attribute_query`, `authn_query`, `assertion_id_request`, `name_id_management`, `name_id_mapping`, `metadata`,
+    `metadata_refresh`, and the warnings `algorithm_fallback`, `session_termination`, `attribute_release`,
+    `principal_unidentified`, `store`, `metadata_expired`, `status_detail`), `Outcome` (`success`, `warning`,
+    `failure`), `Err` (a `*StatusError`), `ServiceProvider`, `Verified`, `RequestID` and `Time`. The context is that
+    of the HTTP request. `Verified` says whether the message was authenticated as one of that SP: until it is, and
+    for an `AuthnRequest` that isn't signed, `ServiceProvider` is the `Issuer` that somebody sent.
+  - **Not every outcome is an error.** A logout that is answered with `Success` and `PartialLogout`, and an
+    artifact that is answered with `Success` and no message, are results. They are reported with `warning`, and are
+    never a `StatusError` that is returned. A request that the `SessionProvider` answers itself, such as with a
+    login form, is not finished and reports nothing.
+  - **Logging:** `StatusError` and `Event` implement `slog.LogValuer` (a group with stable keys: `error`,
+    `top_level`, `second_level`, `status_message`, `http_status`, `debug`, `cause`) and have `Fields()`, the same as
+    a map, for a logger such as logrus. `%v` prints the name and the message, and `%+v` prints one line with the
+    codes, the debug message and the cause, quoted with `strconv.Quote`, so that a line break or an escape sequence
+    in a request can't forge a log line. The values of `LogValue` and `Fields` are not escaped, as the handler or
+    the formatter does that.
+
+    ```go
+    idp.Observer = saml.ObserverFunc(func(ctx context.Context, event saml.Event) {
+        logrus.WithContext(ctx).WithFields(event.Fields()).Info("saml")
+    })
+    ```
+
+  - `ServiceProviderMetadataResolverOptions.Observer` receives a `metadata_refresh` failure for each refresh in the
+    background that fails. `saml.RecordingObserver` keeps the events, for tests. `samlsp.DefaultOnError` logs with
+    `slog.Default()`.
 - **Replay detection:** the ID of every `AuthnRequest` that is answered for a session, and of every verified
   `LogoutRequest` and `ManageNameIDRequest` on any binding, `AttributeQuery`, `AuthnQuery`, `AssertionIDRequest` and
   `NameIDMappingRequest`, is recorded in `IdentityProvider.ReplayStore` until the request expires, and a
@@ -624,7 +717,7 @@ without acting on it. See **`Scoping` and `ProxyRestriction`** below.
   an `EncryptedID` on any binding, which is decrypted with the encryption key of the IdP after the signature is
   verified (see **Encryption key and its rollover**). The metadata lists an encryption key only when the IdP has one,
   with the algorithms the IdP allows and GCM first. One that can't be decrypted is answered like a `NameID` which names no
-  session, with `Success`, so that the answer says nothing about the ciphertext, and the reason is only logged
+  session, with `Success`, so that the answer says nothing about the ciphertext, and the reason is only reported to the `Observer`
   (`IdpLogoutRequest.Unidentified`). An SP that was sent an `EncryptedID` is sent one again in the `LogoutRequest` of a
   propagated logout, and is skipped if it can no longer be encrypted to. `BaseID`, an `EncryptedID` that holds
   anything but a `NameID`, and one in the `Subject` of an `AuthnRequest` or of a query are not supported, although
@@ -871,7 +964,7 @@ without acting on it. See **`Scoping` and `ProxyRestriction`** below.
     type gets `IdentityProvider.SignatureMethod` and its digest, as before. SHA-1 is never chosen this way, whatever
     the SP lists first, unless it is the `SignatureMethod` of the IdP itself. If the SP lists algorithms and the IdP
     can use none of them (only ECDSA methods and an RSA key, only RSASSA-PSS, only SHA-1), the message is signed
-    with the settings of the IdP anyway and the reason is logged, once for a response: the profile doesn't make the
+    with the settings of the IdP anyway and the reason is reported to the `Observer`, once for a response: the profile doesn't make the
     list a policy, the signature is no weaker than the one every other SP gets, and it is what that SP was sent
     before its metadata was read for this. Return an error from an `IssuancePolicy` to refuse instead. The two
     types are negotiated separately, so naming only a `SignatureMethod` for an SP whose metadata lists digests

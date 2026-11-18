@@ -134,29 +134,29 @@ func (req *IdpNameIDMappingRequest) Validate() error {
 	// This code runs before any authentication, and the cost of the XML parsing below is proportional to the
 	// size of the request.
 	if err := checkAuthnRequestSize(req.RequestBuffer); err != nil {
-		return err
+		return ErrMalformedRequest.WithDebugError(err)
 	}
 
 	if err := xrv.Validate(bytes.NewReader(req.RequestBuffer)); err != nil {
-		return err
+		return ErrMalformedRequest.WithDebugError(err)
 	}
 
 	root, err := parseRequestRoot(req.RequestBuffer, "NameIDMappingRequest")
 	if err != nil {
-		return err
+		return ErrMalformedRequest.WithDebugError(err)
 	}
 
 	// The size is limited and the XML validated above, as for a LogoutRequest, into a fixed type.
 	if err = xml.Unmarshal(req.RequestBuffer, &req.Request); err != nil {
-		return err
+		return ErrMalformedRequest.WithDebugError(err)
 	}
 
 	if err = req.header().checkTrust(); err != nil {
-		return err
+		return ErrMalformedRequest.WithDebugError(err)
 	}
 
 	if err = req.verifyRequester(root); err != nil {
-		return err
+		return statusErrorOr(err, ErrInvalidSignature)
 	}
 
 	if err = req.header().checkRequestStage(req.Now, req.IDP.NameIDMappingURL.String()); err != nil {
@@ -203,7 +203,7 @@ func (req *IdpNameIDMappingRequest) verifyRequester(root *etree.Element) error {
 func (req *IdpNameIDMappingRequest) readNameIDPolicy() error {
 	policies, err := findChildren(req.verifiedEl, samlProtocolNS, "NameIDPolicy")
 	if err != nil || len(policies) != 1 || req.Request.NameIDPolicy == nil {
-		return &statusError{StatusRequester, StatusRequestDenied, errors.New("request does not have exactly one NameIDPolicy")}
+		return ErrRequestDenied.WithDebug("request does not have exactly one NameIDPolicy")
 	}
 
 	policy := req.Request.NameIDPolicy
@@ -269,65 +269,82 @@ func (req *IdpNameIDMappingRequest) MakeResponse(status Status) *NameIDMappingRe
 //   - Responder if the provider fails; and otherwise Success.
 //
 // A request that is not a POST gets StatusMethodNotAllowed, one that is not a SOAP 1.1 envelope gets a Client
-// fault, and a failure to sign or write the response gets a Server fault.
+// fault, and a failure to sign or write the response gets a Server fault, which is the rule of SAMLBind §3.2.3.3.
+// A request whose sender is not verified gets the status codes of its error and nothing else.
+//
+// Each request is reported to the Observer as one EventNameIDMapping.
 func (idp *IdentityProvider) ServeNameIDMapping(w http.ResponseWriter, r *http.Request) {
-	soap, ok := idp.receiveSOAPRequest(w, r)
+	soap, ok := idp.receiveSOAPRequest(w, r, EventNameIDMapping)
 	if !ok {
 		return
 	}
 
 	req := &IdpNameIDMappingRequest{IDP: idp, HTTPRequest: r, RequestBuffer: soap.Body, Now: TimeNow()}
 
-	var response *NameIDMappingResponse
+	var (
+		response *NameIDMappingResponse
+		err      error
+	)
 
 	if soap.Message.Tag != "NameIDMappingRequest" || soap.Message.NamespaceURI() != samlProtocolNS {
-		idp.logger().Printf("failed to handle name identifier mapping request: the message is not a NameIDMappingRequest")
-
 		// MakeResponse answers it only if the ID is valid.
 		req.Request.ID = soap.Message.SelectAttrValue("ID", "")
-		response = req.MakeResponse(requesterStatus(StatusRequestUnsupported))
-	} else if err := req.Validate(); err != nil {
-		idp.logger().Printf("failed to validate name identifier mapping request: %s", err)
-
-		response = req.MakeResponse(errorStatus(err))
-	} else {
-		response = idp.mapNameID(r, req)
+		err = ErrRequestUnsupported.WithDebug("failed to handle name identifier mapping request: the message is not a NameIDMappingRequest")
+	} else if err = req.Validate(); err == nil {
+		response, err = idp.mapNameID(r, req)
 	}
 
-	if err := idp.writeSOAPMessage(w, r, req.ServiceProviderMetadata, response); err != nil {
-		idp.logger().Printf("failed to write name identifier mapping response: %s", err)
+	state := req.state()
+
+	if err != nil {
+		response = req.MakeResponse(idp.status(r, err, state))
+	}
+
+	if writeErr := idp.writeSOAPMessage(w, r, req.ServiceProviderMetadata, response); writeErr != nil {
+		err = ErrServerError.WithDebugf("failed to write name identifier mapping response: %s", writeErr).WithWrap(writeErr)
+
 		writeSOAPFault(w, &soapFault{Code: "Server", String: soapFaultStringProcessing})
 	}
+
+	idp.observe(r, state.event(EventNameIDMapping, err))
 }
 
-// mapNameID returns the unsigned response to the verified req. The target and the policy are decided before the
-// principal is identified, so that a requester which may not map to a target learns nothing of any principal,
-// and so does the key that the answer is encrypted to, so that nothing is looked up that couldn't be sent.
-func (idp *IdentityProvider) mapNameID(r *http.Request, req *IdpNameIDMappingRequest) *NameIDMappingResponse {
+// state returns what is established of the request. The requester is established once its signature is verified.
+func (req *IdpNameIDMappingRequest) state() requestState {
+	state := requestState{respondable: req.verifiedEl != nil, verified: req.verifiedEl != nil}
+
+	if isValidAuthnRequestID(req.Request.ID) {
+		state.requestID = req.Request.ID
+	}
+
+	switch {
+	case req.ServiceProviderMetadata != nil:
+		state.serviceProvider = req.ServiceProviderMetadata.EntityID
+	case req.Request.Issuer != nil:
+		state.serviceProvider = req.Request.Issuer.Value
+	}
+
+	return state
+}
+
+// mapNameID returns the unsigned response to the verified req, or the error whose status the response has. The
+// target and the policy are decided before the principal is identified, so that a requester which may not map to
+// a target learns nothing of any principal, and so does the key that the answer is encrypted to, so that nothing
+// is looked up that couldn't be sent.
+func (idp *IdentityProvider) mapNameID(r *http.Request, req *IdpNameIDMappingRequest) (*NameIDMappingResponse, error) {
 	provider, ok := idp.nameIDProvider().(NameIDMappingProvider)
 	if !ok {
-		idp.logger().Printf("cannot map name identifier: the name identifier provider does not implement NameIDMappingProvider")
-
-		return req.MakeResponse(Status{StatusCode: StatusCode{Value: StatusResponder, StatusCode: &StatusCode{Value: StatusRequestUnsupported}}})
+		return nil, ErrNotImplemented.WithDebug("cannot map name identifier: the name identifier provider does not implement NameIDMappingProvider")
 	}
 
 	encrypter, err := idp.nameIDMappingTarget(r, req)
 	if err != nil {
-		idp.logger().Printf("cannot map name identifier for %s: %s", req.ServiceProviderMetadata.EntityID, err)
-
-		status, ok := RequestStatus(err)
-		if !ok {
-			status = Status{StatusCode: StatusCode{Value: StatusResponder}}
-		}
-
-		return req.MakeResponse(status)
+		return nil, statusErrorOr(err, ErrServerError)
 	}
 
 	subject, err := idp.identifySubject(r, req.verifiedEl, req.Request.NameID, req.ServiceProviderMetadata, true)
 	if err != nil {
-		idp.logger().Printf("failed to validate name identifier mapping request: %s", err)
-
-		return req.MakeResponse(errorStatus(err))
+		return nil, statusErrorOr(err, ErrRequestDenied)
 	}
 
 	req.Request.NameID, req.NameIDEncrypted, req.Unidentified = subject.NameID, subject.Encrypted, subject.Unidentified
@@ -336,29 +353,29 @@ func (idp *IdentityProvider) mapNameID(r *http.Request, req *IdpNameIDMappingReq
 	// provider, as the requester knows what it sent. One that was encrypted is still looked up, so that the
 	// time taken doesn't tell what became of the ciphertext.
 	if req.Unidentified && !req.NameIDEncrypted {
-		return req.MakeResponse(requesterStatus(StatusUnknownPrincipal))
+		return nil, ErrUnknownPrincipal.WithDebug("the principal of the request is not identified")
 	}
 
 	nameID, err := provider.MapNameID(r, req)
 
+	// What the error of the provider says is not sent: every unknown principal is answered alike, and so is
+	// every policy that can't be satisfied, and any other error is a failure of the identity provider.
 	switch {
-	case req.Unidentified, errors.Is(err, ErrUnknownPrincipal), err == nil && nameID == nil:
-		return req.MakeResponse(requesterStatus(StatusUnknownPrincipal))
+	case req.Unidentified:
+		return nil, ErrUnknownPrincipal.WithDebug("the principal of the request is not identified")
+	case errors.Is(err, ErrUnknownPrincipal):
+		return nil, ErrUnknownPrincipal.WithDebugError(err)
+	case err == nil && nameID == nil:
+		return nil, ErrUnknownPrincipal.WithDebug("the name identifier mapping provider returned no identifier")
 	case errors.Is(err, ErrInvalidNameIDPolicy):
-		idp.logger().Printf("cannot map name identifier for %s: %s", req.ServiceProviderMetadata.EntityID, err)
-
-		return req.MakeResponse(requesterStatus(StatusInvalidNameIDPolicy))
+		return nil, ErrInvalidNameIDPolicy.WithDebugError(err)
 	case err != nil:
-		idp.logger().Printf("cannot map name identifier for %s: %s", req.ServiceProviderMetadata.EntityID, err)
-
-		return req.MakeResponse(Status{StatusCode: StatusCode{Value: StatusResponder}})
+		return nil, ErrServerError.WithDebugf("cannot map name identifier: %s", err).WithWrap(err)
 	}
 
 	mapped, err := req.completeMappedNameID(nameID)
 	if err != nil {
-		idp.logger().Printf("cannot map name identifier for %s: %s", req.ServiceProviderMetadata.EntityID, err)
-
-		return req.MakeResponse(Status{StatusCode: StatusCode{Value: StatusResponder}})
+		return nil, ErrServerError.WithDebugf("cannot map name identifier: %s", err).WithWrap(err)
 	}
 
 	response := req.MakeResponse(Status{StatusCode: StatusCode{Value: StatusSuccess}})
@@ -366,12 +383,10 @@ func (idp *IdentityProvider) mapNameID(r *http.Request, req *IdpNameIDMappingReq
 	// SAMLCore §6.2: the identifier is encrypted first, and the response which contains the EncryptedID is
 	// then signed. If it can't be encrypted, it is not sent.
 	if response.EncryptedID, err = encrypter.encryptNameID(mapped); err != nil {
-		idp.logger().Printf("cannot encrypt the mapped name identifier for %s: %s", req.TargetMetadata.EntityID, err)
-
-		return req.MakeResponse(Status{StatusCode: StatusCode{Value: StatusResponder}})
+		return nil, ErrServerError.WithDebugf("cannot encrypt the mapped name identifier for %s: %s", req.TargetMetadata.EntityID, err).WithWrap(err)
 	}
 
-	return response
+	return response, nil
 }
 
 // nameIDMappingTarget assigns TargetMetadata, has the NameIDMappingPolicy decide whether the requester may map to
@@ -381,7 +396,7 @@ func (idp *IdentityProvider) mapNameID(r *http.Request, req *IdpNameIDMappingReq
 // supply an identifier in the requested namespace. An affiliation can't be a target, as it has no single key.
 func (idp *IdentityProvider) nameIDMappingTarget(r *http.Request, req *IdpNameIDMappingRequest) (*elementEncrypter, error) {
 	refused := func(err error) error {
-		return &statusError{StatusRequester, StatusInvalidNameIDPolicy, err}
+		return ErrInvalidNameIDPolicy.WithDebugError(err)
 	}
 
 	req.TargetMetadata = req.ServiceProviderMetadata

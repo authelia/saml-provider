@@ -186,7 +186,7 @@ func TestServeLogoutRequestWithUndecryptableEncryptedID(t *testing.T) {
 
 				status := send(t, test, mutate)
 				assert.Check(t, is.DeepEqual(unknown, status))
-				assert.Check(t, status.StatusMessage == nil)
+				assert.Check(t, statusSaysNothingOfTheRequest(status))
 				assert.Check(t, status.StatusDetail == nil)
 
 				// The provider is asked, as it is for a NameID which names nobody, with an identifier that isn't

@@ -15,11 +15,6 @@ import (
 	"authelia.com/provider/saml/internal/dsig"
 )
 
-// ErrUnknownPrincipal is returned by a NameIDManagementProvider or a NameIDMappingProvider which doesn't
-// recognize the identifier of a request. The requester receives a Requester status with an UnknownPrincipal
-// second-level status (SAMLCore §3.6.3, §3.8.3).
-var ErrUnknownPrincipal = errors.New("the principal is unknown")
-
 // signableMessage is a protocol message that is signed with an enveloped signature.
 type signableMessage interface {
 	Element() *etree.Element
@@ -54,7 +49,7 @@ type protocolRequestHeader struct {
 // Nothing in the request is acted on before these pass.
 func (h protocolRequestHeader) checkTrust() error {
 	if !isValidAuthnRequestID(h.ID) {
-		// The value is not included because this error is logged without authentication.
+		// The value is not included: it is arbitrary text of a request that is not authenticated.
 		return errors.New("invalid request ID")
 	}
 
@@ -72,22 +67,21 @@ func (h protocolRequestHeader) checkTrust() error {
 
 // checkRequestStage makes the checks on the content of a request that are reported to the requester as a SAML
 // status: its version, its age, and its Destination, which must be the endpoint when it is present. The request
-// must have been verified, and the error is a *statusError.
+// must have been verified, and the error is a StatusError.
 func (h protocolRequestHeader) checkRequestStage(now time.Time, endpoint string) error {
-	if statusErr := versionStatus(h.Version); statusErr != nil {
-		return statusErr
+	if err := versionError(h.Version); err != nil {
+		return err
 	}
 
 	if err := checkIssueInstant("request", h.IssueInstant, now, MaxIssueDelay); err != nil {
-		return &statusError{StatusRequester, StatusRequestDenied, err}
+		return ErrRequestNotCurrent.WithDebugError(err)
 	}
 
 	// SAMLBind §3.4.5.2 and §3.5.5.2 require the Destination of a signed message on the front channel, which
 	// the caller has checked is present. SAMLBind §3.2 has no such requirement on SOAP, but a Destination that
 	// is present must be this endpoint (SAMLCore §3.2.1).
 	if h.Destination != "" && h.Destination != endpoint {
-		return &statusError{StatusRequester, StatusRequestDenied,
-			fmt.Errorf("expected destination to be %q, not %q", endpoint, h.Destination)}
+		return ErrDestinationMismatch.WithDebugf("expected destination to be %q, not %q", endpoint, h.Destination)
 	}
 
 	return nil
@@ -122,44 +116,45 @@ func readFrontChannelRequest(r *http.Request) (buf []byte, relayState, redirectQ
 
 // verifyFrontChannelRequester looks up the service provider issuer and verifies the signature of the message
 // root, which is required: in the query on the HTTP-Redirect binding, enveloped on HTTP-POST. It returns the
-// metadata and the element that the signature covers. The errors are not statuses, as nothing can be answered
-// to a requester that isn't verified, and they don't include the issuer, which is not verified.
+// metadata and the element that the signature covers. The errors are those of verifySOAPRequester. Nothing can
+// be answered to a requester that isn't verified, so on the front channel they are answered with HTTP.
 func (idp *IdentityProvider) verifyFrontChannelRequester(r *http.Request, root *etree.Element, redirectQuery, issuer string) (*EntityDescriptor, *etree.Element, error) {
 	metadata, err := idp.serviceProvider(r, issuer)
 	if errors.Is(err, os.ErrNotExist) {
-		return nil, nil, errors.New("cannot handle request from unknown service provider")
+		return nil, nil, ErrUnknownServiceProvider.WithDebugf("cannot handle request from unknown service provider %s", issuer)
 	} else if err != nil {
-		return nil, nil, fmt.Errorf("cannot find service provider: %w", err)
+		return nil, nil, ErrServerError.WithDebugf("cannot find service provider: %s", err).WithWrap(err)
 	}
 
 	signatureEl, err := findChild(root, "http://www.w3.org/2000/09/xmldsig#", "Signature")
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, ErrInvalidSignature.WithDebugError(err)
 	}
 
 	if redirectQuery == "" && signatureEl == nil {
-		return nil, nil, errors.New("request is not signed")
+		return nil, nil, ErrSignatureRequired.WithDebug("request is not signed")
 	}
 
 	certificates, err := serviceProviderSigningCertificates(metadata)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, ErrServerError.WithDebugError(err)
 	}
 
 	if len(certificates) == 0 {
-		return nil, nil, errors.New("request is signed but the service provider has no signing certificate")
+		return nil, nil, ErrInvalidSignature.WithDebug("request is signed but the service provider has no signing certificate")
 	}
 
+	// A list that can't be used is a fault of the identity provider, and not of the requester.
 	policy, err := idp.signaturePolicy()
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, ErrServerError.WithDebugError(err)
 	}
 
 	var verified *etree.Element
 
 	if redirectQuery != "" {
 		if err = verifyRedirectSignature(redirectQuery, "SAMLRequest", certificates, policy); err != nil {
-			return nil, nil, fmt.Errorf("invalid request signature: %w", err)
+			return nil, nil, ErrInvalidSignature.WithDebugf("invalid request signature: %s", err).WithWrap(err)
 		}
 
 		// The signature in the query covers the whole message.
@@ -168,7 +163,7 @@ func (idp *IdentityProvider) verifyFrontChannelRequester(r *http.Request, root *
 
 	if signatureEl != nil {
 		if verified, err = verifyEnvelopedSignature(root, certificates, policy); err != nil {
-			return nil, nil, fmt.Errorf("invalid request signature: %w", err)
+			return nil, nil, ErrInvalidSignature.WithDebugf("invalid request signature: %s", err).WithWrap(err)
 		}
 	}
 
@@ -332,7 +327,7 @@ type requestSubject struct {
 // A request with no identifier or more than one, or with a NameID that has no value, is an error with a
 // Requester status and RequestDenied, and one with a BaseID, which is not supported, is RequestUnsupported.
 // Every other reason for which the identifier is not one that the requester shares with the identity provider
-// is not an error: the subject is Unidentified, with a random NameID, and the reason is only logged. All of them
+// is not an error: the subject is Unidentified, with a random NameID, and the reason is only reported to the Observer. All of them
 // are then answered alike, as an unknown principal, because an answer which tells the requester that an
 // EncryptedID was decrypted, or what it held, would let it use the identity provider to learn about a ciphertext
 // that it didn't make (errata E93), as IdpLogoutRequest.Unidentified describes.
@@ -342,7 +337,7 @@ func (idp *IdentityProvider) identifySubject(r *http.Request, verified *etree.El
 	for i, tag := range []string{"NameID", "EncryptedID", "BaseID"} {
 		els, err := findChildren(verified, samlAssertionNamespace, tag)
 		if err != nil {
-			return requestSubject{}, &statusError{StatusRequester, StatusRequestDenied, err}
+			return requestSubject{}, ErrRequestDenied.WithDebugError(err)
 		}
 
 		count[i] = len(els)
@@ -350,11 +345,9 @@ func (idp *IdentityProvider) identifySubject(r *http.Request, verified *etree.El
 
 	switch {
 	case count[2] != 0:
-		return requestSubject{}, &statusError{StatusRequester, StatusRequestUnsupported,
-			errors.New("request identifies the principal with a BaseID, which is not supported")}
+		return requestSubject{}, ErrRequestUnsupported.WithDebug("request identifies the principal with a BaseID, which is not supported")
 	case count[0]+count[1] != 1:
-		return requestSubject{}, &statusError{StatusRequester, StatusRequestDenied,
-			errors.New("request does not have exactly one of a NameID and an EncryptedID")}
+		return requestSubject{}, ErrRequestDenied.WithDebug("request does not have exactly one of a NameID and an EncryptedID")
 	}
 
 	subject := requestSubject{NameID: nameID, Encrypted: count[1] == 1}
@@ -364,7 +357,7 @@ func (idp *IdentityProvider) identifySubject(r *http.Request, verified *etree.El
 	if subject.Encrypted {
 		encryptedIDEl, err := findOneChild(verified, samlAssertionNamespace, "EncryptedID")
 		if err != nil {
-			return requestSubject{}, &statusError{StatusRequester, StatusRequestDenied, err}
+			return requestSubject{}, ErrRequestDenied.WithDebugError(err)
 		}
 
 		decrypter, err := idp.elementDecrypter()
@@ -376,7 +369,7 @@ func (idp *IdentityProvider) identifySubject(r *http.Request, verified *etree.El
 			reason = fmt.Errorf("cannot decrypt the EncryptedID: %w", err)
 		}
 	} else if nameID == nil || nameID.Value == "" {
-		return requestSubject{}, &statusError{StatusRequester, StatusRequestDenied, errors.New("request has a NameID with no value")}
+		return requestSubject{}, ErrRequestDenied.WithDebug("request has a NameID with no value")
 	}
 
 	if reason == nil {
@@ -384,7 +377,8 @@ func (idp *IdentityProvider) identifySubject(r *http.Request, verified *etree.El
 	}
 
 	if reason != nil {
-		idp.logger().Printf("the principal of the request from %s is not identified: %s", metadata.EntityID, reason)
+		idp.observe(r, requestState{serviceProvider: metadata.EntityID, verified: true, respondable: true}.warning(EventPrincipalUnidentified,
+			ErrUnknownPrincipal.WithDebugf("the principal of the request is not identified: %s", reason).WithWrap(reason)))
 
 		// The stand-in is 256 bits from RandReader, so it is not the identifier of anyone.
 		subject.Unidentified = true
@@ -438,26 +432,11 @@ func isAuthenticatedEncryption(encryptedEl *etree.Element) bool {
 	return methodEl != nil && strings.HasSuffix(methodEl.SelectAttrValue("Algorithm", ""), "-gcm")
 }
 
-// requesterStatus is the Status of a request that is refused for what it asks, with a second-level status.
-func requesterStatus(second string) Status {
-	return Status{StatusCode: StatusCode{Value: StatusRequester, StatusCode: &StatusCode{Value: second}}}
-}
-
-// errorStatus returns the Status to answer a request with for an error of Validate on the SOAP binding, where
-// every verified or unverified SAML message is answered: the status that the error carries, or else Requester
-// with RequestDenied.
-func errorStatus(err error) Status {
-	if status, ok := RequestStatus(err); ok {
-		return status
-	}
-
-	return requesterStatus(StatusRequestDenied)
-}
-
 // checkReplay consumes the ID of the request in the ReplayStore of idp, for the kind of the message. It must be
 // the last check of the request, once it is verified, so that only a registered service provider can add to the
 // store. The ID is recorded until the request would be refused for its age, which is MaxIssueDelay and
-// MaxClockSkew after its IssueInstant, and MaxClockSkew longer. The error is a *statusError, as IdentityProvider.checkReplay describes.
+// MaxClockSkew after its IssueInstant, and MaxClockSkew longer. The error is a StatusError, as
+// IdentityProvider.checkReplay describes.
 func (h protocolRequestHeader) checkReplay(idp *IdentityProvider, r *http.Request, kind string) error {
 	return idp.checkReplay(requestContext(r), kind, h.Issuer.Value, h.ID, h.IssueInstant.Add(MaxIssueDelay))
 }

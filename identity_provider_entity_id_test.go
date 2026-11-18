@@ -66,7 +66,7 @@ func TestIDPEntityIDInErrorResponse(t *testing.T) {
 	_, req := entityIDRequest(t, entityIDTestValue)
 
 	w := httptest.NewRecorder()
-	assert.NilError(t, req.WriteErrorResponse(w, StatusResponder, StatusNoPassive, ""))
+	assert.NilError(t, req.WriteErrorResponse(w, ErrNoPassive))
 
 	_, response := postedResponse(t, w.Body.String())
 	assert.Assert(t, response.Issuer != nil)
@@ -133,7 +133,7 @@ func TestIDPRefusesInvalidEntityID(t *testing.T) {
 			assert.Check(t, is.ErrorContains(req.MakeAssertionEl(), "entity ID"))
 
 			w = httptest.NewRecorder()
-			assert.Check(t, is.ErrorContains(req.WriteErrorResponse(w, StatusResponder, "", ""), "entity ID"))
+			assert.Check(t, is.ErrorContains(req.WriteErrorResponse(w, ErrServerError), "entity ID"))
 			assert.Check(t, is.Equal(w.Body.Len(), 0))
 		})
 	}
@@ -144,7 +144,7 @@ func TestIDPAcceptsLongestEntityID(t *testing.T) {
 	_, req := entityIDRequest(t, entityID)
 
 	w := httptest.NewRecorder()
-	assert.NilError(t, req.WriteErrorResponse(w, StatusResponder, "", ""))
+	assert.NilError(t, req.WriteErrorResponse(w, ErrServerError))
 	_, response := postedResponse(t, w.Body.String())
 	assert.Check(t, is.Equal(response.Issuer.Value, entityID))
 }

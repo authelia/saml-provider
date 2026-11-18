@@ -28,7 +28,6 @@ import (
 
 	"authelia.com/provider/saml/internal/dsig"
 	"authelia.com/provider/saml/internal/dsig/etreeutils"
-	"authelia.com/provider/saml/logger"
 )
 
 // NameIDFormat is the format of the id.
@@ -791,27 +790,27 @@ type AssertionAttribute struct {
 // The underlying error is in PrivateErr. Response is the response as it was
 // known at the time validation failed. Now is the time that was used to validate
 // time-dependent parts of the assertion.
+//
+// When the identity provider answered with a status that is not a success, PrivateErr is the StatusError that
+// StatusErrorFromStatus returns, which [errors.As] finds through Unwrap and which matches ErrReceivedStatus. Its
+// TopLevelField and SecondLevelField are the status codes of the identity provider, such as StatusNoPassive, by
+// which a service provider can tell a request that was refused from one that failed. The StatusMessage and the
+// StatusDetail of the identity provider are in its debug message, as they are text of another party.
 type InvalidResponseError struct {
 	PrivateErr error
 	Response   string
 	Now        time.Time
 }
 
+// Unwrap returns PrivateErr, for [errors.Is] and [errors.As]. Error still discloses nothing of it.
+func (ivr *InvalidResponseError) Unwrap() error {
+	return ivr.PrivateErr
+}
+
 // Error implements the error interface. The private error is deliberately not
 // disclosed.
 func (ivr *InvalidResponseError) Error() string {
 	return "Authentication failed"
-}
-
-// ErrBadStatus is returned when the assertion provided is valid but the
-// status code is not "urn:oasis:names:tc:SAML:2.0:status:Success".
-type ErrBadStatus struct {
-	Status string
-}
-
-// Error implements the error interface.
-func (e ErrBadStatus) Error() string {
-	return e.Status
 }
 
 // ParseResponse extracts the SAML IDP response received in req, resolves
@@ -875,11 +874,8 @@ func (sp *ServiceProvider) handleArtifactRequest(ctx context.Context, artifactID
 		return nil, retErr
 	}
 
-	defer func() {
-		if err := response.Body.Close(); err != nil {
-			logger.DefaultLogger.Printf("Error while closing response body during artifact resolution: %v", err)
-		}
-	}()
+	// The body is only read, so a failure to close it says nothing of what was read.
+	defer func() { _ = response.Body.Close() }()
 
 	if response.StatusCode != 200 {
 		retErr.PrivateErr = fmt.Errorf("Error during artifact resolution: HTTP status %d (%s)", response.StatusCode, response.Status)
@@ -1014,7 +1010,7 @@ func (sp *ServiceProvider) parseArtifactResponse(artifactResponseEl *etree.Eleme
 		}
 
 		if artifactResponse.Status.StatusCode.Value != StatusSuccess {
-			retErr.PrivateErr = ErrBadStatus{Status: artifactResponse.Status.StatusCode.Value}
+			retErr.PrivateErr = StatusErrorFromStatus(artifactResponse.Status)
 			return nil, retErr
 		}
 	}
@@ -1161,7 +1157,7 @@ func (sp *ServiceProvider) parseResponse(responseEl *etree.Element, possibleRequ
 		}
 
 		if response.Status.StatusCode.Value != StatusSuccess {
-			return nil, ErrBadStatus{Status: response.Status.StatusCode.Value}
+			return nil, StatusErrorFromStatus(response.Status)
 		}
 	}
 
@@ -2165,7 +2161,7 @@ func (sp *ServiceProvider) validateLogoutResponse(resp *LogoutResponse, possible
 	}
 
 	if resp.Status.StatusCode.Value != StatusSuccess {
-		return fmt.Errorf("status code was not %s", StatusSuccess)
+		return fmt.Errorf("status code was not %s: %w", StatusSuccess, StatusErrorFromStatus(resp.Status))
 	}
 
 	return nil

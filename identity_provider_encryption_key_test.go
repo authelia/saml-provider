@@ -583,7 +583,7 @@ func TestServeLogoutRequestUndecryptableWithSeveralKeys(t *testing.T) {
 					request.NameID, request.EncryptedID = nil, encryptedID
 				})
 				assert.Check(t, is.DeepEqual(unknown, status))
-				assert.Check(t, status.StatusMessage == nil)
+				assert.Check(t, statusSaysNothingOfTheRequest(status))
 				assert.Check(t, status.StatusDetail == nil)
 
 				assert.Assert(t, is.Len(provider.lookups, 1))

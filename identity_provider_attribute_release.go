@@ -1,11 +1,9 @@
 package saml
 
 import (
-	"errors"
+	"context"
 	"fmt"
 	"strings"
-
-	"authelia.com/provider/saml/logger"
 )
 
 // The names of the attributes that the attribute bundles of the REFEDS entity categories hold, each with the
@@ -45,12 +43,6 @@ const (
 	// principal.
 	SchacHomeOrganizationAttributeName = "urn:oid:1.3.6.1.4.1.25178.1.2.9"
 )
-
-// ErrRequiredAttributeUnavailable is wrapped by the error of DefaultAttributeReleasePolicy when it is set to
-// refuse a request that it can't release a required attribute for: a RequestedAttribute with isRequired, or the
-// subject identifier that the subject-id:req entity attribute requires. The request is answered with a Responder
-// status.
-var ErrRequiredAttributeUnavailable = errors.New("an attribute that the service provider requires cannot be released")
 
 // bundleAttribute returns an entry of an attribute bundle.
 func bundleAttribute(friendlyName, name string) Attribute {
@@ -191,7 +183,7 @@ type DefaultAttributeReleasePolicy struct {
 	// EnforceSubjectIDRequirement refuses a request from a service provider that requires a subject identifier
 	// which can't be stated: there is no Session.SubjectID, or no PairwiseIDProvider with a pairwise-id for the
 	// principal. The error wraps ErrRequiredAttributeUnavailable. By default the assertion is made without the
-	// identifier, and that is logged. SAML2Int SDP-IDP16 allows either.
+	// identifier, and that is reported to the Observer. SAML2Int SDP-IDP16 allows either.
 	EnforceSubjectIDRequirement bool
 }
 
@@ -225,7 +217,7 @@ func (p DefaultAttributeReleasePolicy) ReleaseAttributes(req AttributeReleaseReq
 			return nil, requiredAttributeUnavailable(fmt.Sprintf("the subject identifier that subject-id:req requires (%s)", requirement))
 		}
 
-		releaseLogger(req).Printf("the service provider requires a subject identifier (%s) that can't be stated, which is left out", requirement)
+		observeRelease(req, ErrRequiredAttributeUnavailable.WithDebugf("the service provider requires a subject identifier (%s) that can't be stated, which is left out", requirement))
 	}
 
 	if p.EnforceIsRequired && req.Ceiling != nil {
@@ -322,17 +314,18 @@ func missingRequiredAttributes(requested []RequestedAttribute, released []Attrib
 // requiredAttributeUnavailable returns the error for a request that is refused because what names can't be
 // released. It holds no value of an attribute.
 func requiredAttributeUnavailable(what string) error {
-	return &statusError{TopLevel: StatusResponder, Err: fmt.Errorf("%w: %s", ErrRequiredAttributeUnavailable, what)}
+	return ErrRequiredAttributeUnavailable.WithDebug(what)
 }
 
-// releaseLogger returns the logger of the identity provider that req is served by.
-func releaseLogger(req AttributeReleaseRequest) logger.Interface {
+// observeRelease reports err as an EventAttributeRelease with a warning, to the Observer of the identity provider
+// that req is served by, or to the default one if it has none.
+func observeRelease(req AttributeReleaseRequest, err *StatusError) {
 	switch {
 	case req.AuthnRequest != nil && req.AuthnRequest.IDP != nil:
-		return req.AuthnRequest.IDP.logger()
+		req.AuthnRequest.warn(EventAttributeRelease, err)
 	case req.Query != nil && req.Query.IDP != nil:
-		return req.Query.IDP.logger()
+		req.Query.IDP.observe(req.Query.HTTPRequest, req.Query.state().warning(EventAttributeRelease, err))
 	default:
-		return logger.DefaultLogger
+		observe(context.Background(), nil, requestState{}.warning(EventAttributeRelease, err))
 	}
 }

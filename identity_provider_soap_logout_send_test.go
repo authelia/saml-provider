@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"io"
-	"log"
 	"mime"
 	"net/http"
 	"net/http/httptest"
@@ -157,7 +156,7 @@ func newSOAPLogoutFixture(t *testing.T, handler soapLogoutSPHandler) (*propagati
 	t.Helper()
 
 	f := newPropagationFixture(t)
-	f.test.IDP.Logger = log.New(io.Discard, "", 0)
+	f.test.IDP.Observer = logObserver(io.Discard)
 
 	server, recorder := soapLogoutSP(t, f.b, handler)
 	f.test.IDP.HTTPClient = server.Client()

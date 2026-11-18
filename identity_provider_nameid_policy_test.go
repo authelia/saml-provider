@@ -150,7 +150,7 @@ func TestServeSSODoesNotSendNameIDPolicyErrorText(t *testing.T) {
 		return errors.New("alice has no identifier")
 	})
 	response := serveSSOWithPolicy(t, test, &Session{ID: "s", NameID: "alice"}, &NameIDPolicy{})
-	assert.Check(t, response.Status.StatusMessage == nil)
+	assert.Check(t, statusSaysNothingOfTheRequest(response.Status))
 }
 
 // An IdP-initiated response isn't answering a request, so there is no policy to enforce.

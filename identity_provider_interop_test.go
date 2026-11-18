@@ -4,6 +4,7 @@ import (
 	"crypto/x509"
 	"encoding/json"
 	"encoding/xml"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -159,9 +160,9 @@ func TestIDPACSSelection(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			req, err := interopValidate(interopIDP(t, tc.metadata), tc.attrs)
 			if tc.location == "" {
-				assert.Check(t, is.ErrorContains(err, "cannot find assertion consumer service"))
-				_, _, isStatus := requestStatus(err)
-				assert.Check(t, !isStatus, "a request with no usable endpoint can't be answered with a status")
+				assert.Check(t, errors.Is(err, ErrNoResponseEndpoint), "%v", err)
+				assert.Check(t, is.Contains(ToStatusError(err).Debug(), "cannot find assertion consumer service"))
+				assert.Check(t, !req.Respondable(), "a request with no usable endpoint can't be answered with a status")
 
 				return
 			}

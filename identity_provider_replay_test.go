@@ -276,8 +276,7 @@ func TestCheckReplayKeysByIssuerKindAndIdentityProvider(t *testing.T) {
 	err := idp.checkReplay(ctx, replayKindAuthnRequest, "https://sp-a.example.com", "id-1", expires)
 	assert.Check(t, errors.Is(err, ErrReplayed))
 
-	status, ok := RequestStatus(err)
-	assert.Assert(t, ok)
+	status := idp.ErrorStatus(err)
 	assert.Check(t, is.Equal(status.StatusCode.Value, StatusRequester))
 	assert.Check(t, is.Equal(status.StatusCode.StatusCode.Value, StatusRequestDenied))
 
@@ -306,8 +305,9 @@ func TestCheckReplayStoreFailureIsResponder(t *testing.T) {
 			assert.Check(t, errors.Is(err, storeErr))
 			assert.Check(t, !errors.Is(err, ErrReplayed))
 
-			status, ok := RequestStatus(err)
-			assert.Assert(t, ok)
+			assert.Check(t, errors.Is(err, ErrServerError))
+
+			status := idp.ErrorStatus(err)
 			assert.Check(t, is.Equal(status.StatusCode.Value, StatusResponder))
 			assert.Check(t, status.StatusCode.StatusCode == nil)
 		})
@@ -672,9 +672,9 @@ func TestIdpAuthnRequestCheckReplay(t *testing.T) {
 	err := validated().CheckReplay()
 	assert.Check(t, errors.Is(err, ErrReplayed))
 
-	status, ok := RequestStatus(err)
-	assert.Assert(t, ok)
-	assert.Check(t, is.Equal(status.StatusCode.Value, StatusRequester))
+	top, second := errorCodes(err)
+	assert.Check(t, is.Equal(top, StatusRequester))
+	assert.Check(t, is.Equal(second, StatusRequestDenied))
 
 	// A request made without an HTTP request has no context to pass on.
 	req := validated()

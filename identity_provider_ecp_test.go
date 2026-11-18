@@ -7,7 +7,6 @@ import (
 	"crypto/x509"
 	"errors"
 	"io"
-	"log"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -111,7 +110,7 @@ func ecpTestIDP(t *testing.T, mutate func(*EntityDescriptor)) (*IdentityProvider
 	test := signatureTestIDP(t)
 	test.SP.SignatureMethod = ""
 	test.IDP.ECPURL = mustParseURL(ecpTestURL)
-	test.IDP.Logger = log.New(io.Discard, "", 0)
+	test.IDP.Observer = logObserver(io.Discard)
 
 	test.IDP.ServiceProviderProvider = &mockServiceProviderProvider{
 		GetServiceProviderFunc: func(_ *http.Request, serviceProviderID string) (*EntityDescriptor, error) {
@@ -287,7 +286,7 @@ func assertECPStatus(t *testing.T, w *httptest.ResponseRecorder, id, top, second
 	}
 
 	// SAMLProf §4.1.4.2: an error carries no assertion.
-	assert.Check(t, response.Response.Status.StatusMessage == nil)
+	assert.Check(t, statusSaysNothingOfTheRequest(response.Response.Status))
 	assert.Check(t, response.Response.Assertion == nil)
 	assert.Check(t, response.Response.EncryptedAssertion == nil)
 
@@ -799,7 +798,7 @@ func TestServeECPForceAuthnReachesProvider(t *testing.T) {
 func TestServeECPProviderWritesErrorResponse(t *testing.T) {
 	test, provider := ecpTestIDP(t, nil)
 	provider.getSession = func(w http.ResponseWriter, _ *http.Request, req *IdpAuthnRequest) *Session {
-		assert.Check(t, req.WriteErrorResponse(w, StatusResponder, StatusAuthnFailed, ""))
+		assert.Check(t, req.WriteErrorResponse(w, ErrAuthnFailed))
 
 		return nil
 	}

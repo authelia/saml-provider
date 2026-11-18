@@ -14,7 +14,6 @@ import (
 	xrv "github.com/mattermost/xml-roundtrip-validator"
 
 	"authelia.com/provider/saml"
-	"authelia.com/provider/saml/logger"
 )
 
 // ParseMetadata parses arbitrary SAML IDP metadata.
@@ -84,11 +83,8 @@ func FetchMetadata(ctx context.Context, httpClient *http.Client, metadataURL url
 	if err != nil {
 		return nil, err
 	}
-	defer func() {
-		if err := resp.Body.Close(); err != nil {
-			logger.DefaultLogger.Printf("Error while closing response body during fetch metadata: %v", err)
-		}
-	}()
+	// The body is only read, so a failure to close it says nothing of what was read.
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode >= 400 {
 		return nil, fmt.Errorf("failed to fetch metadata: unexpected status code %d", resp.StatusCode)

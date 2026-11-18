@@ -59,7 +59,7 @@ func assertRequestStatus(t *testing.T, w *httptest.ResponseRecorder, id, top, se
 		assert.Check(t, is.Equal(response.Status.StatusCode.StatusCode.Value, second))
 	}
 
-	assert.Check(t, response.Status.StatusMessage == nil)
+	assert.Check(t, statusSaysNothingOfTheRequest(response.Status))
 	assert.Check(t, response.Assertion == nil)
 	assert.Check(t, response.EncryptedAssertion == nil)
 }
@@ -169,10 +169,6 @@ func TestServeSSOSignedRequestFailsRequestStage(t *testing.T) {
 	}
 }
 
-func TestStatusErrorWithoutErr(t *testing.T) {
-	assert.Check(t, (&statusError{TopLevel: StatusRequester}).Error() != "")
-}
-
 type encryptionCertificateEnforcerFunc func(*IdpAuthnRequest, *x509.Certificate) error
 
 func (f encryptionCertificateEnforcerFunc) EnforceEncryptionCertificate(req *IdpAuthnRequest, cert *x509.Certificate) error {
@@ -228,38 +224,29 @@ func TestServeSSOInvalidNameIDPolicyFromAssertionMaker(t *testing.T) {
 	assertRequestStatus(t, w, id, StatusRequester, StatusInvalidNameIDPolicy)
 }
 
-func TestRequestStatus(t *testing.T) {
-	status := func(top, second string) Status {
-		s := Status{StatusCode: StatusCode{Value: top}}
-		if second != "" {
-			s.StatusCode.StatusCode = &StatusCode{Value: second}
-		}
-
-		return s
-	}
+func TestErrorStatusCodes(t *testing.T) {
+	idp := &IdentityProvider{}
 
 	for name, tc := range map[string]struct {
-		err    error
-		status Status
-		ok     bool
+		err         error
+		top, second string
 	}{
-		"request stage":         {&statusError{StatusRequester, StatusRequestDenied, errors.New("expired")}, status(StatusRequester, StatusRequestDenied), true},
-		"wrapped request stage": {fmt.Errorf("validate: %w", &statusError{TopLevel: StatusVersionMismatch}), status(StatusVersionMismatch, ""), true},
-		"name id policy":        {fmt.Errorf("cannot issue a NameID: %w", ErrInvalidNameIDPolicy), status(StatusRequester, StatusInvalidNameIDPolicy), true},
-		"other":                 {errors.New("cannot find service provider"), Status{}, false},
-		"nil":                   {nil, Status{}, false},
+		"request stage":         {ErrRequestNotCurrent.WithDebug("expired"), StatusRequester, StatusRequestDenied},
+		"wrapped request stage": {fmt.Errorf("validate: %w", ErrVersionMismatch), StatusVersionMismatch, ""},
+		"name id policy":        {fmt.Errorf("cannot issue a NameID: %w", ErrInvalidNameIDPolicy), StatusRequester, StatusInvalidNameIDPolicy},
+		"other":                 {errors.New("cannot find service provider"), StatusResponder, ""},
 	} {
 		t.Run(name, func(t *testing.T) {
-			got, ok := RequestStatus(tc.err)
-			assert.Check(t, is.Equal(ok, tc.ok))
-			assert.Check(t, is.DeepEqual(got, tc.status))
+			top, second := statusCodes(idp.ErrorStatus(tc.err))
+			assert.Check(t, is.Equal(top, tc.top))
+			assert.Check(t, is.Equal(second, tc.second))
 		})
 	}
 }
 
-// RequestStatus tells a custom handler which errors of Validate may be answered with a SAML status.
-func TestRequestStatusOfValidate(t *testing.T) {
-	validate := func(t *testing.T, modify func(*AuthnRequest)) error {
+// Respondable tells a custom handler which errors of Validate may be answered with a SAML status.
+func TestRespondableAfterValidate(t *testing.T) {
+	validate := func(t *testing.T, modify func(*AuthnRequest)) (*IdpAuthnRequest, error) {
 		t.Helper()
 
 		test := NewIdentityProviderTest(t, applyKey)
@@ -274,13 +261,17 @@ func TestRequestStatusOfValidate(t *testing.T) {
 
 		req := &IdpAuthnRequest{IDP: &test.IDP, HTTPRequest: httptest.NewRequest(http.MethodPost, "https://idp.example.com/saml/sso", nil), RequestBuffer: body, Now: TimeNow()}
 
-		return req.Validate()
+		return req, req.Validate()
 	}
 
-	_, ok := RequestStatus(validate(t, func(r *AuthnRequest) { r.ID = "bad id" }))
-	assert.Check(t, !ok, "a request that fails before its endpoint is known must not get a SAML response")
+	req, err := validate(t, func(r *AuthnRequest) { r.ID = "bad id" })
+	assert.Check(t, errors.Is(err, ErrMalformedRequest), "%v", err)
+	assert.Check(t, !req.Respondable(), "a request that fails before its endpoint is known must not get a SAML response")
+	assert.Check(t, req.MakeErrorResponse(err) != nil)
 
-	status, ok := RequestStatus(validate(t, func(r *AuthnRequest) { r.Version = "3.0" }))
-	assert.Check(t, ok)
-	assert.Check(t, is.Equal(status.StatusCode.Value, StatusVersionMismatch))
+	req, err = validate(t, func(r *AuthnRequest) { r.Version = "3.0" })
+	assert.Check(t, errors.Is(err, ErrRequestVersionTooHigh), "%v", err)
+	assert.Check(t, req.Respondable())
+	assert.Check(t, is.Equal(req.IDP.ErrorStatus(err).StatusCode.Value, StatusVersionMismatch))
+	assert.NilError(t, req.MakeErrorResponse(err))
 }

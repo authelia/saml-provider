@@ -2,7 +2,6 @@ package saml
 
 import (
 	"bytes"
-	"log"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -195,7 +194,7 @@ func TestSessionProviderRefusesIDPList(t *testing.T) {
 		GetSessionFunc: func(w http.ResponseWriter, _ *http.Request, req *IdpAuthnRequest) *Session {
 			scoping := req.Request.Scoping
 			if scoping != nil && scoping.IDPList != nil && scoping.IDPList.GetComplete == "" && !scoping.IDPList.Contains(req.IDP.entityID()) {
-				assert.Check(t, req.WriteErrorResponse(w, StatusResponder, StatusNoSupportedIDP, ""))
+				assert.Check(t, req.WriteErrorResponse(w, ErrNoSupportedIDP))
 
 				return nil
 			}
@@ -282,7 +281,7 @@ func TestIssuanceRefusesProxyRestrictionThatCannotBeStated(t *testing.T) {
 			issuanceFor(test, ServiceProviderIssuance{ProxyRestriction: &tc.restriction})
 
 			logs := &bytes.Buffer{}
-			test.IDP.Logger = log.New(logs, "", 0)
+			test.IDP.Observer = logObserver(logs)
 
 			// Nothing is sent, as for every decision that can't be carried out.
 			r, _ := scopingRequest(t, test, HTTPPostBinding, nil)
@@ -369,7 +368,7 @@ func TestScopingIsBoundedByRequestSize(t *testing.T) {
 	oversized := hardeningRequest(`ID="id-1"`, TimeNow(), hardeningIssuer+`<Scoping>`+strings.Repeat(`<RequesterID>a</RequesterID>`, 600)+`</Scoping>`)
 
 	_, err = hardeningValidate(test, oversized)
-	assert.Check(t, is.ErrorContains(err, "exceeds"))
+	assert.Check(t, is.Contains(errorText(err), "exceeds"))
 }
 
 func TestServiceProviderSendsScoping(t *testing.T) {
