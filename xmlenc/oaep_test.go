@@ -12,9 +12,10 @@ import (
 	"testing"
 
 	"github.com/beevik/etree"
-	"gotest.tools/assert"
-	is "gotest.tools/assert/cmp"
-	"gotest.tools/golden"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+
+	"authelia.com/provider/saml/internal/golden"
 )
 
 // encryptedKeyCiphertext returns the RSA ciphertext of the EncryptedKey of an EncryptedData element.
@@ -22,9 +23,9 @@ func encryptedKeyCiphertext(t *testing.T, el *etree.Element) []byte {
 	t.Helper()
 
 	value := el.FindElement("./KeyInfo/EncryptedKey/CipherData/CipherValue")
-	assert.Assert(t, value != nil)
+	require.NotNil(t, value)
 	ciphertext, err := base64.StdEncoding.DecodeString(strings.TrimSpace(value.Text()))
-	assert.NilError(t, err)
+	require.NoError(t, err)
 
 	return ciphertext
 }
@@ -40,20 +41,20 @@ func TestGCMKeySizes(t *testing.T) {
 		{AES256GCM, 32, "http://www.w3.org/2009/xmlenc11#aes256-gcm"},
 	} {
 		t.Run(tc.algorithm, func(t *testing.T) {
-			assert.Check(t, is.Equal(tc.keySize, tc.cipher.KeySize()))
-			assert.Check(t, is.Equal(tc.algorithm, tc.cipher.Algorithm()))
+			assert.Equal(t, tc.keySize, tc.cipher.KeySize())
+			assert.Equal(t, tc.algorithm, tc.cipher.Algorithm())
 
 			key, cert := newDigestTestKey(t)
 			encrypter := OAEP()
 			encrypter.BlockCipher = tc.cipher
 			el, err := encrypter.Encrypt(cert, []byte("plaintext"), nil)
-			assert.NilError(t, err)
-			assert.Check(t, is.Equal(tc.algorithm, el.FindElement("./EncryptionMethod").SelectAttrValue("Algorithm", "")))
+			require.NoError(t, err)
+			assert.Equal(t, tc.algorithm, el.FindElement("./EncryptionMethod").SelectAttrValue("Algorithm", ""))
 
 			// The default registry decrypts every GCM key size.
 			plaintext, err := Decrypt(key, el)
-			assert.NilError(t, err)
-			assert.Check(t, is.Equal("plaintext", string(plaintext)))
+			require.NoError(t, err)
+			assert.Equal(t, "plaintext", string(plaintext))
 		})
 	}
 }
@@ -74,17 +75,17 @@ func TestOAEPMGF1PAlwaysMasksWithSHA1(t *testing.T) {
 			encrypter.DigestMethod = tc.digest
 			encrypter.MGFHash = crypto.SHA512 // ignored, as RSA-OAEP-MGF1P fixes MGF1 with SHA-1.
 			el, err := encrypter.Encrypt(cert, []byte("plaintext"), nil)
-			assert.NilError(t, err)
-			assert.Check(t, el.FindElement("./KeyInfo/EncryptedKey/EncryptionMethod/MGF") == nil)
+			require.NoError(t, err)
+			assert.Nil(t, el.FindElement("./KeyInfo/EncryptedKey/EncryptionMethod/MGF"))
 
 			// XML Encryption §5.4.2 fixes the mask generation function of RSA-OAEP-MGF1P to MGF1 with SHA-1,
 			// whatever the digest.
 			_, err = key.Decrypt(nil, encryptedKeyCiphertext(t, el), &rsa.OAEPOptions{Hash: tc.hash, MGFHash: crypto.SHA1})
-			assert.NilError(t, err)
+			require.NoError(t, err)
 
 			plaintext, err := Decrypt(key, el)
-			assert.NilError(t, err)
-			assert.Check(t, is.Equal("plaintext", string(plaintext)))
+			require.NoError(t, err)
+			assert.Equal(t, "plaintext", string(plaintext))
 		})
 	}
 }
@@ -119,38 +120,38 @@ func TestOAEP11RoundTrip(t *testing.T) {
 				encrypter.DigestMethod = digest.method
 				encrypter.MGFHash = mgf.hash
 				el, err := encrypter.Encrypt(cert, []byte("plaintext"), nil)
-				assert.NilError(t, err)
+				require.NoError(t, err)
 
 				method := el.FindElement("./KeyInfo/EncryptedKey/EncryptionMethod")
-				assert.Check(t, is.Equal("http://www.w3.org/2009/xmlenc11#rsa-oaep", method.SelectAttrValue("Algorithm", "")))
+				assert.Equal(t, "http://www.w3.org/2009/xmlenc11#rsa-oaep", method.SelectAttrValue("Algorithm", ""))
 				mgfEl := method.FindElement("./MGF")
-				assert.Assert(t, mgfEl != nil)
-				assert.Check(t, is.Equal("http://www.w3.org/2009/xmlenc11#", mgfEl.NamespaceURI()))
-				assert.Check(t, is.Equal(mgf.algorithm, mgfEl.SelectAttrValue("Algorithm", "")))
+				require.NotNil(t, mgfEl)
+				assert.Equal(t, "http://www.w3.org/2009/xmlenc11#", mgfEl.NamespaceURI())
+				assert.Equal(t, mgf.algorithm, mgfEl.SelectAttrValue("Algorithm", ""))
 
 				_, err = key.Decrypt(nil, encryptedKeyCiphertext(t, el), &rsa.OAEPOptions{Hash: digest.hash, MGFHash: mgf.want})
-				assert.NilError(t, err)
+				require.NoError(t, err)
 
 				// Serialise and parse so that namespaces are resolved as a receiver would see them.
 				doc := etree.NewDocument()
 				doc.SetRoot(el)
 				buf, err := doc.WriteToBytes()
-				assert.NilError(t, err)
+				require.NoError(t, err)
 
 				parsed := etree.NewDocument()
-				assert.NilError(t, parsed.ReadFromBytes(buf))
+				require.NoError(t, parsed.ReadFromBytes(buf))
 
 				plaintext, err := Decrypt(key, parsed.Root())
-				assert.NilError(t, err)
-				assert.Check(t, is.Equal("plaintext", string(plaintext)))
+				require.NoError(t, err)
+				assert.Equal(t, "plaintext", string(plaintext))
 			})
 		}
 	}
 }
 
 func TestOAEPConstructorsMaskAsTheyDeclare(t *testing.T) {
-	assert.Check(t, is.Equal(crypto.SHA256, OAEP_SHA256().MGFHash))
-	assert.Check(t, is.Equal(crypto.SHA512, OAEP_SHA512().MGFHash))
+	assert.Equal(t, crypto.SHA256, OAEP_SHA256().MGFHash)
+	assert.Equal(t, crypto.SHA512, OAEP_SHA512().MGFHash)
 }
 
 func TestOAEP11DecryptRejectsAnUnknownMaskGenerationFunction(t *testing.T) {
@@ -158,12 +159,12 @@ func TestOAEP11DecryptRejectsAnUnknownMaskGenerationFunction(t *testing.T) {
 	encrypter := OAEP_SHA256()
 	encrypter.BlockCipher = AES128CBC
 	el, err := encrypter.Encrypt(cert, []byte("plaintext"), nil)
-	assert.NilError(t, err)
+	require.NoError(t, err)
 
 	el.FindElement("./KeyInfo/EncryptedKey/EncryptionMethod/MGF").SelectAttr("Algorithm").Value = "http://www.w3.org/2009/xmlenc11#mgf1md5"
 
 	_, err = Decrypt(key, el)
-	assert.Check(t, is.ErrorContains(err, "algorithm is not implemented: http://www.w3.org/2009/xmlenc11#mgf1md5"))
+	assert.ErrorContains(t, err, "algorithm is not implemented: http://www.w3.org/2009/xmlenc11#mgf1md5")
 }
 
 func TestOAEPEncryptRejectsAMaskHashWithNoIdentifier(t *testing.T) {
@@ -171,14 +172,14 @@ func TestOAEPEncryptRejectsAMaskHashWithNoIdentifier(t *testing.T) {
 	encrypter := OAEP_SHA256()
 	encrypter.MGFHash = crypto.MD5
 	_, err := encrypter.Encrypt(cert, []byte("plaintext"), nil)
-	assert.Check(t, is.ErrorContains(err, "MGF1"))
+	assert.ErrorContains(t, err, "MGF1")
 }
 
 func TestOAEPDecryptsXMLSec1Ciphertexts(t *testing.T) {
 	block, _ := pem.Decode(golden.Get(t, "xmlsec1-rsa2048.key"))
-	assert.Assert(t, block != nil)
+	require.NotNil(t, block)
 	key, err := x509.ParsePKCS1PrivateKey(block.Bytes)
-	assert.NilError(t, err)
+	require.NoError(t, err)
 
 	// These were made by xmlsec1 1.3.13 (OpenSSL), an independent implementation of XML Encryption.
 	for _, name := range []string{
@@ -188,13 +189,13 @@ func TestOAEPDecryptsXMLSec1Ciphertexts(t *testing.T) {
 	} {
 		t.Run(name, func(t *testing.T) {
 			doc := etree.NewDocument()
-			assert.NilError(t, doc.ReadFromBytes(golden.Get(t, name)))
+			require.NoError(t, doc.ReadFromBytes(golden.Get(t, name)))
 			el := doc.FindElement("//EncryptedData")
-			assert.Assert(t, el != nil)
+			require.NotNil(t, el)
 
 			plaintext, err := Decrypt(key, el)
-			assert.NilError(t, err)
-			assert.Check(t, is.Equal("<secret>hello</secret>", string(plaintext)))
+			require.NoError(t, err)
+			assert.Equal(t, "<secret>hello</secret>", string(plaintext))
 		})
 	}
 }
@@ -216,15 +217,15 @@ func TestOAEPDecryptsWithARegisteredDigestMethod(t *testing.T) {
 	encrypter.BlockCipher = AES128CBC
 	encrypter.DigestMethod = digest
 	el, err := encrypter.Encrypt(cert, []byte("plaintext"), nil)
-	assert.NilError(t, err)
+	require.NoError(t, err)
 
 	opts := &rsa.OAEPOptions{Hash: crypto.SHA384, MGFHash: crypto.SHA256}
 	_, err = key.Decrypt(nil, encryptedKeyCiphertext(t, el), opts)
-	assert.Check(t, err, "the key must be encrypted with SHA-384")
+	assert.NoError(t, err, "the key must be encrypted with SHA-384")
 
 	plaintext, err := Decrypt(key, el)
-	assert.NilError(t, err)
-	assert.Check(t, is.Equal("plaintext", string(plaintext)))
+	require.NoError(t, err)
+	assert.Equal(t, "plaintext", string(plaintext))
 }
 
 // plainSHA384DigestMethod is a DigestMethod defined outside this package which doesn't implement CryptoHasher, as
@@ -252,15 +253,15 @@ func TestOAEPDecryptsWithARegisteredDigestMethodWithoutCryptoHash(t *testing.T) 
 	encrypter.BlockCipher = AES128CBC
 	encrypter.DigestMethod = digest
 	el, err := encrypter.Encrypt(cert, []byte("plaintext"), nil)
-	assert.NilError(t, err)
+	require.NoError(t, err)
 
 	opts := &rsa.OAEPOptions{Hash: crypto.SHA384, MGFHash: crypto.SHA256}
 	_, err = key.Decrypt(nil, encryptedKeyCiphertext(t, el), opts)
-	assert.Check(t, err, "the key must be encrypted with SHA-384")
+	assert.NoError(t, err, "the key must be encrypted with SHA-384")
 
 	plaintext, err := Decrypt(key, el)
-	assert.NilError(t, err)
-	assert.Check(t, is.Equal("plaintext", string(plaintext)))
+	require.NoError(t, err)
+	assert.Equal(t, "plaintext", string(plaintext))
 }
 
 func TestOAEPRefusesADigestMethodWithAnUnknownHash(t *testing.T) {
@@ -269,5 +270,5 @@ func TestOAEPRefusesADigestMethodWithAnUnknownHash(t *testing.T) {
 	encrypter.BlockCipher = AES128CBC
 	encrypter.DigestMethod = unknownDigestMethod{}
 	_, err := encrypter.Encrypt(cert, []byte("plaintext"), nil)
-	assert.Check(t, is.ErrorContains(err, "urn:example:digest"))
+	assert.ErrorContains(t, err, "urn:example:digest")
 }

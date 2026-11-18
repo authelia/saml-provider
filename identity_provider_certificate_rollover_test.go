@@ -13,8 +13,8 @@ import (
 	"time"
 
 	"github.com/beevik/etree"
-	"gotest.tools/assert"
-	is "gotest.tools/assert/cmp"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"authelia.com/provider/saml/internal/dsig"
 )
@@ -24,7 +24,7 @@ func newRolloverTestRSAKey(t *testing.T) (*rsa.PrivateKey, *x509.Certificate) {
 	t.Helper()
 
 	key, err := rsa.GenerateKey(rand.Reader, 2048)
-	assert.NilError(t, err)
+	require.NoError(t, err)
 
 	return key, newRolloverTestCertificate(t, key)
 }
@@ -40,9 +40,9 @@ func newRolloverTestCertificate(t *testing.T, key crypto.Signer) *x509.Certifica
 		NotAfter:     time.Now().Add(time.Hour),
 	}
 	der, err := x509.CreateCertificate(rand.Reader, template, template, key.Public(), key)
-	assert.NilError(t, err)
+	require.NoError(t, err)
 	cert, err := x509.ParseCertificate(der)
-	assert.NilError(t, err)
+	require.NoError(t, err)
 
 	return cert
 }
@@ -58,7 +58,7 @@ func signingCertificates(t *testing.T, descriptors []KeyDescriptor) []string {
 			continue
 		}
 
-		assert.Check(t, is.Len(descriptor.KeyInfo.X509Data.X509Certificates, 1), "each key must be in its own KeyDescriptor")
+		assert.Len(t, descriptor.KeyInfo.X509Data.X509Certificates, 1, "each key must be in its own KeyDescriptor")
 
 		for _, cert := range descriptor.KeyInfo.X509Data.X509Certificates {
 			certs = append(certs, cert.Data)
@@ -82,10 +82,10 @@ func TestIDPMetadataPublishesRolloverCertificates(t *testing.T) {
 	test.IDP.RolloverCertificates = []*x509.Certificate{next, ecdsaNext}
 
 	descriptors := test.IDP.Metadata().IDPSSODescriptors[0].KeyDescriptors
-	assert.Check(t, is.Equal("signing", descriptors[0].Use), "the signing certificate stays first")
-	assert.Check(t, is.DeepEqual(
+	assert.Equal(t, "signing", descriptors[0].Use, "the signing certificate stays first")
+	assert.Equal(t,
 		[]string{encodeCertificate(current), encodeCertificate(next), encodeCertificate(ecdsaNext)},
-		signingCertificates(t, descriptors)))
+		signingCertificates(t, descriptors))
 }
 
 // The authorities that answer queries sign with the key of the identity provider, so a service provider must find
@@ -99,15 +99,15 @@ func TestIDPMetadataPublishesRolloverCertificatesForQueryAuthorities(t *testing.
 	metadata := f.test.IDP.Metadata()
 	expected := []string{encodeCertificate(f.test.IDP.Certificate), encodeCertificate(next)}
 
-	assert.Assert(t, is.Len(metadata.AttributeAuthorityDescriptors, 1))
-	assert.Assert(t, is.Len(metadata.AuthnAuthorityDescriptors, 1))
+	require.Len(t, metadata.AttributeAuthorityDescriptors, 1)
+	require.Len(t, metadata.AuthnAuthorityDescriptors, 1)
 
 	for _, descriptors := range [][]KeyDescriptor{
 		metadata.AttributeAuthorityDescriptors[0].KeyDescriptors,
 		metadata.AuthnAuthorityDescriptors[0].KeyDescriptors,
 	} {
-		assert.Check(t, is.Len(descriptors, 2), "only signing keys are published")
-		assert.Check(t, is.DeepEqual(expected, signingCertificates(t, descriptors)))
+		assert.Len(t, descriptors, 2, "only signing keys are published")
+		assert.Equal(t, expected, signingCertificates(t, descriptors))
 	}
 }
 
@@ -125,7 +125,7 @@ func TestIDPMetadataRolloverCertificatesAreNotAdvertisedForEncryption(t *testing
 		}
 
 		for _, cert := range descriptor.KeyInfo.X509Data.X509Certificates {
-			assert.Check(t, cert.Data != encodeCertificate(next), "a rollover certificate is only published for signing")
+			assert.True(t, cert.Data != encodeCertificate(next), "a rollover certificate is only published for signing")
 		}
 	}
 }
@@ -138,16 +138,16 @@ func TestIDPMetadataRolloverCertificatesAreDeduplicated(t *testing.T) {
 	test.IDP.Certificate = current
 	test.IDP.RolloverCertificates = []*x509.Certificate{nil, current, next, next}
 
-	assert.Check(t, is.DeepEqual(
+	assert.Equal(t,
 		[]string{encodeCertificate(current), encodeCertificate(next)},
-		signingCertificates(t, test.IDP.Metadata().IDPSSODescriptors[0].KeyDescriptors)))
+		signingCertificates(t, test.IDP.Metadata().IDPSSODescriptors[0].KeyDescriptors))
 }
 
 func TestIDPMetadataWithoutRolloverCertificatesPublishesOneSigningKey(t *testing.T) {
 	test := NewIdentityProviderTest(t, applyKey)
-	assert.Check(t, is.DeepEqual(
+	assert.Equal(t,
 		[]string{encodeCertificate(test.Certificate)},
-		signingCertificates(t, test.IDP.Metadata().IDPSSODescriptors[0].KeyDescriptors)))
+		signingCertificates(t, test.IDP.Metadata().IDPSSODescriptors[0].KeyDescriptors))
 }
 
 // rolloverSignedResponse returns a Response signed by an identity provider with key and cert, after
@@ -160,17 +160,17 @@ func rolloverSignedResponse(t *testing.T, key crypto.Signer, cert *x509.Certific
 	test.IDP.Certificate = cert
 
 	req, err := hardeningValidate(test, hardeningRequest(`ID="id-1"`, TimeNow(), hardeningIssuer))
-	assert.NilError(t, err)
-	assert.NilError(t, DefaultAssertionMaker{}.MakeAssertion(req, &Session{ID: "f00d", NameID: "alice"}))
-	assert.NilError(t, req.MakeResponse())
+	require.NoError(t, err)
+	require.NoError(t, DefaultAssertionMaker{}.MakeAssertion(req, &Session{ID: "f00d", NameID: "alice"}))
+	require.NoError(t, req.MakeResponse())
 
 	doc := etree.NewDocument()
 	doc.SetRoot(req.ResponseEl)
 	serialized, err := doc.WriteToBytes()
-	assert.NilError(t, err)
+	require.NoError(t, err)
 
 	parsed := etree.NewDocument()
-	assert.NilError(t, parsed.ReadFromBytes(serialized))
+	require.NoError(t, parsed.ReadFromBytes(serialized))
 
 	return parsed.Root()
 }
@@ -198,7 +198,7 @@ func TestSPVerifiesResponseSignedWithAnyPublishedCertificate(t *testing.T) {
 	defer func() { Clock = previous }()
 
 	sp := ServiceProvider{IDPMetadata: metadata}
-	assert.Check(t, sp.validateSignature(signedByOld))
-	assert.Check(t, sp.validateSignature(signedByNew))
-	assert.Check(t, sp.validateSignature(signedByOther) != nil, "a certificate the metadata doesn't publish must not verify")
+	assert.NoError(t, sp.validateSignature(signedByOld))
+	assert.NoError(t, sp.validateSignature(signedByNew))
+	assert.True(t, sp.validateSignature(signedByOther) != nil, "a certificate the metadata doesn't publish must not verify")
 }

@@ -5,8 +5,8 @@ import (
 	"time"
 
 	"github.com/beevik/etree"
-	"gotest.tools/assert"
-	is "gotest.tools/assert/cmp"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 // childTags returns the tags of the child elements of el, in order.
@@ -37,31 +37,31 @@ func TestManageNameIDRequestElement(t *testing.T) {
 	}
 
 	el := request.Element()
-	assert.Check(t, is.Equal(el.NamespaceURI(), samlProtocolNS))
-	assert.Check(t, is.DeepEqual(childTags(el), []string{"Issuer", "NameID", "NewID"}))
+	assert.Equal(t, el.NamespaceURI(), samlProtocolNS)
+	assert.Equal(t, childTags(el), []string{"Issuer", "NameID", "NewID"})
 
 	var parsed ManageNameIDRequest
-	assert.NilError(t, unmarshalElement(el, &parsed))
-	assert.Check(t, is.Equal(parsed.ID, "id-1"))
-	assert.Check(t, parsed.IssueInstant.Equal(issueInstant))
-	assert.Check(t, is.Equal(parsed.Destination, request.Destination))
-	assert.Check(t, is.Equal(parsed.Consent, request.Consent))
-	assert.Check(t, is.DeepEqual(*parsed.NameID, *request.NameID))
-	assert.Check(t, is.Equal(parsed.NewID, "new"))
-	assert.Check(t, !parsed.Terminate)
+	require.NoError(t, unmarshalElement(el, &parsed))
+	assert.Equal(t, parsed.ID, "id-1")
+	assert.True(t, parsed.IssueInstant.Equal(issueInstant))
+	assert.Equal(t, parsed.Destination, request.Destination)
+	assert.Equal(t, parsed.Consent, request.Consent)
+	assert.Equal(t, *parsed.NameID, *request.NameID)
+	assert.Equal(t, parsed.NewID, "new")
+	assert.False(t, parsed.Terminate)
 
 	request.NewID, request.Terminate = "", true
 	el = request.Element()
-	assert.Check(t, is.DeepEqual(childTags(el), []string{"Issuer", "NameID", "Terminate"}))
+	assert.Equal(t, childTags(el), []string{"Issuer", "NameID", "Terminate"})
 
 	parsed = ManageNameIDRequest{}
-	assert.NilError(t, unmarshalElement(el, &parsed))
-	assert.Check(t, parsed.Terminate)
-	assert.Check(t, is.Equal(parsed.NewID, ""))
+	require.NoError(t, unmarshalElement(el, &parsed))
+	assert.True(t, parsed.Terminate)
+	assert.Equal(t, parsed.NewID, "")
 
 	// A plaintext identifier is never written beside its ciphertext.
 	request.EncryptedID, request.NewEncryptedID = etree.NewElement("saml:EncryptedID"), etree.NewElement("samlp:NewEncryptedID")
-	assert.Check(t, is.DeepEqual(childTags(request.Element()), []string{"Issuer", "EncryptedID", "NewEncryptedID"}))
+	assert.Equal(t, childTags(request.Element()), []string{"Issuer", "EncryptedID", "NewEncryptedID"})
 }
 
 func TestManageNameIDResponseElement(t *testing.T) {
@@ -76,13 +76,13 @@ func TestManageNameIDResponseElement(t *testing.T) {
 	}
 
 	el := response.Element()
-	assert.Check(t, is.DeepEqual(childTags(el), []string{"Issuer", "Status"}))
+	assert.Equal(t, childTags(el), []string{"Issuer", "Status"})
 
 	var parsed ManageNameIDResponse
-	assert.NilError(t, unmarshalElement(el, &parsed))
-	assert.Check(t, is.Equal(parsed.InResponseTo, "id-1"))
-	assert.Check(t, is.Equal(parsed.Destination, response.Destination))
-	assert.Check(t, is.Equal(parsed.Status.StatusCode.StatusCode.Value, StatusUnknownPrincipal))
+	require.NoError(t, unmarshalElement(el, &parsed))
+	assert.Equal(t, parsed.InResponseTo, "id-1")
+	assert.Equal(t, parsed.Destination, response.Destination)
+	assert.Equal(t, parsed.Status.StatusCode.StatusCode.Value, StatusUnknownPrincipal)
 }
 
 // SAMLCore §3.8.1 and §3.8.2.
@@ -99,17 +99,17 @@ func TestNameIDMappingElements(t *testing.T) {
 	}
 
 	el := request.Element()
-	assert.Check(t, is.DeepEqual(childTags(el), []string{"Issuer", "NameID", "NameIDPolicy"}))
+	assert.Equal(t, childTags(el), []string{"Issuer", "NameID", "NameIDPolicy"})
 
 	var parsed NameIDMappingRequest
-	assert.NilError(t, unmarshalElement(el, &parsed))
-	assert.Check(t, is.Equal(parsed.NameID.Value, "p-1"))
-	assert.Check(t, is.Equal(*parsed.NameIDPolicy.Format, format))
-	assert.Check(t, is.Equal(*parsed.NameIDPolicy.SPNameQualifier, target))
-	assert.Check(t, *parsed.NameIDPolicy.AllowCreate)
+	require.NoError(t, unmarshalElement(el, &parsed))
+	assert.Equal(t, parsed.NameID.Value, "p-1")
+	assert.Equal(t, *parsed.NameIDPolicy.Format, format)
+	assert.Equal(t, *parsed.NameIDPolicy.SPNameQualifier, target)
+	assert.True(t, *parsed.NameIDPolicy.AllowCreate)
 
 	request.EncryptedID = etree.NewElement("saml:EncryptedID")
-	assert.Check(t, is.DeepEqual(childTags(request.Element()), []string{"Issuer", "EncryptedID", "NameIDPolicy"}))
+	assert.Equal(t, childTags(request.Element()), []string{"Issuer", "EncryptedID", "NameIDPolicy"})
 
 	response := &NameIDMappingResponse{
 		ID:           "id-2",
@@ -122,19 +122,19 @@ func TestNameIDMappingElements(t *testing.T) {
 	}
 
 	el = response.Element()
-	assert.Check(t, is.DeepEqual(childTags(el), []string{"Issuer", "Status", "NameID"}))
+	assert.Equal(t, childTags(el), []string{"Issuer", "Status", "NameID"})
 
 	var parsedResponse NameIDMappingResponse
-	assert.NilError(t, unmarshalElement(el, &parsedResponse))
-	assert.Check(t, is.Equal(parsedResponse.NameID.Value, "b-1"))
-	assert.Check(t, is.Equal(parsedResponse.InResponseTo, "id-1"))
+	require.NoError(t, unmarshalElement(el, &parsedResponse))
+	assert.Equal(t, parsedResponse.NameID.Value, "b-1")
+	assert.Equal(t, parsedResponse.InResponseTo, "id-1")
 
 	response.EncryptedID = etree.NewElement("saml:EncryptedID")
-	assert.Check(t, is.DeepEqual(childTags(response.Element()), []string{"Issuer", "Status", "EncryptedID"}))
+	assert.Equal(t, childTags(response.Element()), []string{"Issuer", "Status", "EncryptedID"})
 
 	// The schema requires an identifier, so a response without one has an empty NameID.
 	response.NameID, response.EncryptedID = nil, nil
 	el = response.Element()
-	assert.Check(t, is.DeepEqual(childTags(el), []string{"Issuer", "Status", "NameID"}))
-	assert.Check(t, is.Equal(el.FindElement("./NameID").Text(), ""))
+	assert.Equal(t, childTags(el), []string{"Issuer", "Status", "NameID"})
+	assert.Equal(t, el.FindElement("./NameID").Text(), "")
 }

@@ -22,8 +22,8 @@ import (
 	"time"
 
 	"github.com/beevik/etree"
-	"gotest.tools/assert"
-	is "gotest.tools/assert/cmp"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"authelia.com/provider/saml/internal/dsig"
 	"authelia.com/provider/saml/testsaml"
@@ -39,7 +39,7 @@ func logoutRedirectSP(t *testing.T) (ServiceProvider, *ServiceProviderTest) {
 		AcsURL:      mustParseURL("https://sp.example.com/saml2/acs"),
 		IDPMetadata: &EntityDescriptor{},
 	}
-	assert.NilError(t, xml.Unmarshal(test.IDPMetadata, s.IDPMetadata))
+	require.NoError(t, xml.Unmarshal(test.IDPMetadata, s.IDPMetadata))
 
 	return s, test
 }
@@ -56,7 +56,7 @@ func assertRedirectParameterOrder(t *testing.T, rawQuery string, keys ...string)
 		got = append(got, key)
 	}
 
-	assert.Check(t, is.DeepEqual(keys, got))
+	assert.Equal(t, keys, got)
 }
 
 func TestSPSignsRedirectLogoutMessagesInTheQuery(t *testing.T) {
@@ -84,7 +84,7 @@ func TestSPSignsRedirectLogoutMessagesInTheQuery(t *testing.T) {
 			decoded, err = testsaml.ParseRedirectResponse(u)
 		}
 
-		assert.NilError(t, err)
+		require.NoError(t, err)
 
 		return decoded
 	}
@@ -95,13 +95,13 @@ func TestSPSignsRedirectLogoutMessagesInTheQuery(t *testing.T) {
 			s.SignatureMethod = dsig.RSASHA256SignatureMethod
 
 			u, err := tc.redirect(&s)
-			assert.NilError(t, err)
+			require.NoError(t, err)
 			assertRedirectParameterOrder(t, u.RawQuery, tc.parameter, "RelayState", "SigAlg", "Signature")
-			assert.Check(t, is.Equal("relay state&more", u.Query().Get("RelayState")))
-			assert.Check(t, !strings.Contains(string(decode(t, tc.parameter, u)), "Signature>"))
+			assert.Equal(t, "relay state&more", u.Query().Get("RelayState"))
+			assert.False(t, strings.Contains(string(decode(t, tc.parameter, u)), "Signature>"))
 
 			signed, signature := signedRedirectQuery(t, u.RawQuery)
-			assert.Check(t, test.Certificate.CheckSignature(x509.SHA256WithRSA, []byte(signed), signature))
+			assert.NoError(t, test.Certificate.CheckSignature(x509.SHA256WithRSA, []byte(signed), signature))
 		})
 
 		for _, curve := range ecdsaTestCurves {
@@ -111,27 +111,27 @@ func TestSPSignsRedirectLogoutMessagesInTheQuery(t *testing.T) {
 				s.Key, s.Certificate, s.SignatureMethod = key, cert, curve.method
 
 				u, err := tc.redirect(&s)
-				assert.NilError(t, err)
-				assert.Check(t, is.Equal(curve.method, u.Query().Get("SigAlg")))
-				assert.Check(t, !strings.Contains(string(decode(t, tc.parameter, u)), "Signature>"))
+				require.NoError(t, err)
+				assert.Equal(t, curve.method, u.Query().Get("SigAlg"))
+				assert.False(t, strings.Contains(string(decode(t, tc.parameter, u)), "Signature>"))
 
 				signed, signature := signedRedirectQuery(t, u.RawQuery)
 				size := (curve.curve.Params().N.BitLen() + 7) / 8
-				assert.Assert(t, is.Len(signature, 2*size))
+				require.Len(t, signature, 2*size)
 
 				hash := curve.newHash.New()
 				hash.Write([]byte(signed))
 
 				r := new(big.Int).SetBytes(signature[:size])
 				sValue := new(big.Int).SetBytes(signature[size:])
-				assert.Check(t, ecdsa.Verify(&key.PublicKey, hash.Sum(nil), r, sValue))
+				assert.True(t, ecdsa.Verify(&key.PublicKey, hash.Sum(nil), r, sValue))
 			})
 		}
 
 		t.Run(name+"/unsigned", func(t *testing.T) {
 			s, _ := logoutRedirectSP(t)
 			u, err := tc.redirect(&s)
-			assert.NilError(t, err)
+			require.NoError(t, err)
 			assertRedirectParameterOrder(t, u.RawQuery, tc.parameter, "RelayState")
 		})
 	}
@@ -142,29 +142,29 @@ func TestLogoutRedirectRemovesEmbeddedSignatureWithoutChangingTheMessage(t *test
 	s.SignatureMethod = dsig.RSASHA256SignatureMethod
 
 	request, err := s.MakeLogoutRequest("https://idp.example.com/slo?tenant=a", "alice")
-	assert.NilError(t, err)
-	assert.Assert(t, request.Signature != nil)
+	require.NoError(t, err)
+	require.NotNil(t, request.Signature)
 	u, err := request.Redirect("", &s)
-	assert.NilError(t, err)
-	assert.Check(t, request.Signature != nil)
+	require.NoError(t, err)
+	assert.NotNil(t, request.Signature)
 	assertRedirectParameterOrder(t, u.RawQuery, "tenant", "SAMLRequest", "SigAlg", "Signature")
 	signed, _ := signedRedirectQuery(t, u.RawQuery)
-	assert.Check(t, strings.HasPrefix(strings.TrimPrefix(signed, "tenant=a&"), "SAMLRequest="))
+	assert.True(t, strings.HasPrefix(strings.TrimPrefix(signed, "tenant=a&"), "SAMLRequest="))
 
 	decoded, err := testsaml.ParseRedirectRequest(u)
-	assert.NilError(t, err)
-	assert.Check(t, !strings.Contains(string(decoded), "Signature>"))
+	require.NoError(t, err)
+	assert.False(t, strings.Contains(string(decoded), "Signature>"))
 
 	response, err := s.MakeLogoutResponse("https://idp.example.com/slo", "id-request")
-	assert.NilError(t, err)
-	assert.Assert(t, response.Signature != nil)
+	require.NoError(t, err)
+	require.NotNil(t, response.Signature)
 	u, err = response.Redirect("", &s)
-	assert.NilError(t, err)
-	assert.Check(t, response.Signature != nil)
+	require.NoError(t, err)
+	assert.NotNil(t, response.Signature)
 
 	decoded, err = testsaml.ParseRedirectResponse(u)
-	assert.NilError(t, err)
-	assert.Check(t, !strings.Contains(string(decoded), "Signature>"))
+	require.NoError(t, err)
+	assert.False(t, strings.Contains(string(decoded), "Signature>"))
 }
 
 // logoutResponseFixture is a service provider and an unsigned logout response from its identity provider.
@@ -218,10 +218,10 @@ func (f *logoutResponseFixture) setMessageBody(t *testing.T, destination, inResp
 	var compressed bytes.Buffer
 
 	w, err := flate.NewWriter(&compressed, flate.BestCompression)
-	assert.NilError(t, err)
+	require.NoError(t, err)
 	_, err = w.Write([]byte(body))
-	assert.NilError(t, err)
-	assert.NilError(t, w.Close())
+	require.NoError(t, err)
+	require.NoError(t, w.Close())
 
 	f.message = base64.StdEncoding.EncodeToString(compressed.Bytes())
 }
@@ -238,13 +238,13 @@ func signQuery(t *testing.T, key crypto.Signer, method, message, relayState stri
 	query += "&SigAlg=" + url.QueryEscape(method)
 	digest := sha256.Sum256([]byte(query))
 	signature, err := key.Sign(rand.Reader, digest[:], crypto.SHA256)
-	assert.NilError(t, err)
+	require.NoError(t, err)
 
 	if public, ok := key.Public().(*ecdsa.PublicKey); ok {
 		var parsed struct{ R, S *big.Int }
 
 		_, err = asn1.Unmarshal(signature, &parsed)
-		assert.NilError(t, err)
+		require.NoError(t, err)
 
 		size := (public.Params().N.BitLen() + 7) / 8
 		signature = make([]byte, 2*size)
@@ -267,25 +267,25 @@ func (f *logoutResponseFixture) validate(rawQuery string) error {
 func TestSPValidatesRedirectLogoutResponseSignedInTheQuery(t *testing.T) {
 	t.Run("valid", func(t *testing.T) {
 		f := newLogoutResponseFixture(t)
-		assert.Check(t, f.validate(f.signed(t, "")))
+		assert.NoError(t, f.validate(f.signed(t, "")))
 	})
 
 	t.Run("with relay state", func(t *testing.T) {
 		f := newLogoutResponseFixture(t)
-		assert.Check(t, f.validate(f.signed(t, "relay state&more")))
+		assert.NoError(t, f.validate(f.signed(t, "relay state&more")))
 	})
 
 	t.Run("parameters in any order with others ignored", func(t *testing.T) {
 		f := newLogoutResponseFixture(t)
 		pairs := strings.Split(f.signed(t, "relay"), "&")
-		assert.Check(t, f.validate(strings.Join([]string{"extra=1", pairs[3], pairs[2], pairs[1], pairs[0]}, "&")))
+		assert.NoError(t, f.validate(strings.Join([]string{"extra=1", pairs[3], pairs[2], pairs[1], pairs[0]}, "&")))
 	})
 
 	t.Run("through the request", func(t *testing.T) {
 		f := newLogoutResponseFixture(t)
 		req, err := http.NewRequest(http.MethodGet, "https://sp.example.com/saml2/slo?"+f.signed(t, "relay"), nil)
-		assert.NilError(t, err)
-		assert.Check(t, f.sp.ValidateLogoutResponseRequest(req, []string{"id-request"}))
+		require.NoError(t, err)
+		assert.NoError(t, f.sp.ValidateLogoutResponseRequest(req, []string{"id-request"}))
 	})
 
 	t.Run("ecdsa", func(t *testing.T) {
@@ -295,26 +295,26 @@ func TestSPValidatesRedirectLogoutResponseSignedInTheQuery(t *testing.T) {
 		f.sp.IDPCertificate = &certificate
 		Clock = dsig.NewFakeClockAt(time.Now())
 
-		assert.Check(t, f.validate(signQuery(t, key, dsig.ECDSASHA256SignatureMethod, f.message, "")))
+		assert.NoError(t, f.validate(signQuery(t, key, dsig.ECDSASHA256SignatureMethod, f.message, "")))
 	})
 
 	t.Run("pinned certificate", func(t *testing.T) {
 		f := newLogoutResponseFixture(t)
 		certificate := base64.StdEncoding.EncodeToString(f.cert.Raw)
 		f.sp.IDPCertificate = &certificate
-		assert.Check(t, f.validate(f.signed(t, "")))
+		assert.NoError(t, f.validate(f.signed(t, "")))
 	})
 
 	t.Run("fields of the message are still checked", func(t *testing.T) {
 		f := newLogoutResponseFixture(t)
 		f.setMessage(t, "https://other.example.com/slo")
-		assert.Check(t, is.ErrorContains(f.validate(f.signed(t, "")), "Destination"))
+		assert.ErrorContains(t, f.validate(f.signed(t, "")), "Destination")
 	})
 }
 
 func TestSPRejectsInvalidRedirectLogoutResponseSignature(t *testing.T) {
 	otherKey, err := rsa.GenerateKey(rand.Reader, 2048)
-	assert.NilError(t, err)
+	require.NoError(t, err)
 
 	for _, tc := range []struct {
 		name   string
@@ -369,7 +369,7 @@ func TestSPRejectsInvalidRedirectLogoutResponseSignature(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			f := newLogoutResponseFixture(t)
 			err := f.validate(tc.query(t, f))
-			assert.Assert(t, err != nil)
+			require.NotNil(t, err)
 
 			if tc.reason != "" {
 				private := err
@@ -377,7 +377,7 @@ func TestSPRejectsInvalidRedirectLogoutResponseSignature(t *testing.T) {
 					private = invalid.PrivateErr
 				}
 
-				assert.Check(t, is.ErrorContains(private, tc.reason))
+				assert.ErrorContains(t, private, tc.reason)
 			}
 		})
 	}
@@ -393,22 +393,22 @@ func TestSPRejectsInvalidRedirectLogoutResponseSignature(t *testing.T) {
 		h := crypto.SHA256.New()
 		h.Write([]byte(query))
 		der, err := key.Sign(rand.Reader, h.Sum(nil), crypto.SHA256)
-		assert.NilError(t, err)
+		require.NoError(t, err)
 		err = f.validate(query + "&Signature=" + url.QueryEscape(base64.StdEncoding.EncodeToString(der)))
-		assert.Assert(t, err != nil)
+		require.NotNil(t, err)
 	})
 
 	t.Run("expired certificate", func(t *testing.T) {
 		f := newLogoutResponseFixture(t)
 		Clock = dsig.NewFakeClockAt(f.cert.NotAfter.Add(time.Hour))
-		assert.Assert(t, f.validate(f.signed(t, "")) != nil)
+		require.True(t, f.validate(f.signed(t, "")) != nil)
 	})
 
 	t.Run("repeated message through the request", func(t *testing.T) {
 		f := newLogoutResponseFixture(t)
 		req, err := http.NewRequest(http.MethodGet, "https://sp.example.com/saml2/slo?SAML%52esponse=forged&"+f.signed(t, ""), nil)
-		assert.NilError(t, err)
-		assert.Assert(t, f.sp.ValidateLogoutResponseRequest(req, []string{"id-request"}) != nil)
+		require.NoError(t, err)
+		require.True(t, f.sp.ValidateLogoutResponseRequest(req, []string{"id-request"}) != nil)
 	})
 }
 
@@ -418,11 +418,11 @@ func TestSPValidatesRedirectLogoutResponseWithFingerprint(t *testing.T) {
 	algorithm := "http://www.w3.org/2001/04/xmlenc#sha256"
 	f.sp.IDPCertificateFingerprint = &sum
 	f.sp.IDPCertificateFingerprintAlgorithm = &algorithm
-	assert.Check(t, f.validate(f.signed(t, "")))
+	assert.NoError(t, f.validate(f.signed(t, "")))
 
 	other := strings.Repeat("00", 32)
 	f.sp.IDPCertificateFingerprint = &other
-	assert.Assert(t, f.validate(f.signed(t, "")) != nil)
+	require.True(t, f.validate(f.signed(t, "")) != nil)
 }
 
 func TestSPStillAcceptsEmbeddedSignatureOnRedirectLogoutResponse(t *testing.T) {
@@ -432,22 +432,22 @@ func TestSPStillAcceptsEmbeddedSignatureOnRedirectLogoutResponse(t *testing.T) {
 	idp.IDPMetadata = f.sp.IDPMetadata
 
 	response, err := idp.MakeLogoutResponse(f.sp.SloURL.String(), "id-request")
-	assert.NilError(t, err)
+	require.NoError(t, err)
 
 	doc := etree.NewDocument()
 	doc.SetRoot(response.Element())
 	body, err := doc.WriteToBytes()
-	assert.NilError(t, err)
+	require.NoError(t, err)
 
 	var compressed bytes.Buffer
 
 	w, err := flate.NewWriter(&compressed, flate.BestCompression)
-	assert.NilError(t, err)
+	require.NoError(t, err)
 	_, err = w.Write(body)
-	assert.NilError(t, err)
-	assert.NilError(t, w.Close())
+	require.NoError(t, err)
+	require.NoError(t, w.Close())
 
-	assert.Check(t, f.validate("SAMLResponse="+url.QueryEscape(base64.StdEncoding.EncodeToString(compressed.Bytes()))))
+	assert.NoError(t, f.validate("SAMLResponse="+url.QueryEscape(base64.StdEncoding.EncodeToString(compressed.Bytes()))))
 }
 
 func dsigFingerprintForTest(cert *x509.Certificate) string {
@@ -471,12 +471,12 @@ func TestLogoutResponseRedirectRoundTrip(t *testing.T) {
 		SignatureMethod: dsig.RSASHA256SignatureMethod,
 	}
 	response, err := sender.MakeLogoutResponse(f.sp.SloURL.String(), "id-request")
-	assert.NilError(t, err)
+	require.NoError(t, err)
 	u, err := response.Redirect("relay state&more", &sender)
-	assert.NilError(t, err)
+	require.NoError(t, err)
 
-	assert.Check(t, f.sp.ValidateLogoutResponseRedirect(u, []string{"id-request"}))
+	assert.NoError(t, f.sp.ValidateLogoutResponseRedirect(u, []string{"id-request"}))
 
 	u.RawQuery = strings.Replace(u.RawQuery, "RelayState=relay", "RelayState=other", 1)
-	assert.Assert(t, f.sp.ValidateLogoutResponseRedirect(u, []string{"id-request"}) != nil)
+	require.True(t, f.sp.ValidateLogoutResponseRedirect(u, []string{"id-request"}) != nil)
 }

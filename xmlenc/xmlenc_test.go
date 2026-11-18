@@ -6,50 +6,49 @@ import (
 	"testing"
 
 	"github.com/beevik/etree"
-	"gotest.tools/assert"
-	is "gotest.tools/assert/cmp"
+	"github.com/stretchr/testify/assert"
 )
 
 func TestDataAES128(t *testing.T) {
 	t.Run("CBC", func(t *testing.T) {
 		RandReader = rand.New(rand.NewSource(0)) //nolint:gosec  // deterministic random numbers for tests
 		plaintext, err := os.ReadFile("testdata/encrypt-data-aes128-cbc.data")
-		assert.Check(t, err)
+		assert.NoError(t, err)
 
 		var ciphertext string
 		{
 			encrypter := AES128CBC
 			cipherEl, encErr := encrypter.Encrypt([]byte("abcdefghijklmnop"), plaintext, nil)
-			assert.Check(t, encErr)
+			assert.NoError(t, encErr)
 
 			doc := etree.NewDocument()
 			doc.SetRoot(cipherEl)
 			doc.IndentTabs()
 			ciphertext, err = doc.WriteToString()
-			assert.Check(t, err)
+			assert.NoError(t, err)
 		}
 
 		{
 			decrypter := AES128CBC
 			doc := etree.NewDocument()
 			err = doc.ReadFromString(ciphertext)
-			assert.Check(t, err)
+			assert.NoError(t, err)
 
 			actualPlaintext, err := decrypter.Decrypt(
 				[]byte("abcdefghijklmnop"), doc.Root())
-			assert.Check(t, err)
-			assert.Check(t, is.DeepEqual(plaintext, actualPlaintext))
+			assert.NoError(t, err)
+			assert.Equal(t, plaintext, actualPlaintext)
 		}
 
 		{
 			decrypter := AES128CBC
 			doc := etree.NewDocument()
 			err := doc.ReadFromFile("testdata/encrypt-data-aes128-cbc.xml")
-			assert.Check(t, err)
+			assert.NoError(t, err)
 
 			actualPlaintext, err := decrypter.Decrypt([]byte("abcdefghijklmnop"), doc.Root())
-			assert.Check(t, err)
-			assert.Check(t, is.DeepEqual(plaintext, actualPlaintext))
+			assert.NoError(t, err)
+			assert.Equal(t, plaintext, actualPlaintext)
 		}
 	})
 
@@ -60,13 +59,13 @@ func TestDataAES128(t *testing.T) {
 		{
 			encrypter := AES128GCM
 			cipherEl, encErr := encrypter.Encrypt([]byte("abcdefghijklmnop"), []byte(plaintext), []byte("1234567890AZ"))
-			assert.Check(t, encErr)
+			assert.NoError(t, encErr)
 
 			doc := etree.NewDocument()
 			doc.SetRoot(cipherEl)
 			doc.IndentTabs()
 			_, err := doc.WriteToString()
-			assert.Check(t, err)
+			assert.NoError(t, err)
 		}
 	})
 }

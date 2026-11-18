@@ -18,8 +18,8 @@ import (
 	"time"
 
 	"github.com/beevik/etree"
-	"gotest.tools/assert"
-	is "gotest.tools/assert/cmp"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 // memoryLogoutStateProvider is an in-memory LogoutStateProvider.
@@ -89,39 +89,39 @@ func TestContinueLogoutRedirect(t *testing.T) {
 
 	w := httptest.NewRecorder()
 	r := httptest.NewRequest(http.MethodGet, "/logout", nil)
-	assert.NilError(t, test.IDP.continueLogout(w, r, provider, state))
-	assert.Equal(t, w.Code, http.StatusFound)
+	require.NoError(t, test.IDP.continueLogout(w, r, provider, state))
+	require.Equal(t, w.Code, http.StatusFound)
 
 	location, err := url.Parse(w.Header().Get("Location"))
-	assert.NilError(t, err)
-	assert.Check(t, is.Equal(location.Host, "sp.example.com"))
-	assert.Check(t, is.Equal(location.Path, "/saml2/slo"))
-	assert.Check(t, is.Equal(location.Query().Get("RelayState"), state.ID))
-	assert.Check(t, location.Query().Get("SigAlg") != "")
-	assert.Check(t, location.Query().Get("Signature") != "")
-	assert.NilError(t, verifyRedirectSignature(location.RawQuery, "SAMLRequest", []*x509.Certificate{test.IDP.Certificate}, anySignaturePolicy))
-	assert.Check(t, is.Equal(w.Header().Get("Cache-Control"), "no-cache, no-store"))
+	require.NoError(t, err)
+	assert.Equal(t, location.Host, "sp.example.com")
+	assert.Equal(t, location.Path, "/saml2/slo")
+	assert.Equal(t, location.Query().Get("RelayState"), state.ID)
+	assert.True(t, location.Query().Get("SigAlg") != "")
+	assert.True(t, location.Query().Get("Signature") != "")
+	require.NoError(t, verifyRedirectSignature(location.RawQuery, "SAMLRequest", []*x509.Certificate{test.IDP.Certificate}, anySignaturePolicy))
+	assert.Equal(t, w.Header().Get("Cache-Control"), "no-cache, no-store")
 
 	compressed, err := base64.StdEncoding.DecodeString(location.Query().Get("SAMLRequest"))
-	assert.NilError(t, err)
+	require.NoError(t, err)
 	buf, err := io.ReadAll(flate.NewReader(bytes.NewReader(compressed)))
-	assert.NilError(t, err)
+	require.NoError(t, err)
 
 	var request LogoutRequest
-	assert.NilError(t, xml.Unmarshal(buf, &request))
-	assert.Check(t, is.Equal(request.NameID.Value, "alice"))
-	assert.Assert(t, is.Len(request.SessionIndexes, 2))
-	assert.Check(t, is.Equal(request.SessionIndexes[0].Value, "index-one"))
-	assert.Check(t, is.Equal(request.SessionIndexes[1].Value, "index-two"))
-	assert.Assert(t, request.NotOnOrAfter != nil)
-	assert.Check(t, request.NotOnOrAfter.Equal(state.ExpireTime))
-	assert.Check(t, is.Equal(request.Destination, "https://sp.example.com/saml2/slo"))
-	assert.Check(t, is.Equal(request.Issuer.Value, test.IDP.MetadataURL.String()))
+	require.NoError(t, xml.Unmarshal(buf, &request))
+	assert.Equal(t, request.NameID.Value, "alice")
+	require.Len(t, request.SessionIndexes, 2)
+	assert.Equal(t, request.SessionIndexes[0].Value, "index-one")
+	assert.Equal(t, request.SessionIndexes[1].Value, "index-two")
+	require.NotNil(t, request.NotOnOrAfter)
+	assert.True(t, request.NotOnOrAfter.Equal(state.ExpireTime))
+	assert.Equal(t, request.Destination, "https://sp.example.com/saml2/slo")
+	assert.Equal(t, request.Issuer.Value, test.IDP.MetadataURL.String())
 
 	saved, err := provider.LoadLogoutState(r, state.ID)
-	assert.NilError(t, err)
-	assert.Check(t, is.Equal(saved.Current, 0))
-	assert.Check(t, is.Equal(saved.PendingRequestID, request.ID))
+	require.NoError(t, err)
+	assert.Equal(t, saved.Current, 0)
+	assert.Equal(t, saved.PendingRequestID, request.ID)
 }
 
 func TestContinueLogoutPost(t *testing.T) {
@@ -132,34 +132,34 @@ func TestContinueLogoutPost(t *testing.T) {
 
 	w := httptest.NewRecorder()
 	r := httptest.NewRequest(http.MethodGet, "/logout", nil)
-	assert.NilError(t, test.IDP.continueLogout(w, r, provider, state))
-	assert.Equal(t, w.Code, http.StatusOK)
+	require.NoError(t, test.IDP.continueLogout(w, r, provider, state))
+	require.Equal(t, w.Code, http.StatusOK)
 
 	body := w.Body.String()
-	assert.Check(t, strings.Contains(body, `action="https://sp.example.com/saml2/slo"`), body)
-	assert.Check(t, strings.Contains(body, `name="RelayState" value="state-id"`), body)
+	assert.True(t, strings.Contains(body, `action="https://sp.example.com/saml2/slo"`), body)
+	assert.True(t, strings.Contains(body, `name="RelayState" value="state-id"`), body)
 
 	marker := `name="SAMLRequest" value="`
 	start := strings.Index(body, marker)
-	assert.Assert(t, start >= 0, body)
+	require.True(t, start >= 0, body)
 	value, _, _ := strings.Cut(body[start+len(marker):], `"`)
 	decoded, err := base64.StdEncoding.DecodeString(html.UnescapeString(value))
-	assert.NilError(t, err)
+	require.NoError(t, err)
 
 	doc := etree.NewDocument()
-	assert.NilError(t, doc.ReadFromBytes(decoded))
+	require.NoError(t, doc.ReadFromBytes(decoded))
 
 	children := doc.Root().ChildElements()
-	assert.Check(t, is.Equal(children[0].Tag, "Issuer"))
-	assert.Check(t, is.Equal(children[1].Tag, "Signature"))
+	assert.Equal(t, children[0].Tag, "Issuer")
+	assert.Equal(t, children[1].Tag, "Signature")
 
 	_, err = verifyEnvelopedSignature(doc.Root(), []*x509.Certificate{test.IDP.Certificate}, anySignaturePolicy)
-	assert.NilError(t, err)
+	require.NoError(t, err)
 
 	saved, err := provider.LoadLogoutState(r, state.ID)
-	assert.NilError(t, err)
-	assert.Check(t, is.Equal(saved.Current, 0))
-	assert.Check(t, saved.PendingRequestID != "")
+	require.NoError(t, err)
+	assert.Equal(t, saved.Current, 0)
+	assert.True(t, saved.PendingRequestID != "")
 }
 
 func TestContinueLogoutSkipsUnknownServiceProvider(t *testing.T) {
@@ -169,15 +169,15 @@ func TestContinueLogoutSkipsUnknownServiceProvider(t *testing.T) {
 
 	w := httptest.NewRecorder()
 	r := httptest.NewRequest(http.MethodGet, "/logout", nil)
-	assert.NilError(t, test.IDP.continueLogout(w, r, provider, state))
-	assert.Equal(t, w.Code, http.StatusFound)
+	require.NoError(t, test.IDP.continueLogout(w, r, provider, state))
+	require.Equal(t, w.Code, http.StatusFound)
 
 	saved, err := provider.LoadLogoutState(r, state.ID)
-	assert.NilError(t, err)
-	assert.Check(t, is.Equal(saved.Participants[0].Outcome, LogoutOutcomeSkipped))
-	assert.Check(t, saved.Participants[0].Reason != "")
-	assert.Check(t, is.Equal(saved.Participants[1].Outcome, LogoutOutcomePending))
-	assert.Check(t, is.Equal(saved.Current, 1))
+	require.NoError(t, err)
+	assert.Equal(t, saved.Participants[0].Outcome, LogoutOutcomeSkipped)
+	assert.True(t, saved.Participants[0].Reason != "")
+	assert.Equal(t, saved.Participants[1].Outcome, LogoutOutcomePending)
+	assert.Equal(t, saved.Current, 1)
 }
 
 func TestContinueLogoutSkipsInsecureEndpoint(t *testing.T) {
@@ -193,11 +193,11 @@ func TestContinueLogoutSkipsInsecureEndpoint(t *testing.T) {
 
 	w := httptest.NewRecorder()
 	r := httptest.NewRequest(http.MethodGet, "/logout", nil)
-	assert.NilError(t, test.IDP.continueLogout(w, r, provider, state))
+	require.NoError(t, test.IDP.continueLogout(w, r, provider, state))
 
-	assert.Check(t, is.Len(provider.deleted, 1))
-	assert.Check(t, is.Equal(state.Participants[0].Outcome, LogoutOutcomeSkipped))
-	assert.Check(t, state.Participants[0].Reason != "")
+	assert.Len(t, provider.deleted, 1)
+	assert.Equal(t, state.Participants[0].Outcome, LogoutOutcomeSkipped)
+	assert.True(t, state.Participants[0].Reason != "")
 }
 
 func TestContinueLogoutNoPendingFinishes(t *testing.T) {
@@ -208,8 +208,8 @@ func TestContinueLogoutNoPendingFinishes(t *testing.T) {
 
 	w := httptest.NewRecorder()
 	r := httptest.NewRequest(http.MethodGet, "/logout", nil)
-	assert.NilError(t, test.IDP.continueLogout(w, r, provider, state))
-	assert.DeepEqual(t, provider.deleted, []string{state.ID})
+	require.NoError(t, test.IDP.continueLogout(w, r, provider, state))
+	require.Equal(t, provider.deleted, []string{state.ID})
 }
 
 func TestContinueLogoutSaveFailureFinishes(t *testing.T) {
@@ -221,20 +221,20 @@ func TestContinueLogoutSaveFailureFinishes(t *testing.T) {
 
 	w := httptest.NewRecorder()
 	r := httptest.NewRequest(http.MethodGet, "/logout", nil)
-	assert.NilError(t, test.IDP.continueLogout(w, r, provider, state))
-	assert.Check(t, is.Equal(w.Code, http.StatusFound))
-	assert.Check(t, is.Equal(w.Header().Get("Location"), "https://idp.example.com/done"))
+	require.NoError(t, test.IDP.continueLogout(w, r, provider, state))
+	assert.Equal(t, w.Code, http.StatusFound)
+	assert.Equal(t, w.Header().Get("Location"), "https://idp.example.com/done")
 
 	// The state couldn't be claimed, so it is left to expire rather than deleted, as it may be a newer revision.
-	assert.Check(t, is.Len(provider.deleted, 0))
+	assert.Len(t, provider.deleted, 0)
 
 	for _, participant := range state.Participants {
-		assert.Check(t, is.Equal(participant.Outcome, LogoutOutcomeFailed))
-		assert.Check(t, is.Contains(participant.Reason, "boom"))
+		assert.Equal(t, participant.Outcome, LogoutOutcomeFailed)
+		assert.Contains(t, participant.Reason, "boom")
 	}
 
-	assert.Check(t, is.Equal(state.Current, -1))
-	assert.Check(t, is.Equal(state.PendingRequestID, ""))
+	assert.Equal(t, state.Current, -1)
+	assert.Equal(t, state.PendingRequestID, "")
 }
 
 func TestContinueLogoutSigningFailureFinishes(t *testing.T) {
@@ -248,11 +248,11 @@ func TestContinueLogoutSigningFailureFinishes(t *testing.T) {
 
 	w := httptest.NewRecorder()
 	r := httptest.NewRequest(http.MethodGet, "/logout", nil)
-	assert.NilError(t, test.IDP.continueLogout(w, r, provider, state))
-	assert.Check(t, is.Equal(w.Code, http.StatusFound))
-	assert.Check(t, is.Equal(state.Participants[0].Outcome, LogoutOutcomeFailed))
-	assert.Check(t, is.Contains(state.Participants[0].Reason, "cannot make the logout request"))
-	assert.Check(t, is.Equal(state.Participants[1].Outcome, LogoutOutcomeSuccess))
+	require.NoError(t, test.IDP.continueLogout(w, r, provider, state))
+	assert.Equal(t, w.Code, http.StatusFound)
+	assert.Equal(t, state.Participants[0].Outcome, LogoutOutcomeFailed)
+	assert.Contains(t, state.Participants[0].Reason, "cannot make the logout request")
+	assert.Equal(t, state.Participants[1].Outcome, LogoutOutcomeSuccess)
 }
 
 func TestFinishLogoutSaveFailureKeepsNewerState(t *testing.T) {
@@ -272,9 +272,9 @@ func TestFinishLogoutSaveFailureKeepsNewerState(t *testing.T) {
 	provider.saveErr = errors.New("boom")
 
 	w := httptest.NewRecorder()
-	assert.NilError(t, test.IDP.continueLogout(w, httptest.NewRequest(http.MethodGet, "/logout", nil), provider, stale))
-	assert.Check(t, is.Equal(w.Code, http.StatusFound))
-	assert.Check(t, is.Len(provider.deleted, 0))
-	assert.Assert(t, provider.states[newer.ID] != nil)
-	assert.Check(t, is.Equal(provider.states[newer.ID].PendingRequestID, "id-newer"))
+	require.NoError(t, test.IDP.continueLogout(w, httptest.NewRequest(http.MethodGet, "/logout", nil), provider, stale))
+	assert.Equal(t, w.Code, http.StatusFound)
+	assert.Len(t, provider.deleted, 0)
+	require.NotNil(t, provider.states[newer.ID])
+	assert.Equal(t, provider.states[newer.ID].PendingRequestID, "id-newer")
 }

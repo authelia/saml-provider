@@ -6,8 +6,8 @@ import (
 	"time"
 
 	"github.com/beevik/etree"
-	"gotest.tools/assert"
-	is "gotest.tools/assert/cmp"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"authelia.com/provider/saml/xmlenc"
 )
@@ -24,13 +24,13 @@ func TestSPRejectsForgedShortGCMCiphertextWithoutPanic(t *testing.T) {
 		AcsURL:      mustParseURL("https://sp.example.com/saml2/acs"),
 		IDPMetadata: &EntityDescriptor{},
 	}
-	assert.NilError(t, xml.Unmarshal(test.IDPMetadata, sp.IDPMetadata))
+	require.NoError(t, xml.Unmarshal(test.IDPMetadata, sp.IDPMetadata))
 
 	encrypter := xmlenc.OAEP()
 	encrypter.BlockCipher = xmlenc.AES128GCM
 	encrypter.DigestMethod = &xmlenc.SHA1
 	encryptedData, err := encrypter.Encrypt(test.Certificate, []byte("<a/>"), nil)
-	assert.NilError(t, err)
+	require.NoError(t, err)
 	encryptedData.FindElement("./CipherData/CipherValue").SetText("AAAA")
 
 	doc := etree.NewDocument()
@@ -48,9 +48,9 @@ func TestSPRejectsForgedShortGCMCiphertextWithoutPanic(t *testing.T) {
 	response.CreateElement("saml:EncryptedAssertion").AddChild(encryptedData)
 
 	serialized, err := doc.WriteToBytes()
-	assert.NilError(t, err)
+	require.NoError(t, err)
 
 	_, err = sp.ParseXMLResponse(serialized, []string{"id-1"}, sp.AcsURL)
-	assert.Assert(t, err != nil)
-	assert.Check(t, is.ErrorContains(err.(*InvalidResponseError).PrivateErr, "ciphertext too short"))
+	require.NotNil(t, err)
+	assert.ErrorContains(t, err.(*InvalidResponseError).PrivateErr, "ciphertext too short")
 }

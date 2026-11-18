@@ -7,8 +7,8 @@ import (
 	"time"
 
 	"github.com/beevik/etree"
-	"gotest.tools/assert"
-	is "gotest.tools/assert/cmp"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 const (
@@ -48,17 +48,17 @@ func extensionsRoundTrip[T any, PT interface {
 		tags = append(tags, child.Tag)
 	}
 
-	assert.Assert(t, len(tags) >= 2, "children: %v", tags)
-	assert.Check(t, is.DeepEqual(tags[:2], []string{"Issuer", "Extensions"}))
+	require.True(t, len(tags) >= 2, "children: %v", tags)
+	assert.Equal(t, tags[:2], []string{"Issuer", "Extensions"})
 
 	doc := etree.NewDocument()
 	doc.SetRoot(el)
 
 	buf, err := doc.WriteToBytes()
-	assert.NilError(t, err)
+	require.NoError(t, err)
 
 	parsed := PT(new(T))
-	assert.NilError(t, xml.Unmarshal(buf, parsed), string(buf))
+	require.NoError(t, xml.Unmarshal(buf, parsed), string(buf))
 
 	return extensions(parsed)
 }
@@ -136,19 +136,19 @@ func TestProtocolExtensionsRoundTripOnEveryMessage(t *testing.T) {
 		},
 	} {
 		t.Run(name, func(t *testing.T) {
-			assert.Check(t, is.DeepEqual(got(t), want))
+			assert.Equal(t, got(t), want)
 		})
 	}
 }
 
 func TestProtocolExtensionsAbsentByDefault(t *testing.T) {
 	el := (&Response{ID: "id-1", Version: "2.0", Status: Status{StatusCode: StatusCode{Value: StatusSuccess}}}).Element()
-	assert.Check(t, el.FindElement("./Extensions") == nil)
+	assert.Nil(t, el.FindElement("./Extensions"))
 
 	var req AuthnRequest
-	assert.NilError(t, xml.Unmarshal([]byte(`<samlp:AuthnRequest xmlns:samlp="urn:oasis:names:tc:SAML:2.0:protocol" ID="id-1" Version="2.0"/>`), &req))
-	assert.Check(t, req.Extensions == nil)
-	assert.Check(t, req.Extensions.Find(extensionsTestNamespace, "Hint") == nil)
+	require.NoError(t, xml.Unmarshal([]byte(`<samlp:AuthnRequest xmlns:samlp="urn:oasis:names:tc:SAML:2.0:protocol" ID="id-1" Version="2.0"/>`), &req))
+	assert.Nil(t, req.Extensions)
+	assert.True(t, req.Extensions.Find(extensionsTestNamespace, "Hint") == nil)
 }
 
 func TestProtocolExtensionsParsedFromRequest(t *testing.T) {
@@ -163,17 +163,17 @@ func TestProtocolExtensionsParsedFromRequest(t *testing.T) {
 	</samlp:AuthnRequest>`
 
 	var req AuthnRequest
-	assert.NilError(t, xml.Unmarshal([]byte(raw), &req))
+	require.NoError(t, xml.Unmarshal([]byte(raw), &req))
 
 	// The text of a protocol extension is kept as it is, where that of a metadata extension is trimmed.
 	want := extensionsTestValue()
 	want.Elements[0].Children[0].Content = " 42 "
-	assert.Check(t, is.DeepEqual(req.Extensions, want))
+	assert.Equal(t, req.Extensions, want)
 
 	hint := req.Extensions.Find(extensionsTestNamespace, "Hint")
-	assert.Assert(t, hint != nil)
-	assert.Check(t, is.Equal(hint.Children[0].Content, " 42 "))
-	assert.Check(t, req.Extensions.Find(extensionsTestNamespace, "Flag") == nil)
+	require.NotNil(t, hint)
+	assert.Equal(t, hint.Children[0].Content, " 42 ")
+	assert.True(t, req.Extensions.Find(extensionsTestNamespace, "Flag") == nil)
 }
 
 func TestProtocolExtensionsElementDeclaresNamespaces(t *testing.T) {
@@ -181,18 +181,18 @@ func TestProtocolExtensionsElementDeclaresNamespaces(t *testing.T) {
 	doc.SetRoot(extensionsTestValue().Element())
 
 	out, err := doc.WriteToString()
-	assert.NilError(t, err)
-	assert.Check(t, is.Equal(out, `<samlp:Extensions>`+
+	require.NoError(t, err)
+	assert.Equal(t, out, `<samlp:Extensions>`+
 		`<Hint xmlns="urn:example:extension" kind="a" xmlns:ns1="urn:oasis:names:tc:SAML:2.0:profiles:attribute:X500" ns1:Encoding="LDAP">`+
 		`<Value xmlns="urn:example:extension">42</Value></Hint>`+
 		`<Flag xmlns="urn:example:other"/>`+
-		`</samlp:Extensions>`))
+		`</samlp:Extensions>`)
 }
 
 func TestProtocolExtensionsCheck(t *testing.T) {
 	var none *ProtocolExtensions
-	assert.Check(t, none.check())
-	assert.Check(t, extensionsTestValue().check())
+	assert.NoError(t, none.check())
+	assert.NoError(t, extensionsTestValue().check())
 
 	for name, tc := range map[string]struct {
 		extensions *ProtocolExtensions
@@ -228,7 +228,7 @@ func TestProtocolExtensionsCheck(t *testing.T) {
 		}}}, "namespace declaration"},
 	} {
 		t.Run(name, func(t *testing.T) {
-			assert.Check(t, is.ErrorContains(tc.extensions.check(), tc.err))
+			assert.ErrorContains(t, tc.extensions.check(), tc.err)
 		})
 	}
 }
@@ -240,18 +240,18 @@ func TestProtocolExtensionsCheckAcceptsValidNames(t *testing.T) {
 		Children: []ExtensionElement{{XMLName: xml.Name{Space: extensionsTestNamespace, Local: "Value"}}},
 	}}}
 
-	assert.Check(t, extensions.check())
+	assert.NoError(t, extensions.check())
 }
 
 func TestProtocolExtensionsCloneSharesNothing(t *testing.T) {
 	original := extensionsTestValue()
 	clone := original.clone()
-	assert.Check(t, is.DeepEqual(clone, original))
+	assert.Equal(t, clone, original)
 
 	clone.Elements[0].Attrs[0].Value = "changed"
 	clone.Elements[0].Children[0].Content = "changed"
 
-	assert.Check(t, is.DeepEqual(original, extensionsTestValue()))
+	assert.Equal(t, original, extensionsTestValue())
 }
 
 const attributeExtRaw = `<saml:Attribute xmlns:saml="urn:oasis:names:tc:SAML:2.0:assertion"
@@ -276,20 +276,20 @@ func attributeExtValue() Attribute {
 
 func TestAttributeExtensionsParsed(t *testing.T) {
 	var attribute Attribute
-	assert.NilError(t, xml.Unmarshal([]byte(attributeExtRaw), &attribute))
-	assert.Check(t, is.DeepEqual(attribute, attributeExtValue()))
+	require.NoError(t, xml.Unmarshal([]byte(attributeExtRaw), &attribute))
+	assert.Equal(t, attribute, attributeExtValue())
 }
 
 func TestAttributeExtensionsInvalidLastModifiedIsKept(t *testing.T) {
 	raw := strings.Replace(attributeExtRaw, "2008-10-31T12:46:02Z", "yesterday", 1)
 
 	var attribute Attribute
-	assert.NilError(t, xml.Unmarshal([]byte(raw), &attribute))
-	assert.Check(t, attribute.LastModified.IsZero())
-	assert.Check(t, is.DeepEqual(attribute.Attrs, []xml.Attr{
+	require.NoError(t, xml.Unmarshal([]byte(raw), &attribute))
+	assert.True(t, attribute.LastModified.IsZero())
+	assert.Equal(t, attribute.Attrs, []xml.Attr{
 		{Name: xml.Name{Space: x500Namespace, Local: "Encoding"}, Value: "LDAP"},
 		{Name: xml.Name{Space: attributeExtNamespace, Local: "LastModified"}, Value: "yesterday"},
-	}))
+	})
 }
 
 func TestAttributeExtensionsElement(t *testing.T) {
@@ -299,16 +299,16 @@ func TestAttributeExtensionsElement(t *testing.T) {
 	doc.SetRoot(attribute.Element())
 
 	buf, err := doc.WriteToBytes()
-	assert.NilError(t, err)
+	require.NoError(t, err)
 
 	el := doc.Root()
-	assert.Check(t, is.Equal(el.SelectAttrValue("xmlns:ext", ""), attributeExtNamespace))
-	assert.Check(t, is.Equal(el.SelectAttrValue("ext:OriginalIssuer", ""), "https://idp.example.com/saml"))
-	assert.Check(t, is.Equal(el.SelectAttrValue("ext:LastModified", ""), "2008-10-31T12:46:02Z"))
+	assert.Equal(t, el.SelectAttrValue("xmlns:ext", ""), attributeExtNamespace)
+	assert.Equal(t, el.SelectAttrValue("ext:OriginalIssuer", ""), "https://idp.example.com/saml")
+	assert.Equal(t, el.SelectAttrValue("ext:LastModified", ""), "2008-10-31T12:46:02Z")
 
 	var parsed Attribute
-	assert.NilError(t, xml.Unmarshal(buf, &parsed), string(buf))
-	assert.Check(t, is.DeepEqual(parsed, attribute))
+	require.NoError(t, xml.Unmarshal(buf, &parsed), string(buf))
+	assert.Equal(t, parsed, attribute)
 }
 
 func TestAttributeWithoutExtensionsElementIsUnchanged(t *testing.T) {
@@ -318,21 +318,21 @@ func TestAttributeWithoutExtensionsElementIsUnchanged(t *testing.T) {
 	doc.SetRoot(attribute.Element())
 
 	out, err := doc.WriteToString()
-	assert.NilError(t, err)
-	assert.Check(t, is.Equal(out, `<saml:Attribute Name="urn:oid:2.5.4.42" NameFormat="urn:oasis:names:tc:SAML:2.0:attrname-format:uri"/>`))
+	require.NoError(t, err)
+	assert.Equal(t, out, `<saml:Attribute Name="urn:oid:2.5.4.42" NameFormat="urn:oasis:names:tc:SAML:2.0:attrname-format:uri"/>`)
 }
 
 func TestAttributeExtensionsMarshalXML(t *testing.T) {
 	attribute := attributeExtValue()
 
 	buf, err := xml.Marshal(attribute)
-	assert.NilError(t, err)
-	assert.Check(t, is.Contains(string(buf), `xmlns:ext="urn:oasis:names:tc:SAML:attribute:ext"`))
-	assert.Check(t, is.Contains(string(buf), `ext:OriginalIssuer="https://idp.example.com/saml"`))
+	require.NoError(t, err)
+	assert.Contains(t, string(buf), `xmlns:ext="urn:oasis:names:tc:SAML:attribute:ext"`)
+	assert.Contains(t, string(buf), `ext:OriginalIssuer="https://idp.example.com/saml"`)
 
 	var parsed Attribute
-	assert.NilError(t, xml.Unmarshal(buf, &parsed), string(buf))
-	assert.Check(t, is.DeepEqual(parsed, attribute))
+	require.NoError(t, xml.Unmarshal(buf, &parsed), string(buf))
+	assert.Equal(t, parsed, attribute)
 }
 
 func TestRequestedAttributeKeepsIsRequiredAndExtensions(t *testing.T) {
@@ -340,18 +340,18 @@ func TestRequestedAttributeKeepsIsRequiredAndExtensions(t *testing.T) {
 	requested := RequestedAttribute{Attribute: attributeExtValue(), IsRequired: &required}
 
 	buf, err := xml.Marshal(requested)
-	assert.NilError(t, err)
-	assert.Check(t, is.Contains(string(buf), `isRequired="true"`))
+	require.NoError(t, err)
+	assert.Contains(t, string(buf), `isRequired="true"`)
 
 	var parsed RequestedAttribute
-	assert.NilError(t, xml.Unmarshal(buf, &parsed), string(buf))
-	assert.Check(t, is.DeepEqual(parsed, requested))
+	require.NoError(t, xml.Unmarshal(buf, &parsed), string(buf))
+	assert.Equal(t, parsed, requested)
 
 	var optional RequestedAttribute
-	assert.NilError(t, xml.Unmarshal([]byte(`<RequestedAttribute Name="a"/>`), &optional))
-	assert.Check(t, optional.IsRequired == nil)
+	require.NoError(t, xml.Unmarshal([]byte(`<RequestedAttribute Name="a"/>`), &optional))
+	assert.Nil(t, optional.IsRequired)
 
-	assert.Check(t, is.ErrorContains(xml.Unmarshal([]byte(`<RequestedAttribute Name="a" isRequired="maybe"/>`), &optional), "isRequired"))
+	assert.ErrorContains(t, xml.Unmarshal([]byte(`<RequestedAttribute Name="a" isRequired="maybe"/>`), &optional), "isRequired")
 }
 
 func TestEntityAttributesMarshalAttributeExtensions(t *testing.T) {
@@ -361,14 +361,14 @@ func TestEntityAttributesMarshalAttributeExtensions(t *testing.T) {
 		XMLName    xml.Name    `xml:"urn:oasis:names:tc:SAML:2.0:metadata EntityDescriptor"`
 		Extensions *Extensions `xml:"urn:oasis:names:tc:SAML:2.0:metadata Extensions"`
 	}{Extensions: &extensions})
-	assert.NilError(t, err)
-	assert.Check(t, is.Contains(string(buf), `ext:OriginalIssuer="https://idp.example.com/saml"`))
-	assert.Check(t, is.Contains(string(buf), `ext:LastModified="2008-10-31T12:46:02Z"`))
+	require.NoError(t, err)
+	assert.Contains(t, string(buf), `ext:OriginalIssuer="https://idp.example.com/saml"`)
+	assert.Contains(t, string(buf), `ext:LastModified="2008-10-31T12:46:02Z"`)
 
 	var parsed struct {
 		Extensions Extensions `xml:"urn:oasis:names:tc:SAML:2.0:metadata Extensions"`
 	}
-	assert.NilError(t, xml.Unmarshal(buf, &parsed), string(buf))
-	assert.Assert(t, parsed.Extensions.EntityAttributes != nil, string(buf))
-	assert.Check(t, is.DeepEqual(parsed.Extensions.EntityAttributes.Attributes[0], attributeExtValue()))
+	require.NoError(t, xml.Unmarshal(buf, &parsed), string(buf))
+	require.True(t, parsed.Extensions.EntityAttributes != nil, string(buf))
+	assert.Equal(t, parsed.Extensions.EntityAttributes.Attributes[0], attributeExtValue())
 }

@@ -14,8 +14,8 @@ import (
 	"time"
 
 	"github.com/beevik/etree"
-	"gotest.tools/assert"
-	is "gotest.tools/assert/cmp"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"authelia.com/provider/saml/xmlenc"
 )
@@ -94,28 +94,28 @@ func negotiatedAssertion(t *testing.T, configure func(*IdentityProvider), method
 	}
 
 	req, err := hardeningValidate(test, hardeningRequest(`ID="id-1"`, TimeNow(), hardeningIssuer))
-	assert.NilError(t, err)
-	assert.NilError(t, DefaultAssertionMaker{}.MakeAssertion(req, &Session{ID: "f00d", NameID: sessionFor, NameIDFormat: string(EmailAddressNameIDFormat)}))
+	require.NoError(t, err)
+	require.NoError(t, DefaultAssertionMaker{}.MakeAssertion(req, &Session{ID: "f00d", NameID: sessionFor, NameIDFormat: string(EmailAddressNameIDFormat)}))
 
 	descriptor := KeyDescriptor{Use: "encryption", EncryptionMethods: methods}
 	descriptor.KeyInfo.X509Data.X509Certificates = []X509Certificate{{Data: base64.StdEncoding.EncodeToString(cert.Raw)}}
 
 	req.SPSSODescriptor.KeyDescriptors = []KeyDescriptor{descriptor}
 	if err := req.MakeAssertionEl(); err != nil {
-		assert.Check(t, req.AssertionEl == nil, "no assertion may be sent when negotiation fails")
+		assert.True(t, req.AssertionEl == nil, "no assertion may be sent when negotiation fails")
 		return nil, err
 	}
 
 	doc := etree.NewDocument()
 	doc.SetRoot(req.AssertionEl)
 	serialized, err := doc.WriteToBytes()
-	assert.NilError(t, err)
+	require.NoError(t, err)
 
 	parsed := etree.NewDocument()
-	assert.NilError(t, parsed.ReadFromBytes(serialized))
-	assert.Check(t, is.Equal("EncryptedAssertion", parsed.Root().Tag))
+	require.NoError(t, parsed.ReadFromBytes(serialized))
+	assert.Equal(t, "EncryptedAssertion", parsed.Root().Tag)
 	encryptedData := parsed.Root().FindElement("./EncryptedData")
-	assert.Assert(t, encryptedData != nil)
+	require.NotNil(t, encryptedData)
 
 	return encryptedData, nil
 }
@@ -135,7 +135,7 @@ func checkNegotiated(t *testing.T, encryptedData *etree.Element, want negotiated
 
 	key, _ := negotiationKey()
 	keyMethod := encryptedData.FindElement("./KeyInfo/EncryptedKey/EncryptionMethod")
-	assert.Assert(t, keyMethod != nil)
+	require.NotNil(t, keyMethod)
 
 	got := negotiated{
 		content:      encryptedData.FindElement("./EncryptionMethod").SelectAttrValue("Algorithm", ""),
@@ -146,11 +146,11 @@ func checkNegotiated(t *testing.T, encryptedData *etree.Element, want negotiated
 	}
 
 	if el := keyMethod.FindElement("./MGF"); el != nil {
-		assert.Check(t, is.Equal("http://www.w3.org/2009/xmlenc11#", el.NamespaceURI()))
+		assert.Equal(t, "http://www.w3.org/2009/xmlenc11#", el.NamespaceURI())
 		got.mgf = el.SelectAttrValue("Algorithm", "")
 	}
 
-	assert.Check(t, is.Equal(want, got))
+	assert.Equal(t, want, got)
 
 	// RSA-OAEP-MGF1P always uses MGF1 with SHA-1 (XML Encryption §5.4.2), and XML Encryption 1.1 RSA-OAEP the one
 	// its MGF names (§5.5.2), so check the key transport against crypto/rsa directly as well.
@@ -163,15 +163,15 @@ func checkNegotiated(t *testing.T, encryptedData *etree.Element, want negotiated
 	}
 
 	value := encryptedData.FindElement("./KeyInfo/EncryptedKey/CipherData/CipherValue")
-	assert.Assert(t, value != nil)
+	require.NotNil(t, value)
 	ciphertext, err := base64.StdEncoding.DecodeString(strings.TrimSpace(value.Text()))
-	assert.NilError(t, err)
+	require.NoError(t, err)
 	_, err = key.Decrypt(nil, ciphertext, &rsa.OAEPOptions{Hash: hashes[want.digest], MGFHash: mgfHash})
-	assert.Check(t, err, "the key transport must be what the EncryptedKey states")
+	assert.NoError(t, err, "the key transport must be what the EncryptedKey states")
 
 	plaintext, err := xmlenc.Decrypt(key, encryptedData)
-	assert.NilError(t, err)
-	assert.Check(t, strings.Contains(string(plaintext), sessionFor))
+	require.NoError(t, err)
+	assert.True(t, strings.Contains(string(plaintext), sessionFor))
 }
 
 func TestIDPNegotiatesEncryptionWithServiceProvider(t *testing.T) {
@@ -214,7 +214,7 @@ func TestIDPNegotiatesEncryptionWithServiceProvider(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			el, err := negotiatedAssertion(t, nil, tc.methods...)
-			assert.NilError(t, err)
+			require.NoError(t, err)
 			checkNegotiated(t, el, tc.want)
 		})
 	}
@@ -238,8 +238,8 @@ func TestIDPRefusesToEncryptWithAnAlgorithmTheServiceProviderDoesNotList(t *test
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			_, err := negotiatedAssertion(t, nil, tc.methods...)
-			assert.Check(t, is.ErrorContains(err, tc.err))
-			assert.Check(t, is.ErrorContains(err, "https://sp.example.com/saml2/metadata"))
+			assert.ErrorContains(t, err, tc.err)
+			assert.ErrorContains(t, err, "https://sp.example.com/saml2/metadata")
 		})
 	}
 }
@@ -352,11 +352,11 @@ func TestIDPEncryptionAlgorithmConfiguration(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			el, err := negotiatedAssertion(t, tc.configure, tc.methods...)
 			if tc.err != "" {
-				assert.Check(t, is.ErrorContains(err, tc.err))
+				assert.ErrorContains(t, err, tc.err)
 				return
 			}
 
-			assert.NilError(t, err)
+			require.NoError(t, err)
 			checkNegotiated(t, el, tc.want)
 		})
 	}
@@ -368,15 +368,15 @@ func TestIDPEncryptionNegotiationLeavesPlaintextServiceProvidersAlone(t *testing
 	test := NewIdentityProviderTest(t, applyKey)
 	test.IDP.ContentEncryptionMethods = []string{tripleDES}
 	req, err := hardeningValidate(test, hardeningRequest(`ID="id-1"`, TimeNow(), hardeningIssuer))
-	assert.NilError(t, err)
-	assert.NilError(t, DefaultAssertionMaker{}.MakeAssertion(req, &Session{ID: "f00d", NameID: sessionFor, NameIDFormat: string(EmailAddressNameIDFormat)}))
+	require.NoError(t, err)
+	require.NoError(t, DefaultAssertionMaker{}.MakeAssertion(req, &Session{ID: "f00d", NameID: sessionFor, NameIDFormat: string(EmailAddressNameIDFormat)}))
 	req.SPSSODescriptor.KeyDescriptors = nil
 	req.ServiceProviderMetadata = &EntityDescriptor{
 		EntityID:         req.ServiceProviderMetadata.EntityID,
 		SPSSODescriptors: []SPSSODescriptor{*req.SPSSODescriptor},
 	}
-	assert.NilError(t, req.MakeAssertionEl())
-	assert.Check(t, is.Equal("Assertion", req.AssertionEl.Tag))
+	require.NoError(t, req.MakeAssertionEl())
+	assert.Equal(t, "Assertion", req.AssertionEl.Tag)
 }
 
 func TestSPOfThisLibraryNegotiatesWithIDPOfThisLibrary(t *testing.T) {
@@ -388,6 +388,6 @@ func TestSPOfThisLibraryNegotiatesWithIDPOfThisLibrary(t *testing.T) {
 		AcsURL:      mustParseURL("https://sp.example.com/saml2/acs"),
 	}
 	el, err := negotiatedAssertion(t, nil, sp.Metadata().SPSSODescriptors[0].KeyDescriptors[0].EncryptionMethods...)
-	assert.NilError(t, err)
+	require.NoError(t, err)
 	checkNegotiated(t, el, negotiated{content: aes128GCM, keyTransport: rsaOAEP, digest: digestSHA1})
 }

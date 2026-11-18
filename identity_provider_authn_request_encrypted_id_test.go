@@ -10,8 +10,8 @@ import (
 	"testing"
 
 	"github.com/beevik/etree"
-	"gotest.tools/assert"
-	is "gotest.tools/assert/cmp"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"authelia.com/provider/saml/internal/dsig"
 )
@@ -72,7 +72,7 @@ func (f *encryptedSubjectFixture) requestElement(t *testing.T, binding string, i
 	unsigned.SignatureMethod = ""
 
 	request, err := unsigned.MakeAuthenticationRequest(signatureTestSSOURL, binding, HTTPPostBinding)
-	assert.NilError(t, err)
+	require.NoError(t, err)
 
 	request.NameIDPolicy = nil
 	request.Subject = &Subject{}
@@ -80,7 +80,7 @@ func (f *encryptedSubjectFixture) requestElement(t *testing.T, binding string, i
 	el := request.Element()
 
 	subject := el.FindElement("./Subject")
-	assert.Assert(t, subject != nil)
+	require.NotNil(t, subject)
 
 	for _, identifier := range identifiers {
 		subject.AddChild(identifier)
@@ -94,7 +94,7 @@ func (f *encryptedSubjectFixture) encrypted(t *testing.T, nameID *NameID) *etree
 	t.Helper()
 
 	encryptedID, err := idpEncrypter(t, f.test).encryptNameID(nameID)
-	assert.NilError(t, err)
+	require.NoError(t, err)
 
 	return encryptedID
 }
@@ -119,17 +119,17 @@ func (f *encryptedSubjectFixture) post(t *testing.T, el *etree.Element, signed b
 
 	if signed {
 		signingContext, err := GetSigningContext(&f.test.SP)
-		assert.NilError(t, err)
+		require.NoError(t, err)
 
 		el, err = signingContext.SignEnveloped(el)
-		assert.NilError(t, err)
+		require.NoError(t, err)
 	}
 
 	doc := etree.NewDocument()
 	doc.SetRoot(el)
 
 	body, err := doc.WriteToBytes()
-	assert.NilError(t, err)
+	require.NoError(t, err)
 
 	form := url.Values{"SAMLRequest": {base64.StdEncoding.EncodeToString(body)}}
 	r := httptest.NewRequest(http.MethodPost, signatureTestSSOURL, strings.NewReader(form.Encode()))
@@ -151,8 +151,8 @@ func (f *encryptedSubjectFixture) redirect(t *testing.T, el *etree.Element, sign
 	}
 
 	u, err := redirectURL(signatureTestSSOURL, "SAMLRequest", el, "relay", &sp)
-	assert.NilError(t, err)
-	assert.Check(t, is.Equal(u.Query().Has("Signature"), signed))
+	require.NoError(t, err)
+	assert.Equal(t, u.Query().Has("Signature"), signed)
 
 	w := httptest.NewRecorder()
 	f.test.IDP.ServeSSO(w, httptest.NewRequest(http.MethodGet, u.String(), nil))
@@ -185,22 +185,22 @@ func assertSubjectStatus(t *testing.T, w *httptest.ResponseRecorder, top, second
 	t.Helper()
 
 	response := subjectResponse(t, w)
-	assert.Check(t, is.Equal(response.Status.StatusCode.Value, top))
-	assert.Assert(t, response.Status.StatusCode.StatusCode != nil)
-	assert.Check(t, is.Equal(response.Status.StatusCode.StatusCode.Value, second))
-	assert.Check(t, response.Assertion == nil)
-	assert.Check(t, response.EncryptedAssertion == nil)
+	assert.Equal(t, response.Status.StatusCode.Value, top)
+	require.NotNil(t, response.Status.StatusCode.StatusCode)
+	assert.Equal(t, response.Status.StatusCode.StatusCode.Value, second)
+	assert.Nil(t, response.Assertion)
+	assert.Nil(t, response.EncryptedAssertion)
 }
 
 // sentAssertionEl returns the assertion that req was answered with, as the service provider decrypts it.
 func sentAssertionEl(t *testing.T, test *IdentityProviderTest, req *IdpAuthnRequest) *etree.Element {
 	t.Helper()
 
-	assert.Assert(t, req.AssertionEl != nil)
-	assert.Assert(t, is.Equal(req.AssertionEl.Tag, "EncryptedAssertion"))
+	require.NotNil(t, req.AssertionEl)
+	require.Equal(t, req.AssertionEl.Tag, "EncryptedAssertion")
 
 	assertionEl, err := test.SP.decryptElement(req.AssertionEl)
-	assert.NilError(t, err)
+	require.NoError(t, err)
 
 	return assertionEl
 }
@@ -213,17 +213,17 @@ func assertEncryptedIDIssued(t *testing.T, test *IdentityProviderTest, req *IdpA
 	assertionEl := sentAssertionEl(t, test, req)
 
 	subjectEl := assertionEl.FindElement("./Subject")
-	assert.Assert(t, subjectEl != nil)
-	assert.Check(t, subjectEl.FindElement("./NameID") == nil)
-	assert.Check(t, !strings.Contains(elementToString(assertionEl), "alice"))
+	require.NotNil(t, subjectEl)
+	assert.Nil(t, subjectEl.FindElement("./NameID"))
+	assert.False(t, strings.Contains(elementToString(assertionEl), "alice"))
 
 	encryptedID := subjectEl.FindElement("./EncryptedID")
-	assert.Assert(t, encryptedID != nil)
+	require.NotNil(t, encryptedID)
 
 	decrypted, err := test.SP.DecryptNameID(encryptedID)
-	assert.NilError(t, err)
-	assert.Check(t, is.Equal(decrypted.Value, "alice"))
-	assert.Check(t, is.Equal(decrypted.Format, string(EmailAddressNameIDFormat)))
+	require.NoError(t, err)
+	assert.Equal(t, decrypted.Value, "alice")
+	assert.Equal(t, decrypted.Format, string(EmailAddressNameIDFormat))
 }
 
 // A signed request may name the principal with an EncryptedID (SAMLCore §3.4.1, §2.2.4), and the assertion then
@@ -234,7 +234,7 @@ func TestServeSSOEncryptedSubject(t *testing.T) {
 			f := newEncryptedSubjectFixture(t)
 
 			el := f.requestElement(t, binding.name, f.encrypted(t, f.alice()))
-			assert.Check(t, !strings.Contains(elementToString(el), "alice"))
+			assert.False(t, strings.Contains(elementToString(el), "alice"))
 
 			var enforced []NameID
 
@@ -245,19 +245,19 @@ func TestServeSSOEncryptedSubject(t *testing.T) {
 			})
 
 			w := binding.serve(f, t, el, true)
-			assert.Check(t, is.Equal(subjectResponse(t, w).Status.StatusCode.Value, StatusSuccess))
+			assert.Equal(t, subjectResponse(t, w).Status.StatusCode.Value, StatusSuccess)
 
 			// The session provider and the enforcer are given the identifier that was encrypted.
-			assert.Assert(t, is.Len(f.requests, 1))
+			require.Len(t, f.requests, 1)
 
 			req := f.requests[0]
-			assert.Check(t, req.SubjectEncrypted)
-			assert.Assert(t, req.Request.Subject.NameID != nil)
-			assert.Check(t, is.DeepEqual(*req.Request.Subject.NameID, *f.alice()))
-			assert.Check(t, is.DeepEqual(enforced, []NameID{*f.alice()}))
+			assert.True(t, req.SubjectEncrypted)
+			require.NotNil(t, req.Request.Subject.NameID)
+			assert.Equal(t, *req.Request.Subject.NameID, *f.alice())
+			assert.Equal(t, enforced, []NameID{*f.alice()})
 
 			assertEncryptedIDIssued(t, f.test, req)
-			assert.Check(t, is.Len(f.unidentified(), 0))
+			assert.Len(t, f.unidentified(), 0)
 		})
 	}
 }
@@ -274,7 +274,7 @@ func TestServeSSOEncryptedSubjectOfOtherPrincipal(t *testing.T) {
 
 			w := binding.serve(f, t, f.requestElement(t, binding.name, f.encrypted(t, bob)), true)
 			assertAuthnFailed(t, subjectResponse(t, w))
-			assert.Check(t, is.Len(f.unidentified(), 0))
+			assert.Len(t, f.unidentified(), 0)
 		})
 	}
 }
@@ -284,14 +284,14 @@ func TestServeSSOPlainSubjectIsNotEncrypted(t *testing.T) {
 	f := newEncryptedSubjectFixture(t)
 
 	w := f.post(t, f.requestElement(t, HTTPPostBinding, f.alice().Element()), true)
-	assert.Check(t, is.Equal(subjectResponse(t, w).Status.StatusCode.Value, StatusSuccess))
+	assert.Equal(t, subjectResponse(t, w).Status.StatusCode.Value, StatusSuccess)
 
-	assert.Assert(t, is.Len(f.requests, 1))
-	assert.Check(t, !f.requests[0].SubjectEncrypted)
+	require.Len(t, f.requests, 1)
+	assert.False(t, f.requests[0].SubjectEncrypted)
 
 	assertionEl := sentAssertionEl(t, f.test, f.requests[0])
-	assert.Check(t, assertionEl.FindElement("./Subject/NameID") != nil)
-	assert.Check(t, assertionEl.FindElement("./Subject/EncryptedID") == nil)
+	assert.NotNil(t, assertionEl.FindElement("./Subject/NameID"))
+	assert.Nil(t, assertionEl.FindElement("./Subject/EncryptedID"))
 }
 
 // Nothing is decrypted for a request that is not signed, as the service provider is not known to have sent the
@@ -307,14 +307,14 @@ func TestServeSSOUnsignedEncryptedSubjectIsUnsupported(t *testing.T) {
 				f.allowUnsigned()
 
 				encryptedID, err := encrypter(t, f.test).encryptNameID(f.alice())
-				assert.NilError(t, err)
+				require.NoError(t, err)
 
 				w := binding.serve(f, t, f.requestElement(t, binding.name, encryptedID), false)
 				assertSubjectStatus(t, w, StatusRequester, StatusRequestUnsupported)
 
 				// It is refused before there is a session, and nothing was decrypted that could be reported.
-				assert.Check(t, is.Len(f.requests, 0))
-				assert.Check(t, is.Len(f.unidentified(), 0))
+				assert.Len(t, f.requests, 0)
+				assert.Len(t, f.unidentified(), 0)
 			})
 		}
 	}
@@ -330,15 +330,15 @@ func TestServeSSOEncryptedSubjectWithoutEncryptionKey(t *testing.T) {
 
 			// One that can't be decrypted is refused in the same way, which shows that it isn't tried.
 			encryptedID, err := otherKeyEncrypter(t, f.test).encryptNameID(f.alice())
-			assert.NilError(t, err)
+			require.NoError(t, err)
 
 			for _, identifier := range []*etree.Element{f.encrypted(t, f.alice()), encryptedID} {
 				w := binding.serve(f, t, f.requestElement(t, binding.name, identifier), true)
 				assertSubjectStatus(t, w, StatusRequester, StatusRequestUnsupported)
 			}
 
-			assert.Check(t, is.Len(f.requests, 0))
-			assert.Check(t, is.Len(f.unidentified(), 0))
+			assert.Len(t, f.requests, 0)
+			assert.Len(t, f.unidentified(), 0)
 		})
 	}
 }
@@ -358,7 +358,7 @@ func TestServeSSOUnidentifiedEncryptedSubject(t *testing.T) {
 			name: "encrypted to another key",
 			encrypt: func(f *encryptedSubjectFixture, t *testing.T) *etree.Element {
 				encryptedID, err := otherKeyEncrypter(t, f.test).encryptNameID(f.alice())
-				assert.NilError(t, err)
+				require.NoError(t, err)
 
 				return encryptedID
 			},
@@ -396,7 +396,7 @@ func TestServeSSOUnidentifiedEncryptedSubject(t *testing.T) {
 		mismatch := subjectResponse(t, binding.serve(baseline, t,
 			baseline.requestElement(t, binding.name, (&NameID{Value: "bob"}).Element()), true))
 		assertAuthnFailed(t, mismatch)
-		assert.Assert(t, is.Len(baseline.requests, 1))
+		require.Len(t, baseline.requests, 1)
 
 		for _, tc := range cases {
 			t.Run(binding.name+"/"+tc.name, func(t *testing.T) {
@@ -415,18 +415,18 @@ func TestServeSSOUnidentifiedEncryptedSubject(t *testing.T) {
 
 				response := subjectResponse(t, w)
 				assertAuthnFailed(t, response)
-				assert.Check(t, is.DeepEqual(response.Status, mismatch.Status))
-				assert.Check(t, statusSaysNothingOfTheRequest(response.Status))
-				assert.Check(t, is.Equal(enforced, 0))
+				assert.Equal(t, response.Status, mismatch.Status)
+				assert.True(t, statusSaysNothingOfTheRequest(response.Status))
+				assert.Equal(t, enforced, 0)
 
 				// As for the mismatch, it fails once there is a session, and not before.
-				assert.Assert(t, is.Len(f.requests, 1))
-				assert.Check(t, f.requests[0].SubjectEncrypted)
-				assert.Check(t, f.requests[0].Request.Subject.NameID == nil)
+				require.Len(t, f.requests, 1)
+				assert.True(t, f.requests[0].SubjectEncrypted)
+				assert.Nil(t, f.requests[0].Request.Subject.NameID)
 
 				reasons := f.unidentified()
-				assert.Assert(t, is.Len(reasons, 1))
-				assert.Check(t, is.Contains(reasons[0], tc.reason))
+				require.Len(t, reasons, 1)
+				assert.Contains(t, reasons[0], tc.reason)
 
 				var log strings.Builder
 
@@ -434,7 +434,7 @@ func TestServeSSOUnidentifiedEncryptedSubject(t *testing.T) {
 					log.WriteString(event.String() + "\n")
 				}
 
-				assert.Check(t, is.Contains(log.String(), string(EventPrincipalUnidentified)))
+				assert.Contains(t, log.String(), string(EventPrincipalUnidentified))
 			})
 		}
 	}
@@ -478,8 +478,8 @@ func TestServeSSOSubjectIdentifierRules(t *testing.T) {
 					assertSubjectStatus(t, w, StatusRequester, tc.second)
 				}
 
-				assert.Check(t, is.Len(f.requests, 0))
-				assert.Check(t, is.Len(f.unidentified(), 0))
+				assert.Len(t, f.requests, 0)
+				assert.Len(t, f.unidentified(), 0)
 			})
 		}
 	}
@@ -491,10 +491,10 @@ func TestServeSSOEncryptedSubjectMustBeSigned(t *testing.T) {
 	f := newEncryptedSubjectFixture(t)
 
 	signingContext, err := GetSigningContext(&f.test.SP)
-	assert.NilError(t, err)
+	require.NoError(t, err)
 
 	signed, err := signingContext.SignEnveloped(f.requestElement(t, HTTPPostBinding, f.alice().Element()))
-	assert.NilError(t, err)
+	require.NoError(t, err)
 
 	// The NameID that was signed is replaced after the fact.
 	subject := signed.FindElement("./Subject")
@@ -505,7 +505,7 @@ func TestServeSSOEncryptedSubjectMustBeSigned(t *testing.T) {
 	doc.SetRoot(signed)
 
 	body, err := doc.WriteToBytes()
-	assert.NilError(t, err)
+	require.NoError(t, err)
 
 	form := url.Values{"SAMLRequest": {base64.StdEncoding.EncodeToString(body)}}
 	r := httptest.NewRequest(http.MethodPost, signatureTestSSOURL, strings.NewReader(form.Encode()))
@@ -514,9 +514,9 @@ func TestServeSSOEncryptedSubjectMustBeSigned(t *testing.T) {
 	w := httptest.NewRecorder()
 	f.test.IDP.ServeSSO(w, r)
 
-	assert.Check(t, is.Equal(w.Code, http.StatusBadRequest), "the signature doesn't verify")
-	assert.Check(t, is.Len(f.requests, 0))
-	assert.Check(t, is.Len(f.unidentified(), 0))
+	assert.Equal(t, w.Code, http.StatusBadRequest, "the signature doesn't verify")
+	assert.Len(t, f.requests, 0)
+	assert.Len(t, f.unidentified(), 0)
 }
 
 // A request of the Enhanced Client or Proxy profile is verified by its enveloped signature like one on HTTP-POST.
@@ -546,7 +546,7 @@ func TestServeECPEncryptedSubject(t *testing.T) {
 		}
 
 		encryptedID, err := idpEncrypter(t, test).encryptNameID(&NameID{Format: string(EmailAddressNameIDFormat), Value: "alice"})
-		assert.NilError(t, err)
+		require.NoError(t, err)
 
 		return test, provider, func(request *AuthnRequest) {
 			request.NameIDPolicy = nil
@@ -559,11 +559,11 @@ func TestServeECPEncryptedSubject(t *testing.T) {
 
 		w, _ := serveECP(t, test, mutate)
 		response := parseECPResponse(t, w)
-		assert.Check(t, is.Equal(response.Response.Status.StatusCode.Value, StatusSuccess))
+		assert.Equal(t, response.Response.Status.StatusCode.Value, StatusSuccess)
 
-		assert.Assert(t, is.Len(provider.requests, 1))
-		assert.Check(t, provider.requests[0].SubjectEncrypted)
-		assert.Check(t, is.Equal(provider.requests[0].Request.Subject.NameID.Value, "alice"))
+		require.Len(t, provider.requests, 1)
+		assert.True(t, provider.requests[0].SubjectEncrypted)
+		assert.Equal(t, provider.requests[0].Request.Subject.NameID.Value, "alice")
 		assertEncryptedIDIssued(t, test, provider.requests[0])
 	})
 
@@ -572,8 +572,8 @@ func TestServeECPEncryptedSubject(t *testing.T) {
 
 		w, id := serveECP(t, test, mutate)
 		assertECPStatus(t, w, id, StatusRequester, StatusRequestUnsupported)
-		assert.Check(t, is.Len(provider.requests, 0))
-		assert.Check(t, is.Len(eventsOfKind(test.Events, EventPrincipalUnidentified), 0))
+		assert.Len(t, provider.requests, 0)
+		assert.Len(t, eventsOfKind(test.Events, EventPrincipalUnidentified), 0)
 	})
 
 	t.Run("no encryption key", func(t *testing.T) {
@@ -581,8 +581,8 @@ func TestServeECPEncryptedSubject(t *testing.T) {
 
 		w, id := serveECP(t, test, mutate)
 		assertECPStatus(t, w, id, StatusRequester, StatusRequestUnsupported)
-		assert.Check(t, is.Len(provider.requests, 0))
-		assert.Check(t, is.Len(eventsOfKind(test.Events, EventPrincipalUnidentified), 0))
+		assert.Len(t, provider.requests, 0)
+		assert.Len(t, eventsOfKind(test.Events, EventPrincipalUnidentified), 0)
 	})
 }
 
@@ -592,12 +592,12 @@ func TestEncryptedSubjectSurvivesResume(t *testing.T) {
 
 	u, err := redirectURL(signatureTestSSOURL, "SAMLRequest",
 		f.requestElement(t, HTTPRedirectBinding, f.encrypted(t, f.alice())), "relay", &f.test.SP)
-	assert.NilError(t, err)
+	require.NoError(t, err)
 
 	first, err := NewIdpAuthnRequest(&f.test.IDP, httptest.NewRequest(http.MethodGet, u.String(), nil))
-	assert.NilError(t, err)
-	assert.NilError(t, first.Validate())
-	assert.Check(t, first.SubjectEncrypted)
+	require.NoError(t, err)
+	require.NoError(t, first.Validate())
+	assert.True(t, first.SubjectEncrypted)
 
 	r := httptest.NewRequest(http.MethodPost, signatureTestSSOURL, strings.NewReader(first.ResumeFormValues().Encode()))
 	r.Header.Set("Content-Type", "application/x-www-form-urlencoded")
@@ -605,8 +605,8 @@ func TestEncryptedSubjectSurvivesResume(t *testing.T) {
 	w := httptest.NewRecorder()
 	f.test.IDP.ServeSSO(w, r)
 
-	assert.Check(t, is.Equal(subjectResponse(t, w).Status.StatusCode.Value, StatusSuccess))
-	assert.Assert(t, is.Len(f.requests, 1))
-	assert.Check(t, is.DeepEqual(*f.requests[0].Request.Subject.NameID, *f.alice()))
+	assert.Equal(t, subjectResponse(t, w).Status.StatusCode.Value, StatusSuccess)
+	require.Len(t, f.requests, 1)
+	assert.Equal(t, *f.requests[0].Request.Subject.NameID, *f.alice())
 	assertEncryptedIDIssued(t, f.test, f.requests[0])
 }

@@ -10,8 +10,8 @@ import (
 	"testing"
 
 	"github.com/beevik/etree"
-	"gotest.tools/assert"
-	is "gotest.tools/assert/cmp"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 // issuanceEncryptionSP is the entity ID of the service provider of hardeningIssuer.
@@ -22,11 +22,11 @@ const issuanceEncryptionSP = "https://sp.example.com/saml2/metadata"
 func issuanceEncryptionOf(t *testing.T, encryptedEl *etree.Element) negotiated {
 	t.Helper()
 
-	assert.Assert(t, encryptedEl != nil, "there is no encrypted element")
+	require.True(t, encryptedEl != nil, "there is no encrypted element")
 
 	contentMethod := encryptedEl.FindElement("./EncryptedData/EncryptionMethod")
 	keyMethod := encryptedEl.FindElement("./EncryptedData/KeyInfo/EncryptedKey/EncryptionMethod")
-	assert.Assert(t, contentMethod != nil && keyMethod != nil)
+	require.True(t, contentMethod != nil && keyMethod != nil)
 
 	got := negotiated{
 		content:      contentMethod.SelectAttrValue("Algorithm", ""),
@@ -72,15 +72,15 @@ func TestIssuanceEncryptionIsNegotiatedByDefault(t *testing.T) {
 	configure := issuanceEncryptionFor(ServiceProviderIssuance{Sign: SignAssertion})
 
 	encryptedData, err := negotiatedAssertion(t, configure)
-	assert.NilError(t, err)
+	require.NoError(t, err)
 	checkNegotiated(t, encryptedData, negotiated{content: aes128GCM, keyTransport: rsaOAEP, digest: digestSHA1})
 
 	encryptedData, err = negotiatedAssertion(t, configure, method(aes256CBC), oaepMethod(rsaOAEP11, digestSHA256, mgf1SHA256))
-	assert.NilError(t, err)
+	require.NoError(t, err)
 	checkNegotiated(t, encryptedData, negotiated{content: aes256CBC, keyTransport: rsaOAEP11, digest: digestSHA256, mgf: mgf1SHA256})
 
 	_, err = negotiatedAssertion(t, configure, method(tripleDES))
-	assert.Check(t, is.ErrorContains(err, "content encryption"))
+	assert.ErrorContains(t, err, "content encryption")
 }
 
 func TestIssuanceEncryptionMethods(t *testing.T) {
@@ -155,7 +155,7 @@ func TestIssuanceEncryptionMethods(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			encryptedData, err := negotiatedAssertion(t, issuanceEncryptionFor(tc.issuance), tc.methods...)
-			assert.NilError(t, err)
+			require.NoError(t, err)
 			checkNegotiated(t, encryptedData, tc.want)
 		})
 	}
@@ -178,17 +178,17 @@ func TestIssuanceEncryptionMethodsOfCustomPolicy(t *testing.T) {
 	}
 
 	encryptedData, err := negotiatedAssertion(t, configure, method(aes256GCM))
-	assert.NilError(t, err)
+	require.NoError(t, err)
 	checkNegotiated(t, encryptedData, negotiated{content: aes128CBC, keyTransport: rsaOAEP, digest: digestSHA1})
 
-	assert.Assert(t, len(defaults) > 0)
+	require.True(t, len(defaults) > 0)
 
 	for _, issuance := range defaults {
-		assert.Check(t, is.Equal(issuance.ContentEncryptionMethod, ""))
-		assert.Check(t, is.Equal(issuance.KeyTransportMethod, ""))
-		assert.Check(t, is.Equal(issuance.KeyTransportDigestMethod, ""))
-		assert.Check(t, is.Equal(issuance.KeyTransportMGF, ""))
-		assert.Check(t, is.Equal(issuance.AssertionEncryption, EncryptAssertionWhenPossible))
+		assert.Equal(t, issuance.ContentEncryptionMethod, "")
+		assert.Equal(t, issuance.KeyTransportMethod, "")
+		assert.Equal(t, issuance.KeyTransportDigestMethod, "")
+		assert.Equal(t, issuance.KeyTransportMGF, "")
+		assert.Equal(t, issuance.AssertionEncryption, EncryptAssertionWhenPossible)
 	}
 }
 
@@ -285,14 +285,14 @@ func TestIssuanceRefusesEncryptionMethods(t *testing.T) {
 				test.IDP.Observer = logObserver(logs)
 
 				w := serveSSO(test, replayPostRequest(signedPostBody(t, &test.SP, nil), nil))
-				assert.Check(t, is.Equal(w.Code, http.StatusInternalServerError))
-				assert.Check(t, !strings.Contains(w.Body.String(), "SAMLResponse"))
-				assert.Check(t, is.Contains(logs.String(), "IssuancePolicy"))
-				assert.Check(t, is.Contains(logs.String(), tc.reason))
+				assert.Equal(t, w.Code, http.StatusInternalServerError)
+				assert.False(t, strings.Contains(w.Body.String(), "SAMLResponse"))
+				assert.Contains(t, logs.String(), "IssuancePolicy")
+				assert.Contains(t, logs.String(), tc.reason)
 
 				// Nor is any other message signed for that service provider.
 				_, err := test.IDP.signingContextFor(httptest.NewRequest(http.MethodGet, "https://idp.example.com/saml/slo", nil), test.SP.Metadata())
-				assert.Check(t, is.ErrorContains(err, tc.reason))
+				assert.ErrorContains(t, err, tc.reason)
 			})
 		}
 	}
@@ -306,10 +306,10 @@ func TestIssuanceEncryptionSSOEndToEnd(t *testing.T) {
 
 	responseEl, responseXML, id := issuanceSSO(t, test)
 
-	assert.Check(t, is.Equal(issuanceEncryptionOf(t, responseEl.FindElement("./EncryptedAssertion")), issuanceLegacyEncrypted))
+	assert.Equal(t, issuanceEncryptionOf(t, responseEl.FindElement("./EncryptedAssertion")), issuanceLegacyEncrypted)
 
 	assertion := issuanceAccept(t, &test.SP, responseXML, []string{id})
-	assert.Check(t, assertion.Subject != nil)
+	assert.NotNil(t, assertion.Subject)
 
 	// Another service provider is not affected.
 	test.IDP.IssuancePolicy = DefaultIssuancePolicy{ServiceProviders: map[string]ServiceProviderIssuance{
@@ -317,7 +317,7 @@ func TestIssuanceEncryptionSSOEndToEnd(t *testing.T) {
 	}}
 
 	responseEl, _, _ = issuanceSSO(t, test)
-	assert.Check(t, is.Equal(issuanceEncryptionOf(t, responseEl.FindElement("./EncryptedAssertion")).content, aes128GCM))
+	assert.Equal(t, issuanceEncryptionOf(t, responseEl.FindElement("./EncryptedAssertion")).content, aes128GCM)
 }
 
 // The EncryptedID and each EncryptedAttribute of an assertion are encrypted as the assertion is.
@@ -334,30 +334,30 @@ func TestIssuanceEncryptionOfParts(t *testing.T) {
 	body := respond(t, req)
 
 	doc := etree.NewDocument()
-	assert.NilError(t, doc.ReadFromString(body))
-	assert.Check(t, is.Equal(issuanceEncryptionOf(t, doc.Root().FindElement("./EncryptedAssertion")), issuanceLegacyEncrypted))
+	require.NoError(t, doc.ReadFromString(body))
+	assert.Equal(t, issuanceEncryptionOf(t, doc.Root().FindElement("./EncryptedAssertion")), issuanceLegacyEncrypted)
 
 	assertionEl := sentAssertionElement(t, test, body)
 
 	encryptedID := assertionEl.FindElement("./Subject/EncryptedID")
-	assert.Check(t, is.Equal(issuanceEncryptionOf(t, encryptedID), issuanceLegacyEncrypted))
+	assert.Equal(t, issuanceEncryptionOf(t, encryptedID), issuanceLegacyEncrypted)
 
 	nameID, err := test.SP.DecryptNameID(reparse(t, encryptedID))
-	assert.NilError(t, err)
-	assert.Check(t, nameID.Value != "")
+	require.NoError(t, err)
+	assert.True(t, nameID.Value != "")
 
 	encryptedAttributes := assertionEl.FindElements("./AttributeStatement/EncryptedAttribute")
-	assert.Assert(t, len(encryptedAttributes) > 0)
+	require.True(t, len(encryptedAttributes) > 0)
 
 	for _, encryptedAttribute := range encryptedAttributes {
-		assert.Check(t, is.Equal(issuanceEncryptionOf(t, encryptedAttribute), issuanceLegacyEncrypted))
+		assert.Equal(t, issuanceEncryptionOf(t, encryptedAttribute), issuanceLegacyEncrypted)
 
 		_, err = test.SP.decryptElement(reparse(t, encryptedAttribute))
-		assert.Check(t, err)
+		assert.NoError(t, err)
 	}
 
 	_, err = test.SP.ParseXMLResponse([]byte(body), []string{"id-request"}, test.SP.AcsURL)
-	assert.Check(t, err)
+	assert.NoError(t, err)
 }
 
 func TestIssuanceEncryptionArtifact(t *testing.T) {
@@ -371,10 +371,10 @@ func TestIssuanceEncryptionArtifact(t *testing.T) {
 		envelope := soapTestParseResponse(t, serveArtifactResolution(test, r))
 
 		encryptedAssertion := envelope.FindElement("./Body/ArtifactResponse/Response/EncryptedAssertion")
-		assert.Check(t, is.Equal(issuanceEncryptionOf(t, encryptedAssertion), issuanceLegacyEncrypted))
+		assert.Equal(t, issuanceEncryptionOf(t, encryptedAssertion), issuanceLegacyEncrypted)
 
 		_, err := test.SP.decryptElement(reparse(t, encryptedAssertion))
-		assert.Check(t, err)
+		assert.NoError(t, err)
 	})
 
 	t.Run("end to end", func(t *testing.T) {
@@ -391,10 +391,10 @@ func issuanceQueryMessage(t *testing.T, f *queryFixture, service queryService, m
 	t.Helper()
 
 	w := f.serve(service, queryPost(t, service.url, signQueryElement(t, &f.test.SP, message)))
-	assert.Assert(t, is.Equal(w.Code, http.StatusOK), "body: %s", w.Body.String())
+	require.Equal(t, w.Code, http.StatusOK, "body: %s", w.Body.String())
 
 	_, _, responseEl, err := parseSOAPEnvelope(w.Body.Bytes())
-	assert.NilError(t, err)
+	require.NoError(t, err)
 
 	return responseEl, f.answer(t, w)
 }
@@ -407,8 +407,8 @@ func TestIssuanceEncryptionQueryResponses(t *testing.T) {
 
 		responseEl, response := issuanceQueryMessage(t, f, queryServices[0], f.attributeQuery().Element())
 		assertQueryStatus(t, response, StatusSuccess, "")
-		assert.Check(t, is.Equal(response.Encrypted, 1))
-		assert.Check(t, is.Equal(issuanceEncryptionOf(t, responseEl.FindElement("./EncryptedAssertion")), issuanceLegacyEncrypted))
+		assert.Equal(t, response.Encrypted, 1)
+		assert.Equal(t, issuanceEncryptionOf(t, responseEl.FindElement("./EncryptedAssertion")), issuanceLegacyEncrypted)
 	})
 
 	t.Run("AuthnQuery", func(t *testing.T) {
@@ -417,8 +417,8 @@ func TestIssuanceEncryptionQueryResponses(t *testing.T) {
 
 		responseEl, response := issuanceQueryMessage(t, f, queryServices[1], f.authnQuery().Element())
 		assertQueryStatus(t, response, StatusSuccess, "")
-		assert.Check(t, is.Equal(response.Encrypted, 1))
-		assert.Check(t, is.Equal(issuanceEncryptionOf(t, responseEl.FindElement("./EncryptedAssertion")), issuanceLegacyEncrypted))
+		assert.Equal(t, response.Encrypted, 1)
+		assert.Equal(t, issuanceEncryptionOf(t, responseEl.FindElement("./EncryptedAssertion")), issuanceLegacyEncrypted)
 	})
 
 	t.Run("AssertionIDRequest", func(t *testing.T) {
@@ -428,8 +428,8 @@ func TestIssuanceEncryptionQueryResponses(t *testing.T) {
 
 		responseEl, response := issuanceQueryMessage(t, f, queryServices[2], f.assertionIDRequest(queryTestStoredAssertionID).Element())
 		assertQueryStatus(t, response, StatusSuccess, "")
-		assert.Check(t, is.Equal(response.Encrypted, 1))
-		assert.Check(t, is.Equal(issuanceEncryptionOf(t, responseEl.FindElement("./EncryptedAssertion")), issuanceLegacyEncrypted))
+		assert.Equal(t, response.Encrypted, 1)
+		assert.Equal(t, issuanceEncryptionOf(t, responseEl.FindElement("./EncryptedAssertion")), issuanceLegacyEncrypted)
 	})
 }
 
@@ -438,15 +438,15 @@ func TestIssuanceEncryptionManageNameIDRequest(t *testing.T) {
 	test, sp, _ := sendManageNameIDFixture(t)
 	issuanceFor(test, issuanceLegacyEncryption)
 
-	assert.NilError(t, sendManageNameID(test, NameIDChange{NameID: *testNameID(test, &test.SP), NewID: "p-alice-2", Encrypt: true}))
-	assert.Assert(t, is.Len(sp.requests, 1))
+	require.NoError(t, sendManageNameID(test, NameIDChange{NameID: *testNameID(test, &test.SP), NewID: "p-alice-2", Encrypt: true}))
+	require.Len(t, sp.requests, 1)
 
-	assert.Check(t, is.Equal(issuanceEncryptionOf(t, sp.elements[0].FindElement("./EncryptedID")), issuanceLegacyEncrypted))
-	assert.Check(t, is.Equal(issuanceEncryptionOf(t, sp.elements[0].FindElement("./NewEncryptedID")), issuanceLegacyEncrypted))
+	assert.Equal(t, issuanceEncryptionOf(t, sp.elements[0].FindElement("./EncryptedID")), issuanceLegacyEncrypted)
+	assert.Equal(t, issuanceEncryptionOf(t, sp.elements[0].FindElement("./NewEncryptedID")), issuanceLegacyEncrypted)
 
 	// The service provider decrypted both.
-	assert.Check(t, is.DeepEqual(*sp.nameIDs[0], *testNameID(test, &test.SP)))
-	assert.Check(t, is.Equal(sp.newIDs[0], "p-alice-2"))
+	assert.Equal(t, *sp.nameIDs[0], *testNameID(test, &test.SP))
+	assert.Equal(t, sp.newIDs[0], "p-alice-2")
 }
 
 // The EncryptedID of a LogoutRequest that the identity provider sends to a session participant.
@@ -458,15 +458,15 @@ func TestIssuanceEncryptionLogoutRequest(t *testing.T) {
 	f.encryptParticipants(f.a.MetadataURL.String())
 
 	el := sentLogoutRequestElement(t, f.a, sentLogoutRequest(t, f.startLogout(t)))
-	assert.Check(t, el.FindElement("./NameID") == nil)
+	assert.Nil(t, el.FindElement("./NameID"))
 
 	encryptedID, err := findOneChild(el, samlAssertionNamespace, "EncryptedID")
-	assert.NilError(t, err)
-	assert.Check(t, is.Equal(issuanceEncryptionOf(t, encryptedID), issuanceLegacyEncrypted))
+	require.NoError(t, err)
+	assert.Equal(t, issuanceEncryptionOf(t, encryptedID), issuanceLegacyEncrypted)
 
 	nameID, err := f.a.DecryptNameID(encryptedID)
-	assert.NilError(t, err)
-	assert.Check(t, is.Equal(nameID.Value, "alice"))
+	require.NoError(t, err)
+	assert.Equal(t, nameID.Value, "alice")
 }
 
 // The EncryptedID of a NameIDMappingResponse is encrypted as the policy says for the service provider that the
@@ -481,11 +481,11 @@ func TestIssuanceEncryptionNameIDMapping(t *testing.T) {
 	checkStatus(t, result.Response.Status, StatusSuccess, "")
 
 	encryptedID := result.Element.FindElement("./EncryptedID")
-	assert.Check(t, is.Equal(issuanceEncryptionOf(t, encryptedID), issuanceLegacyEncrypted))
+	assert.Equal(t, issuanceEncryptionOf(t, encryptedID), issuanceLegacyEncrypted)
 
 	nameID, err := f.b.DecryptNameID(reparse(t, encryptedID))
-	assert.NilError(t, err)
-	assert.Check(t, is.Equal(nameID.Value, "b-alice"))
+	require.NoError(t, err)
+	assert.Equal(t, nameID.Value, "b-alice")
 }
 
 func TestIssuanceRequireAssertionEncryption(t *testing.T) {
@@ -500,27 +500,27 @@ func TestIssuanceRequireAssertionEncryption(t *testing.T) {
 		test.IDP.Observer = logObserver(logs)
 
 		w := serveSSO(test, replayPostRequest(signedPostBody(t, &test.SP, nil), nil))
-		assert.Assert(t, is.Equal(w.Code, http.StatusOK), "body: %s", w.Body.String())
-		assert.Check(t, is.Contains(logs.String(), "has no encryption key"))
+		require.Equal(t, w.Code, http.StatusOK, "body: %s", w.Body.String())
+		assert.Contains(t, logs.String(), "has no encryption key")
 
 		doc, _ := postedResponse(t, w.Body.String())
 		responseEl := doc.Root()
 
-		assert.Check(t, responseEl.FindElement("./Assertion") == nil)
-		assert.Check(t, responseEl.FindElement("./EncryptedAssertion") == nil)
-		assert.Check(t, responseEl.FindElement("./Signature") != nil)
+		assert.Nil(t, responseEl.FindElement("./Assertion"))
+		assert.Nil(t, responseEl.FindElement("./EncryptedAssertion"))
+		assert.NotNil(t, responseEl.FindElement("./Signature"))
 
 		statusCode := responseEl.FindElement("./Status/StatusCode")
-		assert.Assert(t, statusCode != nil)
-		assert.Check(t, is.Equal(statusCode.SelectAttrValue("Value", ""), StatusResponder))
+		require.NotNil(t, statusCode)
+		assert.Equal(t, statusCode.SelectAttrValue("Value", ""), StatusResponder)
 	}
 
 	plaintext := func(t *testing.T, test *IdentityProviderTest) {
 		t.Helper()
 
 		responseEl, responseXML, id := issuanceSSO(t, test)
-		assert.Check(t, responseEl.FindElement("./Assertion") != nil)
-		assert.Check(t, responseEl.FindElement("./EncryptedAssertion") == nil)
+		assert.NotNil(t, responseEl.FindElement("./Assertion"))
+		assert.Nil(t, responseEl.FindElement("./EncryptedAssertion"))
 
 		issuanceAccept(t, &test.SP, responseXML, []string{id})
 	}
@@ -538,8 +538,8 @@ func TestIssuanceRequireAssertionEncryption(t *testing.T) {
 		issuanceFor(test, ServiceProviderIssuance{AssertionEncryption: &yes})
 
 		responseEl, responseXML, id := issuanceSSO(t, test)
-		assert.Check(t, responseEl.FindElement("./Assertion") == nil)
-		assert.Check(t, responseEl.FindElement("./EncryptedAssertion") != nil)
+		assert.Nil(t, responseEl.FindElement("./Assertion"))
+		assert.NotNil(t, responseEl.FindElement("./EncryptedAssertion"))
 
 		issuanceAccept(t, &test.SP, responseXML, []string{id})
 	})
@@ -605,9 +605,9 @@ func TestIssuanceRequireAssertionEncryption(t *testing.T) {
 
 		w := httptest.NewRecorder()
 		test.IDP.ServeIDPInitiated(w, httptest.NewRequest(http.MethodGet, "https://idp.example.com/services/sp/whoami", nil), test.SP.MetadataURL.String(), "")
-		assert.Check(t, is.Equal(w.Code, http.StatusInternalServerError))
-		assert.Check(t, !strings.Contains(w.Body.String(), "SAMLResponse"))
-		assert.Check(t, is.Contains(logs.String(), "has no encryption key"))
+		assert.Equal(t, w.Code, http.StatusInternalServerError)
+		assert.False(t, strings.Contains(w.Body.String(), "SAMLResponse"))
+		assert.Contains(t, logs.String(), "has no encryption key")
 	})
 
 	t.Run("the assertion of a query", func(t *testing.T) {
@@ -617,9 +617,9 @@ func TestIssuanceRequireAssertionEncryption(t *testing.T) {
 		issuanceFor(f.test, ServiceProviderIssuance{AssertionEncryption: &yes})
 
 		response := f.queryAttributes(t, f.attributeQuery())
-		assert.Check(t, response.Response.Status.StatusCode.Value != StatusSuccess)
-		assert.Check(t, is.Len(response.Assertions, 0))
-		assert.Check(t, is.Contains(f.log.String(), "has no encryption key"))
+		assert.True(t, response.Response.Status.StatusCode.Value != StatusSuccess)
+		assert.Len(t, response.Assertions, 0)
+		assert.Contains(t, f.log.String(), "has no encryption key")
 	})
 
 	t.Run("an assertion that is requested by its ID", func(t *testing.T) {
@@ -629,9 +629,9 @@ func TestIssuanceRequireAssertionEncryption(t *testing.T) {
 		issuanceFor(f.test, ServiceProviderIssuance{AssertionEncryption: &yes})
 
 		response := f.requestAssertions(t, f.assertionIDRequest(queryTestStoredAssertionID))
-		assert.Check(t, response.Response.Status.StatusCode.Value != StatusSuccess)
-		assert.Check(t, is.Len(response.Assertions, 0))
-		assert.Check(t, is.Contains(f.log.String(), "has no encryption key"))
+		assert.True(t, response.Response.Status.StatusCode.Value != StatusSuccess)
+		assert.Len(t, response.Assertions, 0)
+		assert.Contains(t, f.log.String(), "has no encryption key")
 	})
 }
 
@@ -654,12 +654,12 @@ func plainAssertionElement(t *testing.T, body string) *etree.Element {
 	t.Helper()
 
 	doc := etree.NewDocument()
-	assert.NilError(t, doc.ReadFromString(body))
+	require.NoError(t, doc.ReadFromString(body))
 
-	assert.Check(t, doc.Root().FindElement("./EncryptedAssertion") == nil, "the assertion is encrypted")
+	assert.True(t, doc.Root().FindElement("./EncryptedAssertion") == nil, "the assertion is encrypted")
 
 	assertionEl := doc.Root().FindElement("./Assertion")
-	assert.Assert(t, assertionEl != nil, "the response has no assertion: %s", body)
+	require.True(t, assertionEl != nil, "the response has no assertion: %s", body)
 
 	return assertionEl
 }
@@ -667,19 +667,19 @@ func plainAssertionElement(t *testing.T, body string) *etree.Element {
 // NoAssertionEncryption sends a service provider that has an encryption key its assertion signed and not
 // encrypted.
 func TestIssuanceNoAssertionEncryption(t *testing.T) {
-	none, whenPossible, require := NoAssertionEncryption, EncryptAssertionWhenPossible, RequireAssertionEncryption
+	none, whenPossible, required := NoAssertionEncryption, EncryptAssertionWhenPossible, RequireAssertionEncryption
 
 	plaintext := func(t *testing.T, test *IdentityProviderTest) {
 		t.Helper()
 
 		responseEl, responseXML, id := issuanceSSO(t, test)
-		assert.Check(t, responseEl.FindElement("./EncryptedAssertion") == nil)
+		assert.Nil(t, responseEl.FindElement("./EncryptedAssertion"))
 
 		assertionEl := responseEl.FindElement("./Assertion")
-		assert.Assert(t, assertionEl != nil)
-		assert.Check(t, assertionEl.FindElement("./Signature") != nil)
-		assert.Check(t, assertionEl.FindElement("./Subject/NameID") != nil)
-		assert.Check(t, !strings.Contains(string(responseXML), "EncryptedData"))
+		require.NotNil(t, assertionEl)
+		assert.NotNil(t, assertionEl.FindElement("./Signature"))
+		assert.NotNil(t, assertionEl.FindElement("./Subject/NameID"))
+		assert.False(t, strings.Contains(string(responseXML), "EncryptedData"))
 
 		issuanceAccept(t, &test.SP, responseXML, []string{id})
 	}
@@ -688,8 +688,8 @@ func TestIssuanceNoAssertionEncryption(t *testing.T) {
 		t.Helper()
 
 		responseEl, responseXML, id := issuanceSSO(t, test)
-		assert.Check(t, responseEl.FindElement("./Assertion") == nil)
-		assert.Check(t, responseEl.FindElement("./EncryptedAssertion") != nil)
+		assert.Nil(t, responseEl.FindElement("./Assertion"))
+		assert.NotNil(t, responseEl.FindElement("./EncryptedAssertion"))
 
 		issuanceAccept(t, &test.SP, responseXML, []string{id})
 	}
@@ -716,10 +716,10 @@ func TestIssuanceNoAssertionEncryption(t *testing.T) {
 		issuanceFor(test, ServiceProviderIssuance{Sign: SignResponse, AssertionEncryption: &none})
 
 		responseEl, responseXML, id := issuanceSSO(t, test)
-		assert.Check(t, responseEl.FindElement("./EncryptedAssertion") == nil)
-		assert.Check(t, responseEl.FindElement("./Signature") != nil)
-		assert.Assert(t, responseEl.FindElement("./Assertion") != nil)
-		assert.Check(t, responseEl.FindElement("./Assertion/Signature") == nil)
+		assert.Nil(t, responseEl.FindElement("./EncryptedAssertion"))
+		assert.NotNil(t, responseEl.FindElement("./Signature"))
+		require.NotNil(t, responseEl.FindElement("./Assertion"))
+		assert.Nil(t, responseEl.FindElement("./Assertion/Signature"))
 
 		issuanceAccept(t, &test.SP, responseXML, []string{id})
 	})
@@ -755,7 +755,7 @@ func TestIssuanceNoAssertionEncryption(t *testing.T) {
 		test := issuanceTestIDP(t)
 		test.IDP.IssuancePolicy = DefaultIssuancePolicy{
 			AssertionEncryption: NoAssertionEncryption,
-			ServiceProviders:    map[string]ServiceProviderIssuance{test.SP.MetadataURL.String(): {AssertionEncryption: &require}},
+			ServiceProviders:    map[string]ServiceProviderIssuance{test.SP.MetadataURL.String(): {AssertionEncryption: &required}},
 		}
 
 		encrypted(t, test)
@@ -797,11 +797,11 @@ func TestIssuanceNoAssertionEncryption(t *testing.T) {
 
 		w := httptest.NewRecorder()
 		test.IDP.ServeIDPInitiated(w, httptest.NewRequest(http.MethodGet, "https://idp.example.com/services/sp/whoami", nil), test.SP.MetadataURL.String(), "")
-		assert.Assert(t, is.Equal(w.Code, http.StatusOK), "body: %s", w.Body.String())
+		require.Equal(t, w.Code, http.StatusOK, "body: %s", w.Body.String())
 
 		doc, _ := postedResponse(t, w.Body.String())
-		assert.Check(t, doc.Root().FindElement("./EncryptedAssertion") == nil)
-		assert.Check(t, doc.Root().FindElement("./Assertion/Signature") != nil)
+		assert.Nil(t, doc.Root().FindElement("./EncryptedAssertion"))
+		assert.NotNil(t, doc.Root().FindElement("./Assertion/Signature"))
 	})
 
 	t.Run("the Response of an ArtifactResponse", func(t *testing.T) {
@@ -814,9 +814,9 @@ func TestIssuanceNoAssertionEncryption(t *testing.T) {
 		envelope := soapTestParseResponse(t, serveArtifactResolution(test, r))
 
 		responseEl := envelope.FindElement("./Body/ArtifactResponse/Response")
-		assert.Assert(t, responseEl != nil)
-		assert.Check(t, responseEl.FindElement("./EncryptedAssertion") == nil)
-		assert.Check(t, responseEl.FindElement("./Assertion/Signature") != nil)
+		require.NotNil(t, responseEl)
+		assert.Nil(t, responseEl.FindElement("./EncryptedAssertion"))
+		assert.NotNil(t, responseEl.FindElement("./Assertion/Signature"))
 	})
 
 	t.Run("the artifact binding end to end", func(t *testing.T) {
@@ -840,30 +840,30 @@ func TestIssuanceNoAssertionEncryptionEncryptsParts(t *testing.T) {
 		body := respond(t, req)
 		assertionEl := plainAssertionElement(t, body)
 
-		assert.Check(t, assertionEl.FindElement("./Subject/NameID") == nil)
-		assert.Check(t, !strings.Contains(elementToString(assertionEl.FindElement("./Subject")), req.Assertion.Subject.NameID.Value))
-		assert.Check(t, req.nameIDEncrypted)
+		assert.Nil(t, assertionEl.FindElement("./Subject/NameID"))
+		assert.False(t, strings.Contains(elementToString(assertionEl.FindElement("./Subject")), req.Assertion.Subject.NameID.Value))
+		assert.True(t, req.nameIDEncrypted)
 
 		encryptedID := assertionEl.FindElement("./Subject/EncryptedID")
-		assert.Assert(t, encryptedID != nil)
+		require.NotNil(t, encryptedID)
 
 		nameID, err := test.SP.DecryptNameID(reparse(t, encryptedID))
-		assert.NilError(t, err)
-		assert.Check(t, is.DeepEqual(*nameID, *req.Assertion.Subject.NameID))
+		require.NoError(t, err)
+		assert.Equal(t, *nameID, *req.Assertion.Subject.NameID)
 
 		// The signature covers the EncryptedID: it verifies, and no longer does once the ciphertext is changed.
-		assert.Check(t, assertionEl.FindElement("./Signature") != nil)
-		assert.Check(t, test.SP.validateSignature(reparse(t, assertionEl)))
+		assert.NotNil(t, assertionEl.FindElement("./Signature"))
+		assert.NoError(t, test.SP.validateSignature(reparse(t, assertionEl)))
 
 		tampered := reparse(t, assertionEl)
 		cipherValue := tampered.FindElement("./Subject/EncryptedID/EncryptedData/CipherData/CipherValue")
-		assert.Assert(t, cipherValue != nil)
+		require.NotNil(t, cipherValue)
 		cipherValue.SetText("AAAA" + cipherValue.Text())
-		assert.Check(t, test.SP.validateSignature(tampered) != nil)
+		assert.NotNil(t, test.SP.validateSignature(tampered))
 
 		assertion, err := test.SP.ParseXMLResponse([]byte(body), []string{"id-request"}, test.SP.AcsURL)
-		assert.NilError(t, err)
-		assert.Check(t, is.DeepEqual(*req.Assertion.Subject.NameID, *assertion.Subject.NameID))
+		require.NoError(t, err)
+		assert.Equal(t, *req.Assertion.Subject.NameID, *assertion.Subject.NameID)
 	})
 
 	t.Run("an EncryptedID and EncryptedAttribute elements that the ElementEncryptionPolicy asks for", func(t *testing.T) {
@@ -879,25 +879,25 @@ func TestIssuanceNoAssertionEncryptionEncryptsParts(t *testing.T) {
 		body := respond(t, req)
 		assertionEl := plainAssertionElement(t, body)
 
-		assert.Check(t, assertionEl.FindElement("./Subject/NameID") == nil)
-		assert.Check(t, assertionEl.FindElement("./Subject/EncryptedID") != nil)
-		assert.Check(t, is.Len(assertionEl.FindElements("./AttributeStatement/Attribute"), 0))
-		assert.Check(t, !strings.Contains(body, "admins"))
+		assert.Nil(t, assertionEl.FindElement("./Subject/NameID"))
+		assert.NotNil(t, assertionEl.FindElement("./Subject/EncryptedID"))
+		assert.Len(t, assertionEl.FindElements("./AttributeStatement/Attribute"), 0)
+		assert.False(t, strings.Contains(body, "admins"))
 
 		encryptedAttributes := assertionEl.FindElements("./AttributeStatement/EncryptedAttribute")
-		assert.Assert(t, len(encryptedAttributes) > 0)
+		require.True(t, len(encryptedAttributes) > 0)
 
 		for _, encryptedAttribute := range encryptedAttributes {
 			_, err := test.SP.decryptElement(reparse(t, encryptedAttribute))
-			assert.Check(t, err)
+			assert.NoError(t, err)
 		}
 
-		assert.Check(t, test.SP.validateSignature(reparse(t, assertionEl)))
+		assert.NoError(t, test.SP.validateSignature(reparse(t, assertionEl)))
 
 		assertion, err := test.SP.ParseXMLResponse([]byte(body), []string{"id-request"}, test.SP.AcsURL)
-		assert.NilError(t, err)
-		assert.Check(t, is.DeepEqual(*req.Assertion.Subject.NameID, *assertion.Subject.NameID))
-		assert.Check(t, is.DeepEqual(friendlyNames(req.Assertion.AttributeStatements), friendlyNames(assertion.AttributeStatements)))
+		require.NoError(t, err)
+		assert.Equal(t, *req.Assertion.Subject.NameID, *assertion.Subject.NameID)
+		assert.Equal(t, friendlyNames(req.Assertion.AttributeStatements), friendlyNames(assertion.AttributeStatements))
 	})
 
 	t.Run("the parts are encrypted with what the policy chose", func(t *testing.T) {
@@ -909,7 +909,7 @@ func TestIssuanceNoAssertionEncryptionEncryptsParts(t *testing.T) {
 		issuanceFor(test, issuance)
 
 		assertionEl := plainAssertionElement(t, respond(t, req))
-		assert.Check(t, is.Equal(issuanceEncryptionOf(t, assertionEl.FindElement("./Subject/EncryptedID")), issuanceLegacyEncrypted))
+		assert.Equal(t, issuanceEncryptionOf(t, assertionEl.FindElement("./Subject/EncryptedID")), issuanceLegacyEncrypted)
 	})
 
 	t.Run("a part can't be encrypted to a service provider with no encryption key", func(t *testing.T) {
@@ -924,17 +924,17 @@ func TestIssuanceNoAssertionEncryptionEncryptsParts(t *testing.T) {
 			err = req.MakeAssertionEl()
 		}
 
-		assert.Check(t, errors.Is(err, ErrInvalidNameIDPolicy), "got %v", err)
-		assert.Check(t, req.AssertionEl == nil)
+		assert.True(t, errors.Is(err, ErrInvalidNameIDPolicy), "got %v", err)
+		assert.Nil(t, req.AssertionEl)
 
 		_, req = encryptedPartsRequest(t)
 		issuanceUnencrypted(req.SPSSODescriptor)
 		req.IDP.IssuancePolicy = test.IDP.IssuancePolicy
 		req.IDP.ElementEncryptionPolicy = DefaultElementEncryptionPolicy{AttributeServiceProviders: []string{test.SP.MetadataURL.String()}}
 
-		assert.NilError(t, DefaultAssertionMaker{}.MakeAssertion(req, encryptedPartsSession))
-		assert.Check(t, is.ErrorContains(req.MakeAssertionEl(), "has no encryption key"))
-		assert.Check(t, req.AssertionEl == nil)
+		require.NoError(t, DefaultAssertionMaker{}.MakeAssertion(req, encryptedPartsSession))
+		assert.ErrorContains(t, req.MakeAssertionEl(), "has no encryption key")
+		assert.Nil(t, req.AssertionEl)
 	})
 }
 
@@ -951,12 +951,12 @@ func TestIssuanceNoAssertionEncryptionAndUnusableCertificate(t *testing.T) {
 
 		body := respond(t, req)
 		assertionEl := plainAssertionElement(t, body)
-		assert.Check(t, assertionEl.FindElement("./Subject/NameID") != nil)
-		assert.Check(t, assertionEl.FindElement("./Signature") != nil)
-		assert.Check(t, is.Equal(*asked, 0))
+		assert.NotNil(t, assertionEl.FindElement("./Subject/NameID"))
+		assert.NotNil(t, assertionEl.FindElement("./Signature"))
+		assert.Equal(t, *asked, 0)
 
 		_, err := test.SP.ParseXMLResponse([]byte(body), []string{"id-request"}, test.SP.AcsURL)
-		assert.Check(t, err)
+		assert.NoError(t, err)
 	})
 
 	t.Run("a refused certificate over single sign-on", func(t *testing.T) {
@@ -965,8 +965,8 @@ func TestIssuanceNoAssertionEncryptionAndUnusableCertificate(t *testing.T) {
 		refusingEncryptionCertificate(&test.IDP)
 
 		responseEl, responseXML, id := issuanceSSO(t, test)
-		assert.Check(t, responseEl.FindElement("./EncryptedAssertion") == nil)
-		assert.Check(t, responseEl.FindElement("./Assertion/Signature") != nil)
+		assert.Nil(t, responseEl.FindElement("./EncryptedAssertion"))
+		assert.NotNil(t, responseEl.FindElement("./Assertion/Signature"))
 
 		issuanceAccept(t, &test.SP, responseXML, []string{id})
 	})
@@ -982,7 +982,7 @@ func TestIssuanceNoAssertionEncryptionAndUnusableCertificate(t *testing.T) {
 		}
 
 		_, err := req.elementEncrypter()
-		assert.Assert(t, is.ErrorContains(err, "cannot parse certificate"))
+		require.ErrorContains(t, err, "cannot parse certificate")
 
 		plainAssertionElement(t, respond(t, req))
 	})
@@ -994,10 +994,10 @@ func TestIssuanceNoAssertionEncryptionAndUnusableCertificate(t *testing.T) {
 
 		asked := refusingEncryptionCertificate(&test.IDP)
 
-		assert.NilError(t, DefaultAssertionMaker{}.MakeAssertion(req, encryptedPartsSession))
-		assert.Check(t, is.ErrorContains(req.MakeAssertionEl(), "the certificate is refused"))
-		assert.Check(t, req.AssertionEl == nil)
-		assert.Check(t, is.Equal(*asked, 1))
+		require.NoError(t, DefaultAssertionMaker{}.MakeAssertion(req, encryptedPartsSession))
+		assert.ErrorContains(t, req.MakeAssertionEl(), "the certificate is refused")
+		assert.Nil(t, req.AssertionEl)
+		assert.Equal(t, *asked, 1)
 	})
 
 	t.Run("a refused certificate stops an EncryptedAttribute that the policy asks for", func(t *testing.T) {
@@ -1007,10 +1007,10 @@ func TestIssuanceNoAssertionEncryptionAndUnusableCertificate(t *testing.T) {
 
 		asked := refusingEncryptionCertificate(&test.IDP)
 
-		assert.NilError(t, DefaultAssertionMaker{}.MakeAssertion(req, encryptedPartsSession))
-		assert.Check(t, is.ErrorContains(req.MakeAssertionEl(), "the certificate is refused"))
-		assert.Check(t, req.AssertionEl == nil)
-		assert.Check(t, is.Equal(*asked, 1))
+		require.NoError(t, DefaultAssertionMaker{}.MakeAssertion(req, encryptedPartsSession))
+		assert.ErrorContains(t, req.MakeAssertionEl(), "the certificate is refused")
+		assert.Nil(t, req.AssertionEl)
+		assert.Equal(t, *asked, 1)
 	})
 
 	// What is not the opt-out is as it was: the assertion is never sent in plaintext because the key was refused.
@@ -1024,10 +1024,10 @@ func TestIssuanceNoAssertionEncryptionAndUnusableCertificate(t *testing.T) {
 
 			asked := refusingEncryptionCertificate(&test.IDP)
 
-			assert.NilError(t, DefaultAssertionMaker{}.MakeAssertion(req, encryptedPartsSession))
-			assert.Check(t, is.ErrorContains(req.MakeAssertionEl(), "the certificate is refused"))
-			assert.Check(t, req.AssertionEl == nil)
-			assert.Check(t, is.Equal(*asked, 1))
+			require.NoError(t, DefaultAssertionMaker{}.MakeAssertion(req, encryptedPartsSession))
+			assert.ErrorContains(t, req.MakeAssertionEl(), "the certificate is refused")
+			assert.Nil(t, req.AssertionEl)
+			assert.Equal(t, *asked, 1)
 		})
 	}
 }
@@ -1043,9 +1043,9 @@ func TestIssuanceNoAssertionEncryptionQueryResponses(t *testing.T) {
 
 		response := f.queryAttributes(t, f.attributeQuery())
 		assertQueryStatus(t, response, StatusSuccess, "")
-		assert.Assert(t, is.Len(response.Assertions, 1))
-		assert.Check(t, is.Equal(response.Encrypted, 0))
-		assert.Check(t, response.AssertionEls[0].FindElement("./Subject/NameID") != nil)
+		require.Len(t, response.Assertions, 1)
+		assert.Equal(t, response.Encrypted, 0)
+		assert.NotNil(t, response.AssertionEls[0].FindElement("./Subject/NameID"))
 	})
 
 	t.Run("AuthnQuery", func(t *testing.T) {
@@ -1054,8 +1054,8 @@ func TestIssuanceNoAssertionEncryptionQueryResponses(t *testing.T) {
 
 		response := f.queryAuthn(t, f.authnQuery())
 		assertQueryStatus(t, response, StatusSuccess, "")
-		assert.Assert(t, is.Len(response.Assertions, 1))
-		assert.Check(t, is.Equal(response.Encrypted, 0))
+		require.Len(t, response.Assertions, 1)
+		assert.Equal(t, response.Encrypted, 0)
 	})
 
 	t.Run("a query whose Subject is an EncryptedID", func(t *testing.T) {
@@ -1069,19 +1069,19 @@ func TestIssuanceNoAssertionEncryptionQueryResponses(t *testing.T) {
 
 		response := f.query(t, queryServices[0], message)
 		assertQueryStatus(t, response, StatusSuccess, "")
-		assert.Assert(t, is.Len(response.Assertions, 1))
-		assert.Check(t, is.Equal(response.Encrypted, 0))
+		require.Len(t, response.Assertions, 1)
+		assert.Equal(t, response.Encrypted, 0)
 
 		subjectEl := response.AssertionEls[0].FindElement("./Subject")
-		assert.Assert(t, subjectEl != nil)
-		assert.Check(t, subjectEl.FindElement("./NameID") == nil)
+		require.NotNil(t, subjectEl)
+		assert.Nil(t, subjectEl.FindElement("./NameID"))
 
 		encryptedID := subjectEl.FindElement("./EncryptedID")
-		assert.Assert(t, encryptedID != nil)
+		require.NotNil(t, encryptedID)
 
 		decrypted, err := f.test.SP.DecryptNameID(encryptedID)
-		assert.NilError(t, err)
-		assert.Check(t, is.DeepEqual(*decrypted, *nameID))
+		require.NoError(t, err)
+		assert.Equal(t, *decrypted, *nameID)
 	})
 
 	t.Run("a query to a service provider whose certificate is refused", func(t *testing.T) {
@@ -1092,8 +1092,8 @@ func TestIssuanceNoAssertionEncryptionQueryResponses(t *testing.T) {
 
 		response := f.queryAttributes(t, f.attributeQuery())
 		assertQueryStatus(t, response, StatusSuccess, "")
-		assert.Assert(t, is.Len(response.Assertions, 1))
-		assert.Check(t, is.Equal(response.Encrypted, 0))
+		require.Len(t, response.Assertions, 1)
+		assert.Equal(t, response.Encrypted, 0)
 	})
 
 	t.Run("AssertionIDRequest", func(t *testing.T) {
@@ -1105,10 +1105,10 @@ func TestIssuanceNoAssertionEncryptionQueryResponses(t *testing.T) {
 
 		response := f.requestAssertions(t, f.assertionIDRequest(queryTestStoredAssertionID))
 		assertQueryStatus(t, response, StatusSuccess, "")
-		assert.Assert(t, is.Len(response.Assertions, 1))
-		assert.Check(t, is.Equal(response.Encrypted, 0))
-		assert.Check(t, is.Equal(response.Assertions[0].ID, queryTestStoredAssertionID))
-		assert.Check(t, is.Equal(*asked, 0))
+		require.Len(t, response.Assertions, 1)
+		assert.Equal(t, response.Encrypted, 0)
+		assert.Equal(t, response.Assertions[0].ID, queryTestStoredAssertionID)
+		assert.Equal(t, *asked, 0)
 	})
 
 	t.Run("an AssertionIDRequest is still encrypted to by default", func(t *testing.T) {
@@ -1117,7 +1117,7 @@ func TestIssuanceNoAssertionEncryptionQueryResponses(t *testing.T) {
 
 		response := f.requestAssertions(t, f.assertionIDRequest(queryTestStoredAssertionID))
 		assertQueryStatus(t, response, StatusSuccess, "")
-		assert.Check(t, is.Equal(response.Encrypted, 1))
+		assert.Equal(t, response.Encrypted, 1)
 	})
 }
 
@@ -1137,12 +1137,12 @@ func TestIssuanceRefusesUnknownAssertionEncryption(t *testing.T) {
 				test.IDP.Observer = logObserver(logs)
 
 				w := serveSSO(test, replayPostRequest(signedPostBody(t, &test.SP, nil), nil))
-				assert.Check(t, is.Equal(w.Code, http.StatusInternalServerError))
-				assert.Check(t, !strings.Contains(w.Body.String(), "SAMLResponse"))
-				assert.Check(t, is.Contains(logs.String(), "unknown AssertionEncryption"))
+				assert.Equal(t, w.Code, http.StatusInternalServerError)
+				assert.False(t, strings.Contains(w.Body.String(), "SAMLResponse"))
+				assert.Contains(t, logs.String(), "unknown AssertionEncryption")
 
 				_, err := test.IDP.signingContextFor(httptest.NewRequest(http.MethodGet, "https://idp.example.com/saml/slo", nil), test.SP.Metadata())
-				assert.Check(t, is.ErrorContains(err, "unknown AssertionEncryption"))
+				assert.ErrorContains(t, err, "unknown AssertionEncryption")
 			})
 		}
 	}

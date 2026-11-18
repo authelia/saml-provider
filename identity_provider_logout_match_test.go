@@ -6,7 +6,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"gotest.tools/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestIdpLogoutRequestMatchesSession(t *testing.T) {
@@ -103,9 +103,9 @@ func TestIdpLogoutRequestMatchesSession(t *testing.T) {
 
 				err := req.MatchesSession(nil, session)
 				if want {
-					assert.NilError(t, err, "valueOnly=%t", valueOnly)
+					require.NoError(t, err, "valueOnly=%t", valueOnly)
 				} else {
-					assert.Assert(t, err != nil, "valueOnly=%t", valueOnly)
+					require.True(t, err != nil, "valueOnly=%t", valueOnly)
 				}
 			}
 		})
@@ -118,22 +118,22 @@ func TestIdpLogoutRequestMatchesSessionNilPreconditions(t *testing.T) {
 	session := &Session{NameID: "alice@example.com", NameIDFormat: string(TransientNameIDFormat)}
 
 	req := &IdpLogoutRequest{IDP: &idp, ServiceProviderMetadata: test.SP.Metadata(), Request: LogoutRequest{NameID: &NameID{Value: "alice@example.com"}}}
-	assert.Assert(t, req.MatchesSession(nil, nil) != nil)
+	require.True(t, req.MatchesSession(nil, nil) != nil)
 
 	// An SPNameQualifier can't be checked without the metadata of the service provider.
 	req = &IdpLogoutRequest{IDP: &idp, Request: LogoutRequest{NameID: &NameID{SPNameQualifier: "https://sp.example.com", Value: "alice@example.com"}}}
-	assert.Assert(t, req.MatchesSession(nil, session) != nil)
+	require.True(t, req.MatchesSession(nil, session) != nil)
 
 	// The complete identifier can't be compared without it either, so only the value-only match succeeds.
 	req.Request.NameID.SPNameQualifier = ""
-	assert.Assert(t, req.MatchesSession(nil, session) != nil)
+	require.True(t, req.MatchesSession(nil, session) != nil)
 
 	idp.LogoutNameIDValueOnly = true
 
-	assert.NilError(t, req.MatchesSession(nil, session))
+	require.NoError(t, req.MatchesSession(nil, session))
 
 	// The NameID of a session without a format was never asserted, even when only the value is compared.
-	assert.Assert(t, req.MatchesSession(nil, &Session{NameID: "alice@example.com"}) != nil)
+	require.True(t, req.MatchesSession(nil, &Session{NameID: "alice@example.com"}) != nil)
 }
 
 // fixedParticipantProvider is a SessionProvider whose session participants are fixed.
@@ -224,9 +224,9 @@ func TestIdpLogoutRequestMatchesParticipantNameID(t *testing.T) {
 			err := req.MatchesSession(httptest.NewRequest(http.MethodGet, "https://idp.example.com/saml/slo", nil), &Session{NameID: "alice@example.com", Index: "i1"})
 
 			if tc.match {
-				assert.NilError(t, err)
+				require.NoError(t, err)
 			} else {
-				assert.Assert(t, err != nil)
+				require.NotNil(t, err)
 			}
 		})
 	}
@@ -237,7 +237,7 @@ func TestIdpLogoutRequestMatchesParticipantNameID(t *testing.T) {
 		idp.SessionProvider = &fixedParticipantProvider{err: boom}
 
 		req := &IdpLogoutRequest{IDP: &idp, ServiceProviderMetadata: sp, Request: LogoutRequest{NameID: &asserted}}
-		assert.Assert(t, errors.Is(req.MatchesSession(nil, &Session{NameID: "alice@example.com"}), boom))
+		require.True(t, errors.Is(req.MatchesSession(nil, &Session{NameID: "alice@example.com"}), boom))
 	})
 
 	t.Run("affiliation", func(t *testing.T) {
@@ -251,6 +251,6 @@ func TestIdpLogoutRequestMatchesParticipantNameID(t *testing.T) {
 
 		nameID := NameID{Format: string(PersistentNameIDFormat), NameQualifier: idpEntityID, SPNameQualifier: affiliation, Value: "abc"}
 		req := &IdpLogoutRequest{IDP: &idp, ServiceProviderMetadata: sp, Request: LogoutRequest{NameID: &nameID}}
-		assert.NilError(t, req.MatchesSession(nil, &Session{NameID: "alice@example.com"}))
+		require.NoError(t, req.MatchesSession(nil, &Session{NameID: "alice@example.com"}))
 	})
 }

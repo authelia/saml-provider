@@ -11,8 +11,8 @@ import (
 	"time"
 
 	"github.com/beevik/etree"
-	"gotest.tools/assert"
-	is "gotest.tools/assert/cmp"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 const logoutResponseTestRequestID = "id-pending"
@@ -34,7 +34,7 @@ func signedLogoutResponse(t *testing.T, binding string, sp, signer *ServiceProvi
 	unsigned := *sp
 	unsigned.SignatureMethod = ""
 	response, err := unsigned.MakeLogoutResponse(logoutTestSLOURL, logoutResponseTestRequestID)
-	assert.NilError(t, err)
+	require.NoError(t, err)
 
 	if mutate != nil {
 		mutate(response)
@@ -42,19 +42,19 @@ func signedLogoutResponse(t *testing.T, binding string, sp, signer *ServiceProvi
 
 	if binding == HTTPRedirectBinding {
 		u, err := response.Redirect("state-id", signer)
-		assert.NilError(t, err)
+		require.NoError(t, err)
 
 		return httptest.NewRequest(http.MethodGet, u.String(), nil)
 	}
 
 	if signer != nil {
-		assert.NilError(t, signer.SignLogoutResponse(response))
+		require.NoError(t, signer.SignLogoutResponse(response))
 	}
 
 	doc := etree.NewDocument()
 	doc.SetRoot(response.Element())
 	body, err := doc.WriteToBytes()
-	assert.NilError(t, err)
+	require.NoError(t, err)
 
 	form := url.Values{"SAMLResponse": {base64.StdEncoding.EncodeToString(body)}, "RelayState": {"state-id"}}
 	r := httptest.NewRequest(http.MethodPost, logoutTestSLOURL, strings.NewReader(form.Encode()))
@@ -79,12 +79,12 @@ func TestLogoutResponseValid(t *testing.T) {
 			state := logoutResponseState(test)
 
 			resp, err := validateLogoutResponse(test, signedLogoutResponse(t, binding, &test.SP, &test.SP, nil), state)
-			assert.NilError(t, err)
-			assert.Check(t, is.Equal(resp.RelayState, "state-id"))
+			require.NoError(t, err)
+			assert.Equal(t, resp.RelayState, "state-id")
 
 			resp.outcome(state)
-			assert.Check(t, is.Equal(state.Participants[0].Outcome, LogoutOutcomeSuccess))
-			assert.Check(t, is.Equal(state.PendingRequestID, logoutResponseTestRequestID))
+			assert.Equal(t, state.Participants[0].Outcome, LogoutOutcomeSuccess)
+			assert.Equal(t, state.PendingRequestID, logoutResponseTestRequestID)
 		})
 	}
 }
@@ -132,8 +132,8 @@ func TestLogoutResponseRejects(t *testing.T) {
 				}
 
 				_, err := validateLogoutResponse(test, signedLogoutResponse(t, binding, &test.SP, signer, tc.mutate), state)
-				assert.ErrorContains(t, err, tc.expected)
-				assert.Check(t, is.Equal(errors.Is(err, ErrLogoutResponseUncorrelated), tc.uncorrelated), "error: %v", err)
+				require.ErrorContains(t, err, tc.expected)
+				assert.Equal(t, errors.Is(err, ErrLogoutResponseUncorrelated), tc.uncorrelated, "error: %v", err)
 			})
 		}
 	}
@@ -145,7 +145,7 @@ func TestLogoutResponseRejects(t *testing.T) {
 		r.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 
 		_, err := validateLogoutResponse(test, r, logoutResponseState(test))
-		assert.ErrorContains(t, err, "request body too large")
+		require.ErrorContains(t, err, "request body too large")
 	})
 
 	t.Run("unknown service provider", func(t *testing.T) {
@@ -156,7 +156,7 @@ func TestLogoutResponseRejects(t *testing.T) {
 		_, err := validateLogoutResponse(test, signedLogoutResponse(t, HTTPPostBinding, &test.SP, &test.SP, func(r *LogoutResponse) {
 			r.Issuer.Value = "https://unknown.example.com/metadata"
 		}), state)
-		assert.ErrorContains(t, err, "cannot find service provider https://unknown.example.com/metadata")
+		require.ErrorContains(t, err, "cannot find service provider https://unknown.example.com/metadata")
 	})
 }
 
@@ -171,11 +171,11 @@ func TestLogoutResponseNonSuccessStatus(t *testing.T) {
 			})
 
 			resp, err := validateLogoutResponse(test, r, state)
-			assert.NilError(t, err)
+			require.NoError(t, err)
 
 			resp.outcome(state)
-			assert.Check(t, is.Equal(state.Participants[0].Outcome, LogoutOutcomeFailed))
-			assert.Check(t, is.Equal(state.Participants[0].Reason, StatusRequester))
+			assert.Equal(t, state.Participants[0].Outcome, LogoutOutcomeFailed)
+			assert.Equal(t, state.Participants[0].Reason, StatusRequester)
 		})
 	}
 }
@@ -186,7 +186,7 @@ func TestLogoutResponseOutcomeWithoutStatusIsFailed(t *testing.T) {
 	resp := &IdpLogoutResponse{}
 
 	resp.outcome(state)
-	assert.Check(t, is.Equal(state.Participants[0].Outcome, LogoutOutcomeFailed))
+	assert.Equal(t, state.Participants[0].Outcome, LogoutOutcomeFailed)
 }
 
 func TestLogoutResponseOutcome(t *testing.T) {
@@ -210,8 +210,8 @@ func TestLogoutResponseOutcome(t *testing.T) {
 			resp := &IdpLogoutResponse{Response: LogoutResponse{Status: Status{StatusCode: tc.code}}}
 
 			resp.outcome(state)
-			assert.Check(t, is.Equal(state.Participants[0].Outcome, tc.outcome))
-			assert.Check(t, is.Equal(state.Participants[0].Reason, tc.expected))
+			assert.Equal(t, state.Participants[0].Outcome, tc.outcome)
+			assert.Equal(t, state.Participants[0].Reason, tc.expected)
 		})
 	}
 }

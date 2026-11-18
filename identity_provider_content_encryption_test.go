@@ -6,8 +6,8 @@ import (
 	"testing"
 
 	"github.com/beevik/etree"
-	"gotest.tools/assert"
-	is "gotest.tools/assert/cmp"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"authelia.com/provider/saml/xmlenc"
 )
@@ -28,18 +28,18 @@ func encryptedAssertionFor(t *testing.T, test *IdentityProviderTest, descriptors
 	t.Helper()
 
 	req, err := hardeningValidate(test, hardeningRequest(`ID="id-1"`, TimeNow(), hardeningIssuer))
-	assert.NilError(t, err)
-	assert.NilError(t, DefaultAssertionMaker{}.MakeAssertion(req, &Session{ID: "f00d", NameID: sessionFor, NameIDFormat: string(EmailAddressNameIDFormat)}))
+	require.NoError(t, err)
+	require.NoError(t, DefaultAssertionMaker{}.MakeAssertion(req, &Session{ID: "f00d", NameID: sessionFor, NameIDFormat: string(EmailAddressNameIDFormat)}))
 	req.SPSSODescriptor.KeyDescriptors = descriptors
-	assert.NilError(t, req.MakeAssertionEl())
+	require.NoError(t, req.MakeAssertionEl())
 
 	doc := etree.NewDocument()
 	doc.SetRoot(req.AssertionEl)
 	serialized, err := doc.WriteToBytes()
-	assert.NilError(t, err)
+	require.NoError(t, err)
 
 	parsed := etree.NewDocument()
-	assert.NilError(t, parsed.ReadFromBytes(serialized))
+	require.NoError(t, parsed.ReadFromBytes(serialized))
 
 	return parsed.Root()
 }
@@ -72,12 +72,12 @@ func TestIDPChoosesContentEncryptionFromMetadata(t *testing.T) {
 
 			el := encryptedAssertionFor(t, test, []KeyDescriptor{descriptor})
 			encryptedData := el.FindElement("./EncryptedData")
-			assert.Assert(t, encryptedData != nil)
-			assert.Check(t, is.Equal(tc.want, encryptedData.FindElement("./EncryptionMethod").SelectAttrValue("Algorithm", "")))
+			require.NotNil(t, encryptedData)
+			assert.Equal(t, tc.want, encryptedData.FindElement("./EncryptionMethod").SelectAttrValue("Algorithm", ""))
 
 			plaintext, err := xmlenc.Decrypt(test.SPKey, encryptedData)
-			assert.NilError(t, err)
-			assert.Check(t, strings.Contains(string(plaintext), sessionFor))
+			require.NoError(t, err)
+			assert.True(t, strings.Contains(string(plaintext), sessionFor))
 		})
 	}
 }
@@ -93,7 +93,7 @@ func TestIDPUsesEncryptionMethodsOfKeyItEncryptsTo(t *testing.T) {
 	unspecified.KeyInfo.X509Data.X509Certificates = certificate
 
 	el := encryptedAssertionFor(t, test, []KeyDescriptor{other, unspecified, encryption})
-	assert.Check(t, is.Equal(aes128GCM, el.FindElement("./EncryptedData/EncryptionMethod").SelectAttrValue("Algorithm", "")))
+	assert.Equal(t, aes128GCM, el.FindElement("./EncryptedData/EncryptionMethod").SelectAttrValue("Algorithm", ""))
 }
 
 func TestSPOfThisLibraryReceivesAndDecryptsGCM(t *testing.T) {
@@ -107,11 +107,11 @@ func TestSPOfThisLibraryReceivesAndDecryptsGCM(t *testing.T) {
 	metadata := sp.Metadata()
 
 	el := encryptedAssertionFor(t, test, metadata.SPSSODescriptors[0].KeyDescriptors)
-	assert.Check(t, is.Equal(aes128GCM, el.FindElement("./EncryptedData/EncryptionMethod").SelectAttrValue("Algorithm", "")))
+	assert.Equal(t, aes128GCM, el.FindElement("./EncryptedData/EncryptionMethod").SelectAttrValue("Algorithm", ""))
 
 	assertion, err := sp.decryptElement(el)
-	assert.NilError(t, err)
-	assert.Check(t, is.Equal(sessionFor, assertion.FindElement("./Subject/NameID").Text()))
+	require.NoError(t, err)
+	assert.Equal(t, sessionFor, assertion.FindElement("./Subject/NameID").Text())
 }
 
 func base64Certificate(test *IdentityProviderTest) string {

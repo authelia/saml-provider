@@ -8,8 +8,8 @@ import (
 	"strings"
 	"testing"
 
-	"gotest.tools/assert"
-	is "gotest.tools/assert/cmp"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestValidate(t *testing.T) {
@@ -46,7 +46,7 @@ func TestValidate(t *testing.T) {
 	}
 
 	for _, doc := range docs {
-		assert.Check(t, Validate([]byte(doc)), "doc: %q", doc)
+		assert.NoError(t, Validate([]byte(doc)), "doc: %q", doc)
 	}
 }
 
@@ -64,7 +64,8 @@ func TestValidateSyntaxError(t *testing.T) {
 	}
 
 	for _, doc := range docs {
-		assert.Check(t, is.ErrorType(Validate([]byte(doc)), &xml.SyntaxError{}), "doc: %q", doc)
+		var syntaxErr *xml.SyntaxError
+		assert.ErrorAs(t, Validate([]byte(doc)), &syntaxErr, "doc: %q", doc)
 	}
 }
 
@@ -87,9 +88,9 @@ func TestValidateUnstableToken(t *testing.T) {
 	for _, tc := range testCases {
 		var validationErr ValidationError
 
-		if assert.Check(t, errors.As(Validate([]byte(tc.doc)), &validationErr), "doc: %q", tc.doc) {
-			assert.Check(t, is.Equal(tc.line, validationErr.Line), "doc: %q", tc.doc)
-			assert.Check(t, is.Equal(tc.column, validationErr.Column), "doc: %q", tc.doc)
+		if assert.True(t, errors.As(Validate([]byte(tc.doc)), &validationErr), "doc: %q", tc.doc) {
+			assert.Equal(t, tc.line, validationErr.Line, "doc: %q", tc.doc)
+			assert.Equal(t, tc.column, validationErr.Column, "doc: %q", tc.doc)
 		}
 	}
 }
@@ -117,12 +118,12 @@ func TestValidateAllocationsBoundedByInputSize(t *testing.T) {
 			runtime.GC()
 			runtime.ReadMemStats(&before)
 
-			assert.NilError(t, Validate(data))
+			require.NoError(t, Validate(data))
 
 			runtime.ReadMemStats(&after)
 
 			perByte := float64(after.TotalAlloc-before.TotalAlloc) / float64(len(data))
-			assert.Check(t, perByte < maxBytesPerInputByte, "allocated %.0f bytes per input byte", perByte)
+			assert.True(t, perByte < maxBytesPerInputByte, "allocated %.0f bytes per input byte", perByte)
 		})
 	}
 }
@@ -168,15 +169,15 @@ func TestValidateRoundtripError(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			var validationErr ValidationError
 
-			assert.Assert(t, errors.As(Validate([]byte(tc.doc)), &validationErr))
-			assert.Check(t, is.Equal(tc.line, validationErr.Line))
-			assert.Check(t, is.Equal(tc.column, validationErr.Column))
-			assert.Check(t, is.Equal(tc.source, tc.doc[validationErr.Start:validationErr.End]))
+			require.True(t, errors.As(Validate([]byte(tc.doc)), &validationErr))
+			assert.Equal(t, tc.line, validationErr.Line)
+			assert.Equal(t, tc.column, validationErr.Column)
+			assert.Equal(t, tc.source, tc.doc[validationErr.Start:validationErr.End])
 
 			var roundtripErr RoundtripError
 
-			assert.Assert(t, errors.As(validationErr, &roundtripErr))
-			assert.Check(t, is.DeepEqual(tokenize(t, tc.source), roundtripErr.Expected))
+			require.True(t, errors.As(validationErr, &roundtripErr))
+			assert.Equal(t, tokenize(t, tc.source), roundtripErr.Expected)
 		})
 	}
 }
@@ -185,11 +186,11 @@ func TestValidateRoundtripError(t *testing.T) {
 func TestValidateRoundtripErrorObserved(t *testing.T) {
 	var roundtripErr RoundtripError
 
-	assert.Assert(t, errors.As(Validate([]byte(`<x:Root xmlns:x="a" x:attr="1" y:b="2"/>`)), &roundtripErr))
+	require.True(t, errors.As(Validate([]byte(`<x:Root xmlns:x="a" x:attr="1" y:b="2"/>`)), &roundtripErr))
 
 	observed, ok := roundtripErr.Observed.(xml.StartElement)
-	assert.Assert(t, ok)
-	assert.Check(t, is.DeepEqual(xml.StartElement{
+	require.True(t, ok)
+	assert.Equal(t, xml.StartElement{
 		Name: xml.Name{Local: "Root"},
 		Attr: []xml.Attr{
 			{Name: xml.Name{Local: "xmlns"}, Value: "x"},
@@ -200,7 +201,7 @@ func TestValidateRoundtripErrorObserved(t *testing.T) {
 			{Name: xml.Name{Space: "xmlns", Local: "y"}, Value: "y"},
 			{Name: xml.Name{Space: "y", Local: "b"}, Value: "2"},
 		},
-	}, observed))
+	}, observed)
 }
 
 func TestTokenEquals(t *testing.T) {
@@ -215,26 +216,26 @@ func TestTokenEquals(t *testing.T) {
 
 	for i, token1 := range tokens {
 		for j, token2 := range tokens {
-			assert.Check(t, is.Equal(i == j, tokenEquals(token1, xml.CopyToken(token2))), "%T and %T", token1, token2)
+			assert.Equal(t, i == j, tokenEquals(token1, xml.CopyToken(token2)), "%T and %T", token1, token2)
 		}
 	}
 
-	assert.Check(t, !tokenEquals(struct{}{}, struct{}{}), "a value that isn't a token never equals")
+	assert.False(t, tokenEquals(struct{}{}, struct{}{}), "a value that isn't a token never equals")
 }
 
 func TestErrorMessages(t *testing.T) {
-	assert.Check(t, is.Equal("xmlrv: in token starting at 2:16: unexpected EOF",
-		ValidationError{Start: 34, End: 54, Line: 2, Column: 16, err: io.ErrUnexpectedEOF}.Error()))
+	assert.Equal(t, "xmlrv: in token starting at 2:16: unexpected EOF",
+		ValidationError{Start: 34, End: 54, Line: 2, Column: 16, err: io.ErrUnexpectedEOF}.Error())
 
-	assert.Check(t, is.Equal("roundtrip error: expected {{ Foo} []}, observed {{ Bar} []}",
-		RoundtripError{Expected: tokenize(t, `<Foo>`), Observed: tokenize(t, `<Bar>`)}.Error()))
+	assert.Equal(t, "roundtrip error: expected {{ Foo} []}, observed {{ Bar} []}",
+		RoundtripError{Expected: tokenize(t, `<Foo>`), Observed: tokenize(t, `<Bar>`)}.Error())
 }
 
 func tokenize(t *testing.T, s string) xml.Token {
 	t.Helper()
 
 	token, err := xml.NewDecoder(strings.NewReader(s)).RawToken()
-	assert.NilError(t, err)
+	require.NoError(t, err)
 
 	return xml.CopyToken(token)
 }

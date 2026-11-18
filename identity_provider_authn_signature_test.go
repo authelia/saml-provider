@@ -18,8 +18,8 @@ import (
 	"time"
 
 	"github.com/beevik/etree"
-	"gotest.tools/assert"
-	is "gotest.tools/assert/cmp"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"authelia.com/provider/saml/internal/dsig"
 )
@@ -47,9 +47,9 @@ func signedRedirectURL(t *testing.T, test *IdentityProviderTest) *url.URL {
 	t.Helper()
 
 	request, err := test.SP.MakeAuthenticationRequest(signatureTestSSOURL, HTTPRedirectBinding, HTTPPostBinding)
-	assert.NilError(t, err)
+	require.NoError(t, err)
 	u, err := request.Redirect("relay", &test.SP)
-	assert.NilError(t, err)
+	require.NoError(t, err)
 
 	return u
 }
@@ -73,18 +73,18 @@ func signedPostBody(t *testing.T, sp *ServiceProvider, mutate func(*AuthnRequest
 	unsigned := *sp
 	unsigned.SignatureMethod = ""
 	request, err := unsigned.MakeAuthenticationRequest(signatureTestSSOURL, HTTPPostBinding, HTTPPostBinding)
-	assert.NilError(t, err)
+	require.NoError(t, err)
 
 	if mutate != nil {
 		mutate(request)
 	}
 
-	assert.NilError(t, sp.SignAuthnRequest(request))
+	require.NoError(t, sp.SignAuthnRequest(request))
 
 	doc := etree.NewDocument()
 	doc.SetRoot(request.Element())
 	buf, err := doc.WriteToBytes()
-	assert.NilError(t, err)
+	require.NoError(t, err)
 
 	return buf
 }
@@ -96,7 +96,7 @@ func validatePost(t *testing.T, test *IdentityProviderTest, body []byte) error {
 	r := httptest.NewRequest(http.MethodPost, signatureTestSSOURL, strings.NewReader(form.Encode()))
 	r.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	req, err := NewIdpAuthnRequest(&test.IDP, r)
-	assert.NilError(t, err)
+	require.NoError(t, err)
 
 	return req.Validate()
 }
@@ -108,7 +108,7 @@ func serviceProviderWithOtherKey(t *testing.T, test *IdentityProviderTest) Servi
 	t.Helper()
 
 	key, err := rsa.GenerateKey(rand.Reader, 2048)
-	assert.NilError(t, err)
+	require.NoError(t, err)
 
 	other := test.SP
 	other.Key = key
@@ -118,7 +118,7 @@ func serviceProviderWithOtherKey(t *testing.T, test *IdentityProviderTest) Servi
 
 func TestValidateAcceptsSignedRedirect(t *testing.T) {
 	test := signatureTestIDP(t)
-	assert.NilError(t, validateURL(t, test, signedRedirectURL(t, test).String()))
+	require.NoError(t, validateURL(t, test, signedRedirectURL(t, test).String()))
 }
 
 func TestValidateRejectsAlteredRedirect(t *testing.T) {
@@ -155,7 +155,7 @@ func TestValidateRejectsAlteredRedirect(t *testing.T) {
 			test := signatureTestIDP(t)
 			u := signedRedirectURL(t, test)
 			u.RawQuery = alter(u.RawQuery)
-			assert.Check(t, validateURL(t, test, u.String()) != nil)
+			assert.True(t, validateURL(t, test, u.String()) != nil)
 		})
 	}
 }
@@ -164,11 +164,11 @@ func TestValidateRejectsRedirectSignedByAnotherKey(t *testing.T) {
 	test := signatureTestIDP(t)
 	other := serviceProviderWithOtherKey(t, test)
 	request, err := other.MakeAuthenticationRequest(signatureTestSSOURL, HTTPRedirectBinding, HTTPPostBinding)
-	assert.NilError(t, err)
+	require.NoError(t, err)
 	u, err := request.Redirect("relay", &other)
-	assert.NilError(t, err)
+	require.NoError(t, err)
 
-	assert.Check(t, is.ErrorContains(validateURL(t, test, u.String()), "signature"))
+	assert.ErrorContains(t, validateURL(t, test, u.String()), "signature")
 }
 
 func TestValidateRejectsRedirectSignedWithExpiredCertificate(t *testing.T) {
@@ -176,7 +176,7 @@ func TestValidateRejectsRedirectSignedWithExpiredCertificate(t *testing.T) {
 	u := signedRedirectURL(t, test)
 	Clock = dsig.NewFakeClockAt(test.SPCertificate.NotAfter.Add(time.Hour))
 
-	assert.Check(t, validateURL(t, test, u.String()) != nil)
+	assert.True(t, validateURL(t, test, u.String()) != nil)
 }
 
 // A service provider which doesn't declare that it signs still can't send a bad signature.
@@ -191,7 +191,7 @@ func TestValidateRejectsBadSignatureFromUndeclaredSigner(t *testing.T) {
 	}
 	u.RawQuery = strings.Replace(u.RawQuery, "&Signature=", "&Signature=AAAA", 1)
 
-	assert.Check(t, is.ErrorContains(validateURL(t, test, u.String()), "signature"))
+	assert.ErrorContains(t, validateURL(t, test, u.String()), "signature")
 }
 
 func TestValidateRequiresSignatureWhenDeclaredBySP(t *testing.T) {
@@ -199,11 +199,11 @@ func TestValidateRequiresSignatureWhenDeclaredBySP(t *testing.T) {
 	unsigned := test.SP
 	unsigned.SignatureMethod = ""
 	request, err := unsigned.MakeAuthenticationRequest(signatureTestSSOURL, HTTPRedirectBinding, HTTPPostBinding)
-	assert.NilError(t, err)
+	require.NoError(t, err)
 	u, err := request.Redirect("relay", &unsigned)
-	assert.NilError(t, err)
+	require.NoError(t, err)
 
-	assert.Check(t, is.Contains(errorText(validateURL(t, test, u.String())), "not signed"))
+	assert.Contains(t, errorText(validateURL(t, test, u.String())), "not signed")
 }
 
 // The descriptor in use is selected by the unauthenticated request, so it must not be able to choose
@@ -223,11 +223,11 @@ func TestValidateRequiresSignatureWhenDeclaredByAnyDescriptor(t *testing.T) {
 	unsigned := test.SP
 	unsigned.SignatureMethod = ""
 	request, err := unsigned.MakeAuthenticationRequest(signatureTestSSOURL, HTTPRedirectBinding, HTTPPostBinding)
-	assert.NilError(t, err)
+	require.NoError(t, err)
 	u, err := request.Redirect("", &unsigned)
-	assert.NilError(t, err)
+	require.NoError(t, err)
 
-	assert.Check(t, is.Contains(errorText(validateURL(t, test, u.String())), "not signed"))
+	assert.Contains(t, errorText(validateURL(t, test, u.String())), "not signed")
 }
 
 func TestValidateRequiresSignatureWhenWantedByIDP(t *testing.T) {
@@ -236,27 +236,27 @@ func TestValidateRequiresSignatureWhenWantedByIDP(t *testing.T) {
 	test.IDP.WantAuthnRequestsSigned = true
 
 	request, err := test.SP.MakeAuthenticationRequest(signatureTestSSOURL, HTTPRedirectBinding, HTTPPostBinding)
-	assert.NilError(t, err)
+	require.NoError(t, err)
 	u, err := request.Redirect("", &test.SP)
-	assert.NilError(t, err)
+	require.NoError(t, err)
 
-	assert.Check(t, is.Contains(errorText(validateURL(t, test, u.String())), "not signed"))
+	assert.Contains(t, errorText(validateURL(t, test, u.String())), "not signed")
 }
 
 func TestValidateAcceptsSignedRequestWhenWantedByIDP(t *testing.T) {
 	test := signatureTestIDP(t)
 	test.IDP.WantAuthnRequestsSigned = true
-	assert.NilError(t, validateURL(t, test, signedRedirectURL(t, test).String()))
+	require.NoError(t, validateURL(t, test, signedRedirectURL(t, test).String()))
 }
 
 func TestMetadataDeclaresWantAuthnRequestsSigned(t *testing.T) {
 	test := signatureTestIDP(t)
-	assert.Check(t, test.IDP.Metadata().IDPSSODescriptors[0].WantAuthnRequestsSigned == nil)
+	assert.Nil(t, test.IDP.Metadata().IDPSSODescriptors[0].WantAuthnRequestsSigned)
 
 	test.IDP.WantAuthnRequestsSigned = true
 	want := test.IDP.Metadata().IDPSSODescriptors[0].WantAuthnRequestsSigned
-	assert.Assert(t, want != nil)
-	assert.Check(t, *want)
+	require.NotNil(t, want)
+	assert.True(t, *want)
 }
 
 // ecdsaServiceProvider makes the test service provider's metadata list a new ECDSA certificate.
@@ -264,7 +264,7 @@ func ecdsaServiceProvider(t *testing.T, test *IdentityProviderTest) *ecdsa.Priva
 	t.Helper()
 
 	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
-	assert.NilError(t, err)
+	require.NoError(t, err)
 
 	template := &x509.Certificate{
 		SerialNumber: big.NewInt(1),
@@ -273,9 +273,9 @@ func ecdsaServiceProvider(t *testing.T, test *IdentityProviderTest) *ecdsa.Priva
 		NotAfter:     test.SPCertificate.NotAfter,
 	}
 	der, err := x509.CreateCertificate(rand.Reader, template, template, key.Public(), key)
-	assert.NilError(t, err)
+	require.NoError(t, err)
 	test.SP.Certificate, err = x509.ParseCertificate(der)
-	assert.NilError(t, err)
+	require.NoError(t, err)
 
 	return key
 }
@@ -287,16 +287,16 @@ func ecdsaRedirectURL(t *testing.T, test *IdentityProviderTest, key *ecdsa.Priva
 	unsigned := test.SP
 	unsigned.SignatureMethod = ""
 	request, err := unsigned.MakeAuthenticationRequest(signatureTestSSOURL, HTTPRedirectBinding, HTTPPostBinding)
-	assert.NilError(t, err)
+	require.NoError(t, err)
 	u, err := request.Redirect("", &unsigned)
-	assert.NilError(t, err)
+	require.NoError(t, err)
 
 	query := u.RawQuery + "&SigAlg=" + url.QueryEscape(dsig.ECDSASHA256SignatureMethod)
 	h := crypto.SHA256.New()
 	h.Write([]byte(query))
 	digest := h.Sum(nil)
 	r, s, err := ecdsa.Sign(rand.Reader, key, digest)
-	assert.NilError(t, err)
+	require.NoError(t, err)
 
 	u.RawQuery = query + "&Signature=" + url.QueryEscape(base64.StdEncoding.EncodeToString(encode(r, s, digest)))
 
@@ -310,7 +310,7 @@ func TestValidateAcceptsECDSARedirectInXMLSignatureForm(t *testing.T) {
 		return append(r.FillBytes(make([]byte, 32)), s.FillBytes(make([]byte, 32))...)
 	})
 
-	assert.NilError(t, validateURL(t, test, target))
+	require.NoError(t, validateURL(t, test, target))
 }
 
 func TestValidateRejectsECDSARedirectInDERForm(t *testing.T) {
@@ -318,12 +318,12 @@ func TestValidateRejectsECDSARedirectInDERForm(t *testing.T) {
 	key := ecdsaServiceProvider(t, test)
 	target := ecdsaRedirectURL(t, test, key, func(_, _ *big.Int, digest []byte) []byte {
 		der, err := ecdsa.SignASN1(rand.Reader, key, digest)
-		assert.NilError(t, err)
+		require.NoError(t, err)
 
 		return der
 	})
 
-	assert.Check(t, validateURL(t, test, target) != nil)
+	assert.True(t, validateURL(t, test, target) != nil)
 }
 
 func TestValidateRejectsAlgorithmForAnotherKeyType(t *testing.T) {
@@ -334,12 +334,12 @@ func TestValidateRejectsAlgorithmForAnotherKeyType(t *testing.T) {
 	})
 	target = strings.Replace(target, url.QueryEscape(dsig.ECDSASHA256SignatureMethod), url.QueryEscape(dsig.RSASHA256SignatureMethod), 1)
 
-	assert.Check(t, validateURL(t, test, target) != nil)
+	assert.True(t, validateURL(t, test, target) != nil)
 }
 
 func TestValidateAcceptsSignedPost(t *testing.T) {
 	test := signatureTestIDP(t)
-	assert.NilError(t, validatePost(t, test, signedPostBody(t, &test.SP, nil)))
+	require.NoError(t, validatePost(t, test, signedPostBody(t, &test.SP, nil)))
 }
 
 func TestValidateRejectsAlteredSignedPost(t *testing.T) {
@@ -347,16 +347,16 @@ func TestValidateRejectsAlteredSignedPost(t *testing.T) {
 	body := signedPostBody(t, &test.SP, nil)
 	altered := strings.Replace(string(body), `AssertionConsumerServiceURL="https://sp.example.com/saml2/acs"`,
 		`AssertionConsumerServiceURL="https://sp.example.com/saml2/acs" ProviderName="other"`, 1)
-	assert.Assert(t, altered != string(body))
+	require.True(t, altered != string(body))
 
-	assert.Check(t, is.ErrorContains(validatePost(t, test, []byte(altered)), "signature"))
+	assert.ErrorContains(t, validatePost(t, test, []byte(altered)), "signature")
 }
 
 func TestValidateRejectsPostSignedByAnotherKey(t *testing.T) {
 	test := signatureTestIDP(t)
 	other := serviceProviderWithOtherKey(t, test)
 
-	assert.Check(t, is.ErrorContains(validatePost(t, test, signedPostBody(t, &other, nil)), "signature"))
+	assert.ErrorContains(t, validatePost(t, test, signedPostBody(t, &other, nil)), "signature")
 }
 
 func TestValidateRequiresSignatureOnPostWhenDeclaredBySP(t *testing.T) {
@@ -364,14 +364,14 @@ func TestValidateRequiresSignatureOnPostWhenDeclaredBySP(t *testing.T) {
 	unsigned := test.SP
 	unsigned.SignatureMethod = ""
 	request, err := unsigned.MakeAuthenticationRequest(signatureTestSSOURL, HTTPPostBinding, HTTPPostBinding)
-	assert.NilError(t, err)
+	require.NoError(t, err)
 
 	doc := etree.NewDocument()
 	doc.SetRoot(request.Element())
 	body, err := doc.WriteToBytes()
-	assert.NilError(t, err)
+	require.NoError(t, err)
 
-	assert.Check(t, is.Contains(errorText(validatePost(t, test, body)), "not signed"))
+	assert.Contains(t, errorText(validatePost(t, test, body)), "not signed")
 }
 
 // SAMLBind §3.5.5.2 requires a signed message to carry the Destination.
@@ -379,7 +379,7 @@ func TestValidateRequiresDestinationOnSignedRequest(t *testing.T) {
 	test := signatureTestIDP(t)
 	body := signedPostBody(t, &test.SP, func(r *AuthnRequest) { r.Destination = "" })
 
-	assert.Check(t, is.Contains(errorText(validatePost(t, test, body)), "destination"))
+	assert.Contains(t, errorText(validatePost(t, test, body)), "destination")
 }
 
 // The login form carries the signed query, because the signature doesn't survive as a POST.
@@ -388,8 +388,8 @@ func TestSignedRedirectResumesThroughFormField(t *testing.T) {
 	u := signedRedirectURL(t, test)
 
 	first, err := NewIdpAuthnRequest(&test.IDP, httptest.NewRequest(http.MethodGet, u.String(), nil))
-	assert.NilError(t, err)
-	assert.Check(t, is.Equal(first.RedirectQuery, u.RawQuery))
+	require.NoError(t, err)
+	assert.Equal(t, first.RedirectQuery, u.RawQuery)
 
 	// The form's other fields are unsigned, so they must not take the place of the signed values.
 	form := url.Values{
@@ -400,11 +400,11 @@ func TestSignedRedirectResumesThroughFormField(t *testing.T) {
 	r := httptest.NewRequest(http.MethodPost, signatureTestSSOURL, strings.NewReader(form.Encode()))
 	r.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	second, err := NewIdpAuthnRequest(&test.IDP, r)
-	assert.NilError(t, err)
+	require.NoError(t, err)
 
-	assert.Check(t, is.DeepEqual(second.RequestBuffer, first.RequestBuffer))
-	assert.Check(t, is.Equal(second.RelayState, "relay"))
-	assert.Check(t, second.Validate())
+	assert.Equal(t, second.RequestBuffer, first.RequestBuffer)
+	assert.Equal(t, second.RelayState, "relay")
+	assert.NoError(t, second.Validate())
 }
 
 func TestResumedRedirectWithAlteredQueryIsRejected(t *testing.T) {
@@ -415,22 +415,22 @@ func TestResumedRedirectWithAlteredQueryIsRejected(t *testing.T) {
 	r := httptest.NewRequest(http.MethodPost, signatureTestSSOURL, strings.NewReader(form.Encode()))
 	r.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	req, err := NewIdpAuthnRequest(&test.IDP, r)
-	assert.NilError(t, err)
+	require.NoError(t, err)
 
-	assert.Check(t, is.ErrorContains(req.Validate(), "signature"))
+	assert.ErrorContains(t, req.Validate(), "signature")
 }
 
 func TestUnsignedRedirectHasNoRedirectQuery(t *testing.T) {
 	test := NewIdentityProviderTest(t, applyKey)
 	request, err := test.SP.MakeAuthenticationRequest(signatureTestSSOURL, HTTPRedirectBinding, HTTPPostBinding)
-	assert.NilError(t, err)
+	require.NoError(t, err)
 	u, err := request.Redirect("relay", &test.SP)
-	assert.NilError(t, err)
+	require.NoError(t, err)
 
 	req, err := NewIdpAuthnRequest(&test.IDP, httptest.NewRequest(http.MethodGet, u.String(), nil))
-	assert.NilError(t, err)
-	assert.Check(t, is.Equal(req.RedirectQuery, ""))
-	assert.Check(t, req.Validate())
+	require.NoError(t, err)
+	assert.Equal(t, req.RedirectQuery, "")
+	assert.NoError(t, req.Validate())
 }
 
 // smuggleRootAttributes adds attributes to the root of a signed request. Exclusive canonicalization
@@ -447,7 +447,7 @@ func appendAttributes(t *testing.T, body, prefix, attributes string) string {
 	t.Helper()
 
 	start := strings.Index(body, prefix)
-	assert.Assert(t, start >= 0, "no %s in %s", prefix, body)
+	require.True(t, start >= 0, "no %s in %s", prefix, body)
 
 	end := start + strings.Index(body[start:], ">")
 	if body[end-1] == '/' {
@@ -495,11 +495,11 @@ func TestValidateIgnoresAttributesSmuggledIntoSignedPost(t *testing.T) {
 			r := httptest.NewRequest(http.MethodPost, signatureTestSSOURL, strings.NewReader(form.Encode()))
 			r.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 			req, err := NewIdpAuthnRequest(&test.IDP, r)
-			assert.NilError(t, err)
+			require.NoError(t, err)
 
 			err = req.Validate()
 			if tc.mutate != nil {
-				assert.Check(t, err != nil, "the signed values must be the ones checked")
+				assert.True(t, err != nil, "the signed values must be the ones checked")
 				return
 			}
 
@@ -507,9 +507,9 @@ func TestValidateIgnoresAttributesSmuggledIntoSignedPost(t *testing.T) {
 				return // refusing the request is also safe.
 			}
 
-			assert.Check(t, is.Equal(req.ACSEndpoint.Location, "https://sp.example.com/saml2/acs"))
-			assert.Check(t, req.Request.IsPassive == nil)
-			assert.Check(t, req.Request.ForceAuthn == nil)
+			assert.Equal(t, req.ACSEndpoint.Location, "https://sp.example.com/saml2/acs")
+			assert.Nil(t, req.Request.IsPassive)
+			assert.Nil(t, req.Request.ForceAuthn)
 		})
 	}
 }
@@ -526,13 +526,13 @@ func TestValidateIgnoresSmuggledNameIDPolicyFormat(t *testing.T) {
 	r := httptest.NewRequest(http.MethodPost, signatureTestSSOURL, strings.NewReader(form.Encode()))
 	r.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	req, err := NewIdpAuthnRequest(&test.IDP, r)
-	assert.NilError(t, err)
+	require.NoError(t, err)
 
 	if err := req.Validate(); err != nil {
 		return
 	}
 
-	assert.Check(t, is.Equal(*req.Request.NameIDPolicy.Format, format))
+	assert.Equal(t, *req.Request.NameIDPolicy.Format, format)
 }
 
 // A signature must not turn a document that is too deep to process into a panic.
@@ -541,7 +541,7 @@ func TestValidateDoesNotPanicOnOversizedSignedDocument(t *testing.T) {
 	unsigned := test.SP
 	unsigned.SignatureMethod = ""
 	request, err := unsigned.MakeAuthenticationRequest(signatureTestSSOURL, HTTPPostBinding, HTTPPostBinding)
-	assert.NilError(t, err)
+	require.NoError(t, err)
 
 	doc := etree.NewDocument()
 	doc.SetRoot(request.Element())
@@ -553,9 +553,9 @@ func TestValidateDoesNotPanicOnOversizedSignedDocument(t *testing.T) {
 	}
 
 	body, err := doc.WriteToBytes()
-	assert.NilError(t, err)
+	require.NoError(t, err)
 
-	assert.Check(t, validatePost(t, test, body) != nil)
+	assert.True(t, validatePost(t, test, body) != nil)
 }
 
 // A chain in the metadata must not make the issuer of the certificate a trusted signer.
@@ -574,7 +574,7 @@ func TestSigningCertificatesExcludeChain(t *testing.T) {
 		return append(r.FillBytes(make([]byte, 32)), s.FillBytes(make([]byte, 32))...)
 	})
 
-	assert.Check(t, validateURL(t, test, target) != nil)
+	assert.True(t, validateURL(t, test, target) != nil)
 }
 
 // The relay state is often a URL, and a signature must survive it unchanged.
@@ -583,14 +583,14 @@ func TestSignedRedirectPreservesRelayState(t *testing.T) {
 		t.Run(relayState, func(t *testing.T) {
 			test := signatureTestIDP(t)
 			request, err := test.SP.MakeAuthenticationRequest(signatureTestSSOURL, HTTPRedirectBinding, HTTPPostBinding)
-			assert.NilError(t, err)
+			require.NoError(t, err)
 			u, err := request.Redirect(relayState, &test.SP)
-			assert.NilError(t, err)
+			require.NoError(t, err)
 
 			req, err := NewIdpAuthnRequest(&test.IDP, httptest.NewRequest(http.MethodGet, u.String(), nil))
-			assert.NilError(t, err)
-			assert.Check(t, req.Validate())
-			assert.Check(t, is.Equal(req.RelayState, relayState))
+			require.NoError(t, err)
+			assert.NoError(t, req.Validate())
+			assert.Equal(t, req.RelayState, relayState)
 		})
 	}
 }
@@ -599,13 +599,13 @@ func TestSignedRedirectPreservesRelayState(t *testing.T) {
 func TestSignedRedirectExcludesOtherQueryParameters(t *testing.T) {
 	test := signatureTestIDP(t)
 	request, err := test.SP.MakeAuthenticationRequest(signatureTestSSOURL, HTTPRedirectBinding, HTTPPostBinding)
-	assert.NilError(t, err)
+	require.NoError(t, err)
 
 	request.Destination = signatureTestSSOURL + "?tenant=1"
 	test.IDP.SSOURL.RawQuery = "tenant=1"
 	u, err := request.Redirect("relay", &test.SP)
-	assert.NilError(t, err)
-	assert.Check(t, is.Equal(u.Query().Get("tenant"), "1"))
+	require.NoError(t, err)
+	assert.Equal(t, u.Query().Get("tenant"), "1")
 
-	assert.Check(t, validateURL(t, test, u.String()))
+	assert.NoError(t, validateURL(t, test, u.String()))
 }

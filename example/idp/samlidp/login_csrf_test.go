@@ -7,8 +7,8 @@ import (
 	"strings"
 	"testing"
 
-	"gotest.tools/assert"
-	is "gotest.tools/assert/cmp"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 // postLogin posts the credentials of alice, with the hidden fields of form if it isn't empty, to
@@ -33,7 +33,7 @@ func postLogin(t *testing.T, test *ServerTest, target, form string, headers map[
 // loginTargets returns the URL and the login form of each route which accepts credentials.
 func loginTargets(t *testing.T, test *ServerTest) map[string][2]string {
 	t.Helper()
-	assert.NilError(t, test.Store.Put("/shortcuts/app", Shortcut{ServiceProviderID: "https://sp.example.com/saml2/metadata"}))
+	require.NoError(t, test.Store.Put("/shortcuts/app", Shortcut{ServiceProviderID: "https://sp.example.com/saml2/metadata"}))
 	shortcut := serveAdminRoute(test.Server, http.MethodGet, "/login/app").Body.String()
 	return map[string][2]string{
 		"sso":      {"https://idp.example.com/sso", hardeningStartSSO(t, test)},
@@ -45,7 +45,7 @@ func loginTargets(t *testing.T, test *ServerTest) map[string][2]string {
 func storedSessions(t *testing.T, test *ServerTest) []string {
 	t.Helper()
 	sessions, err := test.Store.List("/sessions/")
-	assert.NilError(t, err)
+	require.NoError(t, err)
 	return sessions
 }
 
@@ -65,10 +65,11 @@ func TestLoginRefusesCrossOriginCredentials(t *testing.T) {
 			hardeningAddUser(t, test)
 			for route, target := range loginTargets(t, test) {
 				w := postLogin(t, test, target[0], target[1], headers)
-				assert.Check(t, is.Equal(w.Code, http.StatusForbidden), route)
-				assert.Check(t, is.Len(w.Result().Cookies(), 0), route)
+				assert.Equal(t, w.Code, http.StatusForbidden, route)
+				assert.Len(t, w.Result().Cookies(), 0, route)
 			}
-			assert.Check(t, is.Len(storedSessions(t, test), 0))
+
+			assert.Len(t, storedSessions(t, test), 0)
 		})
 	}
 }
@@ -84,8 +85,8 @@ func TestLoginAcceptsSameOriginCredentials(t *testing.T) {
 			hardeningAddUser(t, test)
 			for route, target := range loginTargets(t, test) {
 				w := postLogin(t, test, target[0], target[1], headers)
-				assert.Check(t, is.Equal(w.Code, http.StatusOK), route)
-				assert.Check(t, is.Len(w.Result().Cookies(), 1), route)
+				assert.Equal(t, w.Code, http.StatusOK, route)
+				assert.Len(t, w.Result().Cookies(), 1, route)
 			}
 		})
 	}
@@ -103,8 +104,8 @@ func TestCrossSiteAuthnRequestStillShowsLoginForm(t *testing.T) {
 	r.Header.Set("Origin", "https://sp.example.com")
 	w := httptest.NewRecorder()
 	test.Server.ServeHTTP(w, r)
-	assert.Check(t, is.Equal(w.Code, http.StatusOK))
-	assert.Check(t, strings.Contains(w.Body.String(), `name="password"`), w.Body.String())
+	assert.Equal(t, w.Code, http.StatusOK)
+	assert.True(t, strings.Contains(w.Body.String(), `name="password"`), w.Body.String())
 }
 
 // Without Sec-Fetch-Site, the Origin is compared with the configured URL, not the Host header or any
@@ -129,7 +130,7 @@ func TestLoginComparesOriginWithConfiguredURL(t *testing.T) {
 			r.Header.Set("X-Forwarded-Proto", "https")
 			w := httptest.NewRecorder()
 			test.Server.ServeHTTP(w, r)
-			assert.Check(t, is.Equal(w.Code, tc.code))
+			assert.Equal(t, w.Code, tc.code)
 		})
 	}
 }

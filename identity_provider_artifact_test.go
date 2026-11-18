@@ -23,10 +23,10 @@ import (
 	"time"
 
 	"github.com/beevik/etree"
-	"gotest.tools/assert"
-	is "gotest.tools/assert/cmp"
-	"gotest.tools/golden"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
+	"authelia.com/provider/saml/internal/golden"
 	"authelia.com/provider/saml/xmlenc"
 )
 
@@ -75,15 +75,15 @@ func artifactSSO(t *testing.T, test *IdentityProviderTest, sp *ServiceProvider, 
 func redirectedArtifact(t *testing.T, w *httptest.ResponseRecorder) (*url.URL, string) {
 	t.Helper()
 
-	assert.Assert(t, is.Equal(w.Code, http.StatusFound), "body: %s", w.Body.String())
-	assert.Check(t, is.Equal(w.Header().Get("Cache-Control"), "no-cache, no-store"))
-	assert.Check(t, is.Equal(w.Header().Get("Pragma"), "no-cache"))
+	require.Equal(t, w.Code, http.StatusFound, "body: %s", w.Body.String())
+	assert.Equal(t, w.Header().Get("Cache-Control"), "no-cache, no-store")
+	assert.Equal(t, w.Header().Get("Pragma"), "no-cache")
 
 	location, err := url.Parse(w.Header().Get("Location"))
-	assert.NilError(t, err)
+	require.NoError(t, err)
 
 	artifact := location.Query().Get("SAMLart")
-	assert.Assert(t, artifact != "")
+	require.True(t, artifact != "")
 
 	return location, artifact
 }
@@ -92,10 +92,10 @@ func redirectedArtifact(t *testing.T, w *httptest.ResponseRecorder) (*url.URL, s
 func postedArtifact(t *testing.T, w *httptest.ResponseRecorder) url.Values {
 	t.Helper()
 
-	assert.Assert(t, is.Equal(w.Code, http.StatusOK), "body: %s", w.Body.String())
-	assert.Check(t, is.Equal(w.Header().Get("Location"), ""))
-	assert.Check(t, is.Equal(w.Header().Get("Cache-Control"), "no-cache, no-store"))
-	assert.Check(t, is.Equal(w.Header().Get("Pragma"), "no-cache"))
+	require.Equal(t, w.Code, http.StatusOK, "body: %s", w.Body.String())
+	assert.Equal(t, w.Header().Get("Location"), "")
+	assert.Equal(t, w.Header().Get("Cache-Control"), "no-cache, no-store")
+	assert.Equal(t, w.Header().Get("Pragma"), "no-cache")
 
 	body := w.Body.String()
 	form := url.Values{}
@@ -112,7 +112,7 @@ func postedArtifact(t *testing.T, w *httptest.ResponseRecorder) url.Values {
 		form.Set(name, html.UnescapeString(value))
 	}
 
-	assert.Assert(t, form.Get("SAMLart") != "", "body: %s", body)
+	require.True(t, form.Get("SAMLart") != "", "body: %s", body)
 
 	return form
 }
@@ -141,14 +141,14 @@ func artifactResolvePost(t *testing.T, sp *ServiceProvider, artifact string, mut
 	unsigned := *sp
 	unsigned.SignatureMethod = ""
 	request, err := unsigned.MakeArtifactResolveRequest(artifact)
-	assert.NilError(t, err)
+	require.NoError(t, err)
 
 	if mutate != nil {
 		mutate(request)
 	}
 
 	if sp.SignatureMethod != "" {
-		assert.NilError(t, sp.SignArtifactResolve(request))
+		require.NoError(t, sp.SignArtifactResolve(request))
 	}
 
 	return artifactSOAPPost(soapLogoutEnvelope(t, request.Element())), request.ID
@@ -173,7 +173,7 @@ func serveArtifactResolution(test *IdentityProviderTest, r *http.Request) *httpt
 func artifactResponse(t *testing.T, w *httptest.ResponseRecorder) (*ArtifactResponse, *etree.Element) {
 	t.Helper()
 
-	assert.Assert(t, is.Equal(w.Code, http.StatusOK), "body: %s", w.Body.String())
+	require.Equal(t, w.Code, http.StatusOK, "body: %s", w.Body.String())
 
 	envelope := soapTestParseResponse(t, w)
 
@@ -185,11 +185,11 @@ func artifactResponse(t *testing.T, w *httptest.ResponseRecorder) (*ArtifactResp
 		}
 	}
 
-	assert.Assert(t, body != nil)
-	assert.Assert(t, is.Len(body.ChildElements(), 1))
+	require.NotNil(t, body)
+	require.Len(t, body.ChildElements(), 1)
 
 	el := detachSOAPBodyChild(body.ChildElements()[0])
-	assert.Assert(t, is.Equal(el.Tag, "ArtifactResponse"))
+	require.Equal(t, el.Tag, "ArtifactResponse")
 
 	// SAMLCore §3.2.2: Issuer, Signature, Extensions, Status, and then the message.
 	names := make([]string, 0, 4)
@@ -197,20 +197,20 @@ func artifactResponse(t *testing.T, w *httptest.ResponseRecorder) (*ArtifactResp
 		names = append(names, child.Tag)
 	}
 
-	assert.Assert(t, len(names) >= 3)
-	assert.Check(t, is.DeepEqual(names[:3], []string{"Issuer", "Signature", "Status"}))
+	require.True(t, len(names) >= 3)
+	assert.Equal(t, names[:3], []string{"Issuer", "Signature", "Status"})
 
 	verified, err := verifyEnvelopedSignature(el, []*x509.Certificate{mustParseCertificate(golden.Get(t, "idp_cert.pem"))}, anySignaturePolicy)
-	assert.NilError(t, err)
+	require.NoError(t, err)
 
 	response := &ArtifactResponse{}
-	assert.NilError(t, unmarshalElement(verified, response))
+	require.NoError(t, unmarshalElement(verified, response))
 
-	assert.Check(t, is.Equal(response.Version, "2.0"))
-	assert.Assert(t, response.Issuer != nil)
-	assert.Check(t, is.Equal(response.Issuer.Value, "https://idp.example.com/saml/metadata"))
-	assert.Check(t, statusSaysNothingOfTheRequest(response.Status))
-	assert.Check(t, is.Equal(verified.SelectAttrValue("Destination", ""), ""))
+	assert.Equal(t, response.Version, "2.0")
+	require.NotNil(t, response.Issuer)
+	assert.Equal(t, response.Issuer.Value, "https://idp.example.com/saml/metadata")
+	assert.True(t, statusSaysNothingOfTheRequest(response.Status))
+	assert.Equal(t, verified.SelectAttrValue("Destination", ""), "")
 
 	var message *etree.Element
 
@@ -220,7 +220,7 @@ func artifactResponse(t *testing.T, w *httptest.ResponseRecorder) (*ArtifactResp
 			continue
 		}
 
-		assert.Assert(t, message == nil, "more than one message")
+		require.True(t, message == nil, "more than one message")
 
 		message = child
 	}
@@ -235,10 +235,10 @@ func assertEmptyArtifactResponse(t *testing.T, w *httptest.ResponseRecorder, id 
 
 	response, message := artifactResponse(t, w)
 
-	assert.Check(t, is.Equal(response.InResponseTo, id))
-	assert.Check(t, is.Equal(response.Status.StatusCode.Value, StatusSuccess))
-	assert.Check(t, response.Status.StatusCode.StatusCode == nil)
-	assert.Check(t, message == nil, "the response has a message")
+	assert.Equal(t, response.InResponseTo, id)
+	assert.Equal(t, response.Status.StatusCode.Value, StatusSuccess)
+	assert.Nil(t, response.Status.StatusCode.StatusCode)
+	assert.True(t, message == nil, "the response has a message")
 }
 
 // assertResolvedArtifactResponse checks that w is a Success response to the request with the ID, with a Response
@@ -248,13 +248,13 @@ func assertResolvedArtifactResponse(t *testing.T, w *httptest.ResponseRecorder, 
 
 	response, message := artifactResponse(t, w)
 
-	assert.Check(t, is.Equal(response.InResponseTo, id))
-	assert.Check(t, is.Equal(response.Status.StatusCode.Value, StatusSuccess))
-	assert.Assert(t, message != nil, "the response has no message")
-	assert.Check(t, is.Equal(message.Tag, "Response"))
-	assert.Check(t, is.Equal(message.SelectAttrValue("InResponseTo", ""), inResponseTo))
-	assert.Assert(t, response.Response != nil)
-	assert.Check(t, is.Equal(response.Response.Status.StatusCode.Value, StatusSuccess))
+	assert.Equal(t, response.InResponseTo, id)
+	assert.Equal(t, response.Status.StatusCode.Value, StatusSuccess)
+	require.True(t, message != nil, "the response has no message")
+	assert.Equal(t, message.Tag, "Response")
+	assert.Equal(t, message.SelectAttrValue("InResponseTo", ""), inResponseTo)
+	require.NotNil(t, response.Response)
+	assert.Equal(t, response.Response.Status.StatusCode.Value, StatusSuccess)
 
 	return message
 }
@@ -264,17 +264,17 @@ func assertArtifactResponseStatus(t *testing.T, w *httptest.ResponseRecorder, id
 
 	response, message := artifactResponse(t, w)
 
-	assert.Check(t, is.Equal(response.InResponseTo, id))
-	assert.Check(t, is.Equal(response.Status.StatusCode.Value, top))
+	assert.Equal(t, response.InResponseTo, id)
+	assert.Equal(t, response.Status.StatusCode.Value, top)
 
 	if second == "" {
-		assert.Check(t, response.Status.StatusCode.StatusCode == nil)
+		assert.Nil(t, response.Status.StatusCode.StatusCode)
 	} else {
-		assert.Assert(t, response.Status.StatusCode.StatusCode != nil)
-		assert.Check(t, is.Equal(response.Status.StatusCode.StatusCode.Value, second))
+		require.NotNil(t, response.Status.StatusCode.StatusCode)
+		assert.Equal(t, response.Status.StatusCode.StatusCode.Value, second)
 	}
 
-	assert.Check(t, message == nil, "the response has a message")
+	assert.True(t, message == nil, "the response has a message")
 }
 
 func TestArtifactString(t *testing.T) {
@@ -285,27 +285,27 @@ func TestArtifactString(t *testing.T) {
 
 	// SAMLBind §3.6.4: the SourceID is the SHA-1 hash of the entity ID, not encoded.
 	sourceID := sha1.Sum([]byte("https://idp.example.com/saml/metadata")) //nolint:gosec // As above.
-	assert.Check(t, is.DeepEqual(artifact.SourceID, sourceID))
+	assert.Equal(t, artifact.SourceID, sourceID)
 
 	buf, err := base64.StdEncoding.DecodeString(artifact.String())
-	assert.NilError(t, err)
+	require.NoError(t, err)
 
 	// SAMLBind §3.6.4.2: TypeCode 0x0004, EndpointIndex, SourceID and MessageHandle of 20 bytes each.
-	assert.Assert(t, is.Len(buf, 44))
-	assert.Check(t, is.DeepEqual(buf[:4], []byte{0x00, 0x04, 0x01, 0x02}))
-	assert.Check(t, is.DeepEqual(buf[4:24], sourceID[:]))
-	assert.Check(t, is.DeepEqual(buf[24:], artifact.MessageHandle[:]))
+	require.Len(t, buf, 44)
+	assert.Equal(t, buf[:4], []byte{0x00, 0x04, 0x01, 0x02})
+	assert.Equal(t, buf[4:24], sourceID[:])
+	assert.Equal(t, buf[24:], artifact.MessageHandle[:])
 
 	parsed, err := ParseArtifact(artifact.String())
-	assert.NilError(t, err)
-	assert.Check(t, is.DeepEqual(parsed, artifact))
+	require.NoError(t, err)
+	assert.Equal(t, parsed, artifact)
 }
 
 func TestParseArtifactRejects(t *testing.T) {
 	valid := Artifact{SourceID: ArtifactSourceID("https://idp.example.com/saml/metadata")}.String()
 
 	raw, err := base64.StdEncoding.DecodeString(valid)
-	assert.NilError(t, err)
+	require.NoError(t, err)
 
 	retyped := func(first, second byte) string {
 		buf := bytes.Clone(raw)
@@ -330,7 +330,7 @@ func TestParseArtifactRejects(t *testing.T) {
 	} {
 		t.Run(name, func(t *testing.T) {
 			_, err := ParseArtifact(value)
-			assert.Check(t, err != nil, "%q was parsed", value)
+			assert.True(t, err != nil, "%q was parsed", value)
 		})
 	}
 }
@@ -341,49 +341,49 @@ func TestMemoryArtifactStore(t *testing.T) {
 	store := NewMemoryArtifactStore(2)
 
 	entry, err := store.GetArtifact(ctx, "a")
-	assert.NilError(t, err)
-	assert.Check(t, entry == nil)
+	require.NoError(t, err)
+	assert.Nil(t, entry)
 
 	message := []byte("<message/>")
-	assert.NilError(t, store.SaveArtifact(ctx, "a", ArtifactEntry{ServiceProviderEntityID: "sp", Message: message, Expires: TimeNow().Add(time.Minute)}))
+	require.NoError(t, store.SaveArtifact(ctx, "a", ArtifactEntry{ServiceProviderEntityID: "sp", Message: message, Expires: TimeNow().Add(time.Minute)}))
 
 	// The store keeps its own copy, and gives out copies.
 	message[0] = '!'
 
 	entry, err = store.GetArtifact(ctx, "a")
-	assert.NilError(t, err)
-	assert.Assert(t, entry != nil)
-	assert.Check(t, is.Equal(entry.ServiceProviderEntityID, "sp"))
-	assert.Check(t, is.Equal(string(entry.Message), "<message/>"))
-	assert.Check(t, entry.Expires.Equal(TimeNow().Add(time.Minute)))
+	require.NoError(t, err)
+	require.NotNil(t, entry)
+	assert.Equal(t, entry.ServiceProviderEntityID, "sp")
+	assert.Equal(t, string(entry.Message), "<message/>")
+	assert.True(t, entry.Expires.Equal(TimeNow().Add(time.Minute)))
 
 	entry.Message[0] = '!'
 
 	entry, err = store.GetArtifact(ctx, "a")
-	assert.NilError(t, err)
-	assert.Check(t, is.Equal(string(entry.Message), "<message/>"))
+	require.NoError(t, err)
+	assert.Equal(t, string(entry.Message), "<message/>")
 
 	// It never forgets a message that has not expired to make room for another.
-	assert.NilError(t, store.SaveArtifact(ctx, "b", ArtifactEntry{Expires: TimeNow().Add(2 * time.Minute)}))
-	assert.Check(t, errors.Is(store.SaveArtifact(ctx, "c", ArtifactEntry{Expires: TimeNow().Add(time.Minute)}), ErrArtifactStoreFull))
-	assert.Check(t, is.Equal(store.Len(), 2))
+	require.NoError(t, store.SaveArtifact(ctx, "b", ArtifactEntry{Expires: TimeNow().Add(2 * time.Minute)}))
+	assert.True(t, errors.Is(store.SaveArtifact(ctx, "c", ArtifactEntry{Expires: TimeNow().Add(time.Minute)}), ErrArtifactStoreFull))
+	assert.Equal(t, store.Len(), 2)
 
-	assert.NilError(t, store.DeleteArtifact(ctx, "b"))
-	assert.NilError(t, store.DeleteArtifact(ctx, "b"))
-	assert.NilError(t, store.SaveArtifact(ctx, "b", ArtifactEntry{Expires: TimeNow().Add(2 * time.Minute)}))
+	require.NoError(t, store.DeleteArtifact(ctx, "b"))
+	require.NoError(t, store.DeleteArtifact(ctx, "b"))
+	require.NoError(t, store.SaveArtifact(ctx, "b", ArtifactEntry{Expires: TimeNow().Add(2 * time.Minute)}))
 
 	// A message that has expired is not returned, and makes room.
 	advance(time.Minute)
 
 	entry, err = store.GetArtifact(ctx, "a")
-	assert.NilError(t, err)
-	assert.Check(t, entry == nil)
+	require.NoError(t, err)
+	assert.Nil(t, entry)
 
 	advance(time.Minute)
-	assert.NilError(t, store.SaveArtifact(ctx, "c", ArtifactEntry{Expires: TimeNow().Add(time.Minute)}))
-	assert.Check(t, is.Equal(store.Len(), 1))
+	require.NoError(t, store.SaveArtifact(ctx, "c", ArtifactEntry{Expires: TimeNow().Add(time.Minute)}))
+	assert.Equal(t, store.Len(), 1)
 
-	assert.Check(t, is.Equal(NewMemoryArtifactStore(0).capacity, DefaultMemoryArtifactStoreCapacity))
+	assert.Equal(t, NewMemoryArtifactStore(0).capacity, DefaultMemoryArtifactStoreCapacity)
 }
 
 func TestMemoryArtifactStoreConcurrentUse(t *testing.T) {
@@ -402,12 +402,12 @@ func TestMemoryArtifactStoreConcurrentUse(t *testing.T) {
 			key := strconv.Itoa(i)
 
 			for range 100 {
-				assert.Check(t, store.SaveArtifact(ctx, key, ArtifactEntry{Message: []byte(key), Expires: expires}))
+				assert.NoError(t, store.SaveArtifact(ctx, key, ArtifactEntry{Message: []byte(key), Expires: expires}))
 
 				entry, err := store.GetArtifact(ctx, key)
-				assert.Check(t, err)
-				assert.Check(t, entry != nil && string(entry.Message) == key)
-				assert.Check(t, store.DeleteArtifact(ctx, key))
+				assert.NoError(t, err)
+				assert.True(t, entry != nil && string(entry.Message) == key)
+				assert.NoError(t, store.DeleteArtifact(ctx, key))
 
 				store.Len()
 			}
@@ -415,59 +415,59 @@ func TestMemoryArtifactStoreConcurrentUse(t *testing.T) {
 	}
 
 	wg.Wait()
-	assert.Check(t, is.Equal(store.Len(), 0))
+	assert.Equal(t, store.Len(), 0)
 }
 
 func TestIdentityProviderDefaultArtifactStore(t *testing.T) {
 	idp := &IdentityProvider{}
 
 	store := idp.artifactStore()
-	assert.Assert(t, store != nil)
-	assert.Check(t, store == idp.artifactStore())
+	require.NotNil(t, store)
+	assert.True(t, store == idp.artifactStore())
 
 	// A copy made after first use shares the store, and go vet accepts the copy.
 	clone := *idp
-	assert.Check(t, clone.artifactStore() == store)
+	assert.True(t, clone.artifactStore() == store)
 
 	custom := NewMemoryArtifactStore(1)
 	idp.ArtifactStore = custom
-	assert.Check(t, idp.artifactStore() == ArtifactStore(custom))
+	assert.True(t, idp.artifactStore() == ArtifactStore(custom))
 
-	assert.Check(t, is.Equal(idp.artifactLifetime(), DefaultArtifactLifetime))
+	assert.Equal(t, idp.artifactLifetime(), DefaultArtifactLifetime)
 
 	idp.ArtifactLifetime = 5 * time.Second
-	assert.Check(t, is.Equal(idp.artifactLifetime(), 5*time.Second))
+	assert.Equal(t, idp.artifactLifetime(), 5*time.Second)
 }
 
 func TestMetadataArtifactResolutionService(t *testing.T) {
 	test := NewIdentityProviderTest(t, applyKey)
 
 	// It is not listed unless it is served.
-	assert.Check(t, is.Len(test.IDP.Metadata().IDPSSODescriptors[0].ArtifactResolutionServices, 0))
+	assert.Len(t, test.IDP.Metadata().IDPSSODescriptors[0].ArtifactResolutionServices, 0)
 
 	test.IDP.ArtifactResolutionURL = mustParseURL(artifactTestURL)
 
 	buf, err := xml.Marshal(test.IDP.Metadata())
-	assert.NilError(t, err)
+	require.NoError(t, err)
 
 	// SAMLMeta §2.4.2: an indexed endpoint of the SSO descriptor, on the SOAP binding (SAMLProf §5.5).
-	assert.Check(t, is.Contains(string(buf), `<ArtifactResolutionService Binding="urn:oasis:names:tc:SAML:2.0:bindings:SOAP" Location="https://idp.example.com/saml/artifact" index="0"></ArtifactResolutionService>`))
+	assert.Contains(t, string(buf), `<ArtifactResolutionService Binding="urn:oasis:names:tc:SAML:2.0:bindings:SOAP" Location="https://idp.example.com/saml/artifact" index="0"></ArtifactResolutionService>`)
 
 	var parsed EntityDescriptor
 
-	assert.NilError(t, xml.Unmarshal(buf, &parsed))
-	assert.Check(t, is.DeepEqual(parsed.IDPSSODescriptors[0].ArtifactResolutionServices, []IndexedEndpoint{
+	require.NoError(t, xml.Unmarshal(buf, &parsed))
+	assert.Equal(t, parsed.IDPSSODescriptors[0].ArtifactResolutionServices, []IndexedEndpoint{
 		{Binding: SOAPBinding, Location: artifactTestURL, Index: 0},
-	}))
+	})
 
 	// Requests are not received by artifact, so the SSO service doesn't list the binding.
 	for _, endpoint := range parsed.IDPSSODescriptors[0].SingleSignOnServices {
-		assert.Check(t, endpoint.Binding != HTTPArtifactBinding)
+		assert.True(t, endpoint.Binding != HTTPArtifactBinding)
 	}
 
 	// The service provider of this package finds it.
 	test.SP.IDPMetadata = &parsed
-	assert.Check(t, is.Equal(test.SP.GetArtifactBindingLocation(SOAPBinding), artifactTestURL))
+	assert.Equal(t, test.SP.GetArtifactBindingLocation(SOAPBinding), artifactTestURL)
 }
 
 func TestHandlerServesArtifactResolution(t *testing.T) {
@@ -475,17 +475,17 @@ func TestHandlerServesArtifactResolution(t *testing.T) {
 
 	w := httptest.NewRecorder()
 	test.IDP.Handler().ServeHTTP(w, httptest.NewRequest(http.MethodGet, artifactTestURL, nil))
-	assert.Check(t, is.Equal(w.Code, http.StatusMethodNotAllowed))
+	assert.Equal(t, w.Code, http.StatusMethodNotAllowed)
 
 	test.IDP.ArtifactResolutionURL = url.URL{}
 
 	w = httptest.NewRecorder()
 	test.IDP.Handler().ServeHTTP(w, httptest.NewRequest(http.MethodGet, artifactTestURL, nil))
-	assert.Check(t, is.Equal(w.Code, http.StatusNotFound))
+	assert.Equal(t, w.Code, http.StatusNotFound)
 
 	// Nor does the handler itself answer when it is mounted without the URL.
 	r, _ := artifactResolvePost(t, &test.SP, Artifact{}.String(), nil)
-	assert.Check(t, is.Equal(serveArtifactResolution(test, r).Code, http.StatusNotFound))
+	assert.Equal(t, serveArtifactResolution(test, r).Code, http.StatusNotFound)
 }
 
 // artifactACSMetadata returns the metadata of the service provider with these assertion consumer services.
@@ -691,33 +691,33 @@ func TestArtifactACSSelection(t *testing.T) {
 				body := signedPostBody(t, &test.SP, tc.mutate)
 
 				req, err := NewIdpAuthnRequest(&test.IDP, replayPostRequest(body, nil))
-				assert.NilError(t, err)
+				require.NoError(t, err)
 
 				err = req.Validate()
 
 				switch {
 				case expected.refused:
-					assert.Assert(t, err != nil)
-					assert.Check(t, req.ACSEndpoint == nil)
+					require.NotNil(t, err)
+					assert.Nil(t, req.ACSEndpoint)
 
-					assert.Check(t, !req.Respondable(), "a request with no endpoint can't be answered with a status")
-					assert.Check(t, errors.Is(err, ErrNoResponseEndpoint), "error: %v", err)
+					assert.False(t, req.Respondable(), "a request with no endpoint can't be answered with a status")
+					assert.True(t, errors.Is(err, ErrNoResponseEndpoint), "error: %v", err)
 
 					return
 				case expected.unsupported:
-					assert.Assert(t, req.Respondable(), "error: %v", err)
-					assert.Assert(t, errors.Is(err, ErrUnsupportedBinding), "error: %v", err)
+					require.True(t, req.Respondable(), "error: %v", err)
+					require.True(t, errors.Is(err, ErrUnsupportedBinding), "error: %v", err)
 
 					status := test.IDP.ErrorStatus(err)
-					assert.Check(t, is.Equal(status.StatusCode.Value, StatusResponder))
-					assert.Check(t, is.Equal(status.StatusCode.StatusCode.Value, StatusUnsupportedBinding))
+					assert.Equal(t, status.StatusCode.Value, StatusResponder)
+					assert.Equal(t, status.StatusCode.StatusCode.Value, StatusUnsupportedBinding)
 				default:
-					assert.NilError(t, err)
+					require.NoError(t, err)
 				}
 
-				assert.Assert(t, req.ACSEndpoint != nil)
-				assert.Check(t, is.Equal(req.ACSEndpoint.Binding, expected.binding))
-				assert.Check(t, is.Equal(req.ACSEndpoint.Location, expected.location))
+				require.NotNil(t, req.ACSEndpoint)
+				assert.Equal(t, req.ACSEndpoint.Binding, expected.binding)
+				assert.Equal(t, req.ACSEndpoint.Location, expected.location)
 			})
 		}
 	}
@@ -742,44 +742,44 @@ func TestServeSSODeliversResponseByArtifactRedirect(t *testing.T) {
 
 	// SAMLBind §3.6.3.2: the artifact and the RelayState are added to the query of the endpoint, and nothing of
 	// the response is.
-	assert.Check(t, is.Equal(location.Scheme+"://"+location.Host+location.Path, "https://sp.example.com/saml2/acs"))
-	assert.Check(t, is.DeepEqual(location.Query(), url.Values{
+	assert.Equal(t, location.Scheme+"://"+location.Host+location.Path, "https://sp.example.com/saml2/acs")
+	assert.Equal(t, location.Query(), url.Values{
 		"via":        {"artifact"},
 		"SAMLart":    {value},
 		"RelayState": {"relay state&"},
-	}))
-	assert.Check(t, !strings.Contains(w.Body.String(), "SAMLResponse"))
+	})
+	assert.False(t, strings.Contains(w.Body.String(), "SAMLResponse"))
 
 	artifact, err := ParseArtifact(value)
-	assert.NilError(t, err)
-	assert.Check(t, is.Equal(artifact.EndpointIndex, uint16(0)))
-	assert.Check(t, is.DeepEqual(artifact.SourceID, ArtifactSourceID("https://idp.example.com/saml/metadata")))
+	require.NoError(t, err)
+	assert.Equal(t, artifact.EndpointIndex, uint16(0))
+	assert.Equal(t, artifact.SourceID, ArtifactSourceID("https://idp.example.com/saml/metadata"))
 
 	// The response waits in the store for the service provider it is for, under a key that is not the artifact.
-	assert.Check(t, is.Equal(store.Len(), 1))
+	assert.Equal(t, store.Len(), 1)
 
 	key := test.IDP.artifactKey(artifact)
-	assert.Check(t, strings.HasPrefix(key, "artifact:"))
-	assert.Check(t, is.Len(key, len("artifact:")+64))
+	assert.True(t, strings.HasPrefix(key, "artifact:"))
+	assert.Len(t, key, len("artifact:")+64)
 
 	entry, err := store.GetArtifact(context.Background(), key)
-	assert.NilError(t, err)
-	assert.Assert(t, entry != nil)
-	assert.Check(t, is.Equal(entry.ServiceProviderEntityID, "https://sp.example.com/saml2/metadata"))
-	assert.Check(t, entry.Expires.Equal(TimeNow().Add(DefaultArtifactLifetime)))
+	require.NoError(t, err)
+	require.NotNil(t, entry)
+	assert.Equal(t, entry.ServiceProviderEntityID, "https://sp.example.com/saml2/metadata")
+	assert.True(t, entry.Expires.Equal(TimeNow().Add(DefaultArtifactLifetime)))
 
 	var response Response
 
-	assert.NilError(t, xml.Unmarshal(entry.Message, &response))
-	assert.Check(t, is.Equal(response.InResponseTo, id))
-	assert.Check(t, is.Equal(response.Status.StatusCode.Value, StatusSuccess))
-	assert.Check(t, is.Equal(response.Destination, "https://sp.example.com/saml2/acs?via=artifact"))
-	assert.Check(t, response.Signature != nil)
-	assert.Check(t, response.Assertion != nil || response.EncryptedAssertion != nil)
+	require.NoError(t, xml.Unmarshal(entry.Message, &response))
+	assert.Equal(t, response.InResponseTo, id)
+	assert.Equal(t, response.Status.StatusCode.Value, StatusSuccess)
+	assert.Equal(t, response.Destination, "https://sp.example.com/saml2/acs?via=artifact")
+	assert.NotNil(t, response.Signature)
+	assert.True(t, response.Assertion != nil || response.EncryptedAssertion != nil)
 
 	for name, values := range store.entries {
-		assert.Check(t, !strings.Contains(name, value))
-		assert.Check(t, !bytes.Contains(values.Message, []byte(value)))
+		assert.False(t, strings.Contains(name, value))
+		assert.False(t, bytes.Contains(values.Message, []byte(value)))
 	}
 }
 
@@ -790,7 +790,7 @@ func TestServeSSOArtifactsAreUnique(t *testing.T) {
 
 	for range 8 {
 		artifact, _ := issueTestArtifact(t, test, &test.SP)
-		assert.Check(t, !seen[artifact])
+		assert.False(t, seen[artifact])
 
 		seen[artifact] = true
 	}
@@ -805,33 +805,33 @@ func TestServeSSODeliversResponseByArtifactForm(t *testing.T) {
 
 	w, _ := artifactSSO(t, test, &test.SP, nil)
 
-	assert.Assert(t, is.Equal(w.Code, http.StatusOK))
-	assert.Check(t, is.Equal(w.Header().Get("Cache-Control"), "no-cache, no-store"))
-	assert.Check(t, is.Equal(w.Header().Get("Pragma"), "no-cache"))
+	require.Equal(t, w.Code, http.StatusOK)
+	assert.Equal(t, w.Header().Get("Cache-Control"), "no-cache, no-store")
+	assert.Equal(t, w.Header().Get("Pragma"), "no-cache")
 
 	// SAMLBind §3.6.3.3: a form posted to the endpoint, with the artifact and the RelayState in hidden controls,
 	// escaped. It is the default, as it keeps the artifact out of the URL: nothing is redirected.
-	assert.Check(t, is.Equal(w.Header().Get("Location"), ""))
+	assert.Equal(t, w.Header().Get("Location"), "")
 
 	body := w.Body.String()
-	assert.Check(t, is.Contains(body, `<form method="post" action="https://sp.example.com/saml2/acs"`))
-	assert.Check(t, is.Contains(body, `<input type="hidden" name="RelayState" value="relay state&amp;" />`))
-	assert.Check(t, !strings.Contains(body, "SAMLResponse"))
+	assert.Contains(t, body, `<form method="post" action="https://sp.example.com/saml2/acs"`)
+	assert.Contains(t, body, `<input type="hidden" name="RelayState" value="relay state&amp;" />`)
+	assert.False(t, strings.Contains(body, "SAMLResponse"))
 
 	const marker = `<input type="hidden" name="SAMLart" value="`
 
 	start := strings.Index(body, marker)
-	assert.Assert(t, start >= 0)
+	require.True(t, start >= 0)
 
 	value, _, _ := strings.Cut(body[start+len(marker):], `"`)
 
 	artifact, err := ParseArtifact(html.UnescapeString(value))
-	assert.NilError(t, err)
+	require.NoError(t, err)
 
 	entry, err := store.GetArtifact(context.Background(), test.IDP.artifactKey(artifact))
-	assert.NilError(t, err)
-	assert.Assert(t, entry != nil)
-	assert.Check(t, entry.Expires.Equal(TimeNow().Add(10*time.Second)))
+	require.NoError(t, err)
+	require.NotNil(t, entry)
+	assert.True(t, entry.Expires.Equal(TimeNow().Add(10*time.Second)))
 }
 
 func TestServeSSODeliversErrorResponseByArtifact(t *testing.T) {
@@ -843,13 +843,13 @@ func TestServeSSODeliversErrorResponseByArtifact(t *testing.T) {
 	r, resolveID := artifactResolvePost(t, &test.SP, artifact, nil)
 
 	response, message := artifactResponse(t, serveArtifactResolution(test, r))
-	assert.Check(t, is.Equal(response.InResponseTo, resolveID))
-	assert.Check(t, is.Equal(response.Status.StatusCode.Value, StatusSuccess))
-	assert.Assert(t, message != nil)
-	assert.Assert(t, response.Response != nil)
-	assert.Check(t, is.Equal(response.Response.InResponseTo, id))
-	assert.Check(t, is.Equal(response.Response.Status.StatusCode.Value, StatusResponder))
-	assert.Check(t, response.Response.Assertion == nil && response.Response.EncryptedAssertion == nil)
+	assert.Equal(t, response.InResponseTo, resolveID)
+	assert.Equal(t, response.Status.StatusCode.Value, StatusSuccess)
+	require.NotNil(t, message)
+	require.NotNil(t, response.Response)
+	assert.Equal(t, response.Response.InResponseTo, id)
+	assert.Equal(t, response.Response.Status.StatusCode.Value, StatusResponder)
+	assert.True(t, response.Response.Assertion == nil && response.Response.EncryptedAssertion == nil)
 }
 
 // failingArtifactStore is an ArtifactStore whose operations fail with the errors that are set, and otherwise
@@ -892,10 +892,10 @@ func TestServeSSOArtifactStoreFailure(t *testing.T) {
 
 	// The error response can't be delivered by artifact either, so nothing is sent to the service provider.
 	w, _ := artifactSSO(t, test, &test.SP, nil)
-	assert.Check(t, is.Equal(w.Code, http.StatusInternalServerError))
-	assert.Check(t, is.Equal(w.Header().Get("Location"), ""))
-	assert.Check(t, !strings.Contains(w.Body.String(), "store down"))
-	assert.Check(t, is.Contains(logs.String(), "store down"))
+	assert.Equal(t, w.Code, http.StatusInternalServerError)
+	assert.Equal(t, w.Header().Get("Location"), "")
+	assert.False(t, strings.Contains(w.Body.String(), "store down"))
+	assert.Contains(t, logs.String(), "store down")
 }
 
 func TestWriteResponseDeletesArtifactThatIsNotSent(t *testing.T) {
@@ -910,23 +910,23 @@ func TestWriteResponseDeletesArtifactThatIsNotSent(t *testing.T) {
 	body := signedPostBody(t, f.a, func(request *AuthnRequest) { request.ProtocolBinding = HTTPArtifactBinding })
 
 	req, err := NewIdpAuthnRequest(&f.test.IDP, replayPostRequest(body, nil))
-	assert.NilError(t, err)
-	assert.NilError(t, req.Validate())
+	require.NoError(t, err)
+	require.NoError(t, req.Validate())
 
 	req.Session = f.session
-	assert.NilError(t, DefaultAssertionMaker{}.MakeAssertion(req, f.session))
+	require.NoError(t, DefaultAssertionMaker{}.MakeAssertion(req, f.session))
 
 	w := httptest.NewRecorder()
 
 	// The participant can't be recorded, as when a logout of the session has begun, so no artifact is sent,
 	// and the response it stands for doesn't stay behind.
 	err = req.WriteResponse(w)
-	assert.Check(t, errors.Is(err, ErrResponseNotBuilt))
-	assert.Check(t, errors.Is(err, ErrSessionParticipantsClosed))
-	assert.Check(t, is.Equal(w.Header().Get("Location"), ""))
-	assert.Check(t, !strings.Contains(w.Body.String(), "SAMLart"))
-	assert.Check(t, is.Len(store.deleted, 1))
-	assert.Check(t, is.Equal(store.Len(), 0))
+	assert.True(t, errors.Is(err, ErrResponseNotBuilt))
+	assert.True(t, errors.Is(err, ErrSessionParticipantsClosed))
+	assert.Equal(t, w.Header().Get("Location"), "")
+	assert.False(t, strings.Contains(w.Body.String(), "SAMLart"))
+	assert.Len(t, store.deleted, 1)
+	assert.Equal(t, store.Len(), 0)
 }
 
 func TestPostBindingRefusesArtifactEndpoint(t *testing.T) {
@@ -935,30 +935,30 @@ func TestPostBindingRefusesArtifactEndpoint(t *testing.T) {
 	body := signedPostBody(t, &test.SP, func(request *AuthnRequest) { request.ProtocolBinding = HTTPArtifactBinding })
 
 	req, err := NewIdpAuthnRequest(&test.IDP, replayPostRequest(body, nil))
-	assert.NilError(t, err)
-	assert.NilError(t, req.Validate())
-	assert.NilError(t, DefaultAssertionMaker{}.MakeAssertion(req, &Session{ID: "f00f00", UserName: "alice", NameID: "alice"}))
+	require.NoError(t, err)
+	require.NoError(t, req.Validate())
+	require.NoError(t, DefaultAssertionMaker{}.MakeAssertion(req, &Session{ID: "f00f00", UserName: "alice", NameID: "alice"}))
 
 	_, err = req.PostBinding()
-	assert.Check(t, is.ErrorContains(err, "unsupported binding"))
+	assert.ErrorContains(t, err, "unsupported binding")
 
 	// And the artifact binding refuses any other endpoint, or to work without a resolution service.
 	delivery, err := req.ArtifactBinding()
-	assert.NilError(t, err)
-	assert.Check(t, is.Equal(delivery.URL, "https://sp.example.com/saml2/acs"))
+	require.NoError(t, err)
+	assert.Equal(t, delivery.URL, "https://sp.example.com/saml2/acs")
 
 	test.IDP.ArtifactResolutionURL = url.URL{}
 	_, err = req.ArtifactBinding()
-	assert.Check(t, err != nil)
+	assert.NotNil(t, err)
 
 	test.IDP.ArtifactResolutionURL = mustParseURL(artifactTestURL)
 	req.ACSEndpoint = &IndexedEndpoint{Binding: HTTPPostBinding, Location: "https://sp.example.com/saml2/acs"}
 	_, err = req.ArtifactBinding()
-	assert.Check(t, err != nil)
+	assert.NotNil(t, err)
 
 	req.ACSEndpoint = &IndexedEndpoint{Binding: HTTPArtifactBinding, Location: "http://sp.example.com/saml2/acs"}
 	_, err = req.ArtifactBinding()
-	assert.Check(t, errors.Is(err, ErrInsecureEndpoint))
+	assert.True(t, errors.Is(err, ErrInsecureEndpoint))
 }
 
 func TestServeIDPInitiatedDeliversResponseByArtifact(t *testing.T) {
@@ -970,7 +970,7 @@ func TestServeIDPInitiatedDeliversResponseByArtifact(t *testing.T) {
 		test.SP.MetadataURL.String(), "ThisIsTheRelayState")
 
 	form := postedArtifact(t, w)
-	assert.Check(t, is.Equal(form.Get("RelayState"), "ThisIsTheRelayState"))
+	assert.Equal(t, form.Get("RelayState"), "ThisIsTheRelayState")
 
 	r, id := artifactResolvePost(t, &test.SP, form.Get("SAMLart"), nil)
 	assertResolvedArtifactResponse(t, serveArtifactResolution(test, r), id, "")
@@ -986,12 +986,12 @@ func TestServeArtifactResolution(t *testing.T) {
 
 	// The message is the signed Response that the POST binding would have delivered, unchanged.
 	_, err := verifyEnvelopedSignature(message, []*x509.Certificate{mustParseCertificate(golden.Get(t, "idp_cert.pem"))}, anySignaturePolicy)
-	assert.NilError(t, err)
-	assert.Check(t, is.Equal(message.SelectAttrValue("Destination", ""), "https://sp.example.com/saml2/acs"))
+	require.NoError(t, err)
+	assert.Equal(t, message.SelectAttrValue("Destination", ""), "https://sp.example.com/saml2/acs")
 
 	// It is deleted once it is resolved.
-	assert.Check(t, is.Equal(test.IDP.artifactStore().(*MemoryArtifactStore).Len(), 0))
-	assert.Check(t, is.Equal(logs.String(), ""))
+	assert.Equal(t, test.IDP.artifactStore().(*MemoryArtifactStore).Len(), 0)
+	assert.Equal(t, logs.String(), "")
 }
 
 func TestServeArtifactResolutionAcceptsDestination(t *testing.T) {
@@ -1019,7 +1019,7 @@ func TestServeArtifactResolutionResolvesOnce(t *testing.T) {
 		assertEmptyArtifactResponse(t, serveArtifactResolution(test, r), id)
 	}
 
-	assert.Check(t, is.Contains(logs.String(), "artifact not resolved: https://sp.example.com/saml2/metadata sent an artifact that is unknown, expired or already resolved"))
+	assert.Contains(t, logs.String(), "artifact not resolved: https://sp.example.com/saml2/metadata sent an artifact that is unknown, expired or already resolved")
 }
 
 func TestServeArtifactResolutionSingleUseSurvivesTheMessageStore(t *testing.T) {
@@ -1037,14 +1037,14 @@ func TestServeArtifactResolutionSingleUseSurvivesTheMessageStore(t *testing.T) {
 
 	r, id := artifactResolvePost(t, &test.SP, artifact, nil)
 	assertResolvedArtifactResponse(t, serveArtifactResolution(test, r), id, authnRequestID)
-	assert.Check(t, is.Equal(store.Len(), 1))
+	assert.Equal(t, store.Len(), 1)
 
 	// The artifact is recorded under the key of its message, until it expires and the clocks may differ.
 	parsed, err := ParseArtifact(artifact)
-	assert.NilError(t, err)
-	assert.Assert(t, is.Equal(replay.calls(), before+1))
-	assert.Check(t, is.Equal(replay.keys[before], test.IDP.artifactKey(parsed)))
-	assert.Check(t, replay.expiries[before].Equal(TimeNow().Add(DefaultArtifactLifetime+MaxClockSkew)))
+	require.NoError(t, err)
+	require.Equal(t, replay.calls(), before+1)
+	assert.Equal(t, replay.keys[before], test.IDP.artifactKey(parsed))
+	assert.True(t, replay.expiries[before].Equal(TimeNow().Add(DefaultArtifactLifetime+MaxClockSkew)))
 
 	// Another instance, which shares both stores.
 	other := test.IDP
@@ -1087,14 +1087,14 @@ func TestServeArtifactResolutionConcurrentResolvesGiveOneMessage(t *testing.T) {
 
 	for _, w := range recorders {
 		response, message := artifactResponse(t, w)
-		assert.Check(t, is.Equal(response.Status.StatusCode.Value, StatusSuccess))
+		assert.Equal(t, response.Status.StatusCode.Value, StatusSuccess)
 
 		if message != nil {
 			resolved++
 		}
 	}
 
-	assert.Check(t, is.Equal(resolved, 1))
+	assert.Equal(t, resolved, 1)
 }
 
 func TestServeArtifactResolutionRefusesAnotherServiceProvider(t *testing.T) {
@@ -1107,13 +1107,13 @@ func TestServeArtifactResolutionRefusesAnotherServiceProvider(t *testing.T) {
 	// issued to it.
 	r, id := artifactResolvePost(t, b, artifact, nil)
 	assertEmptyArtifactResponse(t, serveArtifactResolution(test, r), id)
-	assert.Check(t, is.Contains(logs.String(),
-		"https://sp-b.example.com/saml2/metadata sent an artifact that was issued for https://sp.example.com/saml2/metadata"))
+	assert.Contains(t, logs.String(),
+		"https://sp-b.example.com/saml2/metadata sent an artifact that was issued for https://sp.example.com/saml2/metadata")
 
 	// An artifact that another party holds is no longer safe to resolve for anyone.
 	r, id = artifactResolvePost(t, &test.SP, artifact, nil)
 	assertEmptyArtifactResponse(t, serveArtifactResolution(test, r), id)
-	assert.Check(t, is.Equal(test.IDP.artifactStore().(*MemoryArtifactStore).Len(), 0))
+	assert.Equal(t, test.IDP.artifactStore().(*MemoryArtifactStore).Len(), 0)
 
 	// B resolves the artifacts of its own responses.
 	artifact, authnRequestID := issueTestArtifact(t, test, b)
@@ -1219,7 +1219,7 @@ func TestServeArtifactResolutionEmptyResponses(t *testing.T) {
 		"artifact with another endpoint index": {
 			request: func(t *testing.T, f *fixture) (*http.Request, string) {
 				artifact, err := ParseArtifact(f.artifact)
-				assert.NilError(t, err)
+				require.NoError(t, err)
 
 				artifact.EndpointIndex = 1
 
@@ -1266,7 +1266,7 @@ func TestServeArtifactResolutionEmptyResponses(t *testing.T) {
 		"changed after it was signed": {
 			request: func(t *testing.T, f *fixture) (*http.Request, string) {
 				request, err := f.test.SP.MakeArtifactResolveRequest(unknown.String())
-				assert.NilError(t, err)
+				require.NoError(t, err)
 
 				el := request.Element()
 				el.FindElement("./Artifact").SetText(f.artifact)
@@ -1327,11 +1327,11 @@ func TestServeArtifactResolutionEmptyResponses(t *testing.T) {
 
 			// SAMLBind §3.6.6: a Success status, even though the message is not returned.
 			assertEmptyArtifactResponse(t, serveArtifactResolution(test, r), id)
-			assert.Check(t, is.Contains(logs.String(), tc.logged))
+			assert.Contains(t, logs.String(), tc.logged)
 
 			// Nothing is recorded for a request that is refused, so only the holder of a real artifact that
 			// is authenticated can add to the replay store.
-			assert.Check(t, is.Equal(replay.calls(), recorded))
+			assert.Equal(t, replay.calls(), recorded)
 
 			r, id = artifactResolvePost(t, &test.SP, artifact, nil)
 
@@ -1381,8 +1381,8 @@ func TestServeArtifactResolutionErrorStatuses(t *testing.T) {
 		assertArtifactResponseStatus(t, serveArtifactResolution(test, r), id, StatusRequester, "")
 
 		// Nothing of the request is logged before its sender is verified.
-		assert.Check(t, !strings.Contains(logs.String(), id))
-		assert.Check(t, !strings.Contains(logs.String(), artifact))
+		assert.False(t, strings.Contains(logs.String(), id))
+		assert.False(t, strings.Contains(logs.String(), artifact))
 	})
 
 	t.Run("invalid ID", func(t *testing.T) {
@@ -1393,7 +1393,7 @@ func TestServeArtifactResolutionErrorStatuses(t *testing.T) {
 
 		// The ID can't be echoed.
 		assertArtifactResponseStatus(t, serveArtifactResolution(test, r), "", StatusRequester, "")
-		assert.Check(t, !strings.Contains(logs.String(), "an id"))
+		assert.False(t, strings.Contains(logs.String(), "an id"))
 	})
 
 	t.Run("too large", func(t *testing.T) {
@@ -1418,8 +1418,8 @@ func TestServeArtifactResolutionErrorStatuses(t *testing.T) {
 		assertArtifactResponseStatus(t, w, id, StatusResponder, "")
 
 		// SAMLCore §3.2.2.4 lets a status carry a message, but an internal error is never put in one.
-		assert.Check(t, !strings.Contains(w.Body.String(), "database down"))
-		assert.Check(t, is.Contains(logs.String(), "database down"))
+		assert.False(t, strings.Contains(w.Body.String(), "database down"))
+		assert.Contains(t, logs.String(), "database down")
 	})
 
 	t.Run("artifact store fails", func(t *testing.T) {
@@ -1435,7 +1435,7 @@ func TestServeArtifactResolutionErrorStatuses(t *testing.T) {
 		r, id := artifactResolvePost(t, &test.SP, artifact, nil)
 		w := serveArtifactResolution(test, r)
 		assertArtifactResponseStatus(t, w, id, StatusResponder, "")
-		assert.Check(t, !strings.Contains(w.Body.String(), "store down"))
+		assert.False(t, strings.Contains(w.Body.String(), "store down"))
 
 		// The artifact was not used up.
 		store.getErr = nil
@@ -1458,7 +1458,7 @@ func TestServeArtifactResolutionErrorStatuses(t *testing.T) {
 		r, id := artifactResolvePost(t, &test.SP, artifact, nil)
 		w := serveArtifactResolution(test, r)
 		assertArtifactResponseStatus(t, w, id, StatusResponder, "")
-		assert.Check(t, !strings.Contains(w.Body.String(), "replay store down"))
+		assert.False(t, strings.Contains(w.Body.String(), "replay store down"))
 	})
 
 	t.Run("stored message is not XML", func(t *testing.T) {
@@ -1466,7 +1466,7 @@ func TestServeArtifactResolutionErrorStatuses(t *testing.T) {
 
 		artifact := Artifact{SourceID: ArtifactSourceID(test.IDP.MetadataURL.String()), MessageHandle: [20]byte{9}}
 
-		assert.NilError(t, test.IDP.artifactStore().SaveArtifact(context.Background(), test.IDP.artifactKey(artifact), ArtifactEntry{
+		require.NoError(t, test.IDP.artifactStore().SaveArtifact(context.Background(), test.IDP.artifactKey(artifact), ArtifactEntry{
 			ServiceProviderEntityID: test.SP.MetadataURL.String(),
 			Message:                 []byte("not xml <"),
 			Expires:                 TimeNow().Add(time.Minute),
@@ -1483,22 +1483,22 @@ func TestServeArtifactResolutionFaults(t *testing.T) {
 	// SAMLBind §3.2.3.3: a problem with the SOAP message itself is a fault.
 	r := artifactSOAPPost([]byte("<not-soap/>"))
 	w := serveArtifactResolution(test, r)
-	assert.Check(t, is.Equal(soapFaultCode(t, w), "soapenv:Client"))
+	assert.Equal(t, soapFaultCode(t, w), "soapenv:Client")
 
 	r, _ = artifactResolvePost(t, &test.SP, Artifact{}.String(), nil)
 	r.Header.Set("Content-Type", "application/json")
-	assert.Check(t, is.Equal(soapFaultCode(t, serveArtifactResolution(test, r)), "soapenv:Client"))
+	assert.Equal(t, soapFaultCode(t, serveArtifactResolution(test, r)), "soapenv:Client")
 
 	r = httptest.NewRequest(http.MethodGet, artifactTestURL, nil)
 	w = serveArtifactResolution(test, r)
-	assert.Check(t, is.Equal(w.Code, http.StatusMethodNotAllowed))
-	assert.Check(t, is.Equal(w.Header().Get("Allow"), http.MethodPost))
+	assert.Equal(t, w.Code, http.StatusMethodNotAllowed)
+	assert.Equal(t, w.Header().Get("Allow"), http.MethodPost)
 
 	// The response can't be signed.
 	test.IDP.Key = nil
 
 	r, _ = artifactResolvePost(t, &test.SP, Artifact{}.String(), nil)
-	assert.Check(t, is.Equal(soapFaultCode(t, serveArtifactResolution(test, r)), "soapenv:Server"))
+	assert.Equal(t, soapFaultCode(t, serveArtifactResolution(test, r)), "soapenv:Server")
 }
 
 // artifactEndToEnd runs Web Browser SSO between the service provider and the identity provider of this package
@@ -1514,14 +1514,14 @@ func artifactEndToEnd(t *testing.T, test *IdentityProviderTest, logs *bytes.Buff
 	server.Config.Handler = test.IDP.Handler()
 	test.SP.IDPMetadata = test.IDP.Metadata()
 
-	assert.Equal(t, test.SP.GetArtifactBindingLocation(SOAPBinding), server.URL+"/saml/artifact")
+	require.Equal(t, test.SP.GetArtifactBindingLocation(SOAPBinding), server.URL+"/saml/artifact")
 
 	// The service provider asks for the response at its artifact endpoint.
 	request, err := test.SP.MakeAuthenticationRequest(test.SP.GetSSOBindingLocation(HTTPRedirectBinding), HTTPRedirectBinding, HTTPArtifactBinding)
-	assert.NilError(t, err)
+	require.NoError(t, err)
 
 	redirect, err := request.Redirect("relay-state", &test.SP)
-	assert.NilError(t, err)
+	require.NoError(t, err)
 
 	// The browser takes the request to the identity provider, which answers with an artifact.
 	w := serveSSO(test, httptest.NewRequest(http.MethodGet, redirect.String(), nil))
@@ -1537,8 +1537,8 @@ func artifactEndToEnd(t *testing.T, test *IdentityProviderTest, logs *bytes.Buff
 	}
 
 	// The browser takes the artifact to the service provider, which resolves it and accepts the assertion.
-	assert.NilError(t, acs.ParseForm())
-	assert.Check(t, is.Equal(acs.Form.Get("RelayState"), "relay-state"))
+	require.NoError(t, acs.ParseForm())
+	assert.Equal(t, acs.Form.Get("RelayState"), "relay-state")
 
 	assertion, err := test.SP.ParseResponse(acs, []string{request.ID})
 	if err != nil {
@@ -1548,23 +1548,23 @@ func artifactEndToEnd(t *testing.T, test *IdentityProviderTest, logs *bytes.Buff
 		}
 	}
 
-	assert.NilError(t, err)
-	assert.Assert(t, assertion.Subject != nil && assertion.Subject.NameID != nil)
-	assert.Check(t, is.Equal(assertion.Issuer.Value, "https://idp.example.com/saml/metadata"))
+	require.NoError(t, err)
+	require.True(t, assertion.Subject != nil && assertion.Subject.NameID != nil)
+	assert.Equal(t, assertion.Issuer.Value, "https://idp.example.com/saml/metadata")
 
 	// SAMLProf §4.1.4.2: the bearer confirmation is for the endpoint that the artifact was delivered to.
-	assert.Assert(t, is.Len(assertion.Subject.SubjectConfirmations, 1))
-	assert.Check(t, is.Equal(assertion.Subject.SubjectConfirmations[0].Method, bearerSubjectConfirmationMethod))
-	assert.Check(t, is.Equal(assertion.Subject.SubjectConfirmations[0].SubjectConfirmationData.Recipient, test.SP.AcsURL.String()))
-	assert.Check(t, is.Equal(assertion.Subject.SubjectConfirmations[0].SubjectConfirmationData.InResponseTo, request.ID))
+	require.Len(t, assertion.Subject.SubjectConfirmations, 1)
+	assert.Equal(t, assertion.Subject.SubjectConfirmations[0].Method, bearerSubjectConfirmationMethod)
+	assert.Equal(t, assertion.Subject.SubjectConfirmations[0].SubjectConfirmationData.Recipient, test.SP.AcsURL.String())
+	assert.Equal(t, assertion.Subject.SubjectConfirmations[0].SubjectConfirmationData.InResponseTo, request.ID)
 
 	// The artifact is used up: presenting it to the service provider again resolves to nothing.
 	replayed := httptest.NewRequest(http.MethodGet, test.SP.AcsURL.String()+"?"+url.Values{"SAMLart": {acs.Form.Get("SAMLart")}}.Encode(), nil)
-	assert.NilError(t, replayed.ParseForm())
+	require.NoError(t, replayed.ParseForm())
 
 	_, err = test.SP.ParseResponse(replayed, []string{request.ID})
-	assert.Check(t, err != nil)
-	assert.Check(t, is.Contains(logs.String(), "unknown, expired or already resolved"))
+	assert.NotNil(t, err)
+	assert.Contains(t, logs.String(), "unknown, expired or already resolved")
 }
 
 func TestArtifactEndToEnd(t *testing.T) {
@@ -1599,7 +1599,7 @@ func TestArtifactEndToEnd(t *testing.T) {
 				descriptor.KeyDescriptors = slices.DeleteFunc(descriptor.KeyDescriptors, func(key KeyDescriptor) bool {
 					return key.Use != "signing"
 				})
-				assert.Check(t, is.Len(descriptor.KeyDescriptors, 1))
+				assert.Len(t, descriptor.KeyDescriptors, 1)
 
 				return metadata, nil
 			},

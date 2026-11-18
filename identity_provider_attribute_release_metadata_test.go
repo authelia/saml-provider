@@ -8,9 +8,10 @@ import (
 	"testing"
 	"time"
 
-	"gotest.tools/assert"
-	is "gotest.tools/assert/cmp"
-	"gotest.tools/golden"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+
+	"authelia.com/provider/saml/internal/golden"
 )
 
 func entityAttribute(name string, values ...string) Attribute {
@@ -48,7 +49,7 @@ func releaseError(t *testing.T, req *IdpAuthnRequest, session *Session) error {
 	t.Helper()
 
 	err := DefaultAssertionMaker{}.MakeAssertion(req, session)
-	assert.Assert(t, err != nil)
+	require.NotNil(t, err)
 
 	return err
 }
@@ -56,11 +57,11 @@ func releaseError(t *testing.T, req *IdpAuthnRequest, session *Session) error {
 func assertRequiredAttributeUnavailable(t *testing.T, err error) {
 	t.Helper()
 
-	assert.Check(t, errors.Is(err, ErrRequiredAttributeUnavailable), "%v", err)
+	assert.True(t, errors.Is(err, ErrRequiredAttributeUnavailable), "%v", err)
 
 	status := (&IdentityProvider{}).ErrorStatus(err)
-	assert.Check(t, is.Equal(status.StatusCode.Value, StatusResponder))
-	assert.Check(t, status.StatusCode.StatusCode == nil)
+	assert.Equal(t, status.StatusCode.Value, StatusResponder)
+	assert.Nil(t, status.StatusCode.StatusCode)
 }
 
 func TestDefaultAttributeReleasePolicySubjectIDRequirement(t *testing.T) {
@@ -146,19 +147,19 @@ func TestDefaultAttributeReleasePolicySubjectIDRequirement(t *testing.T) {
 
 			// By default what can't be stated is left out (SDP-IDP16).
 			req, session := setup(DefaultAttributeReleasePolicy{})
-			assert.Check(t, is.DeepEqual(sortedAttributeNames(releasedAttributes(t, req, session)), sorted(tc.released...)))
+			assert.Equal(t, sortedAttributeNames(releasedAttributes(t, req, session)), sorted(tc.released...))
 
 			req, session = setup(DefaultAttributeReleasePolicy{EnforceSubjectIDRequirement: true})
 
 			if tc.unmet {
 				err := releaseError(t, req, session)
 				assertRequiredAttributeUnavailable(t, err)
-				assert.Check(t, is.Contains(errorText(err), tc.requirement))
+				assert.Contains(t, errorText(err), tc.requirement)
 
 				return
 			}
 
-			assert.Check(t, is.DeepEqual(sortedAttributeNames(releasedAttributes(t, req, session)), sorted(tc.released...)))
+			assert.Equal(t, sortedAttributeNames(releasedAttributes(t, req, session)), sorted(tc.released...))
 		})
 	}
 }
@@ -170,8 +171,8 @@ func TestDefaultAttributeReleasePolicySubjectIDRequirementWithoutAService(t *tes
 		entityAttribute(SubjectIDRequirementAttributeName, "subject-id"))
 
 	attributes := releasedAttributes(t, req, attributeReleaseSession())
-	assert.Assert(t, is.Len(attributes, 1))
-	assert.Check(t, is.DeepEqual(attributes[0], subjectIdentifierAttribute(SubjectIDAttributeName, "alice@example.com")))
+	require.Len(t, attributes, 1)
+	assert.Equal(t, attributes[0], subjectIdentifierAttribute(SubjectIDAttributeName, "alice@example.com"))
 }
 
 // A custom attribute that has the name of an identifier in another format is not the identifier.
@@ -182,7 +183,7 @@ func TestDefaultAttributeReleasePolicySubjectIDRequirementIgnoresOtherFormats(t 
 	}}}
 
 	req := signal(attributeReleaseRequest(t, test, ""), entityAttribute(SubjectIDRequirementAttributeName, "subject-id"))
-	assert.Check(t, is.Len(releasedAttributes(t, req, session), 0))
+	assert.Len(t, releasedAttributes(t, req, session), 0)
 }
 
 func TestDefaultAttributeReleasePolicyLogsUnmetSubjectIDRequirement(t *testing.T) {
@@ -193,9 +194,9 @@ func TestDefaultAttributeReleasePolicyLogsUnmetSubjectIDRequirement(t *testing.T
 	test.IDP.Observer = logObserver(&logged)
 
 	req := signal(attributeReleaseRequest(t, test, ""), entityAttribute(SubjectIDRequirementAttributeName, "pairwise-id"))
-	assert.Check(t, is.Len(releasedAttributes(t, req, attributeReleaseSession()), 0))
-	assert.Check(t, is.Contains(logged.String(), "pairwise-id"))
-	assert.Check(t, !strings.Contains(logged.String(), "alice"))
+	assert.Len(t, releasedAttributes(t, req, attributeReleaseSession()), 0)
+	assert.Contains(t, logged.String(), "pairwise-id")
+	assert.False(t, strings.Contains(logged.String(), "alice"))
 }
 
 // bundleSession is a session with a value for every attribute of the built-in bundles.
@@ -328,19 +329,19 @@ func TestDefaultAttributeReleasePolicyEntityCategoryBundles(t *testing.T) {
 				signal(req, entityAttribute(EntityCategoryAttributeName, tc.categories...))
 			}
 
-			assert.Check(t, is.DeepEqual(sortedAttributeNames(releasedAttributes(t, req, bundleSession())), sorted(tc.released...)))
+			assert.Equal(t, sortedAttributeNames(releasedAttributes(t, req, bundleSession())), sorted(tc.released...))
 		})
 	}
 }
 
 func TestBuiltInBundlesNameAttributesByURI(t *testing.T) {
 	for category, bundle := range everyBuiltInBundle() {
-		assert.Check(t, len(bundle) != 0, category)
+		assert.True(t, len(bundle) != 0, category)
 
 		for _, attribute := range bundle {
-			assert.Check(t, is.Equal(attribute.NameFormat, uriAttrNameFormat), attribute.Name)
-			assert.Check(t, attribute.FriendlyName != "", attribute.Name)
-			assert.Check(t, is.Len(attribute.Values, 0), attribute.Name)
+			assert.Equal(t, attribute.NameFormat, uriAttrNameFormat, attribute.Name)
+			assert.True(t, attribute.FriendlyName != "", attribute.Name)
+			assert.Len(t, attribute.Values, 0, attribute.Name)
 		}
 	}
 
@@ -348,7 +349,7 @@ func TestBuiltInBundlesNameAttributesByURI(t *testing.T) {
 	first := ResearchAndScholarshipAttributes()
 	first[0].Name = "changed"
 
-	assert.Check(t, ResearchAndScholarshipAttributes()[0].Name != "changed")
+	assert.True(t, ResearchAndScholarshipAttributes()[0].Name != "changed")
 }
 
 // A bundle states what the session has and no more.
@@ -359,7 +360,7 @@ func TestDefaultAttributeReleasePolicyEntityCategoryBundleOmitsWhatTheSessionLac
 	req := signal(attributeReleaseRequest(t, test, ""), entityAttribute(EntityCategoryAttributeName, EntityCategoryPersonalized))
 	session := &Session{ID: "s", UserName: "alice", UserEmail: "alice@example.com", UserCommonName: "Alice Smith"}
 
-	assert.Check(t, is.DeepEqual(attributeNames(releasedAttributes(t, req, session)), []string{mailAttributeName}))
+	assert.Equal(t, attributeNames(releasedAttributes(t, req, session)), []string{mailAttributeName})
 }
 
 // A bundle entry that lists values releases only those values, as a RequestedAttribute does.
@@ -374,8 +375,8 @@ func TestDefaultAttributeReleasePolicyEntityCategoryBundleValues(t *testing.T) {
 
 	req := signal(attributeReleaseRequest(t, test, ""), entityAttribute(EntityCategoryAttributeName, EntityCategoryAnonymous))
 	attributes := releasedAttributes(t, req, bundleSession())
-	assert.Assert(t, is.Len(attributes, 1))
-	assert.Check(t, is.DeepEqual(queryAttributeValues(attributes[0]), []string{"https://refeds.org/assurance"}))
+	require.Len(t, attributes, 1)
+	assert.Equal(t, queryAttributeValues(attributes[0]), []string{"https://refeds.org/assurance"})
 }
 
 func TestDefaultAttributeReleasePolicyEntityCategoryTrust(t *testing.T) {
@@ -403,8 +404,8 @@ func TestDefaultAttributeReleasePolicyEntityCategoryTrust(t *testing.T) {
 			expected = append(expected, "urn:oid:1.3.6.1.4.1.5923.1.1.1.9")
 		}
 
-		assert.Check(t, is.DeepEqual(sortedAttributeNames(releasedAttributes(t, req, attributeReleaseSession())), sorted(expected...)))
-		assert.Check(t, asked == req.ServiceProviderMetadata)
+		assert.Equal(t, sortedAttributeNames(releasedAttributes(t, req, attributeReleaseSession())), sorted(expected...))
+		assert.True(t, asked == req.ServiceProviderMetadata)
 	}
 }
 
@@ -431,7 +432,7 @@ func TestDefaultAttributeReleasePolicySubjectIDRequirementDecidesOverBundles(t *
 			}
 
 			req := signal(attributeReleaseRequest(t, test, ""), attributes...)
-			assert.Check(t, is.DeepEqual(sortedAttributeNames(releasedAttributes(t, req, attributeReleaseSession())), sorted(identifiers...)))
+			assert.Equal(t, sortedAttributeNames(releasedAttributes(t, req, attributeReleaseSession())), sorted(identifiers...))
 		})
 	}
 }
@@ -513,12 +514,12 @@ func TestDefaultAttributeReleasePolicyIsRequired(t *testing.T) {
 			}
 
 			// It is not enforced by default.
-			assert.Check(t, is.DeepEqual(sortedAttributeNames(releasedAttributes(t, setup(nil), attributeReleaseSession())), sorted(tc.released...)))
+			assert.Equal(t, sortedAttributeNames(releasedAttributes(t, setup(nil), attributeReleaseSession())), sorted(tc.released...))
 
 			req := setup(DefaultAttributeReleasePolicy{EnforceIsRequired: true})
 
 			if tc.missing == nil {
-				assert.Check(t, is.DeepEqual(sortedAttributeNames(releasedAttributes(t, req, attributeReleaseSession())), sorted(tc.released...)))
+				assert.Equal(t, sortedAttributeNames(releasedAttributes(t, req, attributeReleaseSession())), sorted(tc.released...))
 
 				return
 			}
@@ -527,12 +528,12 @@ func TestDefaultAttributeReleasePolicyIsRequired(t *testing.T) {
 			assertRequiredAttributeUnavailable(t, err)
 
 			for _, name := range tc.missing {
-				assert.Check(t, is.Contains(errorText(err), name))
+				assert.Contains(t, errorText(err), name)
 			}
 
 			// The error names attributes and holds no value of the principal.
 			for _, value := range []string{"alice", "Smith", "Users"} {
-				assert.Check(t, !strings.Contains(err.Error(), value))
+				assert.False(t, strings.Contains(err.Error(), value))
 			}
 		})
 	}
@@ -548,7 +549,7 @@ func TestDefaultAttributeReleasePolicyIsRequiredOfTheSelectedService(t *testing.
 	test.IDP.AttributeReleasePolicy = DefaultAttributeReleasePolicy{EnforceIsRequired: true}
 
 	req := attributeReleaseRequest(t, test, "1", service(0, nil, wanted), service(1, nil, requested(mailAttributeName, uriAttrNameFormat)))
-	assert.Check(t, is.DeepEqual(attributeNames(releasedAttributes(t, req, attributeReleaseSession())), []string{mailAttributeName}))
+	assert.Equal(t, attributeNames(releasedAttributes(t, req, attributeReleaseSession())), []string{mailAttributeName})
 }
 
 // A request that can't be given what the service provider requires is answered with a Responder status.
@@ -575,7 +576,7 @@ func TestServeSSOAnswersUnavailableRequiredAttributeWithResponder(t *testing.T) 
 
 			err := releaseError(t, req, attributeReleaseSession())
 			assertRequiredAttributeUnavailable(t, err)
-			assert.Check(t, req.Assertion == nil)
+			assert.Nil(t, req.Assertion)
 		})
 	}
 }
@@ -593,7 +594,7 @@ func TestDefaultAttributeReleasePolicyFederationFixture(t *testing.T) {
 
 	setup := func(policy AttributeReleasePolicy, pairwise bool) *IdpAuthnRequest {
 		metadata, err := ParseServiceProviderMetadata(golden.Get(t, "TestMetadataExtensions_sp.xml"))
-		assert.NilError(t, err)
+		require.NoError(t, err)
 
 		test := NewIdentityProviderTest(t, applyKey)
 		test.IDP.AttributeReleasePolicy = policy
@@ -612,12 +613,12 @@ func TestDefaultAttributeReleasePolicyFederationFixture(t *testing.T) {
 
 	t.Run("default policy", func(t *testing.T) {
 		attributes := releasedAttributes(t, setup(nil, true), bundleSession())
-		assert.Check(t, is.DeepEqual(sortedAttributeNames(attributes), sorted(eppn, PairwiseIDAttributeName)))
+		assert.Equal(t, sortedAttributeNames(attributes), sorted(eppn, PairwiseIDAttributeName))
 	})
 
 	t.Run("default policy without a pairwise-id", func(t *testing.T) {
 		attributes := releasedAttributes(t, setup(nil, false), bundleSession())
-		assert.Check(t, is.DeepEqual(attributeNames(attributes), []string{eppn}))
+		assert.Equal(t, attributeNames(attributes), []string{eppn})
 	})
 
 	t.Run("research and scholarship enabled", func(t *testing.T) {
@@ -628,8 +629,8 @@ func TestDefaultAttributeReleasePolicyFederationFixture(t *testing.T) {
 		}
 
 		attributes := releasedAttributes(t, setup(policy, true), bundleSession())
-		assert.Check(t, is.DeepEqual(sortedAttributeNames(attributes),
-			sorted(eppn, mailAttributeName, displayName, givenName, sn, scoped, PairwiseIDAttributeName)))
+		assert.Equal(t, sortedAttributeNames(attributes),
+			sorted(eppn, mailAttributeName, displayName, givenName, sn, scoped, PairwiseIDAttributeName))
 	})
 
 	t.Run("enforced without a pairwise-id", func(t *testing.T) {
@@ -643,7 +644,7 @@ func TestDefaultAttributeReleasePolicyFederationFixture(t *testing.T) {
 
 		err := releaseError(t, setup(policy, true), session)
 		assertRequiredAttributeUnavailable(t, err)
-		assert.Check(t, is.Contains(errorText(err), eppn))
+		assert.Contains(t, errorText(err), eppn)
 	})
 }
 
@@ -687,7 +688,7 @@ func TestServeAttributeQueryReleasesByMetadata(t *testing.T) {
 
 		response := f.queryAttributes(t, f.attributeQuery())
 		assertQueryStatus(t, response, StatusSuccess, "")
-		assert.Check(t, is.DeepEqual(queryNames(response), []string{PairwiseIDAttributeName}))
+		assert.Equal(t, queryNames(response), []string{PairwiseIDAttributeName})
 	})
 
 	// Single sign-on states the pairwise-id for "any", so a query that names the subject-id is not told it.
@@ -696,11 +697,11 @@ func TestServeAttributeQueryReleasesByMetadata(t *testing.T) {
 
 		response := f.queryAttributes(t, f.attributeQuery(named(SubjectIDAttributeName)...))
 		assertQueryStatus(t, response, StatusSuccess, "")
-		assert.Check(t, is.Len(response.Assertions, 0))
+		assert.Len(t, response.Assertions, 0)
 
 		response = f.queryAttributes(t, f.attributeQuery(named(PairwiseIDAttributeName)...))
 		assertQueryStatus(t, response, StatusSuccess, "")
-		assert.Check(t, is.DeepEqual(queryNames(response), []string{PairwiseIDAttributeName}))
+		assert.Equal(t, queryNames(response), []string{PairwiseIDAttributeName})
 	})
 
 	t.Run("entity category", func(t *testing.T) {
@@ -710,16 +711,16 @@ func TestServeAttributeQueryReleasesByMetadata(t *testing.T) {
 
 		response := f.queryAttributes(t, f.attributeQuery())
 		assertQueryStatus(t, response, StatusSuccess, "")
-		assert.Check(t, is.DeepEqual(queryNames(response), sorted(mailAttributeName, "urn:oid:1.3.6.1.4.1.5923.1.1.1.9")))
+		assert.Equal(t, queryNames(response), sorted(mailAttributeName, "urn:oid:1.3.6.1.4.1.5923.1.1.1.9"))
 
 		response = f.queryAttributes(t, f.attributeQuery(named("urn:oid:1.3.6.1.4.1.5923.1.1.1.9", uidAttributeName)...))
 		assertQueryStatus(t, response, StatusSuccess, "")
-		assert.Check(t, is.DeepEqual(queryNames(response), []string{"urn:oid:1.3.6.1.4.1.5923.1.1.1.9"}))
+		assert.Equal(t, queryNames(response), []string{"urn:oid:1.3.6.1.4.1.5923.1.1.1.9"})
 
 		// Not enabled, the category releases nothing.
 		f = fixture(nil, category, requested(mailAttributeName, uriAttrNameFormat))
 		response = f.queryAttributes(t, f.attributeQuery())
-		assert.Check(t, is.DeepEqual(queryNames(response), []string{mailAttributeName}))
+		assert.Equal(t, queryNames(response), []string{mailAttributeName})
 	})
 
 	t.Run("isRequired", func(t *testing.T) {
@@ -734,7 +735,7 @@ func TestServeAttributeQueryReleasesByMetadata(t *testing.T) {
 		f = fixture(nil, nil, wanted, requested(mailAttributeName, uriAttrNameFormat))
 		response := f.queryAttributes(t, f.attributeQuery(named(mailAttributeName)...))
 		assertQueryStatus(t, response, StatusSuccess, "")
-		assert.Check(t, is.DeepEqual(queryNames(response), []string{mailAttributeName}))
+		assert.Equal(t, queryNames(response), []string{mailAttributeName})
 
 		// A required attribute that is available is not missing from a query that doesn't name it.
 		wanted = requested(uidAttributeName, uriAttrNameFormat)
@@ -743,7 +744,7 @@ func TestServeAttributeQueryReleasesByMetadata(t *testing.T) {
 		f = fixture(DefaultAttributeReleasePolicy{EnforceIsRequired: true}, nil, wanted, requested(mailAttributeName, uriAttrNameFormat))
 		response = f.queryAttributes(t, f.attributeQuery(named(mailAttributeName)...))
 		assertQueryStatus(t, response, StatusSuccess, "")
-		assert.Check(t, is.DeepEqual(queryNames(response), []string{mailAttributeName}))
+		assert.Equal(t, queryNames(response), []string{mailAttributeName})
 	})
 
 	t.Run("enforced subject identifier requirement", func(t *testing.T) {
@@ -760,17 +761,17 @@ func TestSessionDisplayNameIsACandidate(t *testing.T) {
 	req := attributeReleaseRequest(t, test, "", service(0, nil, requested(DisplayNameAttributeName, uriAttrNameFormat)))
 
 	session := attributeReleaseSession()
-	assert.Check(t, is.Len(releasedAttributes(t, req, session), 0))
+	assert.Len(t, releasedAttributes(t, req, session), 0)
 
 	session.UserDisplayName = "Alice S."
 	attributes := releasedAttributes(t, req, session)
-	assert.Assert(t, is.Len(attributes, 1))
-	assert.Check(t, is.DeepEqual(attributes[0], Attribute{
+	require.Len(t, attributes, 1)
+	assert.Equal(t, attributes[0], Attribute{
 		FriendlyName: "displayName",
 		Name:         "urn:oid:2.16.840.1.113730.3.1.241",
 		NameFormat:   uriAttrNameFormat,
 		Values:       []AttributeValue{{Type: "xs:string", Value: "Alice S."}},
-	}))
+	})
 }
 
 const inheritedEntityAttributesMetadata = `<md:EntitiesDescriptor xmlns:md="urn:oasis:names:tc:SAML:2.0:metadata" xmlns:mdattr="urn:oasis:names:tc:SAML:metadata:attribute" xmlns:saml="urn:oasis:names:tc:SAML:2.0:assertion">
@@ -825,8 +826,8 @@ const inheritedEntityAttributesMetadata = `<md:EntitiesDescriptor xmlns:md="urn:
 // each EntityDescriptor within it.
 func TestParseServiceProvidersMetadataInheritsEntityAttributes(t *testing.T) {
 	entities, err := ParseServiceProvidersMetadata([]byte(inheritedEntityAttributesMetadata))
-	assert.NilError(t, err)
-	assert.Assert(t, is.Len(entities, 3))
+	require.NoError(t, err)
+	require.Len(t, entities, 3)
 
 	byID := map[string]*EntityDescriptor{}
 	for _, entity := range entities {
@@ -834,23 +835,23 @@ func TestParseServiceProvidersMetadataInheritsEntityAttributes(t *testing.T) {
 	}
 
 	plain := byID["https://plain.example.org/sp"]
-	assert.Check(t, is.DeepEqual(plain.EntityCategories(), []string{EntityCategoryAnonymous}))
-	assert.Check(t, is.Equal(plain.SubjectIDRequirement(), SubjectIDRequirementUnspecified))
+	assert.Equal(t, plain.EntityCategories(), []string{EntityCategoryAnonymous})
+	assert.Equal(t, plain.SubjectIDRequirement(), SubjectIDRequirementUnspecified)
 
 	// The entity's own attributes come first, then those of the groups around it, the nearest first.
 	nested := byID["https://nested.example.org/sp"]
-	assert.Check(t, is.DeepEqual(nested.EntityCategories(), []string{EntityCategoryResearchAndScholarship, EntityCategoryAnonymous}))
-	assert.Check(t, is.Equal(nested.SubjectIDRequirement(), SubjectIDRequirementPairwiseID))
+	assert.Equal(t, nested.EntityCategories(), []string{EntityCategoryResearchAndScholarship, EntityCategoryAnonymous})
+	assert.Equal(t, nested.SubjectIDRequirement(), SubjectIDRequirementPairwiseID)
 
 	// The group of another entity is not around this one.
 	conflict := byID["https://conflict.example.org/sp"]
-	assert.Check(t, is.Equal(conflict.SubjectIDRequirement(), SubjectIDRequirementSubjectID))
-	assert.Check(t, is.DeepEqual(conflict.EntityCategories(), []string{EntityCategoryAnonymous}))
+	assert.Equal(t, conflict.SubjectIDRequirement(), SubjectIDRequirementSubjectID)
+	assert.Equal(t, conflict.EntityCategories(), []string{EntityCategoryAnonymous})
 
 	// An EntityDescriptor that is not in a group has only its own.
 	single, err := ParseServiceProviderMetadata(golden.Get(t, "TestMetadataExtensions_sp.xml"))
-	assert.NilError(t, err)
-	assert.Check(t, is.Len(single.Extensions.EntityAttributes.Attributes, 3))
+	require.NoError(t, err)
+	assert.Len(t, single.Extensions.EntityAttributes.Attributes, 3)
 }
 
 func TestServiceProvidersOfDoesNotChangeTheGroup(t *testing.T) {
@@ -864,11 +865,11 @@ func TestServiceProvidersOfDoesNotChangeTheGroup(t *testing.T) {
 	}
 
 	entities := serviceProvidersOf(group, time.Time{}, nil, nil)
-	assert.Assert(t, is.Len(entities, 2))
-	assert.Check(t, is.DeepEqual(entities[0].EntityCategories(), []string{EntityCategoryPersonalized, EntityCategoryAnonymous}))
-	assert.Check(t, is.DeepEqual(entities[1].EntityCategories(), []string{EntityCategoryAnonymous}))
+	require.Len(t, entities, 2)
+	assert.Equal(t, entities[0].EntityCategories(), []string{EntityCategoryPersonalized, EntityCategoryAnonymous})
+	assert.Equal(t, entities[1].EntityCategories(), []string{EntityCategoryAnonymous})
 
-	assert.Check(t, is.Len(own.EntityAttributes.Attributes, 1))
-	assert.Check(t, is.Len(group.Extensions.EntityAttributes.Attributes, 1))
-	assert.Check(t, group.EntityDescriptors[1].Extensions == nil)
+	assert.Len(t, own.EntityAttributes.Attributes, 1)
+	assert.Len(t, group.Extensions.EntityAttributes.Attributes, 1)
+	assert.Nil(t, group.EntityDescriptors[1].Extensions)
 }

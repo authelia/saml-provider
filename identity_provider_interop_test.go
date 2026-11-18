@@ -13,8 +13,8 @@ import (
 	"time"
 
 	"github.com/beevik/etree"
-	"gotest.tools/assert"
-	is "gotest.tools/assert/cmp"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"authelia.com/provider/saml/internal/dsig"
 	"authelia.com/provider/saml/xmlenc"
@@ -160,17 +160,17 @@ func TestIDPACSSelection(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			req, err := interopValidate(interopIDP(t, tc.metadata), tc.attrs)
 			if tc.location == "" {
-				assert.Check(t, errors.Is(err, ErrNoResponseEndpoint), "%v", err)
-				assert.Check(t, is.Contains(ToStatusError(err).Debug(), "cannot find assertion consumer service"))
-				assert.Check(t, !req.Respondable(), "a request with no usable endpoint can't be answered with a status")
+				assert.True(t, errors.Is(err, ErrNoResponseEndpoint), "%v", err)
+				assert.Contains(t, ToStatusError(err).Debug(), "cannot find assertion consumer service")
+				assert.False(t, req.Respondable(), "a request with no usable endpoint can't be answered with a status")
 
 				return
 			}
 
-			assert.NilError(t, err)
-			assert.Check(t, is.Equal(tc.location, req.ACSEndpoint.Location))
-			assert.Check(t, is.Equal(post, req.ACSEndpoint.Binding))
-			assert.Check(t, req.SPSSODescriptor != nil)
+			require.NoError(t, err)
+			assert.Equal(t, tc.location, req.ACSEndpoint.Location)
+			assert.Equal(t, post, req.ACSEndpoint.Binding)
+			assert.NotNil(t, req.SPSSODescriptor)
 		})
 	}
 }
@@ -185,8 +185,8 @@ func TestIDPInitiatedUsesDefaultACS(t *testing.T) {
 
 	w := httptest.NewRecorder()
 	test.IDP.ServeIDPInitiated(w, httptest.NewRequest("GET", "https://idp.example.com/x", nil), interopEntityID, "")
-	assert.Check(t, is.Equal(http.StatusOK, w.Code))
-	assert.Check(t, strings.Contains(w.Body.String(), `action="https://sp/new"`), w.Body.String())
+	assert.Equal(t, http.StatusOK, w.Code)
+	assert.True(t, strings.Contains(w.Body.String(), `action="https://sp/new"`), w.Body.String())
 }
 
 func TestIDPAssertionDeclaresQNamePrefixes(t *testing.T) {
@@ -195,56 +195,56 @@ func TestIDPAssertionDeclaresQNamePrefixes(t *testing.T) {
 	test.IDP.AttributeReleasePolicy = releaseEveryAttribute
 	req := &IdpAuthnRequest{Now: TimeNow(), IDP: &test.IDP, RequestBuffer: hardeningRequest(`ID="id-1"`, TimeNow(), hardeningIssuer)}
 	req.HTTPRequest, _ = http.NewRequest("POST", "https://idp.example.com/saml/sso", nil)
-	assert.NilError(t, req.Validate())
-	assert.NilError(t, DefaultAssertionMaker{}.MakeAssertion(req, &Session{ID: "f00d", NameID: "alice", UserName: "alice"}))
-	assert.NilError(t, req.MakeAssertionEl())
+	require.NoError(t, req.Validate())
+	require.NoError(t, DefaultAssertionMaker{}.MakeAssertion(req, &Session{ID: "f00d", NameID: "alice", UserName: "alice"}))
+	require.NoError(t, req.MakeAssertionEl())
 
 	doc := etree.NewDocument()
 	doc.SetRoot(req.AssertionEl)
 	plaintext, err := xmlenc.Decrypt(test.SPKey, doc.FindElement("//EncryptedAssertion/EncryptedData"))
-	assert.NilError(t, err)
+	require.NoError(t, err)
 
 	// The plaintext stands alone once decrypted, so every prefix it uses must be declared in it.
 	decrypted := etree.NewDocument()
-	assert.NilError(t, decrypted.ReadFromBytes(plaintext))
-	assert.Check(t, is.Equal("http://www.w3.org/2001/XMLSchema", decrypted.Root().SelectAttrValue("xmlns:xs", "")), string(plaintext))
-	assert.Check(t, strings.Contains(string(plaintext), `xsi:type="xs:string"`), string(plaintext))
+	require.NoError(t, decrypted.ReadFromBytes(plaintext))
+	assert.Equal(t, "http://www.w3.org/2001/XMLSchema", decrypted.Root().SelectAttrValue("xmlns:xs", ""), string(plaintext))
+	assert.True(t, strings.Contains(string(plaintext), `xsi:type="xs:string"`), string(plaintext))
 
 	// Exclusive canonicalization drops the declaration, so the signature must still verify.
 	ctx := dsig.NewDefaultValidationContext(&dsig.MemoryX509CertificateStore{Roots: []*x509.Certificate{test.Certificate}})
 	ctx.Clock = dsig.NewFakeClockAt(test.Certificate.NotBefore)
 	_, err = ctx.Validate(decrypted.Root())
-	assert.Check(t, err)
+	assert.NoError(t, err)
 }
 
 func TestAttributeValueOmitsEmptyType(t *testing.T) {
-	assert.Check(t, (&AttributeValue{Value: "a"}).Element().SelectAttr("xsi:type") == nil)
-	assert.Check(t, is.Equal("xs:string", (&AttributeValue{Type: "xs:string", Value: "a"}).Element().SelectAttrValue("xsi:type", "")))
+	assert.True(t, (&AttributeValue{Value: "a"}).Element().SelectAttr("xsi:type") == nil)
+	assert.Equal(t, "xs:string", (&AttributeValue{Type: "xs:string", Value: "a"}).Element().SelectAttrValue("xsi:type", ""))
 }
 
 func TestIDPOmitsEmptyAttributeStatement(t *testing.T) {
 	test := NewIdentityProviderTest(t, applyKey)
 	req, err := hardeningValidate(test, hardeningRequest(`ID="id-1"`, TimeNow(), hardeningIssuer))
-	assert.NilError(t, err)
+	require.NoError(t, err)
 
-	assert.NilError(t, DefaultAssertionMaker{}.MakeAssertion(req, &Session{ID: "f00d", NameID: "alice"}))
-	assert.Check(t, is.Len(req.Assertion.AttributeStatements, 0))
+	require.NoError(t, DefaultAssertionMaker{}.MakeAssertion(req, &Session{ID: "f00d", NameID: "alice"}))
+	assert.Len(t, req.Assertion.AttributeStatements, 0)
 
 	// The service provider requests no attributes, so none are released.
-	assert.NilError(t, DefaultAssertionMaker{}.MakeAssertion(req, &Session{ID: "f00d", NameID: "alice", UserName: "alice"}))
-	assert.Check(t, is.Len(req.Assertion.AttributeStatements, 0))
+	require.NoError(t, DefaultAssertionMaker{}.MakeAssertion(req, &Session{ID: "f00d", NameID: "alice", UserName: "alice"}))
+	assert.Len(t, req.Assertion.AttributeStatements, 0)
 
 	test.IDP.AttributeReleasePolicy = releaseEveryAttribute
 
-	assert.NilError(t, DefaultAssertionMaker{}.MakeAssertion(req, &Session{ID: "f00d", NameID: "alice", UserName: "alice"}))
-	assert.Check(t, is.Len(req.Assertion.AttributeStatements, 1))
+	require.NoError(t, DefaultAssertionMaker{}.MakeAssertion(req, &Session{ID: "f00d", NameID: "alice", UserName: "alice"}))
+	assert.Len(t, req.Assertion.AttributeStatements, 1)
 
 	test.IDP.AttributeReleasePolicy = attributeReleasePolicyFunc(func(AttributeReleaseRequest, *Session, []Attribute) ([]Attribute, error) {
 		return []Attribute{}, nil
 	})
 
-	assert.NilError(t, DefaultAssertionMaker{}.MakeAssertion(req, &Session{ID: "f00d", NameID: "alice", UserName: "alice"}))
-	assert.Check(t, is.Len(req.Assertion.AttributeStatements, 0))
+	require.NoError(t, DefaultAssertionMaker{}.MakeAssertion(req, &Session{ID: "f00d", NameID: "alice", UserName: "alice"}))
+	assert.Len(t, req.Assertion.AttributeStatements, 0)
 }
 
 func TestCacheDurationPreservesLexicalForm(t *testing.T) {
@@ -255,15 +255,15 @@ func TestCacheDurationPreservesLexicalForm(t *testing.T) {
 			`</EntityDescriptor>`
 
 		metadata := EntityDescriptor{}
-		assert.NilError(t, xml.Unmarshal([]byte(doc), &metadata))
-		assert.Assert(t, is.Len(metadata.SPSSODescriptors, 1))
-		assert.Check(t, is.Equal(XSDDuration(value), metadata.SPSSODescriptors[0].CacheDuration))
-		assert.Assert(t, metadata.AffiliationDescriptor != nil && metadata.AffiliationDescriptor.CacheDuration != nil)
-		assert.Check(t, is.Equal(XSDDuration(value), *metadata.AffiliationDescriptor.CacheDuration))
+		require.NoError(t, xml.Unmarshal([]byte(doc), &metadata))
+		require.Len(t, metadata.SPSSODescriptors, 1)
+		assert.Equal(t, XSDDuration(value), metadata.SPSSODescriptors[0].CacheDuration)
+		require.True(t, metadata.AffiliationDescriptor != nil && metadata.AffiliationDescriptor.CacheDuration != nil)
+		assert.Equal(t, XSDDuration(value), *metadata.AffiliationDescriptor.CacheDuration)
 
 		buf, err := xml.Marshal(metadata)
-		assert.NilError(t, err)
-		assert.Check(t, is.Equal(2, strings.Count(string(buf), `cacheDuration="`+value+`"`)), string(buf))
+		require.NoError(t, err)
+		assert.Equal(t, 2, strings.Count(string(buf), `cacheDuration="`+value+`"`), string(buf))
 	}
 }
 
@@ -274,55 +274,55 @@ func TestCacheDurationAbsentIsOmitted(t *testing.T) {
 		`</EntityDescriptor>`
 
 	metadata := EntityDescriptor{}
-	assert.NilError(t, xml.Unmarshal([]byte(doc), &metadata))
-	assert.Check(t, metadata.AffiliationDescriptor.CacheDuration == nil)
+	require.NoError(t, xml.Unmarshal([]byte(doc), &metadata))
+	assert.Nil(t, metadata.AffiliationDescriptor.CacheDuration)
 
 	buf, err := xml.Marshal(metadata)
-	assert.NilError(t, err)
-	assert.Check(t, !strings.Contains(string(buf), `cacheDuration`), string(buf))
+	require.NoError(t, err)
+	assert.False(t, strings.Contains(string(buf), `cacheDuration`), string(buf))
 
 	empty := XSDDuration("")
 	buf, err = xml.Marshal(AffiliationDescriptor{CacheDuration: &empty})
-	assert.NilError(t, err)
-	assert.Check(t, !strings.Contains(string(buf), `cacheDuration`), string(buf))
+	require.NoError(t, err)
+	assert.False(t, strings.Contains(string(buf), `cacheDuration`), string(buf))
 }
 
 func TestCacheDurationRejectsInvalidValue(t *testing.T) {
 	for _, value := range []string{"", "1h", "P", "PT1H "} {
 		doc := `<AffiliationDescriptor xmlns="urn:oasis:names:tc:SAML:2.0:metadata" affiliationOwnerID="https://sp" cacheDuration="` + value + `"/>`
-		assert.Check(t, xml.Unmarshal([]byte(doc), &AffiliationDescriptor{}) != nil, value)
+		assert.True(t, xml.Unmarshal([]byte(doc), &AffiliationDescriptor{}) != nil, value)
 	}
 
 	var duration XSDDuration
-	assert.Check(t, json.Unmarshal([]byte(`"1h"`), &duration) != nil)
-	assert.Check(t, json.Unmarshal([]byte(`true`), &duration) != nil)
+	assert.True(t, json.Unmarshal([]byte(`"1h"`), &duration) != nil)
+	assert.True(t, json.Unmarshal([]byte(`true`), &duration) != nil)
 }
 
 func TestCacheDurationJSON(t *testing.T) {
 	// Stored services are JSON, written by earlier versions when these fields were a time.Duration.
 	metadata := EntityDescriptor{}
-	assert.NilError(t, json.Unmarshal([]byte(`{"SPSSODescriptors":[{"CacheDuration":3600000000000}],"AffiliationDescriptor":{"CacheDuration":7200000000000}}`), &metadata))
-	assert.Check(t, is.Equal(XSDDuration("PT1H"), metadata.SPSSODescriptors[0].CacheDuration))
-	assert.Check(t, is.Equal(XSDDuration("PT2H"), *metadata.AffiliationDescriptor.CacheDuration))
+	require.NoError(t, json.Unmarshal([]byte(`{"SPSSODescriptors":[{"CacheDuration":3600000000000}],"AffiliationDescriptor":{"CacheDuration":7200000000000}}`), &metadata))
+	assert.Equal(t, XSDDuration("PT1H"), metadata.SPSSODescriptors[0].CacheDuration)
+	assert.Equal(t, XSDDuration("PT2H"), *metadata.AffiliationDescriptor.CacheDuration)
 
 	legacy := EntityDescriptor{}
-	assert.NilError(t, json.Unmarshal([]byte(`{"SPSSODescriptors":[{"CacheDuration":0}],"AffiliationDescriptor":{"CacheDuration":0}}`), &legacy))
+	require.NoError(t, json.Unmarshal([]byte(`{"SPSSODescriptors":[{"CacheDuration":0}],"AffiliationDescriptor":{"CacheDuration":0}}`), &legacy))
 	buf, err := xml.Marshal(legacy)
-	assert.NilError(t, err)
-	assert.Check(t, !strings.Contains(string(buf), `cacheDuration`), "an unset legacy duration must stay absent: %s", buf)
+	require.NoError(t, err)
+	assert.False(t, strings.Contains(string(buf), `cacheDuration`), "an unset legacy duration must stay absent: %s", buf)
 
 	month := XSDDuration("P1M")
 	buf, err = json.Marshal(AffiliationDescriptor{CacheDuration: &month})
-	assert.NilError(t, err)
+	require.NoError(t, err)
 
 	decoded := AffiliationDescriptor{}
-	assert.NilError(t, json.Unmarshal(buf, &decoded))
-	assert.Check(t, is.Equal(month, *decoded.CacheDuration))
+	require.NoError(t, json.Unmarshal(buf, &decoded))
+	assert.Equal(t, month, *decoded.CacheDuration)
 
 	buf, err = json.Marshal(AffiliationDescriptor{})
-	assert.NilError(t, err)
+	require.NoError(t, err)
 
 	decoded = AffiliationDescriptor{}
-	assert.NilError(t, json.Unmarshal(buf, &decoded))
-	assert.Check(t, decoded.CacheDuration == nil)
+	require.NoError(t, json.Unmarshal(buf, &decoded))
+	assert.Nil(t, decoded.CacheDuration)
 }

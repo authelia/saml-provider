@@ -10,8 +10,8 @@ import (
 	"testing"
 
 	"github.com/beevik/etree"
-	"gotest.tools/assert"
-	is "gotest.tools/assert/cmp"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 // manageNameIDSP is a service provider with a ManageNameIDService on the SOAP binding, at an httptest server.
@@ -167,60 +167,60 @@ func sendManageNameID(test *IdentityProviderTest, change NameIDChange) error {
 func TestSendManageNameIDRequestNewID(t *testing.T) {
 	test, sp, server := sendManageNameIDFixture(t)
 
-	assert.NilError(t, sendManageNameID(test, NameIDChange{NameID: *testNameID(test, &test.SP), NewID: "p-alice-2"}))
+	require.NoError(t, sendManageNameID(test, NameIDChange{NameID: *testNameID(test, &test.SP), NewID: "p-alice-2"}))
 
-	assert.Assert(t, is.Len(sp.requests, 1))
+	require.Len(t, sp.requests, 1)
 
 	request := sp.requests[0]
 
 	// SAMLProfiles §4.5.4.1.
-	assert.Check(t, is.Equal(request.Issuer.Value, test.IDP.MetadataURL.String()))
-	assert.Check(t, is.Equal(request.Issuer.Format, string(EntityNameIDFormat)))
-	assert.Check(t, is.Equal(request.Version, "2.0"))
-	assert.Check(t, is.Equal(request.Destination, server.URL+"/saml2/mni"))
-	assert.Check(t, is.DeepEqual(*request.NameID, *testNameID(test, &test.SP)))
-	assert.Check(t, is.Equal(request.NewID, "p-alice-2"))
-	assert.Check(t, !request.Terminate)
+	assert.Equal(t, request.Issuer.Value, test.IDP.MetadataURL.String())
+	assert.Equal(t, request.Issuer.Format, string(EntityNameIDFormat))
+	assert.Equal(t, request.Version, "2.0")
+	assert.Equal(t, request.Destination, server.URL+"/saml2/mni")
+	assert.Equal(t, *request.NameID, *testNameID(test, &test.SP))
+	assert.Equal(t, request.NewID, "p-alice-2")
+	assert.False(t, request.Terminate)
 
 	// SAMLCore §3.6.1: the identifier, and then one of the three.
-	assert.Check(t, is.DeepEqual(childTags(sp.elements[0]), []string{"Issuer", "NameID", "NewID"}))
+	assert.Equal(t, childTags(sp.elements[0]), []string{"Issuer", "NameID", "NewID"})
 }
 
 func TestSendManageNameIDRequestTerminate(t *testing.T) {
 	test, sp, _ := sendManageNameIDFixture(t)
 
-	assert.NilError(t, sendManageNameID(test, NameIDChange{NameID: *testNameID(test, &test.SP), Terminate: true}))
+	require.NoError(t, sendManageNameID(test, NameIDChange{NameID: *testNameID(test, &test.SP), Terminate: true}))
 
-	assert.Assert(t, is.Len(sp.requests, 1))
-	assert.Check(t, sp.requests[0].Terminate)
-	assert.Check(t, sp.elements[0].FindElement("./Terminate") != nil)
-	assert.Check(t, sp.elements[0].FindElement("./NewID") == nil)
+	require.Len(t, sp.requests, 1)
+	assert.True(t, sp.requests[0].Terminate)
+	assert.NotNil(t, sp.elements[0].FindElement("./Terminate"))
+	assert.Nil(t, sp.elements[0].FindElement("./NewID"))
 }
 
 // SAMLProfiles §4.5.5: the identifiers are encrypted to the key of the service provider, which decrypts them.
 func TestSendManageNameIDRequestEncrypted(t *testing.T) {
 	test, sp, _ := sendManageNameIDFixture(t)
 
-	assert.NilError(t, sendManageNameID(test, NameIDChange{NameID: *testNameID(test, &test.SP), NewID: "p-alice-2", Encrypt: true}))
+	require.NoError(t, sendManageNameID(test, NameIDChange{NameID: *testNameID(test, &test.SP), NewID: "p-alice-2", Encrypt: true}))
 
-	assert.Assert(t, is.Len(sp.requests, 1))
+	require.Len(t, sp.requests, 1)
 
 	text := elementToString(sp.elements[0])
-	assert.Check(t, !strings.Contains(text, "p-alice"))
-	assert.Check(t, sp.elements[0].FindElement("./NameID") == nil)
-	assert.Check(t, sp.elements[0].FindElement("./NewID") == nil)
+	assert.False(t, strings.Contains(text, "p-alice"))
+	assert.Nil(t, sp.elements[0].FindElement("./NameID"))
+	assert.Nil(t, sp.elements[0].FindElement("./NewID"))
 
 	newEncryptedID := sp.elements[0].FindElement("./NewEncryptedID")
-	assert.Assert(t, newEncryptedID != nil)
-	assert.Check(t, is.Equal(newEncryptedID.NamespaceURI(), samlProtocolNS))
+	require.NotNil(t, newEncryptedID)
+	assert.Equal(t, newEncryptedID.NamespaceURI(), samlProtocolNS)
 
-	assert.Check(t, is.DeepEqual(*sp.nameIDs[0], *testNameID(test, &test.SP)))
-	assert.Check(t, is.Equal(sp.newIDs[0], "p-alice-2"))
+	assert.Equal(t, *sp.nameIDs[0], *testNameID(test, &test.SP))
+	assert.Equal(t, sp.newIDs[0], "p-alice-2")
 
 	// A Terminate has no new identifier to encrypt.
-	assert.NilError(t, sendManageNameID(test, NameIDChange{NameID: *testNameID(test, &test.SP), Terminate: true, Encrypt: true}))
-	assert.Check(t, sp.elements[1].FindElement("./EncryptedID") != nil)
-	assert.Check(t, sp.elements[1].FindElement("./Terminate") != nil)
+	require.NoError(t, sendManageNameID(test, NameIDChange{NameID: *testNameID(test, &test.SP), Terminate: true, Encrypt: true}))
+	assert.NotNil(t, sp.elements[1].FindElement("./EncryptedID"))
+	assert.NotNil(t, sp.elements[1].FindElement("./Terminate"))
 }
 
 // An identifier that must be encrypted and can't be is not sent.
@@ -229,8 +229,8 @@ func TestSendManageNameIDRequestCannotEncrypt(t *testing.T) {
 	test.IDP.EncryptionKeyEnforcer = nil
 
 	err := sendManageNameID(test, NameIDChange{NameID: *testNameID(test, &test.SP), NewID: "p-alice-2", Encrypt: true})
-	assert.Check(t, is.ErrorContains(err, "cannot encrypt the name identifier management request"))
-	assert.Check(t, is.Len(sp.requests, 0))
+	assert.ErrorContains(t, err, "cannot encrypt the name identifier management request")
+	assert.Len(t, sp.requests, 0)
 }
 
 func TestSendManageNameIDRequestInvalidChange(t *testing.T) {
@@ -250,14 +250,14 @@ func TestSendManageNameIDRequestInvalidChange(t *testing.T) {
 		"transient (E12)": {NameIDChange{NameID: transient, Terminate: true}, "transient"},
 	} {
 		t.Run(name, func(t *testing.T) {
-			assert.Check(t, is.ErrorContains(sendManageNameID(test, tc.change), tc.err))
+			assert.ErrorContains(t, sendManageNameID(test, tc.change), tc.err)
 		})
 	}
 
-	assert.Check(t, is.ErrorContains(
+	assert.ErrorContains(t,
 		test.IDP.SendManageNameIDRequest(httptest.NewRequest(http.MethodPost, "/admin", nil), "https://unknown.example.com", NameIDChange{NameID: nameID, Terminate: true}),
-		"cannot find service provider"))
-	assert.Check(t, is.Len(sp.requests, 0))
+		"cannot find service provider")
+	assert.Len(t, sp.requests, 0)
 }
 
 func TestSendManageNameIDRequestStatus(t *testing.T) {
@@ -275,16 +275,16 @@ func TestSendManageNameIDRequestStatus(t *testing.T) {
 
 	var statusErr *StatusError
 
-	assert.Assert(t, errors.As(err, &statusErr), "%v", err)
-	assert.Check(t, errors.Is(err, ErrReceivedStatus))
-	assert.Check(t, is.Equal(statusErr.TopLevelField, StatusRequester))
-	assert.Check(t, is.Equal(statusErr.SecondLevelField, StatusUnknownPrincipal))
+	require.True(t, errors.As(err, &statusErr), "%v", err)
+	assert.True(t, errors.Is(err, ErrReceivedStatus))
+	assert.Equal(t, statusErr.TopLevelField, StatusRequester)
+	assert.Equal(t, statusErr.SecondLevelField, StatusUnknownPrincipal)
 
 	// What the service provider said is text of another party, so it is only in the debug message.
-	assert.Check(t, is.Equal(statusErr.StatusMessageField, ErrReceivedStatus.StatusMessageField))
-	assert.Check(t, is.Len(statusErr.StatusDetailField, 0))
-	assert.Check(t, is.Contains(statusErr.Debug(), "who is this\nFAKE LOG LINE"))
-	assert.Check(t, !strings.ContainsAny(fmt.Sprintf("%+v", err), "\n"))
+	assert.Equal(t, statusErr.StatusMessageField, ErrReceivedStatus.StatusMessageField)
+	assert.Len(t, statusErr.StatusDetailField, 0)
+	assert.Contains(t, statusErr.Debug(), "who is this\nFAKE LOG LINE")
+	assert.False(t, strings.ContainsAny(fmt.Sprintf("%+v", err), "\n"))
 }
 
 // The response is only believed if it is an answer of the service provider to the request.
@@ -364,9 +364,9 @@ func TestSendManageNameIDRequestInvalidResponse(t *testing.T) {
 			sp.respond = tc.respond
 
 			err := sendManageNameID(test, NameIDChange{NameID: *testNameID(test, &test.SP), Terminate: true})
-			assert.Check(t, is.ErrorContains(err, tc.err))
+			assert.ErrorContains(t, err, tc.err)
 
-			assert.Check(t, !errors.Is(err, ErrReceivedStatus))
+			assert.False(t, errors.Is(err, ErrReceivedStatus))
 		})
 	}
 }
@@ -385,7 +385,7 @@ func TestSendManageNameIDRequestBadlySignedResponse(t *testing.T) {
 	}
 
 	err := sendManageNameID(test, NameIDChange{NameID: *testNameID(test, &test.SP), Terminate: true})
-	assert.Check(t, is.ErrorContains(err, "invalid response signature"))
+	assert.ErrorContains(t, err, "invalid response signature")
 }
 
 // SAMLProfiles §4.5.3.2: the responder authenticates itself by signing the response or by the binding, which is
@@ -395,7 +395,7 @@ func TestSendManageNameIDRequestUnsignedResponse(t *testing.T) {
 		test, sp, _ := sendManageNameIDFixture(t)
 		sp.unsigned = true
 
-		assert.NilError(t, sendManageNameID(test, NameIDChange{NameID: *testNameID(test, &test.SP), Terminate: true}))
+		require.NoError(t, sendManageNameID(test, NameIDChange{NameID: *testNameID(test, &test.SP), Terminate: true}))
 	})
 
 	t.Run("over http", func(t *testing.T) {
@@ -408,11 +408,11 @@ func TestSendManageNameIDRequestUnsignedResponse(t *testing.T) {
 		sp.serve(t, test, server)
 
 		err := sendManageNameID(test, NameIDChange{NameID: *testNameID(test, &test.SP), Terminate: true})
-		assert.Check(t, is.ErrorContains(err, "response is not signed"))
+		assert.ErrorContains(t, err, "response is not signed")
 
 		sp.unsigned = false
 
-		assert.NilError(t, sendManageNameID(test, NameIDChange{NameID: *testNameID(test, &test.SP), Terminate: true}))
+		require.NoError(t, sendManageNameID(test, NameIDChange{NameID: *testNameID(test, &test.SP), Terminate: true}))
 	})
 }
 
@@ -427,15 +427,15 @@ func TestSendManageNameIDRequestEndpoint(t *testing.T) {
 		sp.serve(t, test, server)
 
 		err := sendManageNameID(test, NameIDChange{NameID: *testNameID(test, &test.SP), Terminate: true})
-		assert.Check(t, errors.Is(err, ErrInsecureEndpoint), "%v", err)
-		assert.Check(t, is.Len(sp.requests, 0))
+		assert.True(t, errors.Is(err, ErrInsecureEndpoint), "%v", err)
+		assert.Len(t, sp.requests, 0)
 	})
 
 	t.Run("no SOAP service", func(t *testing.T) {
 		test, _ := manageNameIDTestIDP(t)
 
 		err := sendManageNameID(test, NameIDChange{NameID: *testNameID(test, &test.SP), Terminate: true})
-		assert.Check(t, is.ErrorContains(err, "no name identifier management service on the SOAP binding"))
+		assert.ErrorContains(t, err, "no name identifier management service on the SOAP binding")
 	})
 }
 
@@ -453,7 +453,7 @@ func TestSendManageNameIDRequestUsesSignedResponse(t *testing.T) {
 		doc.SetRoot(signTestElement(t, &test.SP, response.Element()))
 
 		body, err := doc.WriteToBytes()
-		assert.NilError(t, err)
+		require.NoError(t, err)
 
 		end := strings.IndexByte(string(body), '>')
 		smuggled := string(body[:end]) + ` xmlns:InResponseTo="` + id + `"` + string(body[end:])
@@ -465,5 +465,5 @@ func TestSendManageNameIDRequestUsesSignedResponse(t *testing.T) {
 	}
 
 	err := sendManageNameID(test, NameIDChange{NameID: *testNameID(test, &test.SP), Terminate: true})
-	assert.Check(t, is.ErrorContains(err, "not to the request"))
+	assert.ErrorContains(t, err, "not to the request")
 }

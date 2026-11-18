@@ -14,8 +14,8 @@ import (
 	"time"
 
 	"github.com/beevik/etree"
-	"gotest.tools/assert"
-	is "gotest.tools/assert/cmp"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"authelia.com/provider/saml/internal/dsig"
 	"authelia.com/provider/saml/xmlenc"
@@ -95,12 +95,12 @@ func issuanceSSO(t *testing.T, test *IdentityProviderTest) (*etree.Element, []by
 	body := signedPostBody(t, &test.SP, nil)
 
 	w := serveSSO(test, replayPostRequest(body, nil))
-	assert.Assert(t, is.Equal(w.Code, http.StatusOK), "body: %s", w.Body.String())
+	require.Equal(t, w.Code, http.StatusOK, "body: %s", w.Body.String())
 
 	doc, _ := postedResponse(t, w.Body.String())
 
 	buf, err := doc.WriteToBytes()
-	assert.NilError(t, err)
+	require.NoError(t, err)
 
 	return doc.Root(), buf, authnRequestID(t, body)
 }
@@ -111,24 +111,24 @@ func issuanceSignatures(t *testing.T, sp *ServiceProvider, responseEl *etree.Ele
 	t.Helper()
 
 	response, err := findChild(responseEl, "http://www.w3.org/2000/09/xmldsig#", "Signature")
-	assert.NilError(t, err)
+	require.NoError(t, err)
 
 	assertionEl, err := findChild(responseEl, samlAssertionNS, "Assertion")
-	assert.NilError(t, err)
+	require.NoError(t, err)
 
 	if assertionEl == nil {
 		encryptedEl, err := findChild(responseEl, samlAssertionNS, "EncryptedAssertion")
-		assert.NilError(t, err)
-		assert.Assert(t, encryptedEl != nil, "the response has no assertion")
+		require.NoError(t, err)
+		require.True(t, encryptedEl != nil, "the response has no assertion")
 
 		encrypted = true
 
 		assertionEl, err = sp.decryptElement(encryptedEl)
-		assert.NilError(t, err)
+		require.NoError(t, err)
 	}
 
 	assertion, err = findChild(assertionEl, "http://www.w3.org/2000/09/xmldsig#", "Signature")
-	assert.NilError(t, err)
+	require.NoError(t, err)
 
 	return response, assertion, encrypted
 }
@@ -137,11 +137,11 @@ func issuanceSignatures(t *testing.T, sp *ServiceProvider, responseEl *etree.Ele
 func issuanceAlgorithms(t *testing.T, signature *etree.Element) (signatureMethod, digestMethod string) {
 	t.Helper()
 
-	assert.Assert(t, signature != nil, "no signature")
+	require.True(t, signature != nil, "no signature")
 
 	methodEl := signature.FindElement("./SignedInfo/SignatureMethod")
 	digestEl := signature.FindElement("./SignedInfo/Reference/DigestMethod")
-	assert.Assert(t, methodEl != nil && digestEl != nil)
+	require.True(t, methodEl != nil && digestEl != nil)
 
 	return methodEl.SelectAttrValue("Algorithm", ""), digestEl.SelectAttrValue("Algorithm", "")
 }
@@ -155,7 +155,7 @@ func issuanceAccept(t *testing.T, sp *ServiceProvider, responseXML []byte, possi
 		t.Fatalf("the service provider refused the response: %s", invalid.PrivateErr)
 	}
 
-	assert.NilError(t, err)
+	require.NoError(t, err)
 
 	return assertion
 }
@@ -164,28 +164,28 @@ func TestIssuanceDefaults(t *testing.T) {
 	test := NewIdentityProviderTest(t, applyKey)
 
 	req, err := hardeningValidate(test, hardeningRequest(`ID="id-1"`, TimeNow(), hardeningIssuer))
-	assert.NilError(t, err)
+	require.NoError(t, err)
 
 	issuance, err := req.Issuance(nil)
-	assert.NilError(t, err)
-	assert.Check(t, is.DeepEqual(issuance, Issuance{
+	require.NoError(t, err)
+	assert.Equal(t, issuance, Issuance{
 		Sign:              SignResponseAndAssertion,
 		SignatureMethod:   dsig.RSASHA256SignatureMethod,
 		AssertionLifetime: MaxIssueDelay,
-	}))
+	})
 
 	test.IDP.SignatureMethod = dsig.RSASHA512SignatureMethod
 	test.IDP.AssertionLifetime = time.Minute
 	test.IDP.IncludeSessionNotOnOrAfter = true
 
 	issuance, err = req.Issuance(nil)
-	assert.NilError(t, err)
-	assert.Check(t, is.DeepEqual(issuance, Issuance{
+	require.NoError(t, err)
+	assert.Equal(t, issuance, Issuance{
 		Sign:                       SignResponseAndAssertion,
 		SignatureMethod:            dsig.RSASHA512SignatureMethod,
 		AssertionLifetime:          time.Minute,
 		IncludeSessionNotOnOrAfter: true,
-	}))
+	})
 }
 
 func TestIssuanceSigningShapes(t *testing.T) {
@@ -217,12 +217,12 @@ func TestIssuanceSigningShapes(t *testing.T) {
 				responseEl, responseXML, id := issuanceSSO(t, test)
 
 				responseSignature, assertionSignature, wasEncrypted := issuanceSignatures(t, &test.SP, responseEl)
-				assert.Check(t, is.Equal(responseSignature != nil, tc.response), "response signature")
-				assert.Check(t, is.Equal(assertionSignature != nil, tc.assertion), "assertion signature")
-				assert.Check(t, is.Equal(wasEncrypted, encrypted))
+				assert.Equal(t, responseSignature != nil, tc.response, "response signature")
+				assert.Equal(t, assertionSignature != nil, tc.assertion, "assertion signature")
+				assert.Equal(t, wasEncrypted, encrypted)
 
 				assertion := issuanceAccept(t, &test.SP, responseXML, []string{id})
-				assert.Check(t, is.Equal(assertion.Issuer.Value, test.IDP.Metadata().EntityID))
+				assert.Equal(t, assertion.Issuer.Value, test.IDP.Metadata().EntityID)
 			})
 		}
 	}
@@ -238,8 +238,8 @@ func TestIssuanceWithoutPolicySignsBoth(t *testing.T) {
 
 	for _, signature := range []*etree.Element{responseSignature, assertionSignature} {
 		signatureMethod, digestMethod := issuanceAlgorithms(t, signature)
-		assert.Check(t, is.Equal(signatureMethod, dsig.RSASHA256SignatureMethod))
-		assert.Check(t, is.Equal(digestMethod, issuanceSHA256Digest))
+		assert.Equal(t, signatureMethod, dsig.RSASHA256SignatureMethod)
+		assert.Equal(t, digestMethod, issuanceSHA256Digest)
 	}
 
 	issuanceAccept(t, &test.SP, responseXML, []string{id})
@@ -265,8 +265,8 @@ func TestIssuanceHonoursWantAssertionsSigned(t *testing.T) {
 			responseEl, responseXML, id := issuanceSSO(t, test)
 
 			responseSignature, assertionSignature, _ := issuanceSignatures(t, &test.SP, responseEl)
-			assert.Check(t, responseSignature != nil)
-			assert.Check(t, is.Equal(assertionSignature != nil, tc.assertion))
+			assert.NotNil(t, responseSignature)
+			assert.Equal(t, assertionSignature != nil, tc.assertion)
 
 			issuanceAccept(t, &test.SP, responseXML, []string{id})
 		})
@@ -287,12 +287,12 @@ func TestIssuanceErrorResponseIsAlwaysSigned(t *testing.T) {
 		doc, _ := postedResponse(t, w.Body.String())
 
 		signature, err := findChild(doc.Root(), "http://www.w3.org/2000/09/xmldsig#", "Signature")
-		assert.NilError(t, err)
+		require.NoError(t, err)
 
 		signatureMethod, _ := issuanceAlgorithms(t, signature)
-		assert.Check(t, is.Equal(signatureMethod, dsig.RSASHA1SignatureMethod))
+		assert.Equal(t, signatureMethod, dsig.RSASHA1SignatureMethod)
 
-		assert.NilError(t, test.SP.validateSignature(doc.Root()))
+		require.NoError(t, test.SP.validateSignature(doc.Root()))
 	}
 }
 
@@ -321,8 +321,8 @@ func TestIssuanceSignatureMethod(t *testing.T) {
 
 			for _, signature := range []*etree.Element{responseSignature, assertionSignature} {
 				signatureMethod, digestMethod := issuanceAlgorithms(t, signature)
-				assert.Check(t, is.Equal(signatureMethod, tc.signatureMethod))
-				assert.Check(t, is.Equal(digestMethod, tc.digests))
+				assert.Equal(t, signatureMethod, tc.signatureMethod)
+				assert.Equal(t, digestMethod, tc.digests)
 			}
 
 			issuanceAccept(t, &test.SP, responseXML, []string{id})
@@ -342,7 +342,7 @@ func TestIssuanceSignatureMethodIsForOneServiceProvider(t *testing.T) {
 
 	for _, signature := range []*etree.Element{responseSignature, assertionSignature} {
 		signatureMethod, _ := issuanceAlgorithms(t, signature)
-		assert.Check(t, is.Equal(signatureMethod, dsig.RSASHA256SignatureMethod))
+		assert.Equal(t, signatureMethod, dsig.RSASHA256SignatureMethod)
 	}
 }
 
@@ -363,9 +363,9 @@ func TestIssuanceRefusesWhatCannotBeDone(t *testing.T) {
 			test.IDP.Observer = logObserver(logs)
 
 			w := serveSSO(test, replayPostRequest(signedPostBody(t, &test.SP, nil), nil))
-			assert.Check(t, is.Equal(w.Code, http.StatusInternalServerError))
-			assert.Check(t, !strings.Contains(w.Body.String(), "SAMLResponse"))
-			assert.Check(t, is.Contains(logs.String(), "IssuancePolicy"))
+			assert.Equal(t, w.Code, http.StatusInternalServerError)
+			assert.False(t, strings.Contains(w.Body.String(), "SAMLResponse"))
+			assert.Contains(t, logs.String(), "IssuancePolicy")
 		})
 	}
 }
@@ -387,26 +387,26 @@ func TestIssuancePolicyReceivesTheRequest(t *testing.T) {
 	responseEl, responseXML, id := issuanceSSO(t, test)
 
 	responseSignature, assertionSignature, _ := issuanceSignatures(t, &test.SP, responseEl)
-	assert.Check(t, responseSignature == nil)
-	assert.Check(t, assertionSignature != nil)
+	assert.Nil(t, responseSignature)
+	assert.NotNil(t, assertionSignature)
 
 	issuanceAccept(t, &test.SP, responseXML, []string{id})
 
-	assert.Assert(t, len(requests) > 0)
+	require.True(t, len(requests) > 0)
 
 	for _, req := range requests {
-		assert.Check(t, req.HTTPRequest != nil)
-		assert.Assert(t, req.ServiceProviderMetadata != nil && req.SPSSODescriptor != nil && req.ACSEndpoint != nil)
-		assert.Check(t, is.Equal(req.ServiceProviderMetadata.EntityID, test.SP.MetadataURL.String()))
-		assert.Check(t, is.Equal(req.ACSEndpoint.Location, test.SP.AcsURL.String()))
-		assert.Assert(t, req.AuthnRequest != nil)
-		assert.Check(t, is.Equal(req.AuthnRequest.Request.ID, id))
-		assert.Assert(t, req.Session != nil)
-		assert.Check(t, is.Equal(req.Session.ID, "f00f00"))
-		assert.Check(t, is.DeepEqual(req.Defaults, Issuance{
+		assert.NotNil(t, req.HTTPRequest)
+		require.True(t, req.ServiceProviderMetadata != nil && req.SPSSODescriptor != nil && req.ACSEndpoint != nil)
+		assert.Equal(t, req.ServiceProviderMetadata.EntityID, test.SP.MetadataURL.String())
+		assert.Equal(t, req.ACSEndpoint.Location, test.SP.AcsURL.String())
+		require.NotNil(t, req.AuthnRequest)
+		assert.Equal(t, req.AuthnRequest.Request.ID, id)
+		require.NotNil(t, req.Session)
+		assert.Equal(t, req.Session.ID, "f00f00")
+		assert.Equal(t, req.Defaults, Issuance{
 			SignatureMethod:   dsig.RSASHA256SignatureMethod,
 			AssertionLifetime: MaxIssueDelay,
-		}))
+		})
 	}
 }
 
@@ -417,9 +417,9 @@ func TestIssuancePolicyErrorFailsTheLogin(t *testing.T) {
 	})
 
 	w := serveSSO(test, replayPostRequest(signedPostBody(t, &test.SP, nil), nil))
-	assert.Check(t, is.Equal(w.Code, http.StatusInternalServerError))
-	assert.Check(t, !strings.Contains(w.Body.String(), "SAMLResponse"))
-	assert.Check(t, !strings.Contains(w.Body.String(), "boom"))
+	assert.Equal(t, w.Code, http.StatusInternalServerError)
+	assert.False(t, strings.Contains(w.Body.String(), "SAMLResponse"))
+	assert.False(t, strings.Contains(w.Body.String(), "boom"))
 }
 
 // issuanceAssertion validates a current request and makes an assertion for session.
@@ -427,8 +427,8 @@ func issuanceAssertion(t *testing.T, test *IdentityProviderTest, session *Sessio
 	t.Helper()
 
 	req, err := hardeningValidate(test, hardeningRequest(`ID="id-1"`, TimeNow(), hardeningIssuer))
-	assert.NilError(t, err)
-	assert.NilError(t, DefaultAssertionMaker{}.MakeAssertion(req, session))
+	require.NoError(t, err)
+	require.NoError(t, DefaultAssertionMaker{}.MakeAssertion(req, session))
 
 	return req
 }
@@ -441,9 +441,9 @@ func TestIssuanceAssertionLifetime(t *testing.T) {
 	req := issuanceAssertion(t, test, &Session{ID: "f00d", NameID: "alice"})
 
 	confirmation := req.Assertion.Subject.SubjectConfirmations[0].SubjectConfirmationData
-	assert.Check(t, req.Assertion.Conditions.NotOnOrAfter.Equal(TimeNow().Add(10*time.Minute)))
-	assert.Check(t, confirmation.NotOnOrAfter.Equal(TimeNow().Add(10*time.Minute)))
-	assert.Check(t, req.Assertion.Conditions.NotBefore.Equal(TimeNow().Add(-MaxClockSkew)))
+	assert.True(t, req.Assertion.Conditions.NotOnOrAfter.Equal(TimeNow().Add(10*time.Minute)))
+	assert.True(t, confirmation.NotOnOrAfter.Equal(TimeNow().Add(10*time.Minute)))
+	assert.True(t, req.Assertion.Conditions.NotBefore.Equal(TimeNow().Add(-MaxClockSkew)))
 
 	// A service provider that the policy doesn't name gets the lifetime of the identity provider.
 	test.IDP.IssuancePolicy = DefaultIssuancePolicy{ServiceProviders: map[string]ServiceProviderIssuance{
@@ -451,7 +451,7 @@ func TestIssuanceAssertionLifetime(t *testing.T) {
 	}}
 
 	req = issuanceAssertion(t, test, &Session{ID: "f00d", NameID: "alice"})
-	assert.Check(t, req.Assertion.Conditions.NotOnOrAfter.Equal(TimeNow().Add(30*time.Second)))
+	assert.True(t, req.Assertion.Conditions.NotOnOrAfter.Equal(TimeNow().Add(30*time.Second)))
 }
 
 func TestIssuanceSessionNotOnOrAfter(t *testing.T) {
@@ -477,10 +477,10 @@ func TestIssuanceSessionNotOnOrAfter(t *testing.T) {
 			req := issuanceAssertion(t, test, &Session{ID: "f00d", NameID: "alice", ExpireTime: expire})
 
 			got := req.Assertion.AuthnStatements[0].SessionNotOnOrAfter
-			assert.Assert(t, is.Equal(got != nil, tc.stated))
+			require.Equal(t, got != nil, tc.stated)
 
 			if tc.stated {
-				assert.Check(t, got.Equal(expire))
+				assert.True(t, got.Equal(expire))
 			}
 		})
 	}
@@ -499,12 +499,12 @@ func TestIssuanceAdditionalAudiences(t *testing.T) {
 
 	assertion := issuanceAccept(t, &test.SP, responseXML, []string{id})
 
-	assert.Assert(t, is.Len(assertion.Conditions.AudienceRestrictions, 1))
-	assert.Check(t, is.DeepEqual(assertion.Conditions.AudienceRestrictions[0].Audiences, []Audience{
+	require.Len(t, assertion.Conditions.AudienceRestrictions, 1)
+	assert.Equal(t, assertion.Conditions.AudienceRestrictions[0].Audiences, []Audience{
 		{Value: test.SP.MetadataURL.String()},
 		{Value: "https://alias.example.com/sp"},
 		{Value: "urn:example:proxy"},
-	}))
+	})
 }
 
 func TestIssuanceIDPInitiated(t *testing.T) {
@@ -514,18 +514,18 @@ func TestIssuanceIDPInitiated(t *testing.T) {
 	w := httptest.NewRecorder()
 	test.IDP.ServeIDPInitiated(w, httptest.NewRequest(http.MethodGet, "https://idp.example.com/services/sp", nil),
 		test.SP.MetadataURL.String(), "relay")
-	assert.Assert(t, is.Equal(w.Code, http.StatusOK), "body: %s", w.Body.String())
+	require.Equal(t, w.Code, http.StatusOK, "body: %s", w.Body.String())
 
 	doc, _ := postedResponse(t, w.Body.String())
 
 	responseSignature, assertionSignature, _ := issuanceSignatures(t, &test.SP, doc.Root())
-	assert.Check(t, responseSignature == nil)
+	assert.Nil(t, responseSignature)
 
 	signatureMethod, _ := issuanceAlgorithms(t, assertionSignature)
-	assert.Check(t, is.Equal(signatureMethod, dsig.RSASHA1SignatureMethod))
+	assert.Equal(t, signatureMethod, dsig.RSASHA1SignatureMethod)
 
 	responseXML, err := doc.WriteToBytes()
-	assert.NilError(t, err)
+	require.NoError(t, err)
 
 	test.SP.AllowIDPInitiated = true
 	issuanceAccept(t, &test.SP, responseXML, nil)
@@ -561,26 +561,26 @@ func TestIssuanceArtifactResponse(t *testing.T) {
 	envelope := soapTestParseResponse(t, serveArtifactResolution(test, r))
 
 	artifactResponseEl := envelope.FindElement("./Body/ArtifactResponse")
-	assert.Assert(t, artifactResponseEl != nil)
+	require.NotNil(t, artifactResponseEl)
 
 	// The ArtifactResponse is how the identity provider authenticates itself, so it is signed whatever is signed
 	// in the Response, with the algorithm of the service provider.
 	signature, err := findChild(artifactResponseEl, "http://www.w3.org/2000/09/xmldsig#", "Signature")
-	assert.NilError(t, err)
+	require.NoError(t, err)
 
 	signatureMethod, digestMethod := issuanceAlgorithms(t, signature)
-	assert.Check(t, is.Equal(signatureMethod, dsig.RSASHA1SignatureMethod))
-	assert.Check(t, is.Equal(digestMethod, issuanceSHA1Digest))
+	assert.Equal(t, signatureMethod, dsig.RSASHA1SignatureMethod)
+	assert.Equal(t, digestMethod, issuanceSHA1Digest)
 
 	responseEl, err := findChild(artifactResponseEl, samlProtocolNS, "Response")
-	assert.NilError(t, err)
-	assert.Assert(t, responseEl != nil)
+	require.NoError(t, err)
+	require.NotNil(t, responseEl)
 
 	responseSignature, assertionSignature, _ := issuanceSignatures(t, &test.SP, responseEl)
-	assert.Check(t, responseSignature == nil)
+	assert.Nil(t, responseSignature)
 
 	signatureMethod, _ = issuanceAlgorithms(t, assertionSignature)
-	assert.Check(t, is.Equal(signatureMethod, dsig.RSASHA1SignatureMethod))
+	assert.Equal(t, signatureMethod, dsig.RSASHA1SignatureMethod)
 }
 
 func TestIssuanceECPEndToEnd(t *testing.T) {
@@ -601,22 +601,22 @@ func TestIssuanceECPEndToEnd(t *testing.T) {
 			}}
 
 			request, err := sp.MakeAuthenticationRequest("", HTTPPostBinding, PAOSBinding)
-			assert.NilError(t, err)
+			require.NoError(t, err)
 
 			client := &ecpTestClient{t: t, username: "alice", password: "secret"}
 			responseXML := client.exchange(ecpTestPAOSRequest(t, request, ecpTestPAOSURL), sp.GetSSOBindingLocation(SOAPBinding))
 
 			doc := etree.NewDocument()
-			assert.NilError(t, doc.ReadFromBytes(responseXML))
+			require.NoError(t, doc.ReadFromBytes(responseXML))
 
 			responseSignature, assertionSignature, _ := issuanceSignatures(t, sp, doc.Root())
-			assert.Check(t, is.Equal(responseSignature != nil, tc.response))
-			assert.Check(t, is.Equal(assertionSignature != nil, tc.assertion))
+			assert.Equal(t, responseSignature != nil, tc.response)
+			assert.Equal(t, assertionSignature != nil, tc.assertion)
 
 			for _, signature := range []*etree.Element{responseSignature, assertionSignature} {
 				if signature != nil {
 					signatureMethod, _ := issuanceAlgorithms(t, signature)
-					assert.Check(t, is.Equal(signatureMethod, dsig.RSASHA384SignatureMethod))
+					assert.Equal(t, signatureMethod, dsig.RSASHA384SignatureMethod)
 				}
 			}
 
@@ -638,34 +638,34 @@ func TestIssuanceQueryResponse(t *testing.T) {
 	query.Destination, query.Subject = e.attributeService, &Subject{NameID: issued.Subject.NameID}
 
 	req, err := http.NewRequest(http.MethodPost, e.attributeService, bytes.NewReader(soapLogoutEnvelope(t, signQueryElement(t, sp, query.Element()))))
-	assert.NilError(t, err)
+	require.NoError(t, err)
 
 	req.Header.Set("Content-Type", "text/xml; charset=utf-8")
 	req.Header.Set("SOAPAction", `"`+soapActionSAML+`"`)
 
 	res, err := e.server.Client().Do(req)
-	assert.NilError(t, err)
+	require.NoError(t, err)
 
 	defer res.Body.Close()
 
 	body, err := io.ReadAll(res.Body)
-	assert.NilError(t, err)
-	assert.Assert(t, is.Equal(res.StatusCode, http.StatusOK), "body: %s", body)
+	require.NoError(t, err)
+	require.Equal(t, res.StatusCode, http.StatusOK, "body: %s", body)
 
 	_, _, message, err := parseSOAPEnvelope(body)
-	assert.NilError(t, err)
-	assert.Assert(t, is.Equal(message.Tag, "Response"))
+	require.NoError(t, err)
+	require.Equal(t, message.Tag, "Response")
 
 	// The Response to a query is always signed, with the algorithm of the service provider, and its assertion
 	// is signed as one of single sign-on is.
 	responseSignature, assertionSignature, _ := issuanceSignatures(t, sp, message)
-	assert.Check(t, assertionSignature == nil)
+	assert.Nil(t, assertionSignature)
 
 	signatureMethod, digestMethod := issuanceAlgorithms(t, responseSignature)
-	assert.Check(t, is.Equal(signatureMethod, dsig.RSASHA1SignatureMethod))
-	assert.Check(t, is.Equal(digestMethod, issuanceSHA1Digest))
+	assert.Equal(t, signatureMethod, dsig.RSASHA1SignatureMethod)
+	assert.Equal(t, digestMethod, issuanceSHA1Digest)
 
-	assert.NilError(t, sp.validateSignature(message))
+	require.NoError(t, sp.validateSignature(message))
 }
 
 func TestIssuanceLogoutRequestSignatureMethod(t *testing.T) {
@@ -683,7 +683,7 @@ func TestIssuanceLogoutRequestSignatureMethod(t *testing.T) {
 		f.b.SloURL.Host: dsig.RSASHA512SignatureMethod,
 	}
 
-	assert.Check(t, is.Equal(location.Query().Get("SigAlg"), expected[location.Host]))
+	assert.Equal(t, location.Query().Get("SigAlg"), expected[location.Host])
 }
 
 func TestIssuanceSigningContextForServiceProvider(t *testing.T) {
@@ -694,16 +694,16 @@ func TestIssuanceSigningContextForServiceProvider(t *testing.T) {
 
 	// Every message that is signed for the service provider uses its algorithms.
 	signingContext, err := test.IDP.signingContextFor(r, test.SP.Metadata())
-	assert.NilError(t, err)
-	assert.Check(t, is.Equal(signingContext.GetSignatureMethodIdentifier(), dsig.RSASHA1SignatureMethod))
-	assert.Check(t, is.Equal(signingContext.GetDigestAlgorithmIdentifier(), issuanceSHA256Digest))
+	require.NoError(t, err)
+	assert.Equal(t, signingContext.GetSignatureMethodIdentifier(), dsig.RSASHA1SignatureMethod)
+	assert.Equal(t, signingContext.GetDigestAlgorithmIdentifier(), issuanceSHA256Digest)
 
 	// A service provider that isn't known, or isn't named, gets those of the identity provider.
 	for _, metadata := range []*EntityDescriptor{nil, {EntityID: "https://other.example.com/metadata"}} {
 		signingContext, err = test.IDP.signingContextFor(r, metadata)
-		assert.NilError(t, err)
-		assert.Check(t, is.Equal(signingContext.GetSignatureMethodIdentifier(), dsig.RSASHA256SignatureMethod))
-		assert.Check(t, is.Equal(signingContext.GetDigestAlgorithmIdentifier(), issuanceSHA256Digest))
+		require.NoError(t, err)
+		assert.Equal(t, signingContext.GetSignatureMethodIdentifier(), dsig.RSASHA256SignatureMethod)
+		assert.Equal(t, signingContext.GetDigestAlgorithmIdentifier(), issuanceSHA256Digest)
 	}
 
 	// The policy is only asked about the service provider.
@@ -716,10 +716,10 @@ func TestIssuanceSigningContextForServiceProvider(t *testing.T) {
 	})
 
 	_, err = test.IDP.signingContextFor(r, test.SP.Metadata())
-	assert.NilError(t, err)
-	assert.Assert(t, is.Len(requests, 1))
-	assert.Check(t, requests[0].HTTPRequest == r)
-	assert.Check(t, is.Equal(requests[0].ServiceProviderMetadata.EntityID, test.SP.MetadataURL.String()))
-	assert.Check(t, requests[0].SPSSODescriptor == nil && requests[0].ACSEndpoint == nil)
-	assert.Check(t, requests[0].AuthnRequest == nil && requests[0].Session == nil)
+	require.NoError(t, err)
+	require.Len(t, requests, 1)
+	assert.True(t, requests[0].HTTPRequest == r)
+	assert.Equal(t, requests[0].ServiceProviderMetadata.EntityID, test.SP.MetadataURL.String())
+	assert.True(t, requests[0].SPSSODescriptor == nil && requests[0].ACSEndpoint == nil)
+	assert.True(t, requests[0].AuthnRequest == nil && requests[0].Session == nil)
 }

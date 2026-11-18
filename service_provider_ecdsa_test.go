@@ -12,8 +12,8 @@ import (
 	"strings"
 	"testing"
 
-	"gotest.tools/assert"
-	is "gotest.tools/assert/cmp"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"authelia.com/provider/saml/internal/dsig"
 	"authelia.com/provider/saml/xmlenc"
@@ -24,12 +24,12 @@ func signedRedirectQuery(t *testing.T, rawQuery string) (signed string, signatur
 	t.Helper()
 
 	signed, encoded, found := strings.Cut(rawQuery, "&Signature=")
-	assert.Assert(t, found)
+	require.True(t, found)
 
 	unescaped, err := url.QueryUnescape(encoded)
-	assert.NilError(t, err)
+	require.NoError(t, err)
 	signature, err = base64.StdEncoding.DecodeString(unescaped)
-	assert.NilError(t, err)
+	require.NoError(t, err)
 
 	return signed, signature
 }
@@ -49,22 +49,22 @@ func TestSPSignsRedirectRequestWithECDSA(t *testing.T) {
 				s.AcsURL = mustParseURL("https://15661444.ngrok.io/saml2/acs")
 				s.IDPMetadata = &EntityDescriptor{}
 				s.SignatureMethod = tc.method
-				assert.NilError(t, xml.Unmarshal(test.IDPMetadata, s.IDPMetadata))
+				require.NoError(t, xml.Unmarshal(test.IDPMetadata, s.IDPMetadata))
 
 				redirectURL, err := s.MakeRedirectAuthenticationRequest("relayState")
-				assert.NilError(t, err)
-				assert.Check(t, is.Equal(tc.method, redirectURL.Query().Get("SigAlg")))
+				require.NoError(t, err)
+				assert.Equal(t, tc.method, redirectURL.Query().Get("SigAlg"))
 
 				signed, signature := signedRedirectQuery(t, redirectURL.RawQuery)
 				size := (tc.curve.Params().N.BitLen() + 7) / 8
-				assert.Assert(t, is.Len(signature, 2*size))
+				require.Len(t, signature, 2*size)
 
 				hash := tc.newHash.New()
 				hash.Write([]byte(signed))
 
 				r := new(big.Int).SetBytes(signature[:size])
 				sValue := new(big.Int).SetBytes(signature[size:])
-				assert.Check(t, ecdsa.Verify(&key.PublicKey, hash.Sum(nil), r, sValue))
+				assert.True(t, ecdsa.Verify(&key.PublicKey, hash.Sum(nil), r, sValue))
 			})
 		}
 	}
@@ -90,11 +90,11 @@ func TestGetSigningContextChecksKeyType(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			_, err := GetSigningContext(&tc.sp)
 			if tc.err == "" {
-				assert.Check(t, err)
+				assert.NoError(t, err)
 				return
 			}
 
-			assert.Check(t, is.ErrorContains(err, tc.err))
+			assert.ErrorContains(t, err, tc.err)
 		})
 	}
 }
@@ -103,7 +103,7 @@ func TestSPMetadataAdvertisesEncryptionOnlyForRSACertificate(t *testing.T) {
 	test := NewServiceProviderTest(t)
 	_, ecdsaCert := newECDSATestKey(t, elliptic.P256())
 	_, isRSA := test.Certificate.PublicKey.(*rsa.PublicKey)
-	assert.Assert(t, isRSA)
+	require.True(t, isRSA)
 
 	s := ServiceProvider{
 		Certificate:     ecdsaCert,
@@ -112,15 +112,15 @@ func TestSPMetadataAdvertisesEncryptionOnlyForRSACertificate(t *testing.T) {
 		SignatureMethod: dsig.ECDSASHA256SignatureMethod,
 	}
 	descriptors := s.Metadata().SPSSODescriptors[0].KeyDescriptors
-	assert.Check(t, is.DeepEqual([]string{"signing"}, keyDescriptorUses(descriptors)))
+	assert.Equal(t, []string{"signing"}, keyDescriptorUses(descriptors))
 
 	s.SignatureMethod = ""
 	descriptors = s.Metadata().SPSSODescriptors[0].KeyDescriptors
-	assert.Check(t, is.DeepEqual([]string{}, keyDescriptorUses(descriptors)))
+	assert.Equal(t, []string{}, keyDescriptorUses(descriptors))
 
 	s.Certificate = test.Certificate
 	descriptors = s.Metadata().SPSSODescriptors[0].KeyDescriptors
-	assert.Check(t, is.DeepEqual([]string{"encryption"}, keyDescriptorUses(descriptors)))
+	assert.Equal(t, []string{"encryption"}, keyDescriptorUses(descriptors))
 }
 
 func TestIDPSendsPlaintextAssertionToSPWithECDSACertificate(t *testing.T) {
@@ -137,7 +137,7 @@ func TestIDPSendsPlaintextAssertionToSPWithECDSACertificate(t *testing.T) {
 	test := NewIdentityProviderTest(t, applyKey)
 	req := IdpAuthnRequest{IDP: &test.IDP, ServiceProviderMetadata: metadata, SPSSODescriptor: &metadata.SPSSODescriptors[0]}
 	_, err := req.spEncryptionKey()
-	assert.Check(t, err == os.ErrNotExist, "expected os.ErrNotExist, got %v", err)
+	assert.True(t, err == os.ErrNotExist, "expected os.ErrNotExist, got %v", err)
 }
 
 // An SP that offers an elliptic curve key for encryption is sent an assertion encrypted to it by ECDH-ES, which
@@ -148,26 +148,26 @@ func TestIDPEncryptsToSPOfferingECDSACertificate(t *testing.T) {
 		t.Run("use="+use, func(t *testing.T) {
 			test := NewIdentityProviderTest(t, applyKey)
 			req, err := hardeningValidate(test, hardeningRequest(`ID="id-1"`, TimeNow(), hardeningIssuer))
-			assert.NilError(t, err)
-			assert.NilError(t, DefaultAssertionMaker{}.MakeAssertion(req, &Session{ID: "f00d", NameID: "alice"}))
+			require.NoError(t, err)
+			require.NoError(t, DefaultAssertionMaker{}.MakeAssertion(req, &Session{ID: "f00d", NameID: "alice"}))
 
 			descriptor := KeyDescriptor{Use: use}
 			descriptor.KeyInfo.X509Data.X509Certificates = []X509Certificate{{Data: base64.StdEncoding.EncodeToString(ecdsaCert.Raw)}}
 			req.SPSSODescriptor.KeyDescriptors = []KeyDescriptor{descriptor}
-			assert.NilError(t, req.MakeAssertionEl())
-			assert.Assert(t, is.Equal(req.AssertionEl.Tag, "EncryptedAssertion"))
+			require.NoError(t, req.MakeAssertionEl())
+			require.Equal(t, req.AssertionEl.Tag, "EncryptedAssertion")
 
 			encryptedData := req.AssertionEl.FindElement("./EncryptedData")
-			assert.Assert(t, encryptedData != nil)
+			require.NotNil(t, encryptedData)
 
 			agreement := encryptedData.FindElement("./KeyInfo/EncryptedKey/KeyInfo/AgreementMethod")
-			assert.Assert(t, agreement != nil)
-			assert.Check(t, is.Equal(agreement.SelectAttrValue("Algorithm", ""), "http://www.w3.org/2009/xmlenc11#ECDH-ES"))
+			require.NotNil(t, agreement)
+			assert.Equal(t, agreement.SelectAttrValue("Algorithm", ""), "http://www.w3.org/2009/xmlenc11#ECDH-ES")
 
 			plaintext, err := xmlenc.Decrypt(key, encryptedData)
-			assert.NilError(t, err)
-			assert.Check(t, is.Contains(string(plaintext), `<saml:Assertion `))
-			assert.Check(t, is.Contains(string(plaintext), `Recipient="https://sp.example.com/saml2/acs"`))
+			require.NoError(t, err)
+			assert.Contains(t, string(plaintext), `<saml:Assertion `)
+			assert.Contains(t, string(plaintext), `Recipient="https://sp.example.com/saml2/acs"`)
 		})
 	}
 }

@@ -7,8 +7,8 @@ import (
 	"time"
 
 	"github.com/beevik/etree"
-	"gotest.tools/assert"
-	is "gotest.tools/assert/cmp"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func scopingInt(v int) *int { return &v }
@@ -20,7 +20,7 @@ func scopingXML(t *testing.T, el *etree.Element) string {
 	doc.SetRoot(el)
 
 	x, err := doc.WriteToString()
-	assert.NilError(t, err)
+	require.NoError(t, err)
 
 	return x
 }
@@ -79,14 +79,14 @@ func TestScopingElement(t *testing.T) {
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
 			el := tc.scoping.Element()
-			assert.Check(t, is.Equal(scopingXML(t, el), tc.expected))
+			assert.Equal(t, scopingXML(t, el), tc.expected)
 
 			// What is written is read back as the same value.
 			el.CreateAttr("xmlns:samlp", "urn:oasis:names:tc:SAML:2.0:protocol")
 
 			actual, err := scopingParse(scopingXML(t, el))
-			assert.NilError(t, err)
-			assert.Check(t, is.DeepEqual(actual, tc.scoping))
+			require.NoError(t, err)
+			assert.Equal(t, actual, tc.scoping)
 		})
 	}
 }
@@ -97,29 +97,29 @@ func TestScopingUnmarshalAnyPrefix(t *testing.T) {
 		`<RequesterID>
 			https://sp.example.com/
 		</RequesterID></Scoping>`)
-	assert.NilError(t, err)
-	assert.Check(t, is.DeepEqual(scoping, Scoping{
+	require.NoError(t, err)
+	assert.Equal(t, scoping, Scoping{
 		ProxyCount: scopingInt(3),
 		IDPList: &IDPList{
 			IDPEntries:  []IDPEntry{{ProviderID: "https://idp.example.com/", Name: "An IdP"}},
 			GetComplete: "https://sp.example.com/list",
 		},
 		RequesterIDs: []string{"https://sp.example.com/"},
-	}))
+	})
 }
 
 func TestScopingUnmarshalIgnoresOtherNamespaces(t *testing.T) {
 	scoping, err := scopingParse(`<samlp:Scoping` + scopingProtocolNS + ` xmlns:x="urn:x">` +
 		`<x:IDPList/><x:RequesterID>https://x.example.com/</x:RequesterID></samlp:Scoping>`)
-	assert.NilError(t, err)
-	assert.Check(t, is.DeepEqual(scoping, Scoping{}))
+	require.NoError(t, err)
+	assert.Equal(t, scoping, Scoping{})
 }
 
 func TestScopingProxyCountSaturates(t *testing.T) {
 	scoping, err := scopingParse(`<samlp:Scoping` + scopingProtocolNS + ` ProxyCount="99999999999999999999999999"/>`)
-	assert.NilError(t, err)
-	assert.Assert(t, scoping.ProxyCount != nil)
-	assert.Check(t, is.Equal(*scoping.ProxyCount, math.MaxInt))
+	require.NoError(t, err)
+	require.NotNil(t, scoping.ProxyCount)
+	assert.Equal(t, *scoping.ProxyCount, math.MaxInt)
 }
 
 func TestScopingUnmarshalRejectsMalformed(t *testing.T) {
@@ -152,7 +152,7 @@ func TestScopingUnmarshalRejectsMalformed(t *testing.T) {
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
 			_, err := scopingParse(tc.xml)
-			assert.Check(t, is.ErrorContains(err, tc.err))
+			assert.ErrorContains(t, err, tc.err)
 		})
 	}
 }
@@ -160,12 +160,12 @@ func TestScopingUnmarshalRejectsMalformed(t *testing.T) {
 func TestIDPListContains(t *testing.T) {
 	var none *IDPList
 
-	assert.Check(t, !none.Contains("https://idp.example.com/"))
+	assert.False(t, none.Contains("https://idp.example.com/"))
 
 	list := &IDPList{IDPEntries: []IDPEntry{{ProviderID: "https://other.example.com/"}, {ProviderID: "https://idp.example.com/"}}}
-	assert.Check(t, list.Contains("https://idp.example.com/"))
-	assert.Check(t, !list.Contains("https://idp.example.com"))
-	assert.Check(t, !list.Contains(""))
+	assert.True(t, list.Contains("https://idp.example.com/"))
+	assert.False(t, list.Contains("https://idp.example.com"))
+	assert.False(t, list.Contains(""))
 }
 
 func TestAuthnRequestScopingXMLRoundTrip(t *testing.T) {
@@ -190,21 +190,21 @@ func TestAuthnRequestScopingXMLRoundTrip(t *testing.T) {
 	x := scopingXML(t, expected.Element())
 
 	// Scoping is the last child, after RequestedAuthnContext (SAMLCore §3.4.1).
-	assert.Check(t, is.Contains(x, `</samlp:RequestedAuthnContext><samlp:Scoping ProxyCount="0">`))
-	assert.Check(t, is.Contains(x, `</samlp:Scoping></samlp:AuthnRequest>`))
+	assert.Contains(t, x, `</samlp:RequestedAuthnContext><samlp:Scoping ProxyCount="0">`)
+	assert.Contains(t, x, `</samlp:Scoping></samlp:AuthnRequest>`)
 
 	var actual AuthnRequest
-	assert.NilError(t, xml.Unmarshal([]byte(x), &actual))
-	assert.Check(t, is.DeepEqual(actual.Scoping, expected.Scoping))
+	require.NoError(t, xml.Unmarshal([]byte(x), &actual))
+	assert.Equal(t, actual.Scoping, expected.Scoping)
 
 	expected.Scoping = nil
 
 	x = scopingXML(t, expected.Element())
-	assert.Check(t, !is.Contains(x, "Scoping")().Success())
+	assert.NotContains(t, x, "Scoping")
 
 	actual = AuthnRequest{}
-	assert.NilError(t, xml.Unmarshal([]byte(x), &actual))
-	assert.Check(t, actual.Scoping == nil)
+	require.NoError(t, xml.Unmarshal([]byte(x), &actual))
+	assert.Nil(t, actual.Scoping)
 }
 
 // TestProxyRestrictionXMLRoundTrip shows what was wrong with ProxyRestriction: its fields had no tags, so the
@@ -232,13 +232,13 @@ func TestProxyRestrictionXMLRoundTrip(t *testing.T) {
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
 			el := tc.restriction.Element()
-			assert.Check(t, is.Equal(scopingXML(t, el), tc.expected))
+			assert.Equal(t, scopingXML(t, el), tc.expected)
 
 			el.CreateAttr("xmlns:saml", "urn:oasis:names:tc:SAML:2.0:assertion")
 
 			var actual ProxyRestriction
-			assert.NilError(t, xml.Unmarshal([]byte(scopingXML(t, el)), &actual))
-			assert.Check(t, is.DeepEqual(actual, tc.restriction))
+			require.NoError(t, xml.Unmarshal([]byte(scopingXML(t, el)), &actual))
+			assert.Equal(t, actual, tc.restriction)
 		})
 	}
 }
@@ -255,13 +255,13 @@ func TestConditionsProxyRestrictionXMLRoundTrip(t *testing.T) {
 	el.CreateAttr("xmlns:saml", "urn:oasis:names:tc:SAML:2.0:assertion")
 
 	var actual Conditions
-	assert.NilError(t, xml.Unmarshal([]byte(scopingXML(t, el)), &actual))
-	assert.Check(t, is.DeepEqual(actual, expected))
+	require.NoError(t, xml.Unmarshal([]byte(scopingXML(t, el)), &actual))
+	assert.Equal(t, actual, expected)
 
 	// encoding/xml writes the attribute and the elements of the schema too.
 	marshalled, err := xml.Marshal(expected.ProxyRestriction)
-	assert.NilError(t, err)
-	assert.Check(t, is.Equal(string(marshalled), `<ProxyRestriction Count="1"><Audience>https://sp.example.com/</Audience></ProxyRestriction>`))
+	require.NoError(t, err)
+	assert.Equal(t, string(marshalled), `<ProxyRestriction Count="1"><Audience>https://sp.example.com/</Audience></ProxyRestriction>`)
 }
 
 func TestProxyRestrictionUnmarshalRejectsMalformedCount(t *testing.T) {
@@ -269,6 +269,6 @@ func TestProxyRestrictionUnmarshalRejectsMalformedCount(t *testing.T) {
 		var restriction ProxyRestriction
 
 		err := xml.Unmarshal([]byte(`<saml:ProxyRestriction xmlns:saml="urn:oasis:names:tc:SAML:2.0:assertion" Count="`+count+`"/>`), &restriction)
-		assert.Check(t, is.ErrorContains(err, "Count"), "Count=%q", count)
+		assert.ErrorContains(t, err, "Count", "Count=%q", count)
 	}
 }

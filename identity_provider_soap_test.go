@@ -10,7 +10,7 @@ import (
 	"testing"
 
 	"github.com/beevik/etree"
-	"gotest.tools/assert"
+	"github.com/stretchr/testify/require"
 )
 
 const (
@@ -107,19 +107,19 @@ func TestReadSOAPRequest(t *testing.T) {
 			req, fault := readSOAPRequest(r, tc.understood...)
 
 			if tc.fault != "" {
-				assert.Assert(t, fault != nil)
-				assert.Equal(t, fault.Code, tc.fault)
-				assert.Assert(t, fault.String != "")
-				assert.Assert(t, req == nil)
+				require.NotNil(t, fault)
+				require.Equal(t, fault.Code, tc.fault)
+				require.True(t, fault.String != "")
+				require.Nil(t, req)
 
 				return
 			}
 
-			assert.Assert(t, fault == nil)
-			assert.Assert(t, req != nil)
-			assert.Equal(t, req.Message.Tag, "LogoutRequest")
-			assert.Equal(t, req.Message.NamespaceURI(), soapTestProtocolNS)
-			assert.Equal(t, len(req.Headers), tc.headers)
+			require.Nil(t, fault)
+			require.NotNil(t, req)
+			require.Equal(t, req.Message.Tag, "LogoutRequest")
+			require.Equal(t, req.Message.NamespaceURI(), soapTestProtocolNS)
+			require.Equal(t, len(req.Headers), tc.headers)
 		})
 	}
 }
@@ -134,20 +134,20 @@ func TestReadSOAPRequestInheritedNamespaces(t *testing.T) {
 		r.Header.Set("Content-Type", "text/xml")
 
 		req, fault := readSOAPRequest(r)
-		assert.Assert(t, fault == nil)
+		require.Nil(t, fault)
 
 		var lr LogoutRequest
 
-		assert.NilError(t, xml.Unmarshal(req.Body, &lr))
-		assert.Equal(t, lr.Issuer.Value, "https://sp.example.com")
+		require.NoError(t, xml.Unmarshal(req.Body, &lr))
+		require.Equal(t, lr.Issuer.Value, "https://sp.example.com")
 
 		doc := etree.NewDocument()
-		assert.NilError(t, doc.ReadFromBytes(req.Body))
+		require.NoError(t, doc.ReadFromBytes(req.Body))
 
 		root := doc.Root()
-		assert.Equal(t, root.SelectAttrValue("xmlns:samlp", ""), soapTestProtocolNS)
-		assert.Equal(t, root.SelectAttrValue("xmlns:saml", ""), soapTestAssertNS)
-		assert.Equal(t, root.SelectAttr("xmlns:soapenv") != nil, true)
+		require.Equal(t, root.SelectAttrValue("xmlns:samlp", ""), soapTestProtocolNS)
+		require.Equal(t, root.SelectAttrValue("xmlns:saml", ""), soapTestAssertNS)
+		require.Equal(t, root.SelectAttr("xmlns:soapenv") != nil, true)
 	})
 
 	t.Run("ShouldCarryDefaultNamespaceDeclaredOnBody", func(t *testing.T) {
@@ -158,13 +158,13 @@ func TestReadSOAPRequestInheritedNamespaces(t *testing.T) {
 		r.Header.Set("Content-Type", "text/xml")
 
 		req, fault := readSOAPRequest(r)
-		assert.Assert(t, fault == nil)
-		assert.Equal(t, req.Message.NamespaceURI(), soapTestProtocolNS)
+		require.Nil(t, fault)
+		require.Equal(t, req.Message.NamespaceURI(), soapTestProtocolNS)
 
 		var lr LogoutRequest
 
-		assert.NilError(t, xml.Unmarshal(req.Body, &lr))
-		assert.Equal(t, lr.ID, "id-1")
+		require.NoError(t, xml.Unmarshal(req.Body, &lr))
+		require.Equal(t, lr.ID, "id-1")
 	})
 
 	t.Run("ShouldPreferNearestDeclaration", func(t *testing.T) {
@@ -175,8 +175,8 @@ func TestReadSOAPRequestInheritedNamespaces(t *testing.T) {
 		r.Header.Set("Content-Type", "text/xml")
 
 		req, fault := readSOAPRequest(r)
-		assert.Assert(t, fault == nil)
-		assert.Equal(t, req.Message.NamespaceURI(), "urn:near")
+		require.Nil(t, fault)
+		require.Equal(t, req.Message.NamespaceURI(), "urn:near")
 	})
 }
 
@@ -188,9 +188,9 @@ func TestReceiveSOAPRequestMethod(t *testing.T) {
 	r := httptest.NewRequest(http.MethodGet, "https://idp.example.com/slo", nil)
 
 	req, ok := test.IDP.receiveSOAPRequest(w, r, EventLogout)
-	assert.Assert(t, !ok)
-	assert.Assert(t, req == nil)
-	assert.Equal(t, w.Code, http.StatusMethodNotAllowed)
+	require.False(t, ok)
+	require.Nil(t, req)
+	require.Equal(t, w.Code, http.StatusMethodNotAllowed)
 }
 
 func TestReceiveSOAPRequestFault(t *testing.T) {
@@ -202,9 +202,9 @@ func TestReceiveSOAPRequestFault(t *testing.T) {
 	r.Header.Set("Content-Type", "text/xml")
 
 	_, ok := test.IDP.receiveSOAPRequest(w, r, EventLogout)
-	assert.Assert(t, !ok)
-	assert.Equal(t, w.Code, http.StatusInternalServerError)
-	assert.Assert(t, strings.Contains(w.Body.String(), "soapenv:Client"))
+	require.False(t, ok)
+	require.Equal(t, w.Code, http.StatusInternalServerError)
+	require.True(t, strings.Contains(w.Body.String(), "soapenv:Client"))
 }
 
 func soapTestParseResponse(t *testing.T, w *httptest.ResponseRecorder) *etree.Element {
@@ -215,58 +215,58 @@ func soapTestParseResponse(t *testing.T, w *httptest.ResponseRecorder) *etree.El
 	defer res.Body.Close()
 
 	mt, _, err := mime.ParseMediaType(res.Header.Get("Content-Type"))
-	assert.NilError(t, err)
-	assert.Equal(t, mt, "text/xml")
-	assert.Equal(t, res.Header.Get("Cache-Control"), "no-cache, no-store")
-	assert.Equal(t, res.Header.Get("Pragma"), "no-cache")
+	require.NoError(t, err)
+	require.Equal(t, mt, "text/xml")
+	require.Equal(t, res.Header.Get("Cache-Control"), "no-cache, no-store")
+	require.Equal(t, res.Header.Get("Pragma"), "no-cache")
 
 	buf, err := io.ReadAll(res.Body)
-	assert.NilError(t, err)
+	require.NoError(t, err)
 
 	doc := etree.NewDocument()
-	assert.NilError(t, doc.ReadFromBytes(buf))
+	require.NoError(t, doc.ReadFromBytes(buf))
 
 	root := doc.Root()
-	assert.Equal(t, root.Tag, "Envelope")
-	assert.Equal(t, root.NamespaceURI(), soapEnvelopeNS)
+	require.Equal(t, root.Tag, "Envelope")
+	require.Equal(t, root.NamespaceURI(), soapEnvelopeNS)
 
 	return root
 }
 
 func TestWriteSOAPResponse(t *testing.T) {
 	msg := etree.NewDocument()
-	assert.NilError(t, msg.ReadFromString(soapTestMessage))
+	require.NoError(t, msg.ReadFromString(soapTestMessage))
 
 	t.Run("ShouldWriteBodyWithoutHeader", func(t *testing.T) {
 		w := httptest.NewRecorder()
-		assert.NilError(t, writeSOAPResponse(w, nil, msg.Root()))
-		assert.Equal(t, w.Code, http.StatusOK)
+		require.NoError(t, writeSOAPResponse(w, nil, msg.Root()))
+		require.Equal(t, w.Code, http.StatusOK)
 
 		root := soapTestParseResponse(t, w)
-		assert.Assert(t, root.SelectElement("Header") == nil)
+		require.Nil(t, root.SelectElement("Header"))
 
 		body := root.SelectElement("Body")
-		assert.Assert(t, body != nil)
-		assert.Equal(t, body.NamespaceURI(), soapEnvelopeNS)
+		require.NotNil(t, body)
+		require.Equal(t, body.NamespaceURI(), soapEnvelopeNS)
 
 		children := body.ChildElements()
-		assert.Equal(t, len(children), 1)
-		assert.Equal(t, children[0].Tag, "LogoutRequest")
-		assert.Equal(t, children[0].NamespaceURI(), soapTestProtocolNS)
+		require.Equal(t, len(children), 1)
+		require.Equal(t, children[0].Tag, "LogoutRequest")
+		require.Equal(t, children[0].NamespaceURI(), soapTestProtocolNS)
 	})
 
 	t.Run("ShouldWriteHeader", func(t *testing.T) {
 		hdr := etree.NewDocument()
-		assert.NilError(t, hdr.ReadFromString(`<ex:Block xmlns:ex="`+soapTestOtherNS+`"/>`))
+		require.NoError(t, hdr.ReadFromString(`<ex:Block xmlns:ex="`+soapTestOtherNS+`"/>`))
 
 		w := httptest.NewRecorder()
-		assert.NilError(t, writeSOAPResponse(w, []*etree.Element{hdr.Root()}, msg.Root()))
+		require.NoError(t, writeSOAPResponse(w, []*etree.Element{hdr.Root()}, msg.Root()))
 
 		root := soapTestParseResponse(t, w)
 		header := root.SelectElement("Header")
-		assert.Assert(t, header != nil)
-		assert.Equal(t, len(header.ChildElements()), 1)
-		assert.Equal(t, header.ChildElements()[0].NamespaceURI(), soapTestOtherNS)
+		require.NotNil(t, header)
+		require.Equal(t, len(header.ChildElements()), 1)
+		require.Equal(t, header.ChildElements()[0].NamespaceURI(), soapTestOtherNS)
 	})
 }
 
@@ -274,13 +274,13 @@ func TestWriteSOAPFault(t *testing.T) {
 	w := httptest.NewRecorder()
 	writeSOAPFault(w, &soapFault{Code: "Client", String: "the request is not a SOAP 1.1 envelope"})
 
-	assert.Equal(t, w.Code, http.StatusInternalServerError)
+	require.Equal(t, w.Code, http.StatusInternalServerError)
 
 	root := soapTestParseResponse(t, w)
 	children := root.SelectElement("Body").ChildElements()
-	assert.Equal(t, len(children), 1)
-	assert.Equal(t, children[0].Tag, "Fault")
-	assert.Equal(t, children[0].NamespaceURI(), soapEnvelopeNS)
-	assert.Equal(t, children[0].SelectElement("faultcode").Text(), "soapenv:Client")
-	assert.Equal(t, children[0].SelectElement("faultstring").Text(), "the request is not a SOAP 1.1 envelope")
+	require.Equal(t, len(children), 1)
+	require.Equal(t, children[0].Tag, "Fault")
+	require.Equal(t, children[0].NamespaceURI(), soapEnvelopeNS)
+	require.Equal(t, children[0].SelectElement("faultcode").Text(), "soapenv:Client")
+	require.Equal(t, children[0].SelectElement("faultstring").Text(), "the request is not a SOAP 1.1 envelope")
 }

@@ -10,9 +10,10 @@ import (
 	"time"
 
 	"github.com/beevik/etree"
-	"gotest.tools/assert"
-	is "gotest.tools/assert/cmp"
-	"gotest.tools/golden"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+
+	"authelia.com/provider/saml/internal/golden"
 )
 
 const (
@@ -29,7 +30,7 @@ func parseExtensionsFixture(t *testing.T) *EntityDescriptor {
 	t.Helper()
 
 	metadata, err := ParseServiceProviderMetadata(golden.Get(t, "TestMetadataExtensions_sp.xml"))
-	assert.NilError(t, err)
+	require.NoError(t, err)
 
 	return metadata
 }
@@ -37,23 +38,23 @@ func parseExtensionsFixture(t *testing.T) *EntityDescriptor {
 func TestParseMetadataExtensionsOfAFederationServiceProvider(t *testing.T) {
 	metadata := parseExtensionsFixture(t)
 
-	assert.Assert(t, metadata.Extensions != nil)
+	require.NotNil(t, metadata.Extensions)
 
-	assert.Check(t, is.DeepEqual(&RegistrationInfo{
+	assert.Equal(t, &RegistrationInfo{
 		RegistrationAuthority: "https://incommon.org",
 		RegistrationInstant:   time.Date(2019, 3, 14, 18, 22, 5, 0, time.UTC),
 		RegistrationPolicies:  []LocalizedURI{{Lang: "en", Value: "http://incommon.org/participation-agreement"}},
-	}, metadata.Extensions.RegistrationInfo))
+	}, metadata.Extensions.RegistrationInfo)
 
-	assert.Check(t, is.DeepEqual(&PublicationInfo{
+	assert.Equal(t, &PublicationInfo{
 		Publisher:       "https://incommon.org",
 		CreationInstant: time.Date(2026, 11, 16, 20, 0, 0, 0, time.UTC),
 		PublicationID:   "20261116T200000",
 		UsagePolicies:   []LocalizedURI{{Lang: "en", Value: "https://incommon.org/terms"}},
-	}, metadata.Extensions.PublicationInfo))
+	}, metadata.Extensions.PublicationInfo)
 
-	assert.Assert(t, metadata.Extensions.EntityAttributes != nil)
-	assert.Check(t, is.DeepEqual([]Attribute{
+	require.NotNil(t, metadata.Extensions.EntityAttributes)
+	assert.Equal(t, []Attribute{
 		{
 			Name:       "http://macedir.org/entity-category",
 			NameFormat: "urn:oasis:names:tc:SAML:2.0:attrname-format:uri",
@@ -72,16 +73,16 @@ func TestParseMetadataExtensionsOfAFederationServiceProvider(t *testing.T) {
 			NameFormat: "urn:oasis:names:tc:SAML:2.0:attrname-format:uri",
 			Values:     []AttributeValue{{Value: "pairwise-id"}},
 		},
-	}, metadata.Extensions.EntityAttributes.Attributes))
+	}, metadata.Extensions.EntityAttributes.Attributes)
 
 	// The algorithm support extension is modelled, so only the extension that isn't is kept as it was.
-	assert.Check(t, is.Len(metadata.Extensions.DigestMethods, 1))
-	assert.Check(t, is.Len(metadata.Extensions.Other, 1))
+	assert.Len(t, metadata.Extensions.DigestMethods, 1)
+	assert.Len(t, metadata.Extensions.Other, 1)
 
 	role := metadata.SPSSODescriptors[0]
-	assert.Assert(t, role.Extensions != nil)
+	require.NotNil(t, role.Extensions)
 
-	assert.Check(t, is.DeepEqual(&UIInfo{
+	assert.Equal(t, &UIInfo{
 		DisplayNames: []LocalizedName{
 			{Lang: "en", Value: "Example University Research Wiki"},
 			{Lang: "de", Value: "Forschungswiki der Beispieluniversität"},
@@ -94,19 +95,19 @@ func TestParseMetadataExtensionsOfAFederationServiceProvider(t *testing.T) {
 			{URL: "https://wiki.example.edu/logo-80x60.png", Height: 60, Width: 80},
 			{URL: "https://wiki.example.edu/logo-de-160x120.png", Height: 120, Width: 160, Lang: "de"},
 		},
-	}, role.Extensions.UIInfo))
+	}, role.Extensions.UIInfo)
 
-	assert.Check(t, is.DeepEqual(&DiscoHints{
+	assert.Equal(t, &DiscoHints{
 		IPHints:          []string{"192.0.2.0/24"},
 		DomainHints:      []string{"example.edu"},
 		GeolocationHints: []string{"geo:47.37328,8.531126"},
-	}, role.Extensions.DiscoHints))
+	}, role.Extensions.DiscoHints)
 
-	assert.Check(t, is.Len(role.Extensions.Other, 1))
+	assert.Len(t, role.Extensions.Other, 1)
 
 	// The entity has more than one ContactPerson, and the REFEDS contact type of the security contact, which is an
 	// attribute named contactType in another namespace, is not mistaken for the contactType of SAMLMeta §2.3.2.2.
-	assert.Check(t, is.DeepEqual([]ContactPerson{
+	assert.Equal(t, []ContactPerson{
 		{ContactType: "technical", GivenName: "Wiki", SurName: "Admins", EmailAddresses: []string{"mailto:wiki-admins@example.edu"}},
 		{
 			ContactType:       "other",
@@ -114,31 +115,31 @@ func TestParseMetadataExtensionsOfAFederationServiceProvider(t *testing.T) {
 			GivenName:         "Security Response Team",
 			EmailAddresses:    []string{"mailto:security@example.edu"},
 		},
-	}, metadata.ContactPeople))
+	}, metadata.ContactPeople)
 
-	assert.Check(t, is.Equal("Example University", metadata.Organization.OrganizationDisplayNames[0].Value))
+	assert.Equal(t, "Example University", metadata.Organization.OrganizationDisplayNames[0].Value)
 }
 
 func TestServiceProviderEntityAttributeAccessors(t *testing.T) {
 	metadata := parseExtensionsFixture(t)
 
-	assert.Check(t, is.DeepEqual([]string{
+	assert.Equal(t, []string{
 		"http://refeds.org/category/research-and-scholarship",
 		"http://www.geant.net/uri/dataprotection-code-of-conduct/v1",
-	}, metadata.EntityCategories()))
-	assert.Check(t, metadata.HasEntityCategory(EntityCategoryResearchAndScholarship))
-	assert.Check(t, metadata.HasEntityCategory(EntityCategoryCodeOfConductV1))
-	assert.Check(t, !metadata.HasEntityCategory(EntityCategoryPersonalized))
-	assert.Check(t, is.DeepEqual([]string{AssuranceCertificationSIRTFI}, metadata.EntityAttributeValues(AssuranceCertificationAttributeName)))
-	assert.Check(t, is.Len(metadata.EntityAttributeValues("urn:example:absent"), 0))
-	assert.Check(t, is.Equal(SubjectIDRequirementPairwiseID, metadata.SubjectIDRequirement()))
+	}, metadata.EntityCategories())
+	assert.True(t, metadata.HasEntityCategory(EntityCategoryResearchAndScholarship))
+	assert.True(t, metadata.HasEntityCategory(EntityCategoryCodeOfConductV1))
+	assert.False(t, metadata.HasEntityCategory(EntityCategoryPersonalized))
+	assert.Equal(t, []string{AssuranceCertificationSIRTFI}, metadata.EntityAttributeValues(AssuranceCertificationAttributeName))
+	assert.Len(t, metadata.EntityAttributeValues("urn:example:absent"), 0)
+	assert.Equal(t, SubjectIDRequirementPairwiseID, metadata.SubjectIDRequirement())
 
 	// Accessors are safe on metadata with no extensions, and on nil.
 	empty := &EntityDescriptor{}
-	assert.Check(t, is.Len(empty.EntityCategories(), 0))
-	assert.Check(t, is.Equal(SubjectIDRequirementUnspecified, empty.SubjectIDRequirement()))
-	assert.Check(t, empty.UIInfo() == nil)
-	assert.Check(t, is.Equal(SubjectIDRequirementUnspecified, (*EntityDescriptor)(nil).SubjectIDRequirement()))
+	assert.Len(t, empty.EntityCategories(), 0)
+	assert.Equal(t, SubjectIDRequirementUnspecified, empty.SubjectIDRequirement())
+	assert.Nil(t, empty.UIInfo())
+	assert.Equal(t, SubjectIDRequirementUnspecified, (*EntityDescriptor)(nil).SubjectIDRequirement())
 }
 
 func TestSubjectIDRequirement(t *testing.T) {
@@ -168,7 +169,7 @@ func TestSubjectIDRequirement(t *testing.T) {
 
 			metadata := &EntityDescriptor{Extensions: &Extensions{EntityAttributes: &EntityAttributes{Attributes: []Attribute{attribute}}}}
 
-			assert.Check(t, is.Equal(tc.expected, metadata.SubjectIDRequirement()))
+			assert.Equal(t, tc.expected, metadata.SubjectIDRequirement())
 		})
 	}
 }
@@ -177,28 +178,28 @@ func TestServiceProviderUIInfoAccessors(t *testing.T) {
 	metadata := parseExtensionsFixture(t)
 
 	ui := metadata.UIInfo()
-	assert.Assert(t, ui != nil)
+	require.NotNil(t, ui)
 
-	assert.Check(t, is.Equal("Example University Research Wiki", metadata.DisplayName()))
-	assert.Check(t, is.Equal("Forschungswiki der Beispieluniversität", metadata.DisplayName("de-AT", "en")))
-	assert.Check(t, is.Equal("Example University Research Wiki", metadata.DisplayName("fr")))
-	assert.Check(t, is.Equal("https://wiki.example.edu/privacy", ui.PrivacyStatementURL("de")))
-	assert.Check(t, is.Equal("Collaboration wiki for research projects.", ui.Description()))
-	assert.Check(t, is.Equal("https://wiki.example.edu/about", ui.InformationURL("en")))
+	assert.Equal(t, "Example University Research Wiki", metadata.DisplayName())
+	assert.Equal(t, "Forschungswiki der Beispieluniversität", metadata.DisplayName("de-AT", "en"))
+	assert.Equal(t, "Example University Research Wiki", metadata.DisplayName("fr"))
+	assert.Equal(t, "https://wiki.example.edu/privacy", ui.PrivacyStatementURL("de"))
+	assert.Equal(t, "Collaboration wiki for research projects.", ui.Description())
+	assert.Equal(t, "https://wiki.example.edu/about", ui.InformationURL("en"))
 
 	// A logo in a requested language is preferred, then one with no language.
-	assert.Check(t, is.DeepEqual([]Logo{{URL: "https://wiki.example.edu/logo-de-160x120.png", Height: 120, Width: 160, Lang: "de"}}, ui.LocalizedLogos("de")))
-	assert.Check(t, is.DeepEqual([]Logo{{URL: "https://wiki.example.edu/logo-80x60.png", Height: 60, Width: 80}}, ui.LocalizedLogos("fr")))
+	assert.Equal(t, []Logo{{URL: "https://wiki.example.edu/logo-de-160x120.png", Height: 120, Width: 160, Lang: "de"}}, ui.LocalizedLogos("de"))
+	assert.Equal(t, []Logo{{URL: "https://wiki.example.edu/logo-80x60.png", Height: 60, Width: 80}}, ui.LocalizedLogos("fr"))
 
 	// Without MDUI the name of the service in the AttributeConsumingService is used, then that of the organization.
 	metadata.SPSSODescriptors[0].Extensions = nil
-	assert.Check(t, is.Equal("Research Wiki", metadata.DisplayName("en")))
+	assert.Equal(t, "Research Wiki", metadata.DisplayName("en"))
 
 	metadata.SPSSODescriptors[0].AttributeConsumingServices = nil
-	assert.Check(t, is.Equal("Example University", metadata.DisplayName("en")))
+	assert.Equal(t, "Example University", metadata.DisplayName("en"))
 
 	metadata.Organization = nil
-	assert.Check(t, is.Equal("", metadata.DisplayName("en")))
+	assert.Equal(t, "", metadata.DisplayName("en"))
 }
 
 // childrenOf returns the namespace and local name of each child element of el.
@@ -217,46 +218,46 @@ func TestMetadataExtensionsRoundTrip(t *testing.T) {
 	metadata := parseExtensionsFixture(t)
 
 	buf, err := xml.MarshalIndent(metadata, "", "  ")
-	assert.NilError(t, err)
+	require.NoError(t, err)
 
 	// What was marshalled is well formed, each element is in its namespace, and the elements that aren't modelled
 	// are kept with their attributes and content.
 	doc := etree.NewDocument()
-	assert.NilError(t, doc.ReadFromBytes(buf))
+	require.NoError(t, doc.ReadFromBytes(buf))
 
 	extensions := doc.Root().ChildElements()[0]
-	assert.Check(t, is.Equal("Extensions", extensions.Tag))
-	assert.Check(t, is.Equal(testNSMD, extensions.NamespaceURI()))
-	assert.Check(t, is.DeepEqual([]xml.Name{
+	assert.Equal(t, "Extensions", extensions.Tag)
+	assert.Equal(t, testNSMD, extensions.NamespaceURI())
+	assert.Equal(t, []xml.Name{
 		{Space: testNSMDRPI, Local: "RegistrationInfo"},
 		{Space: testNSMDRPI, Local: "PublicationInfo"},
 		{Space: testNSMDAttr, Local: "EntityAttributes"},
 		{Space: "urn:oasis:names:tc:SAML:metadata:algsupport", Local: "DigestMethod"},
 		{Space: "http://eduid.cz/schema/metadata/1.0", Local: "RepublishRequest"},
-	}, childrenOf(extensions)))
+	}, childrenOf(extensions))
 
 	digestMethod := extensions.ChildElements()[3]
-	assert.Check(t, is.Equal("http://www.w3.org/2001/04/xmlenc#sha256", digestMethod.SelectAttrValue("Algorithm", "")))
+	assert.Equal(t, "http://www.w3.org/2001/04/xmlenc#sha256", digestMethod.SelectAttrValue("Algorithm", ""))
 
 	target := extensions.ChildElements()[4].ChildElements()[0]
-	assert.Check(t, is.Equal("RepublishTarget", target.Tag))
-	assert.Check(t, is.Equal("http://eduid.cz/schema/metadata/1.0", target.NamespaceURI()))
-	assert.Check(t, is.Equal("http://edugain.org/", target.Text()))
+	assert.Equal(t, "RepublishTarget", target.Tag)
+	assert.Equal(t, "http://eduid.cz/schema/metadata/1.0", target.NamespaceURI())
+	assert.Equal(t, "http://edugain.org/", target.Text())
 
 	roleExtensions := doc.Root().FindElement("./SPSSODescriptor/Extensions")
-	assert.Assert(t, roleExtensions != nil)
-	assert.Check(t, is.DeepEqual([]xml.Name{
+	require.NotNil(t, roleExtensions)
+	assert.Equal(t, []xml.Name{
 		{Space: testNSMDUI, Local: "UIInfo"},
 		{Space: testNSMDUI, Local: "DiscoHints"},
 		{Space: "urn:oasis:names:tc:SAML:profiles:SSO:request-init", Local: "RequestInitiator"},
-	}, childrenOf(roleExtensions)))
-	assert.Check(t, is.Equal("https://wiki.example.edu/Shibboleth.sso/Login", roleExtensions.ChildElements()[2].SelectAttrValue("Location", "")))
+	}, childrenOf(roleExtensions))
+	assert.Equal(t, "https://wiki.example.edu/Shibboleth.sso/Login", roleExtensions.ChildElements()[2].SelectAttrValue("Location", ""))
 
 	// The schema puts Extensions before the keys of a role, and the organization and contacts after the roles.
-	assert.Check(t, is.Equal("Extensions", doc.Root().FindElement("./SPSSODescriptor").ChildElements()[0].Tag))
+	assert.Equal(t, "Extensions", doc.Root().FindElement("./SPSSODescriptor").ChildElements()[0].Tag)
 
 	security := doc.Root().FindElements("./ContactPerson")[1]
-	assert.Check(t, is.Equal("other", security.SelectAttrValue("contactType", "")))
+	assert.Equal(t, "other", security.SelectAttrValue("contactType", ""))
 
 	var refeds string
 
@@ -266,13 +267,13 @@ func TestMetadataExtensionsRoundTrip(t *testing.T) {
 		}
 	}
 
-	assert.Check(t, is.Equal(REFEDSSecurityContactType, refeds))
-	assert.Check(t, security.FindElement("./Company") == nil)
+	assert.Equal(t, REFEDSSecurityContactType, refeds)
+	assert.Nil(t, security.FindElement("./Company"))
 
 	// Parsing what was marshalled gives what was parsed the first time.
 	var again EntityDescriptor
-	assert.NilError(t, xml.Unmarshal(buf, &again))
-	assert.Check(t, is.DeepEqual(metadata, &again))
+	require.NoError(t, xml.Unmarshal(buf, &again))
+	assert.Equal(t, metadata, &again)
 }
 
 func TestMetadataExtensionsMarshalWithConventionalPrefixes(t *testing.T) {
@@ -310,7 +311,7 @@ func TestMetadataExtensionsMarshalWithConventionalPrefixes(t *testing.T) {
 	}
 
 	buf, err := xml.Marshal(metadata)
-	assert.NilError(t, err)
+	require.NoError(t, err)
 
 	out := string(buf)
 
@@ -331,28 +332,28 @@ func TestMetadataExtensionsMarshalWithConventionalPrefixes(t *testing.T) {
 		`<mdui:DiscoHints xmlns:mdui="urn:oasis:names:tc:SAML:metadata:ui"><mdui:DomainHint>example.org</mdui:DomainHint></mdui:DiscoHints>`,
 		`<shibmd:Scope xmlns:shibmd="urn:mace:shibboleth:metadata:1.0" regexp="false">example.org</shibmd:Scope>`,
 	} {
-		assert.Check(t, strings.Contains(out, expected), "missing %s in %s", expected, out)
+		assert.True(t, strings.Contains(out, expected), "missing %s in %s", expected, out)
 	}
 
 	// A namespace aware parser, which is what a peer uses, resolves every one of them.
 	doc := etree.NewDocument()
-	assert.NilError(t, doc.ReadFromBytes(buf))
+	require.NoError(t, doc.ReadFromBytes(buf))
 
-	assert.Check(t, is.DeepEqual([]xml.Name{
+	assert.Equal(t, []xml.Name{
 		{Space: testNSMDRPI, Local: "RegistrationInfo"},
 		{Space: testNSMDAttr, Local: "EntityAttributes"},
-	}, childrenOf(doc.Root().FindElement("./Extensions"))))
-	assert.Check(t, is.Equal(testNSSAML, doc.Root().FindElement("./Extensions/EntityAttributes/Attribute/AttributeValue").NamespaceURI()))
-	assert.Check(t, is.DeepEqual([]xml.Name{
+	}, childrenOf(doc.Root().FindElement("./Extensions")))
+	assert.Equal(t, testNSSAML, doc.Root().FindElement("./Extensions/EntityAttributes/Attribute/AttributeValue").NamespaceURI())
+	assert.Equal(t, []xml.Name{
 		{Space: testNSMDUI, Local: "UIInfo"},
 		{Space: testNSMDUI, Local: "DiscoHints"},
 		{Space: testNSShibMD, Local: "Scope"},
-	}, childrenOf(doc.Root().FindElement("./IDPSSODescriptor/Extensions"))))
+	}, childrenOf(doc.Root().FindElement("./IDPSSODescriptor/Extensions")))
 
 	var again EntityDescriptor
-	assert.NilError(t, xml.Unmarshal(buf, &again))
-	assert.Check(t, is.DeepEqual(metadata.Extensions, again.Extensions))
-	assert.Check(t, is.DeepEqual(metadata.IDPSSODescriptors[0].Extensions, again.IDPSSODescriptors[0].Extensions))
+	require.NoError(t, xml.Unmarshal(buf, &again))
+	assert.Equal(t, metadata.Extensions, again.Extensions)
+	assert.Equal(t, metadata.IDPSSODescriptors[0].Extensions, again.IDPSSODescriptors[0].Extensions)
 }
 
 func TestEmptyMetadataExtensionsAreNotMarshalled(t *testing.T) {
@@ -361,8 +362,8 @@ func TestEmptyMetadataExtensionsAreNotMarshalled(t *testing.T) {
 		EntityID:   "https://idp.example.org/metadata",
 		Extensions: &Extensions{UIInfo: &UIInfo{}, DiscoHints: &DiscoHints{}, EntityAttributes: &EntityAttributes{}},
 	})
-	assert.NilError(t, err)
-	assert.Check(t, !strings.Contains(string(buf), "Extensions"), string(buf))
+	require.NoError(t, err)
+	assert.False(t, strings.Contains(string(buf), "Extensions"), string(buf))
 }
 
 func TestMetadataExtensionsOfAnAggregate(t *testing.T) {
@@ -373,16 +374,16 @@ func TestMetadataExtensionsOfAnAggregate(t *testing.T) {
 		`</md:EntitiesDescriptor>`
 
 	var group EntitiesDescriptor
-	assert.NilError(t, xml.Unmarshal([]byte(aggregate), &group))
-	assert.Assert(t, group.Extensions != nil)
-	assert.Check(t, is.DeepEqual(&PublicationInfo{
+	require.NoError(t, xml.Unmarshal([]byte(aggregate), &group))
+	require.NotNil(t, group.Extensions)
+	assert.Equal(t, &PublicationInfo{
 		Publisher:       "https://federation.example.org",
 		CreationInstant: time.Date(2026, 11, 17, 1, 2, 3, 0, time.UTC),
-	}, group.Extensions.PublicationInfo))
+	}, group.Extensions.PublicationInfo)
 
 	buf, err := xml.Marshal(group)
-	assert.NilError(t, err)
-	assert.Check(t, strings.Contains(string(buf),
+	require.NoError(t, err)
+	assert.True(t, strings.Contains(string(buf),
 		`<Extensions><mdrpi:PublicationInfo xmlns:mdrpi="urn:oasis:names:tc:SAML:metadata:rpi" publisher="https://federation.example.org" creationInstant="2026-11-17T01:02:03Z"></mdrpi:PublicationInfo></Extensions>`), string(buf))
 }
 
@@ -396,22 +397,22 @@ func TestSignedMetadataWithExtensionsFromAFederationIsVerified(t *testing.T) {
 		`entityID="https://wiki.example.edu/shibboleth"`, `entityID="https://wiki.example.edu/shibboleth" ID="sp1"`, 1)
 
 	verified, err := verifier.Verify([]byte(signMetadataXML(t, fixture)))
-	assert.NilError(t, err)
+	require.NoError(t, err)
 
 	// The extensions are read from the XML that the signature covers, and are the same as those of the fixture.
 	metadata, err := ParseServiceProviderMetadata(verified)
-	assert.NilError(t, err)
+	require.NoError(t, err)
 
 	expected := parseExtensionsFixture(t)
-	assert.Check(t, is.DeepEqual(expected.Extensions, metadata.Extensions))
-	assert.Check(t, is.DeepEqual(expected.SPSSODescriptors[0].Extensions, metadata.SPSSODescriptors[0].Extensions))
-	assert.Check(t, is.DeepEqual(expected.ContactPeople, metadata.ContactPeople))
-	assert.Check(t, is.Equal(SubjectIDRequirementPairwiseID, metadata.SubjectIDRequirement()))
+	assert.Equal(t, expected.Extensions, metadata.Extensions)
+	assert.Equal(t, expected.SPSSODescriptors[0].Extensions, metadata.SPSSODescriptors[0].Extensions)
+	assert.Equal(t, expected.ContactPeople, metadata.ContactPeople)
+	assert.Equal(t, SubjectIDRequirementPairwiseID, metadata.SubjectIDRequirement())
 
 	// A change to an extension breaks the signature.
 	tampered := strings.Replace(signMetadataXML(t, fixture), "pairwise-id", "subject-id", 1)
 	_, err = verifier.Verify([]byte(tampered))
-	assert.Check(t, err != nil)
+	assert.NotNil(t, err)
 }
 
 // federationMetadataInfo is what a deployment of SAML2Int publishes about its identity provider.
@@ -457,19 +458,19 @@ func TestIDPMetadataPublishesOnlyAlgorithmSupportByDefault(t *testing.T) {
 	metadata := test.IDP.Metadata()
 
 	// The algorithms that are accepted on a signature are always known, and nothing else is.
-	assert.Assert(t, metadata.Extensions != nil)
-	assert.Check(t, is.DeepEqual(&Extensions{
+	require.NotNil(t, metadata.Extensions)
+	assert.Equal(t, &Extensions{
 		DigestMethods:  metadata.Extensions.DigestMethods,
 		SigningMethods: metadata.Extensions.SigningMethods,
-	}, metadata.Extensions))
-	assert.Check(t, metadata.Organization == nil)
-	assert.Check(t, is.Len(metadata.ContactPeople, 0))
-	assert.Check(t, metadata.IDPSSODescriptors[0].Extensions == nil)
-	assert.Check(t, is.Equal("", metadata.IDPSSODescriptors[0].ErrorURL))
+	}, metadata.Extensions)
+	assert.Nil(t, metadata.Organization)
+	assert.Len(t, metadata.ContactPeople, 0)
+	assert.Nil(t, metadata.IDPSSODescriptors[0].Extensions)
+	assert.Equal(t, "", metadata.IDPSSODescriptors[0].ErrorURL)
 
 	buf, err := xml.Marshal(metadata)
-	assert.NilError(t, err)
-	assert.Check(t, is.Equal(1, strings.Count(string(buf), "<Extensions>")))
+	require.NoError(t, err)
+	assert.Equal(t, 1, strings.Count(string(buf), "<Extensions>"))
 }
 
 func TestIDPMetadataPublishesMetadataInfo(t *testing.T) {
@@ -480,31 +481,31 @@ func TestIDPMetadataPublishesMetadataInfo(t *testing.T) {
 
 	// SDP-MD09 and SDP-MD10: the UIInfo is an extension of the role. SDP-MD12: so is the errorURL.
 	role := metadata.IDPSSODescriptors[0]
-	assert.Assert(t, role.Extensions != nil)
-	assert.Check(t, is.DeepEqual(test.IDP.MetadataInfo.UIInfo, role.Extensions.UIInfo))
-	assert.Check(t, is.DeepEqual(test.IDP.MetadataInfo.DiscoHints, role.Extensions.DiscoHints))
-	assert.Check(t, is.Equal("https://idp.example.com/error", role.ErrorURL))
+	require.NotNil(t, role.Extensions)
+	assert.Equal(t, test.IDP.MetadataInfo.UIInfo, role.Extensions.UIInfo)
+	assert.Equal(t, test.IDP.MetadataInfo.DiscoHints, role.Extensions.DiscoHints)
+	assert.Equal(t, "https://idp.example.com/error", role.ErrorURL)
 
 	// SDP-IDP14: the scopes are never regular expressions.
-	assert.Check(t, is.DeepEqual([]Scope{{Value: "example.com"}, {Value: "example.org"}}, role.Extensions.Scopes))
+	assert.Equal(t, []Scope{{Value: "example.com"}, {Value: "example.org"}}, role.Extensions.Scopes)
 
 	// SDP-MD11: the contacts, and the organization, are those of the entity.
-	assert.Check(t, is.DeepEqual(test.IDP.MetadataInfo.ContactPeople, metadata.ContactPeople))
-	assert.Check(t, is.DeepEqual(test.IDP.MetadataInfo.Organization, metadata.Organization))
+	assert.Equal(t, test.IDP.MetadataInfo.ContactPeople, metadata.ContactPeople)
+	assert.Equal(t, test.IDP.MetadataInfo.Organization, metadata.Organization)
 
 	// Entity attributes describe the entity (MetaAttr §2.1).
-	assert.Assert(t, metadata.Extensions != nil)
-	assert.Check(t, is.DeepEqual(test.IDP.MetadataInfo.EntityAttributes, metadata.Extensions.EntityAttributes.Attributes))
-	assert.Check(t, is.DeepEqual([]string{AssuranceCertificationSIRTFI}, metadata.EntityAttributeValues(AssuranceCertificationAttributeName)))
+	require.NotNil(t, metadata.Extensions)
+	assert.Equal(t, test.IDP.MetadataInfo.EntityAttributes, metadata.Extensions.EntityAttributes.Attributes)
+	assert.Equal(t, []string{AssuranceCertificationSIRTFI}, metadata.EntityAttributeValues(AssuranceCertificationAttributeName))
 
 	// What is published is a copy, so a caller that changes it does not change the configuration.
 	role.Extensions.UIInfo.DisplayNames[0].Value = "changed"
 	metadata.ContactPeople[0].ContactType = "changed"
 	metadata.Extensions.EntityAttributes.Attributes[0].Name = "changed"
 
-	assert.Check(t, is.Equal("Example Identity Provider", test.IDP.MetadataInfo.UIInfo.DisplayNames[0].Value))
-	assert.Check(t, is.Equal("technical", test.IDP.MetadataInfo.ContactPeople[0].ContactType))
-	assert.Check(t, is.Equal(AssuranceCertificationAttributeName, test.IDP.MetadataInfo.EntityAttributes[0].Name))
+	assert.Equal(t, "Example Identity Provider", test.IDP.MetadataInfo.UIInfo.DisplayNames[0].Value)
+	assert.Equal(t, "technical", test.IDP.MetadataInfo.ContactPeople[0].ContactType)
+	assert.Equal(t, AssuranceCertificationAttributeName, test.IDP.MetadataInfo.EntityAttributes[0].Name)
 }
 
 func TestIDPMetadataPublishesScopesOnTheAttributeAuthority(t *testing.T) {
@@ -520,10 +521,10 @@ func TestIDPMetadataPublishesScopesOnTheAttributeAuthority(t *testing.T) {
 	test.IDP.describeMetadata(ed)
 
 	scopes := []Scope{{Value: "example.com"}, {Value: "example.org"}}
-	assert.Check(t, is.DeepEqual(scopes, ed.IDPSSODescriptors[0].Extensions.Scopes))
-	assert.Check(t, is.DeepEqual(scopes, ed.AttributeAuthorityDescriptors[0].Extensions.Scopes))
-	assert.Check(t, ed.AttributeAuthorityDescriptors[0].Extensions.UIInfo == nil)
-	assert.Check(t, is.Equal("", ed.AttributeAuthorityDescriptors[0].ErrorURL))
+	assert.Equal(t, scopes, ed.IDPSSODescriptors[0].Extensions.Scopes)
+	assert.Equal(t, scopes, ed.AttributeAuthorityDescriptors[0].Extensions.Scopes)
+	assert.Nil(t, ed.AttributeAuthorityDescriptors[0].Extensions.UIInfo)
+	assert.Equal(t, "", ed.AttributeAuthorityDescriptors[0].ErrorURL)
 }
 
 func TestIDPMetadataPublishesTheScopeOfTheNameIDProvider(t *testing.T) {
@@ -531,37 +532,37 @@ func TestIDPMetadataPublishesTheScopeOfTheNameIDProvider(t *testing.T) {
 
 	// SDP-IDP14: the scope of the pairwise-id that the provider states is listed without being configured twice.
 	test.IDP.NameIDProvider = PersistentNameIDProvider{Secret: persistentTestSecret, Scope: "example.net"}
-	assert.Check(t, is.DeepEqual([]Scope{{Value: "example.net"}}, test.IDP.Metadata().IDPSSODescriptors[0].Extensions.Scopes))
+	assert.Equal(t, []Scope{{Value: "example.net"}}, test.IDP.Metadata().IDPSSODescriptors[0].Extensions.Scopes)
 
 	// It follows the scopes that are configured, and is not repeated, whatever its case.
 	test.IDP.MetadataInfo.Scopes = []string{"example.com", "Example.NET"}
-	assert.Check(t, is.DeepEqual([]Scope{{Value: "example.com"}, {Value: "Example.NET"}}, test.IDP.Metadata().IDPSSODescriptors[0].Extensions.Scopes))
+	assert.Equal(t, []Scope{{Value: "example.com"}, {Value: "Example.NET"}}, test.IDP.Metadata().IDPSSODescriptors[0].Extensions.Scopes)
 
 	test.IDP.MetadataInfo.Scopes = []string{"example.com"}
 	test.IDP.NameIDProvider = ManagedPersistentNameIDProvider{PersistentNameIDProvider: PersistentNameIDProvider{Secret: persistentTestSecret, Scope: "example.net"}}
-	assert.Check(t, is.DeepEqual([]Scope{{Value: "example.com"}, {Value: "example.net"}}, test.IDP.Metadata().IDPSSODescriptors[0].Extensions.Scopes))
+	assert.Equal(t, []Scope{{Value: "example.com"}, {Value: "example.net"}}, test.IDP.Metadata().IDPSSODescriptors[0].Extensions.Scopes)
 
 	// A provider with no scope, or none at all, adds nothing.
 	test.IDP.NameIDProvider = PersistentNameIDProvider{Secret: persistentTestSecret}
-	assert.Check(t, is.DeepEqual([]Scope{{Value: "example.com"}}, test.IDP.Metadata().IDPSSODescriptors[0].Extensions.Scopes))
+	assert.Equal(t, []Scope{{Value: "example.com"}}, test.IDP.Metadata().IDPSSODescriptors[0].Extensions.Scopes)
 
 	// A scope that the provider can't state is not signed into the metadata.
 	test.IDP.NameIDProvider = PersistentNameIDProvider{Secret: persistentTestSecret, Scope: "not a scope"}
 	_, err := test.IDP.SignedMetadata()
-	assert.Check(t, is.Error(err, `the scope "not a scope" of the NameIDProvider is not a scope`))
+	assert.EqualError(t, err, `the scope "not a scope" of the NameIDProvider is not a scope`)
 }
 
 func TestSubjectIDRequirementRequests(t *testing.T) {
-	assert.Check(t, SubjectIDRequirementSubjectID.Requests(SubjectIDAttributeName))
-	assert.Check(t, !SubjectIDRequirementSubjectID.Requests(PairwiseIDAttributeName))
-	assert.Check(t, SubjectIDRequirementPairwiseID.Requests(PairwiseIDAttributeName))
-	assert.Check(t, !SubjectIDRequirementPairwiseID.Requests(SubjectIDAttributeName))
-	assert.Check(t, SubjectIDRequirementAny.Requests(SubjectIDAttributeName))
-	assert.Check(t, SubjectIDRequirementAny.Requests(PairwiseIDAttributeName))
-	assert.Check(t, !SubjectIDRequirementAny.Requests("urn:oid:0.9.2342.19200300.100.1.3"))
-	assert.Check(t, !SubjectIDRequirementNone.Requests(SubjectIDAttributeName))
-	assert.Check(t, !SubjectIDRequirementNone.Requests(PairwiseIDAttributeName))
-	assert.Check(t, !SubjectIDRequirementUnspecified.Requests(PairwiseIDAttributeName))
+	assert.True(t, SubjectIDRequirementSubjectID.Requests(SubjectIDAttributeName))
+	assert.False(t, SubjectIDRequirementSubjectID.Requests(PairwiseIDAttributeName))
+	assert.True(t, SubjectIDRequirementPairwiseID.Requests(PairwiseIDAttributeName))
+	assert.False(t, SubjectIDRequirementPairwiseID.Requests(SubjectIDAttributeName))
+	assert.True(t, SubjectIDRequirementAny.Requests(SubjectIDAttributeName))
+	assert.True(t, SubjectIDRequirementAny.Requests(PairwiseIDAttributeName))
+	assert.False(t, SubjectIDRequirementAny.Requests("urn:oid:0.9.2342.19200300.100.1.3"))
+	assert.False(t, SubjectIDRequirementNone.Requests(SubjectIDAttributeName))
+	assert.False(t, SubjectIDRequirementNone.Requests(PairwiseIDAttributeName))
+	assert.False(t, SubjectIDRequirementUnspecified.Requests(PairwiseIDAttributeName))
 }
 
 func TestIDPMetadataHook(t *testing.T) {
@@ -569,23 +570,23 @@ func TestIDPMetadataHook(t *testing.T) {
 	test.IDP.MetadataInfo = federationMetadataInfo()
 	test.IDP.MetadataHook = func(metadata *EntityDescriptor) {
 		// The hook runs after the metadata is complete, so it sees what MetadataInfo published.
-		assert.Check(t, metadata.Extensions != nil && metadata.Extensions.EntityAttributes != nil)
+		assert.True(t, metadata.Extensions != nil && metadata.Extensions.EntityAttributes != nil)
 
 		metadata.Extensions.RegistrationInfo = &RegistrationInfo{RegistrationAuthority: "https://federation.example.org"}
 	}
 
-	assert.Check(t, is.Equal("https://federation.example.org", test.IDP.Metadata().Extensions.RegistrationInfo.RegistrationAuthority))
+	assert.Equal(t, "https://federation.example.org", test.IDP.Metadata().Extensions.RegistrationInfo.RegistrationAuthority)
 
 	// What the hook adds is signed.
 	signed, err := test.IDP.SignedMetadata()
-	assert.NilError(t, err)
+	require.NoError(t, err)
 
 	verified, err := verifier.Verify(signed)
-	assert.NilError(t, err)
+	require.NoError(t, err)
 
 	var metadata EntityDescriptor
-	assert.NilError(t, xml.Unmarshal(verified, &metadata))
-	assert.Check(t, is.Equal("https://federation.example.org", metadata.Extensions.RegistrationInfo.RegistrationAuthority))
+	require.NoError(t, xml.Unmarshal(verified, &metadata))
+	assert.Equal(t, "https://federation.example.org", metadata.Extensions.RegistrationInfo.RegistrationAuthority)
 }
 
 func TestSignedIDPMetadataWithExtensionsIsVerified(t *testing.T) {
@@ -593,10 +594,10 @@ func TestSignedIDPMetadataWithExtensionsIsVerified(t *testing.T) {
 	test.IDP.MetadataInfo = federationMetadataInfo()
 
 	signed, err := test.IDP.SignedMetadata()
-	assert.NilError(t, err)
+	require.NoError(t, err)
 
 	doc := etree.NewDocument()
-	assert.NilError(t, doc.ReadFromBytes(signed))
+	require.NoError(t, doc.ReadFromBytes(signed))
 
 	// The schema: Signature, then Extensions, then the roles, the organization and the contacts.
 	children := doc.Root().ChildElements()
@@ -606,47 +607,47 @@ func TestSignedIDPMetadataWithExtensionsIsVerified(t *testing.T) {
 		tags = append(tags, child.Tag)
 	}
 
-	assert.Check(t, is.DeepEqual([]string{"Signature", "Extensions", "IDPSSODescriptor", "Organization", "ContactPerson", "ContactPerson"}, tags))
+	assert.Equal(t, []string{"Signature", "Extensions", "IDPSSODescriptor", "Organization", "ContactPerson", "ContactPerson"}, tags)
 
 	role := doc.Root().FindElement("./IDPSSODescriptor")
-	assert.Check(t, is.Equal("https://idp.example.com/error", role.SelectAttrValue("errorURL", "")))
-	assert.Check(t, is.Equal("Extensions", role.ChildElements()[0].Tag))
-	assert.Check(t, is.DeepEqual([]xml.Name{
+	assert.Equal(t, "https://idp.example.com/error", role.SelectAttrValue("errorURL", ""))
+	assert.Equal(t, "Extensions", role.ChildElements()[0].Tag)
+	assert.Equal(t, []xml.Name{
 		{Space: testNSMDUI, Local: "UIInfo"},
 		{Space: testNSMDUI, Local: "DiscoHints"},
 		{Space: testNSShibMD, Local: "Scope"},
 		{Space: testNSShibMD, Local: "Scope"},
-	}, childrenOf(role.ChildElements()[0])))
+	}, childrenOf(role.ChildElements()[0]))
 
 	for _, scope := range role.ChildElements()[0].ChildElements()[2:] {
-		assert.Check(t, is.Equal("false", scope.SelectAttrValue("regexp", "")))
+		assert.Equal(t, "false", scope.SelectAttrValue("regexp", ""))
 	}
 
 	verified, err := verifier.Verify(signed)
-	assert.NilError(t, err)
+	require.NoError(t, err)
 
 	var metadata EntityDescriptor
-	assert.NilError(t, xml.Unmarshal(verified, &metadata))
+	require.NoError(t, xml.Unmarshal(verified, &metadata))
 
 	expected := test.IDP.Metadata()
-	assert.Check(t, is.DeepEqual(expected.Extensions, metadata.Extensions))
-	assert.Check(t, is.DeepEqual(expected.IDPSSODescriptors[0].Extensions, metadata.IDPSSODescriptors[0].Extensions))
-	assert.Check(t, is.DeepEqual(expected.Organization, metadata.Organization))
-	assert.Check(t, is.DeepEqual(expected.ContactPeople, metadata.ContactPeople))
-	assert.Check(t, is.Equal(expected.IDPSSODescriptors[0].ErrorURL, metadata.IDPSSODescriptors[0].ErrorURL))
+	assert.Equal(t, expected.Extensions, metadata.Extensions)
+	assert.Equal(t, expected.IDPSSODescriptors[0].Extensions, metadata.IDPSSODescriptors[0].Extensions)
+	assert.Equal(t, expected.Organization, metadata.Organization)
+	assert.Equal(t, expected.ContactPeople, metadata.ContactPeople)
+	assert.Equal(t, expected.IDPSSODescriptors[0].ErrorURL, metadata.IDPSSODescriptors[0].ErrorURL)
 
 	// A change to an extension breaks the signature.
 	_, err = verifier.Verify([]byte(strings.Replace(string(signed), ">example.org<", ">example.net<", 1)))
-	assert.Check(t, err != nil)
+	assert.NotNil(t, err)
 }
 
 func TestMetadataInfoValidate(t *testing.T) {
-	assert.Check(t, MetadataInfo{}.Validate())
-	assert.Check(t, federationMetadataInfo().Validate())
+	assert.NoError(t, MetadataInfo{}.Validate())
+	assert.NoError(t, federationMetadataInfo().Validate())
 
 	dataLogo := federationMetadataInfo()
 	dataLogo.UIInfo.Logos = []Logo{{URL: "data:image/png;base64,iVBORw0KGgo=", Height: 16, Width: 16, Lang: "en"}}
-	assert.Check(t, dataLogo.Validate())
+	assert.NoError(t, dataLogo.Validate())
 
 	testCases := []struct {
 		name     string
@@ -742,7 +743,7 @@ func TestMetadataInfoValidate(t *testing.T) {
 			info := federationMetadataInfo()
 			tc.change(&info)
 
-			assert.Check(t, is.Error(info.Validate(), tc.expected))
+			assert.EqualError(t, info.Validate(), tc.expected)
 		})
 	}
 }
@@ -753,13 +754,13 @@ func TestInvalidMetadataInfoIsNotServed(t *testing.T) {
 	test.IDP.MetadataInfo.ErrorURL = "http://idp.example.com/error"
 
 	_, err := test.IDP.SignedMetadata()
-	assert.Check(t, is.Error(err, `MetadataInfo.ErrorURL: "http://idp.example.com/error" is not an https URL`))
+	assert.EqualError(t, err, `MetadataInfo.ErrorURL: "http://idp.example.com/error" is not an https URL`)
 
 	w := httptest.NewRecorder()
 	test.IDP.ServeMetadata(w, httptest.NewRequest(http.MethodGet, test.IDP.MetadataURL.String(), nil))
 
-	assert.Check(t, is.Equal(http.StatusInternalServerError, w.Code))
-	assert.Check(t, !strings.Contains(w.Body.String(), "EntityDescriptor"))
+	assert.Equal(t, http.StatusInternalServerError, w.Code)
+	assert.False(t, strings.Contains(w.Body.String(), "EntityDescriptor"))
 }
 
 func TestUnknownExtensionElementKeepsNamespacedAttributes(t *testing.T) {
@@ -768,9 +769,9 @@ func TestUnknownExtensionElementKeepsNamespacedAttributes(t *testing.T) {
 		`<ex:Child>one</ex:Child><other:Child/></ex:Thing></md:Extensions></md:EntityDescriptor>`
 
 	var metadata EntityDescriptor
-	assert.NilError(t, xml.Unmarshal([]byte(data), &metadata))
-	assert.Assert(t, metadata.Extensions != nil)
-	assert.Check(t, is.DeepEqual([]ExtensionElement{{
+	require.NoError(t, xml.Unmarshal([]byte(data), &metadata))
+	require.NotNil(t, metadata.Extensions)
+	assert.Equal(t, []ExtensionElement{{
 		XMLName: xml.Name{Space: "urn:example:ext", Local: "Thing"},
 		Attrs: []xml.Attr{
 			{Name: xml.Name{Space: "urn:example:other", Local: "flag"}, Value: "yes"},
@@ -781,18 +782,18 @@ func TestUnknownExtensionElementKeepsNamespacedAttributes(t *testing.T) {
 			{XMLName: xml.Name{Space: "urn:example:ext", Local: "Child"}, Content: "one"},
 			{XMLName: xml.Name{Space: "urn:example:other", Local: "Child"}},
 		},
-	}}, metadata.Extensions.Other))
+	}}, metadata.Extensions.Other)
 
 	buf, err := xml.Marshal(&metadata)
-	assert.NilError(t, err)
+	require.NoError(t, err)
 
 	doc := etree.NewDocument()
-	assert.NilError(t, doc.ReadFromBytes(buf))
+	require.NoError(t, doc.ReadFromBytes(buf))
 
 	thing := doc.Root().FindElement("./Extensions").ChildElements()[0]
-	assert.Check(t, is.Equal("urn:example:ext", thing.NamespaceURI()))
-	assert.Check(t, is.Equal("1", thing.SelectAttrValue("plain", "")))
-	assert.Check(t, is.Equal("en", thing.SelectAttrValue("xml:lang", "")))
+	assert.Equal(t, "urn:example:ext", thing.NamespaceURI())
+	assert.Equal(t, "1", thing.SelectAttrValue("plain", ""))
+	assert.Equal(t, "en", thing.SelectAttrValue("xml:lang", ""))
 
 	var flag string
 
@@ -802,13 +803,13 @@ func TestUnknownExtensionElementKeepsNamespacedAttributes(t *testing.T) {
 		}
 	}
 
-	assert.Check(t, is.Equal("yes", flag))
-	assert.Check(t, is.DeepEqual([]xml.Name{
+	assert.Equal(t, "yes", flag)
+	assert.Equal(t, []xml.Name{
 		{Space: "urn:example:ext", Local: "Child"},
 		{Space: "urn:example:other", Local: "Child"},
-	}, childrenOf(thing)))
+	}, childrenOf(thing))
 
 	var again EntityDescriptor
-	assert.NilError(t, xml.Unmarshal(buf, &again))
-	assert.Check(t, is.DeepEqual(metadata.Extensions, again.Extensions))
+	require.NoError(t, xml.Unmarshal(buf, &again))
+	assert.Equal(t, metadata.Extensions, again.Extensions)
 }

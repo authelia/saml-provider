@@ -9,8 +9,8 @@ import (
 	"time"
 
 	"github.com/beevik/etree"
-	"gotest.tools/assert"
-	is "gotest.tools/assert/cmp"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"authelia.com/provider/saml/internal/dsig"
 )
@@ -49,12 +49,12 @@ func TestSPChecksInResponseToOfRedirectLogoutResponse(t *testing.T) {
 
 			err := f.sp.ValidateLogoutResponseRedirect(&url.URL{RawQuery: f.signed(t, "")}, tc.possible)
 			if tc.valid {
-				assert.Check(t, err)
+				assert.NoError(t, err)
 				return
 			}
 
-			assert.Assert(t, err != nil)
-			assert.Check(t, is.ErrorContains(privateError(err), inResponseToError))
+			require.NotNil(t, err)
+			assert.ErrorContains(t, privateError(err), inResponseToError)
 		})
 	}
 }
@@ -72,47 +72,47 @@ func signedLogoutResponseForm(t *testing.T, f *logoutResponseFixture, inResponse
 		SignatureMethod: dsig.RSASHA256SignatureMethod,
 	}
 	response, err := idp.MakeLogoutResponse(f.sp.SloURL.String(), inResponseTo)
-	assert.NilError(t, err)
+	require.NoError(t, err)
 
 	doc := etree.NewDocument()
 	doc.SetRoot(response.Element())
 	body, err := doc.WriteToBytes()
-	assert.NilError(t, err)
+	require.NoError(t, err)
 
 	return base64.StdEncoding.EncodeToString(body)
 }
 
 func TestSPChecksInResponseToOfPostLogoutResponse(t *testing.T) {
 	f := newLogoutResponseFixture(t)
-	assert.Check(t, f.sp.ValidateLogoutResponseForm(signedLogoutResponseForm(t, f, "id-request"), []string{"id-request"}))
+	assert.NoError(t, f.sp.ValidateLogoutResponseForm(signedLogoutResponseForm(t, f, "id-request"), []string{"id-request"}))
 
 	err := f.sp.ValidateLogoutResponseForm(signedLogoutResponseForm(t, f, "id-other"), []string{"id-request"})
-	assert.Assert(t, err != nil)
-	assert.Check(t, is.ErrorContains(privateError(err), inResponseToError))
+	require.NotNil(t, err)
+	assert.ErrorContains(t, privateError(err), inResponseToError)
 
 	err = f.sp.ValidateLogoutResponseForm(signedLogoutResponseForm(t, f, ""), []string{"id-request"})
-	assert.Assert(t, err != nil)
-	assert.Check(t, is.ErrorContains(privateError(err), inResponseToError))
+	require.NotNil(t, err)
+	assert.ErrorContains(t, privateError(err), inResponseToError)
 }
 
 func TestValidateLogoutResponseRequestPassesPossibleRequestIDs(t *testing.T) {
 	f := newLogoutResponseFixture(t)
 
 	redirect, err := http.NewRequest(http.MethodGet, "https://sp.example.com/saml2/slo?"+f.signed(t, ""), nil)
-	assert.NilError(t, err)
-	assert.Check(t, f.sp.ValidateLogoutResponseRequest(redirect, []string{"id-request"}))
-	assert.Check(t, is.ErrorContains(privateError(f.sp.ValidateLogoutResponseRequest(redirect, []string{"id-other"})), inResponseToError))
+	require.NoError(t, err)
+	assert.NoError(t, f.sp.ValidateLogoutResponseRequest(redirect, []string{"id-request"}))
+	assert.ErrorContains(t, privateError(f.sp.ValidateLogoutResponseRequest(redirect, []string{"id-other"})), inResponseToError)
 
 	form := url.Values{"SAMLResponse": {signedLogoutResponseForm(t, f, "id-request")}}.Encode()
 	newPost := func() *http.Request {
 		post, err := http.NewRequest(http.MethodPost, "https://sp.example.com/saml2/slo", strings.NewReader(form))
-		assert.NilError(t, err)
+		require.NoError(t, err)
 		post.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 
 		return post
 	}
-	assert.Check(t, f.sp.ValidateLogoutResponseRequest(newPost(), []string{"id-request"}))
-	assert.Check(t, is.ErrorContains(privateError(f.sp.ValidateLogoutResponseRequest(newPost(), []string{"id-other"})), inResponseToError))
+	assert.NoError(t, f.sp.ValidateLogoutResponseRequest(newPost(), []string{"id-request"}))
+	assert.ErrorContains(t, privateError(f.sp.ValidateLogoutResponseRequest(newPost(), []string{"id-other"})), inResponseToError)
 }
 
 func TestLogoutRequestIDCanBeTrackedAcrossBindings(t *testing.T) {
@@ -121,31 +121,31 @@ func TestLogoutRequestIDCanBeTrackedAcrossBindings(t *testing.T) {
 	sp.SignatureMethod = ""
 
 	request, err := sp.MakeLogoutRequest("https://idp.example.com/slo", "alice")
-	assert.NilError(t, err)
-	assert.Assert(t, request.ID != "")
+	require.NoError(t, err)
+	require.True(t, request.ID != "")
 	_, err = request.Redirect("", &sp)
-	assert.NilError(t, err)
+	require.NoError(t, err)
 
 	f.setMessageInResponseTo(t, sp.SloURL.String(), ` InResponseTo="`+request.ID+`"`)
-	assert.Check(t, sp.ValidateLogoutResponseRedirect(&url.URL{RawQuery: f.signed(t, "")}, []string{request.ID}))
+	assert.NoError(t, sp.ValidateLogoutResponseRedirect(&url.URL{RawQuery: f.signed(t, "")}, []string{request.ID}))
 }
 
 func TestLogoutResponseExpiryUsesTimeNow(t *testing.T) {
 	f := newLogoutResponseFixture(t)
 	query := f.signed(t, "")
 	u := &url.URL{RawQuery: query}
-	assert.Check(t, f.sp.ValidateLogoutResponseRedirect(u, []string{"id-request"}))
+	assert.NoError(t, f.sp.ValidateLogoutResponseRedirect(u, []string{"id-request"}))
 
 	TimeNow = func() time.Time { return time.Now().Add(MaxIssueDelay + time.Hour) }
 	err := f.sp.ValidateLogoutResponseRedirect(u, []string{"id-request"})
-	assert.Assert(t, err != nil)
-	assert.Check(t, is.ErrorContains(privateError(err), "expired"))
+	require.NotNil(t, err)
+	assert.ErrorContains(t, privateError(err), "expired")
 }
 
 func TestSPRejectsLogoutResponseWithoutIssuer(t *testing.T) {
 	f := newLogoutResponseFixture(t)
 	f.setMessageWithoutIssuer(t)
 	err := f.sp.ValidateLogoutResponseRedirect(&url.URL{RawQuery: f.signed(t, "")}, []string{"id-request"})
-	assert.Assert(t, err != nil)
-	assert.Check(t, is.ErrorContains(privateError(err), "issuer"))
+	require.NotNil(t, err)
+	assert.ErrorContains(t, privateError(err), "issuer")
 }

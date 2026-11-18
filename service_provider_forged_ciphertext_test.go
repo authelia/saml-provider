@@ -7,7 +7,7 @@ import (
 	"time"
 
 	"github.com/beevik/etree"
-	"gotest.tools/assert"
+	"github.com/stretchr/testify/require"
 
 	"authelia.com/provider/saml/xmlenc"
 )
@@ -34,13 +34,13 @@ func TestSPRejectsForgedCBCCiphertextWithoutPanic(t *testing.T) {
 				AcsURL:      mustParseURL("https://sp.example.com/saml2/acs"),
 				IDPMetadata: &EntityDescriptor{},
 			}
-			assert.NilError(t, xml.Unmarshal(test.IDPMetadata, sp.IDPMetadata))
+			require.NoError(t, xml.Unmarshal(test.IDPMetadata, sp.IDPMetadata))
 
 			encrypter := xmlenc.OAEP()
 			encrypter.BlockCipher = tc.cipher
 			encrypter.DigestMethod = &xmlenc.SHA1
 			encryptedData, err := encrypter.Encrypt(test.Certificate, []byte("<a/>"), nil)
-			assert.NilError(t, err)
+			require.NoError(t, err)
 			encryptedData.FindElement("./CipherData/CipherValue").SetText(base64.StdEncoding.EncodeToString(make([]byte, tc.size)))
 
 			doc := etree.NewDocument()
@@ -57,10 +57,10 @@ func TestSPRejectsForgedCBCCiphertextWithoutPanic(t *testing.T) {
 			response.CreateElement("saml:EncryptedAssertion").AddChild(encryptedData)
 
 			serialized, err := doc.WriteToBytes()
-			assert.NilError(t, err)
+			require.NoError(t, err)
 
 			_, err = sp.ParseXMLResponse(serialized, []string{"id-1"}, sp.AcsURL)
-			assert.Assert(t, err != nil)
+			require.NotNil(t, err)
 		})
 	}
 }

@@ -7,8 +7,8 @@ import (
 	"strings"
 	"testing"
 
-	"gotest.tools/assert"
-	is "gotest.tools/assert/cmp"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 // oversizedBody is valid JSON and XML up to the limit, so only the size can refuse it.
@@ -36,11 +36,11 @@ func TestAdminBodiesAreLimited(t *testing.T) {
 			test := NewServerTest(t)
 			w := httptest.NewRecorder()
 			test.Server.ServeHTTP(w, httptest.NewRequest(http.MethodPut, "https://idp.example.com"+path, body()))
-			assert.Check(t, is.Equal(w.Code, http.StatusRequestEntityTooLarge))
+			assert.Equal(t, w.Code, http.StatusRequestEntityTooLarge)
 
 			keys, err := test.Store.List(strings.TrimSuffix(strings.TrimSuffix(path, "big"), "padded"))
-			assert.NilError(t, err)
-			assert.Check(t, is.Len(keys, 0))
+			require.NoError(t, err)
+			assert.Len(t, keys, 0)
 		})
 	}
 }

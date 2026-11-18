@@ -15,15 +15,15 @@ import (
 	"time"
 
 	"github.com/beevik/etree"
-	"gotest.tools/assert"
-	is "gotest.tools/assert/cmp"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"authelia.com/provider/saml/internal/dsig"
 )
 
 func TestSPVerifiesIDPSignatureInRawECDSAEncoding(t *testing.T) {
 	key, err := ecdsa.GenerateKey(elliptic.P384(), rand.Reader)
-	assert.NilError(t, err)
+	require.NoError(t, err)
 
 	template := &x509.Certificate{
 		SerialNumber: big.NewInt(1),
@@ -32,9 +32,9 @@ func TestSPVerifiesIDPSignatureInRawECDSAEncoding(t *testing.T) {
 		NotAfter:     time.Now().Add(time.Hour),
 	}
 	der, err := x509.CreateCertificate(rand.Reader, template, template, key.Public(), key)
-	assert.NilError(t, err)
+	require.NoError(t, err)
 	cert, err := x509.ParseCertificate(der)
-	assert.NilError(t, err)
+	require.NoError(t, err)
 
 	test := NewIdentityProviderTest(t)
 	test.IDP.Key = nil
@@ -43,21 +43,21 @@ func TestSPVerifiesIDPSignatureInRawECDSAEncoding(t *testing.T) {
 	test.IDP.SignatureMethod = dsig.ECDSASHA384SignatureMethod
 
 	req, err := hardeningValidate(test, hardeningRequest(`ID="id-1"`, TimeNow(), hardeningIssuer))
-	assert.NilError(t, err)
-	assert.NilError(t, DefaultAssertionMaker{}.MakeAssertion(req, &Session{ID: "f00d", NameID: "alice"}))
-	assert.NilError(t, req.MakeResponse())
+	require.NoError(t, err)
+	require.NoError(t, DefaultAssertionMaker{}.MakeAssertion(req, &Session{ID: "f00d", NameID: "alice"}))
+	require.NoError(t, req.MakeResponse())
 
 	doc := etree.NewDocument()
 	doc.SetRoot(req.ResponseEl)
 	serialized, err := doc.WriteToBytes()
-	assert.NilError(t, err)
+	require.NoError(t, err)
 
 	parsed := etree.NewDocument()
-	assert.NilError(t, parsed.ReadFromBytes(serialized))
+	require.NoError(t, parsed.ReadFromBytes(serialized))
 
 	value, err := base64.StdEncoding.DecodeString(parsed.Root().FindElement("./Signature/SignatureValue").Text())
-	assert.NilError(t, err)
-	assert.Check(t, is.Len(value, 96))
+	require.NoError(t, err)
+	assert.Len(t, value, 96)
 
 	previous := Clock
 
@@ -65,7 +65,7 @@ func TestSPVerifiesIDPSignatureInRawECDSAEncoding(t *testing.T) {
 	defer func() { Clock = previous }()
 
 	sp := ServiceProvider{IDPMetadata: test.IDP.Metadata()}
-	assert.Check(t, sp.validateSignature(parsed.Root()))
+	assert.NoError(t, sp.validateSignature(parsed.Root()))
 }
 
 func TestIDPSignsWithECDSAByDefaultForCurve(t *testing.T) {
@@ -85,7 +85,7 @@ func TestIDPSignsWithECDSAByDefaultForCurve(t *testing.T) {
 					test.IDP.Certificate = cert
 					apply(test)
 					signature, _ := interopSignatureMethod(t, test)
-					assert.Check(t, is.Equal(tc.method, signature))
+					assert.Equal(t, tc.method, signature)
 				})
 			}
 		})
@@ -100,9 +100,9 @@ func TestIDPRejectsSignatureMethodForOtherKeyType(t *testing.T) {
 	test.IDP.Certificate = cert
 	test.IDP.SignatureMethod = dsig.RSASHA256SignatureMethod
 	req, err := hardeningValidate(test, hardeningRequest(`ID="id-1"`, TimeNow(), hardeningIssuer))
-	assert.NilError(t, err)
-	assert.NilError(t, DefaultAssertionMaker{}.MakeAssertion(req, &Session{ID: "f00d", NameID: "alice"}))
-	assert.Check(t, is.ErrorContains(req.MakeResponse(), "incompatible"))
+	require.NoError(t, err)
+	require.NoError(t, DefaultAssertionMaker{}.MakeAssertion(req, &Session{ID: "f00d", NameID: "alice"}))
+	assert.ErrorContains(t, req.MakeResponse(), "incompatible")
 }
 
 func TestIDPRejectsKeyWhichCannotSign(t *testing.T) {
@@ -110,9 +110,9 @@ func TestIDPRejectsKeyWhichCannotSign(t *testing.T) {
 	test.IDP.Key = "not a key"
 	test.IDP.Signer = nil
 	req, err := hardeningValidate(test, hardeningRequest(`ID="id-1"`, TimeNow(), hardeningIssuer))
-	assert.NilError(t, err)
-	assert.NilError(t, DefaultAssertionMaker{}.MakeAssertion(req, &Session{ID: "f00d", NameID: "alice"}))
-	assert.Check(t, is.ErrorContains(req.MakeResponse(), "crypto.Signer"))
+	require.NoError(t, err)
+	require.NoError(t, DefaultAssertionMaker{}.MakeAssertion(req, &Session{ID: "f00d", NameID: "alice"}))
+	assert.ErrorContains(t, req.MakeResponse(), "crypto.Signer")
 }
 
 // SAML2Int SDP-MD07 requires an EC public key to be at least 256 bits in length.
@@ -131,16 +131,16 @@ func TestIDPRejectsECDSAKeyShorterThan256Bits(t *testing.T) {
 			apply(test)
 
 			req, err := hardeningValidate(test, hardeningRequest(`ID="id-1"`, TimeNow(), hardeningIssuer))
-			assert.NilError(t, err)
-			assert.NilError(t, DefaultAssertionMaker{}.MakeAssertion(req, &Session{ID: "f00d", NameID: "alice"}))
-			assert.Check(t, is.ErrorContains(req.MakeResponse(), "shorter than 256 bits"))
+			require.NoError(t, err)
+			require.NoError(t, DefaultAssertionMaker{}.MakeAssertion(req, &Session{ID: "f00d", NameID: "alice"}))
+			assert.ErrorContains(t, req.MakeResponse(), "shorter than 256 bits")
 
 			_, err = test.IDP.SignedMetadata()
-			assert.Check(t, is.ErrorContains(err, "shorter than 256 bits"))
+			assert.ErrorContains(t, err, "shorter than 256 bits")
 
 			w := httptest.NewRecorder()
 			test.IDP.ServeMetadata(w, httptest.NewRequest(http.MethodGet, test.IDP.MetadataURL.String(), nil))
-			assert.Check(t, is.Equal(w.Code, http.StatusInternalServerError))
+			assert.Equal(t, w.Code, http.StatusInternalServerError)
 		})
 	}
 }
@@ -150,13 +150,13 @@ func TestIDPMetadataOmitsEncryptionForECDSACertificate(t *testing.T) {
 	test := NewIdentityProviderTest(t)
 	test.IDP.Certificate = cert
 	descriptors := test.IDP.Metadata().IDPSSODescriptors[0].KeyDescriptors
-	assert.Check(t, is.DeepEqual([]string{"signing"}, keyDescriptorUses(descriptors)))
+	assert.Equal(t, []string{"signing"}, keyDescriptorUses(descriptors))
 }
 
 func TestIDPMetadataAdvertisesEncryptionForRSACertificate(t *testing.T) {
 	test := NewIdentityProviderTest(t, applyKey)
 	descriptors := test.IDP.Metadata().IDPSSODescriptors[0].KeyDescriptors
-	assert.Check(t, is.DeepEqual([]string{"signing", "encryption"}, keyDescriptorUses(descriptors)))
+	assert.Equal(t, []string{"signing", "encryption"}, keyDescriptorUses(descriptors))
 }
 
 // What is encrypted to the identity provider can only be decrypted with a private key that it holds.
@@ -165,7 +165,7 @@ func TestIDPMetadataOmitsEncryptionWithoutDecryptionKey(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			test := NewIdentityProviderTest(t, opts...)
 			descriptors := test.IDP.Metadata().IDPSSODescriptors[0].KeyDescriptors
-			assert.Check(t, is.DeepEqual([]string{"signing"}, keyDescriptorUses(descriptors)))
+			assert.Equal(t, []string{"signing"}, keyDescriptorUses(descriptors))
 		})
 	}
 }
@@ -177,11 +177,11 @@ func TestIDPMetadataListsTheEncryptionMethodsItAccepts(t *testing.T) {
 
 	t.Run("defaults put gcm first", func(t *testing.T) {
 		test := NewIdentityProviderTest(t, applyKey)
-		assert.Check(t, is.DeepEqual([]EncryptionMethod{
+		assert.Equal(t, []EncryptionMethod{
 			method(aes128GCM), method(aes192GCM), method(aes256GCM),
 			method(aes128CBC), method(aes192CBC), method(aes256CBC),
 			method(rsaOAEP), method(rsaOAEP11),
-		}, algorithms(test)))
+		}, algorithms(test))
 	})
 
 	t.Run("restricted", func(t *testing.T) {
@@ -189,15 +189,15 @@ func TestIDPMetadataListsTheEncryptionMethodsItAccepts(t *testing.T) {
 		test.IDP.ContentEncryptionMethods = []string{aes256CBC, aes256GCM}
 		test.IDP.KeyTransportMethods = []string{rsaOAEP11}
 		test.IDP.KeyTransportDigestMethods = []string{digestSHA256, digestSHA512}
-		assert.Check(t, is.DeepEqual([]EncryptionMethod{
+		assert.Equal(t, []EncryptionMethod{
 			method(aes256GCM), method(aes256CBC), oaepMethod(rsaOAEP11, digestSHA256, mgf1SHA256),
-		}, algorithms(test)))
+		}, algorithms(test))
 	})
 
 	t.Run("misconfigured", func(t *testing.T) {
 		test := NewIdentityProviderTest(t, applyKey)
 		test.IDP.ContentEncryptionMethods = []string{tripleDES}
-		assert.Check(t, is.DeepEqual([]string{"signing"}, keyDescriptorUses(test.IDP.Metadata().IDPSSODescriptors[0].KeyDescriptors)))
+		assert.Equal(t, []string{"signing"}, keyDescriptorUses(test.IDP.Metadata().IDPSSODescriptors[0].KeyDescriptors))
 	})
 }
 
@@ -244,23 +244,23 @@ func TestSPAcceptsDERSignatureOnlyWithSignatureVerifier(t *testing.T) {
 	test.IDP.Certificate = cert
 	test.IDP.SignatureMethod = dsig.ECDSASHA256SignatureMethod
 	req, err := hardeningValidate(test, hardeningRequest(`ID="id-1"`, TimeNow(), hardeningIssuer))
-	assert.NilError(t, err)
-	assert.NilError(t, DefaultAssertionMaker{}.MakeAssertion(req, &Session{ID: "f00d", NameID: "alice"}))
-	assert.NilError(t, req.MakeResponse())
+	require.NoError(t, err)
+	require.NoError(t, DefaultAssertionMaker{}.MakeAssertion(req, &Session{ID: "f00d", NameID: "alice"}))
+	require.NoError(t, req.MakeResponse())
 
 	doc := etree.NewDocument()
 	doc.SetRoot(req.ResponseEl)
 	serialized, err := doc.WriteToBytes()
-	assert.NilError(t, err)
+	require.NoError(t, err)
 
 	parsed := etree.NewDocument()
-	assert.NilError(t, parsed.ReadFromBytes(serialized))
+	require.NoError(t, parsed.ReadFromBytes(serialized))
 
 	value := parsed.Root().FindElement("./Signature/SignatureValue")
 	raw, err := base64.StdEncoding.DecodeString(value.Text())
-	assert.NilError(t, err)
+	require.NoError(t, err)
 	der, err := asn1.Marshal(struct{ R, S *big.Int }{new(big.Int).SetBytes(raw[:32]), new(big.Int).SetBytes(raw[32:])})
-	assert.NilError(t, err)
+	require.NoError(t, err)
 	value.SetText(base64.StdEncoding.EncodeToString(der))
 
 	previous := Clock
@@ -269,8 +269,8 @@ func TestSPAcceptsDERSignatureOnlyWithSignatureVerifier(t *testing.T) {
 	defer func() { Clock = previous }()
 
 	sp := ServiceProvider{IDPMetadata: test.IDP.Metadata()}
-	assert.Check(t, is.ErrorContains(sp.validateSignature(parsed.Root().Copy()), "invalid ECDSA signature length"))
+	assert.ErrorContains(t, sp.validateSignature(parsed.Root().Copy()), "invalid ECDSA signature length")
 
 	sp.SignatureVerifier = derSignatureVerifier{}
-	assert.Check(t, sp.validateSignature(parsed.Root().Copy()))
+	assert.NoError(t, sp.validateSignature(parsed.Root().Copy()))
 }

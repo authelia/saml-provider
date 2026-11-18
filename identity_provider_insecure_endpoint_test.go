@@ -10,8 +10,8 @@ import (
 	"testing"
 	"time"
 
-	"gotest.tools/assert"
-	is "gotest.tools/assert/cmp"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestIsSecureEndpointLocation(t *testing.T) {
@@ -57,24 +57,24 @@ func TestIsSecureEndpointLocation(t *testing.T) {
 		{"https://sp example.com/saml2/acs", false},
 	} {
 		t.Run(tc.location, func(t *testing.T) {
-			assert.Check(t, is.Equal(isSecureEndpointLocation(tc.location), tc.secure))
+			assert.Equal(t, isSecureEndpointLocation(tc.location), tc.secure)
 		})
 	}
 }
 
 func TestCheckServiceProviderEndpoint(t *testing.T) {
 	idp := &IdentityProvider{}
-	assert.Check(t, idp.CheckServiceProviderEndpoint("https://sp.example.com/acs"))
-	assert.Check(t, idp.CheckServiceProviderEndpoint("http://localhost:8080/acs"))
+	assert.NoError(t, idp.CheckServiceProviderEndpoint("https://sp.example.com/acs"))
+	assert.NoError(t, idp.CheckServiceProviderEndpoint("http://localhost:8080/acs"))
 	err := idp.CheckServiceProviderEndpoint("http://sp.example.com/acs")
-	assert.Check(t, errors.Is(err, ErrInsecureEndpoint), "error: %v", err)
+	assert.True(t, errors.Is(err, ErrInsecureEndpoint), "error: %v", err)
 
 	idp.AllowInsecureServiceProviderEndpoints = true
-	assert.Check(t, idp.CheckServiceProviderEndpoint("http://sp.example.com/acs"))
-	assert.Check(t, idp.CheckServiceProviderEndpoint("HTTP://sp.example.com/acs"))
+	assert.NoError(t, idp.CheckServiceProviderEndpoint("http://sp.example.com/acs"))
+	assert.NoError(t, idp.CheckServiceProviderEndpoint("HTTP://sp.example.com/acs"))
 	// The option only allows plain HTTP, not URLs which are not HTTP at all.
 	for _, location := range []string{"", "/acs", "//sp.example.com/acs", "http:///acs", "ftp://sp.example.com/acs", "http://%zz/"} {
-		assert.Check(t, errors.Is(idp.CheckServiceProviderEndpoint(location), ErrInsecureEndpoint), "location %q", location)
+		assert.True(t, errors.Is(idp.CheckServiceProviderEndpoint(location), ErrInsecureEndpoint), "location %q", location)
 	}
 }
 
@@ -104,9 +104,9 @@ func TestCheckServiceProviderBackChannelEndpoint(t *testing.T) {
 
 			err := idp.CheckServiceProviderBackChannelEndpoint(tc.location)
 			if tc.ok {
-				assert.Check(t, err)
+				assert.NoError(t, err)
 			} else {
-				assert.Check(t, errors.Is(err, ErrInsecureEndpoint), "error: %v", err)
+				assert.True(t, errors.Is(err, ErrInsecureEndpoint), "error: %v", err)
 			}
 		})
 	}
@@ -153,10 +153,10 @@ func TestIDPRefusesInsecureACS(t *testing.T) {
 	} {
 		t.Run(name, func(t *testing.T) {
 			req, err := hardeningValidate(test, insecureEndpointRequest(attrs))
-			assert.Check(t, errors.Is(err, ErrInsecureEndpoint), "error: %v", err)
-			assert.Check(t, req.ACSEndpoint == nil, "an insecure endpoint must not be selected")
+			assert.True(t, errors.Is(err, ErrInsecureEndpoint), "error: %v", err)
+			assert.True(t, req.ACSEndpoint == nil, "an insecure endpoint must not be selected")
 			// A SAML error response goes to the ACS, so none can be sent either.
-			assert.Check(t, req.WriteErrorResponse(httptest.NewRecorder(), ErrServerError) != nil)
+			assert.True(t, req.WriteErrorResponse(httptest.NewRecorder(), ErrServerError) != nil)
 		})
 	}
 }
@@ -172,8 +172,8 @@ func TestIDPAllowsInsecureACSWhenEnabled(t *testing.T) {
 	} {
 		t.Run(name, func(t *testing.T) {
 			req, err := hardeningValidate(test, insecureEndpointRequest(attrs))
-			assert.NilError(t, err)
-			assert.Check(t, is.Equal(req.ACSEndpoint.Location, insecureACS.Location))
+			require.NoError(t, err)
+			assert.Equal(t, req.ACSEndpoint.Location, insecureACS.Location)
 		})
 	}
 }
@@ -183,8 +183,8 @@ func TestIDPAllowsLoopbackACS(t *testing.T) {
 	test := insecureEndpointTestIDP(t, loopback)
 
 	req, err := hardeningValidate(test, insecureEndpointRequest(`AssertionConsumerServiceURL="http://localhost:8080/saml2/acs"`))
-	assert.NilError(t, err)
-	assert.Check(t, is.Equal(req.ACSEndpoint.Location, loopback.Location))
+	require.NoError(t, err)
+	assert.Equal(t, req.ACSEndpoint.Location, loopback.Location)
 }
 
 // A service provider which lists an insecure endpoint alongside a secure one can still be used
@@ -197,34 +197,34 @@ func TestIDPMixedACSEndpoints(t *testing.T) {
 
 	t.Run("secure url", func(t *testing.T) {
 		req, err := hardeningValidate(test, insecureEndpointRequest(`AssertionConsumerServiceURL="https://sp.example.com/saml2/acs"`))
-		assert.NilError(t, err)
-		assert.Check(t, is.Equal(req.ACSEndpoint.Location, secureACS.Location))
+		require.NoError(t, err)
+		assert.Equal(t, req.ACSEndpoint.Location, secureACS.Location)
 	})
 
 	t.Run("secure index", func(t *testing.T) {
 		req, err := hardeningValidate(test, insecureEndpointRequest(`AssertionConsumerServiceIndex="2"`))
-		assert.NilError(t, err)
-		assert.Check(t, is.Equal(req.ACSEndpoint.Location, secureACS.Location))
+		require.NoError(t, err)
+		assert.Equal(t, req.ACSEndpoint.Location, secureACS.Location)
 	})
 
 	// The default skips the insecure endpoint, although it is marked as the default.
 	t.Run("default", func(t *testing.T) {
 		req, err := hardeningValidate(test, insecureEndpointRequest(``))
-		assert.NilError(t, err)
-		assert.Check(t, is.Equal(req.ACSEndpoint.Location, secureACS.Location))
+		require.NoError(t, err)
+		assert.Equal(t, req.ACSEndpoint.Location, secureACS.Location)
 	})
 
 	// An explicit choice of the insecure endpoint is refused, rather than replaced by another.
 	t.Run("insecure url", func(t *testing.T) {
 		req, err := hardeningValidate(test, insecureEndpointRequest(`AssertionConsumerServiceURL="http://sp.example.com/saml2/acs"`))
-		assert.Check(t, errors.Is(err, ErrInsecureEndpoint), "error: %v", err)
-		assert.Check(t, req.ACSEndpoint == nil)
+		assert.True(t, errors.Is(err, ErrInsecureEndpoint), "error: %v", err)
+		assert.Nil(t, req.ACSEndpoint)
 	})
 
 	t.Run("insecure index", func(t *testing.T) {
 		req, err := hardeningValidate(test, insecureEndpointRequest(`AssertionConsumerServiceIndex="1"`))
-		assert.Check(t, errors.Is(err, ErrInsecureEndpoint), "error: %v", err)
-		assert.Check(t, req.ACSEndpoint == nil)
+		assert.True(t, errors.Is(err, ErrInsecureEndpoint), "error: %v", err)
+		assert.Nil(t, req.ACSEndpoint)
 	})
 
 	t.Run("enabled default", func(t *testing.T) {
@@ -233,8 +233,8 @@ func TestIDPMixedACSEndpoints(t *testing.T) {
 		t.Cleanup(func() { test.IDP.AllowInsecureServiceProviderEndpoints = false })
 
 		req, err := hardeningValidate(test, insecureEndpointRequest(``))
-		assert.NilError(t, err)
-		assert.Check(t, is.Equal(req.ACSEndpoint.Location, insecureACS.Location))
+		require.NoError(t, err)
+		assert.Equal(t, req.ACSEndpoint.Location, insecureACS.Location)
 	})
 }
 
@@ -264,9 +264,9 @@ func TestIDPServeSSORefusesInsecureACS(t *testing.T) {
 	w := httptest.NewRecorder()
 	test.IDP.ServeSSO(w, r)
 
-	assert.Check(t, is.Equal(w.Code, http.StatusBadRequest))
-	assert.Check(t, !strings.Contains(w.Body.String(), "SAMLResponse"))
-	assert.Check(t, !strings.Contains(w.Body.String(), "http://sp.example.com"))
+	assert.Equal(t, w.Code, http.StatusBadRequest)
+	assert.False(t, strings.Contains(w.Body.String(), "SAMLResponse"))
+	assert.False(t, strings.Contains(w.Body.String(), "http://sp.example.com"))
 }
 
 func TestIDPServeIDPInitiatedRefusesInsecureACS(t *testing.T) {
@@ -282,8 +282,8 @@ func TestIDPServeIDPInitiatedRefusesInsecureACS(t *testing.T) {
 		w := httptest.NewRecorder()
 		r := httptest.NewRequest(http.MethodGet, "https://idp.example.com/services/sp/whoami", nil)
 		test.IDP.ServeIDPInitiated(w, r, test.SP.MetadataURL.String(), "relay")
-		assert.Check(t, is.Equal(w.Code, http.StatusInternalServerError))
-		assert.Check(t, !strings.Contains(w.Body.String(), "SAMLResponse"))
+		assert.Equal(t, w.Code, http.StatusInternalServerError)
+		assert.False(t, strings.Contains(w.Body.String(), "SAMLResponse"))
 	})
 
 	t.Run("secure endpoint chosen", func(t *testing.T) {
@@ -293,8 +293,8 @@ func TestIDPServeIDPInitiatedRefusesInsecureACS(t *testing.T) {
 		w := httptest.NewRecorder()
 		r := httptest.NewRequest(http.MethodGet, "https://idp.example.com/services/sp/whoami", nil)
 		test.IDP.ServeIDPInitiated(w, r, test.SP.MetadataURL.String(), "relay")
-		assert.Check(t, is.Equal(w.Code, http.StatusOK))
-		assert.Check(t, is.Contains(w.Body.String(), `action="https://sp.example.com/saml2/acs"`))
+		assert.Equal(t, w.Code, http.StatusOK)
+		assert.Contains(t, w.Body.String(), `action="https://sp.example.com/saml2/acs"`)
 	})
 
 	t.Run("enabled", func(t *testing.T) {
@@ -305,8 +305,8 @@ func TestIDPServeIDPInitiatedRefusesInsecureACS(t *testing.T) {
 		w := httptest.NewRecorder()
 		r := httptest.NewRequest(http.MethodGet, "https://idp.example.com/services/sp/whoami", nil)
 		test.IDP.ServeIDPInitiated(w, r, test.SP.MetadataURL.String(), "relay")
-		assert.Check(t, is.Equal(w.Code, http.StatusOK))
-		assert.Check(t, is.Contains(w.Body.String(), `action="http://sp.example.com/saml2/acs"`))
+		assert.Equal(t, w.Code, http.StatusOK)
+		assert.Contains(t, w.Body.String(), `action="http://sp.example.com/saml2/acs"`)
 	})
 }
 
@@ -317,13 +317,13 @@ func TestIDPPostBindingRefusesInsecureACS(t *testing.T) {
 	req.ACSEndpoint = &insecureACS
 
 	_, err := req.PostBinding()
-	assert.Check(t, errors.Is(err, ErrInsecureEndpoint), "error: %v", err)
-	assert.Check(t, req.ResponseEl == nil, "no response must be made for an insecure endpoint")
+	assert.True(t, errors.Is(err, ErrInsecureEndpoint), "error: %v", err)
+	assert.True(t, req.ResponseEl == nil, "no response must be made for an insecure endpoint")
 
 	w := httptest.NewRecorder()
 	err = req.WriteErrorResponse(w, ErrServerError)
-	assert.Check(t, errors.Is(err, ErrInsecureEndpoint), "error: %v", err)
-	assert.Check(t, is.Equal(w.Body.Len(), 0))
+	assert.True(t, errors.Is(err, ErrInsecureEndpoint), "error: %v", err)
+	assert.Equal(t, w.Body.Len(), 0)
 }
 
 // insecureLogoutTestIDP returns an identity provider whose service provider has the given SLO endpoints.
@@ -344,9 +344,9 @@ func TestServeSLORefusesInsecureEndpoint(t *testing.T) {
 		test, provider := insecureLogoutTestIDP(t, Endpoint{Binding: HTTPRedirectBinding, Location: "http://sp.example.com/saml2/slo"})
 		r, _ := redirectLogoutRequest(t, &test.SP, nil)
 		w := serveSLO(test, r)
-		assert.Check(t, is.Equal(w.Code, http.StatusBadRequest))
-		assert.Check(t, is.Equal(w.Header().Get("Location"), ""))
-		assert.Check(t, is.Len(provider.terminated, 0))
+		assert.Equal(t, w.Code, http.StatusBadRequest)
+		assert.Equal(t, w.Header().Get("Location"), "")
+		assert.Len(t, provider.terminated, 0)
 	})
 
 	t.Run("response location", func(t *testing.T) {
@@ -357,9 +357,9 @@ func TestServeSLORefusesInsecureEndpoint(t *testing.T) {
 		})
 		r, _ := postLogoutRequest(t, &test.SP, nil)
 		w := serveSLO(test, r)
-		assert.Check(t, is.Equal(w.Code, http.StatusBadRequest))
-		assert.Check(t, !strings.Contains(w.Body.String(), "SAMLResponse"))
-		assert.Check(t, is.Len(provider.terminated, 0))
+		assert.Equal(t, w.Code, http.StatusBadRequest)
+		assert.False(t, strings.Contains(w.Body.String(), "SAMLResponse"))
+		assert.Len(t, provider.terminated, 0)
 	})
 
 	// The response location is all that the identity provider uses, so an insecure location for
@@ -372,7 +372,7 @@ func TestServeSLORefusesInsecureEndpoint(t *testing.T) {
 		})
 		r, _ := redirectLogoutRequest(t, &test.SP, nil)
 		location, _ := redirectedLogoutResponse(t, serveSLO(test, r))
-		assert.Check(t, is.Equal(location.Scheme, "https"))
+		assert.Equal(t, location.Scheme, "https")
 	})
 
 	// An insecure endpoint for the binding of the request is skipped for a secure one.
@@ -383,7 +383,7 @@ func TestServeSLORefusesInsecureEndpoint(t *testing.T) {
 		)
 		r, _ := redirectLogoutRequest(t, &test.SP, nil)
 		_, _, response := postedLogoutResponse(t, serveSLO(test, r))
-		assert.Check(t, is.Equal(response.Destination, "https://sp.example.com/saml2/slo"))
+		assert.Equal(t, response.Destination, "https://sp.example.com/saml2/slo")
 	})
 
 	t.Run("enabled", func(t *testing.T) {
@@ -391,14 +391,14 @@ func TestServeSLORefusesInsecureEndpoint(t *testing.T) {
 		test.IDP.AllowInsecureServiceProviderEndpoints = true
 		r, _ := redirectLogoutRequest(t, &test.SP, nil)
 		location, _ := redirectedLogoutResponse(t, serveSLO(test, r))
-		assert.Check(t, is.Equal(location.Scheme, "http"))
-		assert.Check(t, is.Len(provider.terminated, 1))
+		assert.Equal(t, location.Scheme, "http")
+		assert.Len(t, provider.terminated, 1)
 	})
 
 	t.Run("loopback", func(t *testing.T) {
 		test, _ := insecureLogoutTestIDP(t, Endpoint{Binding: HTTPRedirectBinding, Location: "http://127.0.0.1:8080/saml2/slo"})
 		r, _ := redirectLogoutRequest(t, &test.SP, nil)
 		location, _ := redirectedLogoutResponse(t, serveSLO(test, r))
-		assert.Check(t, is.Equal(location.Host, "127.0.0.1:8080"))
+		assert.Equal(t, location.Host, "127.0.0.1:8080")
 	})
 }

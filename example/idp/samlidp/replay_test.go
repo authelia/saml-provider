@@ -8,8 +8,8 @@ import (
 	"strings"
 	"testing"
 
-	"gotest.tools/assert"
-	is "gotest.tools/assert/cmp"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"authelia.com/provider/saml"
 )
@@ -24,29 +24,29 @@ func TestLoginFormRepresentsRequestAndReplayIsRefused(t *testing.T) {
 
 	for range 2 {
 		w := hardeningSubmitLogin(t, test, form, "wrong")
-		assert.Assert(t, is.Equal(w.Code, http.StatusOK))
+		require.Equal(t, w.Code, http.StatusOK)
 
 		form = w.Body.String()
-		assert.Check(t, is.Equal(hardeningFormAction(t, form), "https://idp.example.com/sso"))
+		assert.Equal(t, hardeningFormAction(t, form), "https://idp.example.com/sso")
 	}
 
 	answered := hardeningSubmitLogin(t, test, form, "hunter2")
 	hardeningAssertSAMLResponse(t, answered, "frob")
-	assert.Assert(t, is.Len(answered.Result().Cookies(), 1))
+	require.Len(t, answered.Result().Cookies(), 1)
 
 	assertDenied := func(w *httptest.ResponseRecorder) {
 		t.Helper()
 
-		assert.Assert(t, is.Equal(w.Code, http.StatusOK))
+		require.Equal(t, w.Code, http.StatusOK)
 
 		body := w.Body.String()
-		assert.Check(t, is.Equal(hardeningFormAction(t, body), "https://sp.example.com/saml2/acs"))
+		assert.Equal(t, hardeningFormAction(t, body), "https://sp.example.com/saml2/acs")
 
 		response, err := base64.StdEncoding.DecodeString(hardeningHidden(t, body, "SAMLResponse"))
-		assert.NilError(t, err)
-		assert.Check(t, is.Contains(string(response), saml.StatusRequester))
-		assert.Check(t, is.Contains(string(response), saml.StatusRequestDenied))
-		assert.Check(t, !strings.Contains(string(response), "Assertion"), string(response))
+		require.NoError(t, err)
+		assert.Contains(t, string(response), saml.StatusRequester)
+		assert.Contains(t, string(response), saml.StatusRequestDenied)
+		assert.False(t, strings.Contains(string(response), "Assertion"), string(response))
 	}
 
 	assertDenied(hardeningSubmitLogin(t, test, form, "hunter2"))

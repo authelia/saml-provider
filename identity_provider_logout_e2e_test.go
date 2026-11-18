@@ -22,8 +22,8 @@ import (
 	"time"
 
 	"github.com/beevik/etree"
-	"gotest.tools/assert"
-	is "gotest.tools/assert/cmp"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"authelia.com/provider/saml/xmlenc"
 )
@@ -190,7 +190,7 @@ func newPropagationFixture(t *testing.T) *propagationFixture {
 	test.IDP.SessionProvider = f.provider
 
 	for i, sp := range []*ServiceProvider{f.a, f.b} {
-		assert.NilError(t, f.provider.AddSessionParticipant(nil, f.session, SessionParticipant{
+		require.NoError(t, f.provider.AddSessionParticipant(nil, f.session, SessionParticipant{
 			ServiceProviderEntityID: sp.MetadataURL.String(),
 			NameID: NameID{
 				Format:          string(PersistentNameIDFormat),
@@ -212,7 +212,7 @@ func propagationServiceProviderKey(t *testing.T) (*rsa.PrivateKey, *x509.Certifi
 	t.Helper()
 
 	key, err := rsa.GenerateKey(rand.Reader, 2048)
-	assert.NilError(t, err)
+	require.NoError(t, err)
 
 	template := &x509.Certificate{
 		SerialNumber: big.NewInt(1),
@@ -221,9 +221,9 @@ func propagationServiceProviderKey(t *testing.T) (*rsa.PrivateKey, *x509.Certifi
 		NotAfter:     time.Date(2100, 1, 1, 0, 0, 0, 0, time.UTC),
 	}
 	der, err := x509.CreateCertificate(rand.Reader, template, template, key.Public(), key)
-	assert.NilError(t, err)
+	require.NoError(t, err)
 	certificate, err := x509.ParseCertificate(der)
-	assert.NilError(t, err)
+	require.NoError(t, err)
 
 	return key, certificate
 }
@@ -232,7 +232,7 @@ func (f *propagationFixture) startLogout(t *testing.T) *httptest.ResponseRecorde
 	t.Helper()
 
 	w := httptest.NewRecorder()
-	assert.NilError(t, f.test.IDP.StartLogout(w, httptest.NewRequest(http.MethodGet, "/logout", nil), f.session, propagationReturnURL))
+	require.NoError(t, f.test.IDP.StartLogout(w, httptest.NewRequest(http.MethodGet, "/logout", nil), f.session, propagationReturnURL))
 
 	return w
 }
@@ -244,23 +244,23 @@ func sentLogoutRequest(t *testing.T, w *httptest.ResponseRecorder) *url.URL {
 
 	if w.Code == http.StatusFound {
 		location, err := url.Parse(w.Header().Get("Location"))
-		assert.NilError(t, err)
+		require.NoError(t, err)
 
 		return location
 	}
 
-	assert.Assert(t, is.Equal(w.Code, http.StatusOK), "body: %s", w.Body.String())
+	require.Equal(t, w.Code, http.StatusOK, "body: %s", w.Body.String())
 	body := w.Body.String()
 	attribute := func(marker string) string {
 		start := strings.Index(body, marker)
-		assert.Assert(t, start >= 0, "no %s in %q", marker, body)
+		require.True(t, start >= 0, "no %s in %q", marker, body)
 		value, _, _ := strings.Cut(body[start+len(marker):], `"`)
 
 		return html.UnescapeString(value)
 	}
 
 	location, err := url.Parse(attribute(`action="`))
-	assert.NilError(t, err)
+	require.NoError(t, err)
 
 	location.RawQuery = url.Values{
 		"SAMLRequest": {attribute(`name="SAMLRequest" value="`)},
@@ -295,35 +295,35 @@ func respondAsSPWithStatusCode(t *testing.T, sp *ServiceProvider, location *url.
 func respondAsSPForNameID(t *testing.T, sp *ServiceProvider, location *url.URL, code StatusCode, value string) *http.Request {
 	t.Helper()
 
-	assert.Check(t, is.Equal(location.Scheme+"://"+location.Host+location.Path, sp.SloURL.String()))
+	assert.Equal(t, location.Scheme+"://"+location.Host+location.Path, sp.SloURL.String())
 
 	certificates, err := sp.getIDPSigningCerts()
-	assert.NilError(t, err)
+	require.NoError(t, err)
 
 	encoded, err := base64.StdEncoding.DecodeString(location.Query().Get("SAMLRequest"))
-	assert.NilError(t, err)
+	require.NoError(t, err)
 
 	var request LogoutRequest
 
 	if location.Query().Has("SigAlg") {
-		assert.NilError(t, verifyRedirectSignature(location.RawQuery, "SAMLRequest", certificates, anySignaturePolicy))
+		require.NoError(t, verifyRedirectSignature(location.RawQuery, "SAMLRequest", certificates, anySignaturePolicy))
 
 		buf, err := io.ReadAll(flate.NewReader(bytes.NewReader(encoded)))
-		assert.NilError(t, err)
-		assert.NilError(t, xml.Unmarshal(buf, &request))
+		require.NoError(t, err)
+		require.NoError(t, xml.Unmarshal(buf, &request))
 	} else {
 		doc := etree.NewDocument()
-		assert.NilError(t, doc.ReadFromBytes(encoded))
+		require.NoError(t, doc.ReadFromBytes(encoded))
 		verified, err := verifyEnvelopedSignature(doc.Root(), certificates, anySignaturePolicy)
-		assert.NilError(t, err)
-		assert.NilError(t, unmarshalElement(verified, &request))
+		require.NoError(t, err)
+		require.NoError(t, unmarshalElement(verified, &request))
 	}
 
-	assert.Assert(t, request.NameID != nil)
-	assert.Check(t, is.Equal(request.NameID.Value, value))
-	assert.Check(t, is.Equal(request.NameID.SPNameQualifier, sp.MetadataURL.String()))
-	assert.Check(t, is.DeepEqual(request.SessionIndexes, []SessionIndex{{Value: "index-one"}}))
-	assert.Check(t, is.Equal(request.Destination, sp.SloURL.String()))
+	require.NotNil(t, request.NameID)
+	assert.Equal(t, request.NameID.Value, value)
+	assert.Equal(t, request.NameID.SPNameQualifier, sp.MetadataURL.String())
+	assert.Equal(t, request.SessionIndexes, []SessionIndex{{Value: "index-one"}})
+	assert.Equal(t, request.Destination, sp.SloURL.String())
 
 	relayState := location.Query().Get("RelayState")
 
@@ -331,14 +331,14 @@ func respondAsSPForNameID(t *testing.T, sp *ServiceProvider, location *url.URL, 
 
 	if code.Value == StatusSuccess && code.StatusCode == nil {
 		u, err = sp.MakeRedirectLogoutResponse(request.ID, relayState)
-		assert.NilError(t, err)
+		require.NoError(t, err)
 	} else {
 		response, err := sp.MakeLogoutResponse(sp.GetSLOBindingLocation(HTTPRedirectBinding), request.ID)
-		assert.NilError(t, err)
+		require.NoError(t, err)
 
 		response.Status.StatusCode = code
 		u, err = response.Redirect(relayState, sp)
-		assert.NilError(t, err)
+		require.NoError(t, err)
 	}
 
 	return httptest.NewRequest(http.MethodGet, u.String(), nil)
@@ -361,30 +361,30 @@ func TestStartLogoutVisitsEveryParticipant(t *testing.T) {
 			f.b.LogoutBindings = []string{binding}
 
 			w := f.startLogout(t)
-			assert.Check(t, is.DeepEqual(f.provider.calls, []string{"participants session-one", "save", "terminate session-one", "save"}))
-			assert.Check(t, !f.provider.writtenBeforeTerminate)
-			assert.Check(t, is.DeepEqual(f.provider.terminated, []*Session{f.session}))
+			assert.Equal(t, f.provider.calls, []string{"participants session-one", "save", "terminate session-one", "save"})
+			assert.False(t, f.provider.writtenBeforeTerminate)
+			assert.Equal(t, f.provider.terminated, []*Session{f.session})
 
 			// The participants were closed when the logout began, so a service provider can't be added that the
 			// logout won't reach.
 			err := f.provider.AddSessionParticipant(nil, f.session, SessionParticipant{ServiceProviderEntityID: "https://sp-c.example.com"})
-			assert.Check(t, errors.Is(err, ErrSessionParticipantsClosed))
+			assert.True(t, errors.Is(err, ErrSessionParticipantsClosed))
 
 			w = serveSLO(f.test, respondAsSP(t, f.a, sentLogoutRequest(t, w)))
-			assert.Check(t, f.provider.result == nil)
+			assert.Nil(t, f.provider.result)
 
 			w = serveSLO(f.test, respondAsSP(t, f.b, sentLogoutRequest(t, w)))
-			assert.Check(t, is.Equal(w.Code, http.StatusNoContent))
+			assert.Equal(t, w.Code, http.StatusNoContent)
 
-			assert.Assert(t, f.provider.result != nil)
-			assert.Check(t, f.provider.result.SessionTerminated)
-			assert.Check(t, !f.provider.result.Partial())
-			assert.Check(t, is.DeepEqual(participantOutcomes(f.provider.result.Participants), map[string]LogoutOutcome{
+			require.NotNil(t, f.provider.result)
+			assert.True(t, f.provider.result.SessionTerminated)
+			assert.False(t, f.provider.result.Partial())
+			assert.Equal(t, participantOutcomes(f.provider.result.Participants), map[string]LogoutOutcome{
 				f.a.MetadataURL.String(): LogoutOutcomeSuccess,
 				f.b.MetadataURL.String(): LogoutOutcomeSuccess,
-			}))
-			assert.Check(t, is.Len(f.provider.states, 0))
-			assert.Check(t, is.Len(f.provider.deleted, 1))
+			})
+			assert.Len(t, f.provider.states, 0)
+			assert.Len(t, f.provider.deleted, 1)
 		})
 	}
 }
@@ -397,10 +397,10 @@ func TestStartLogoutWithoutResultHandlerRedirects(t *testing.T) {
 	w = serveSLO(f.test, respondAsSP(t, f.a, sentLogoutRequest(t, w)))
 	w = serveSLO(f.test, respondAsSP(t, f.b, sentLogoutRequest(t, w)))
 
-	assert.Check(t, is.Equal(w.Code, http.StatusFound))
-	assert.Check(t, is.Equal(w.Header().Get("Location"), propagationReturnURL))
-	assert.Check(t, f.provider.result == nil)
-	assert.Check(t, is.Len(f.provider.states, 0))
+	assert.Equal(t, w.Code, http.StatusFound)
+	assert.Equal(t, w.Header().Get("Location"), propagationReturnURL)
+	assert.Nil(t, f.provider.result)
+	assert.Len(t, f.provider.states, 0)
 }
 
 func TestStartLogoutNoParticipants(t *testing.T) {
@@ -409,11 +409,11 @@ func TestStartLogoutNoParticipants(t *testing.T) {
 	f.test.IDP.SessionProvider = withoutResultHandler{f.provider, f.provider, f.provider, f.provider}
 
 	w := f.startLogout(t)
-	assert.Check(t, is.Equal(w.Code, http.StatusFound))
-	assert.Check(t, is.Equal(w.Header().Get("Location"), propagationReturnURL))
-	assert.Check(t, is.DeepEqual(f.provider.terminated, []*Session{f.session}))
-	assert.Check(t, is.Len(f.provider.states, 0))
-	assert.Check(t, is.Len(f.provider.deleted, 1))
+	assert.Equal(t, w.Code, http.StatusFound)
+	assert.Equal(t, w.Header().Get("Location"), propagationReturnURL)
+	assert.Equal(t, f.provider.terminated, []*Session{f.session})
+	assert.Len(t, f.provider.states, 0)
+	assert.Len(t, f.provider.deleted, 1)
 }
 
 func TestStartLogoutRequiresInterfaces(t *testing.T) {
@@ -422,11 +422,11 @@ func TestStartLogoutRequiresInterfaces(t *testing.T) {
 
 	w := httptest.NewRecorder()
 	err := f.test.IDP.StartLogout(w, httptest.NewRequest(http.MethodGet, "/logout", nil), f.session, propagationReturnURL)
-	assert.Check(t, is.ErrorContains(err, "LogoutStateProvider"))
-	assert.Check(t, is.Equal(w.Code, http.StatusOK))
-	assert.Check(t, is.Equal(w.Body.Len(), 0))
-	assert.Check(t, is.Len(w.Header(), 0))
-	assert.Check(t, is.Len(f.provider.terminated, 0))
+	assert.ErrorContains(t, err, "LogoutStateProvider")
+	assert.Equal(t, w.Code, http.StatusOK)
+	assert.Equal(t, w.Body.Len(), 0)
+	assert.Len(t, w.Header(), 0)
+	assert.Len(t, f.provider.terminated, 0)
 }
 
 func TestStartLogoutRequiresReturnURLWithoutResultHandler(t *testing.T) {
@@ -435,21 +435,21 @@ func TestStartLogoutRequiresReturnURLWithoutResultHandler(t *testing.T) {
 
 	w := httptest.NewRecorder()
 	err := f.test.IDP.StartLogout(w, httptest.NewRequest(http.MethodGet, "/logout", nil), f.session, "")
-	assert.Check(t, is.ErrorContains(err, "without a return URL"))
-	assert.Check(t, !errors.Is(err, ErrLogoutNotPropagated))
-	assert.Check(t, is.Equal(w.Code, http.StatusOK))
-	assert.Check(t, is.Equal(w.Body.Len(), 0))
-	assert.Check(t, is.Len(w.Header(), 0))
-	assert.Check(t, is.Len(f.provider.calls, 0))
-	assert.Check(t, is.Len(f.provider.terminated, 0))
+	assert.ErrorContains(t, err, "without a return URL")
+	assert.False(t, errors.Is(err, ErrLogoutNotPropagated))
+	assert.Equal(t, w.Code, http.StatusOK)
+	assert.Equal(t, w.Body.Len(), 0)
+	assert.Len(t, w.Header(), 0)
+	assert.Len(t, f.provider.calls, 0)
+	assert.Len(t, f.provider.terminated, 0)
 }
 
 func TestStartLogoutWithResultHandlerAllowsEmptyReturnURL(t *testing.T) {
 	f := newPropagationFixture(t)
 
 	w := httptest.NewRecorder()
-	assert.NilError(t, f.test.IDP.StartLogout(w, httptest.NewRequest(http.MethodGet, "/logout", nil), f.session, ""))
-	assert.Check(t, is.Equal(w.Code, http.StatusFound))
+	require.NoError(t, f.test.IDP.StartLogout(w, httptest.NewRequest(http.MethodGet, "/logout", nil), f.session, ""))
+	assert.Equal(t, w.Code, http.StatusFound)
 }
 
 func TestStartLogoutWritesNothingWhenItCannotBegin(t *testing.T) {
@@ -463,13 +463,13 @@ func TestStartLogoutWritesNothingWhenItCannotBegin(t *testing.T) {
 
 			w := httptest.NewRecorder()
 			err := f.test.IDP.StartLogout(w, httptest.NewRequest(http.MethodGet, "/logout", nil), f.session, propagationReturnURL)
-			assert.Check(t, errors.Is(err, ErrLogoutNotPropagated), "error: %v", err)
-			assert.Check(t, is.ErrorContains(err, "storage unavailable"))
-			assert.Check(t, is.Equal(w.Code, http.StatusOK))
-			assert.Check(t, is.Equal(w.Body.Len(), 0))
-			assert.Check(t, is.Equal(w.Header().Get("Location"), ""))
-			assert.Check(t, is.DeepEqual(f.provider.terminated, []*Session{f.session}))
-			assert.Check(t, f.provider.result == nil)
+			assert.True(t, errors.Is(err, ErrLogoutNotPropagated), "error: %v", err)
+			assert.ErrorContains(t, err, "storage unavailable")
+			assert.Equal(t, w.Code, http.StatusOK)
+			assert.Equal(t, w.Body.Len(), 0)
+			assert.Equal(t, w.Header().Get("Location"), "")
+			assert.Equal(t, f.provider.terminated, []*Session{f.session})
+			assert.Nil(t, f.provider.result)
 		})
 	}
 }
@@ -486,13 +486,13 @@ func TestStartLogoutCannotBeginAndTerminationFails(t *testing.T) {
 
 			w := httptest.NewRecorder()
 			err := f.test.IDP.StartLogout(w, httptest.NewRequest(http.MethodGet, "/logout", nil), f.session, propagationReturnURL)
-			assert.Assert(t, err != nil)
-			assert.Check(t, !errors.Is(err, ErrLogoutNotPropagated), "error: %v", err)
-			assert.Check(t, is.ErrorContains(err, "storage unavailable"))
-			assert.Check(t, is.ErrorContains(err, "session store down"))
-			assert.Check(t, is.Equal(w.Code, http.StatusOK))
-			assert.Check(t, is.Equal(w.Body.Len(), 0))
-			assert.Check(t, is.DeepEqual(f.provider.terminated, []*Session{f.session}))
+			require.NotNil(t, err)
+			assert.False(t, errors.Is(err, ErrLogoutNotPropagated), "error: %v", err)
+			assert.ErrorContains(t, err, "storage unavailable")
+			assert.ErrorContains(t, err, "session store down")
+			assert.Equal(t, w.Code, http.StatusOK)
+			assert.Equal(t, w.Body.Len(), 0)
+			assert.Equal(t, f.provider.terminated, []*Session{f.session})
 		})
 	}
 }
@@ -503,7 +503,7 @@ func TestStartLogoutCannotBeginWithPartialTermination(t *testing.T) {
 	f.provider.terminateErr = ErrPartialLogout
 
 	err := f.test.IDP.StartLogout(httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, "/logout", nil), f.session, propagationReturnURL)
-	assert.Check(t, errors.Is(err, ErrLogoutNotPropagated), "error: %v", err)
+	assert.True(t, errors.Is(err, ErrLogoutNotPropagated), "error: %v", err)
 }
 
 func TestStartLogoutSaveFailureDuringSequenceFinishes(t *testing.T) {
@@ -511,21 +511,21 @@ func TestStartLogoutSaveFailureDuringSequenceFinishes(t *testing.T) {
 	f.provider.saveErrAfter, f.provider.saveErrLater = 1, errors.New("storage unavailable")
 
 	w := f.startLogout(t)
-	assert.Check(t, is.Equal(w.Code, http.StatusNoContent))
-	assert.Check(t, is.DeepEqual(f.provider.terminated, []*Session{f.session}))
+	assert.Equal(t, w.Code, http.StatusNoContent)
+	assert.Equal(t, f.provider.terminated, []*Session{f.session})
 
-	assert.Assert(t, f.provider.result != nil)
-	assert.Check(t, f.provider.result.SessionTerminated)
-	assert.Check(t, f.provider.result.Partial())
-	assert.Check(t, is.Equal(f.provider.result.ReturnURL, propagationReturnURL))
-	assert.Check(t, f.provider.result.StateID != "")
+	require.NotNil(t, f.provider.result)
+	assert.True(t, f.provider.result.SessionTerminated)
+	assert.True(t, f.provider.result.Partial())
+	assert.Equal(t, f.provider.result.ReturnURL, propagationReturnURL)
+	assert.True(t, f.provider.result.StateID != "")
 
 	for _, participant := range f.provider.result.Participants {
-		assert.Check(t, is.Equal(participant.Outcome, LogoutOutcomeFailed))
-		assert.Check(t, is.Contains(participant.Reason, "storage unavailable"))
+		assert.Equal(t, participant.Outcome, LogoutOutcomeFailed)
+		assert.Contains(t, participant.Reason, "storage unavailable")
 	}
 
-	assert.Check(t, is.Len(f.provider.result.Participants, 2))
+	assert.Len(t, f.provider.result.Participants, 2)
 }
 
 // serveSLOFromA sends A's signed LogoutRequest, and returns the answer and the ID of the request.
@@ -541,20 +541,20 @@ func TestServeSLOPropagates(t *testing.T) {
 	f := newPropagationFixture(t)
 
 	w, id := f.serveSLOFromA(t)
-	assert.Check(t, is.DeepEqual(f.provider.terminated, []*Session{f.session}))
-	assert.Check(t, !f.provider.writtenBeforeTerminate)
+	assert.Equal(t, f.provider.terminated, []*Session{f.session})
+	assert.False(t, f.provider.writtenBeforeTerminate)
 
 	w = serveSLO(f.test, respondAsSP(t, f.b, sentLogoutRequest(t, w)))
 
 	location, response := redirectedLogoutResponse(t, w)
-	assert.Check(t, is.Equal(location.Scheme+"://"+location.Host+location.Path, f.a.SloURL.String()))
-	assert.Check(t, is.Equal(location.Query().Get("RelayState"), "relay"))
-	assert.Check(t, is.Equal(response.InResponseTo, id))
-	assert.Check(t, is.Equal(response.Status.StatusCode.Value, StatusSuccess))
-	assert.Check(t, response.Status.StatusCode.StatusCode == nil)
-	assert.Check(t, f.a.ValidateLogoutResponseRedirect(location, []string{id}))
-	assert.Check(t, f.provider.result == nil, "the service provider is answered, not the result handler")
-	assert.Check(t, is.Len(f.provider.states, 0))
+	assert.Equal(t, location.Scheme+"://"+location.Host+location.Path, f.a.SloURL.String())
+	assert.Equal(t, location.Query().Get("RelayState"), "relay")
+	assert.Equal(t, response.InResponseTo, id)
+	assert.Equal(t, response.Status.StatusCode.Value, StatusSuccess)
+	assert.Nil(t, response.Status.StatusCode.StatusCode)
+	assert.NoError(t, f.a.ValidateLogoutResponseRedirect(location, []string{id}))
+	assert.True(t, f.provider.result == nil, "the service provider is answered, not the result handler")
+	assert.Len(t, f.provider.states, 0)
 }
 
 func TestServeSLOPartialWhenParticipantFails(t *testing.T) {
@@ -564,11 +564,11 @@ func TestServeSLOPartialWhenParticipantFails(t *testing.T) {
 	w = serveSLO(f.test, respondAsSPWithStatus(t, f.b, sentLogoutRequest(t, w), StatusRequester))
 
 	location, response := redirectedLogoutResponse(t, w)
-	assert.Check(t, is.Equal(response.InResponseTo, id))
-	assert.Check(t, is.Equal(response.Status.StatusCode.Value, StatusSuccess))
-	assert.Assert(t, response.Status.StatusCode.StatusCode != nil)
-	assert.Check(t, is.Equal(response.Status.StatusCode.StatusCode.Value, StatusPartialLogout))
-	assert.Check(t, f.a.ValidateLogoutResponseRedirect(location, []string{id}))
+	assert.Equal(t, response.InResponseTo, id)
+	assert.Equal(t, response.Status.StatusCode.Value, StatusSuccess)
+	require.NotNil(t, response.Status.StatusCode.StatusCode)
+	assert.Equal(t, response.Status.StatusCode.StatusCode.Value, StatusPartialLogout)
+	assert.NoError(t, f.a.ValidateLogoutResponseRedirect(location, []string{id}))
 }
 
 func TestServeSLOPartialWhenParticipantPartiallyLogsOut(t *testing.T) {
@@ -581,11 +581,11 @@ func TestServeSLOPartialWhenParticipantPartiallyLogsOut(t *testing.T) {
 	}))
 
 	location, response := redirectedLogoutResponse(t, w)
-	assert.Check(t, is.Equal(response.InResponseTo, id))
-	assert.Check(t, is.Equal(response.Status.StatusCode.Value, StatusSuccess))
-	assert.Assert(t, response.Status.StatusCode.StatusCode != nil)
-	assert.Check(t, is.Equal(response.Status.StatusCode.StatusCode.Value, StatusPartialLogout))
-	assert.Check(t, f.a.ValidateLogoutResponseRedirect(location, []string{id}))
+	assert.Equal(t, response.InResponseTo, id)
+	assert.Equal(t, response.Status.StatusCode.Value, StatusSuccess)
+	require.NotNil(t, response.Status.StatusCode.StatusCode)
+	assert.Equal(t, response.Status.StatusCode.StatusCode.Value, StatusPartialLogout)
+	assert.NoError(t, f.a.ValidateLogoutResponseRedirect(location, []string{id}))
 }
 
 func TestStartLogoutParticipantPartialLogoutIsFailed(t *testing.T) {
@@ -597,13 +597,13 @@ func TestStartLogoutParticipantPartialLogoutIsFailed(t *testing.T) {
 		StatusCode: &StatusCode{Value: StatusPartialLogout},
 	}))
 	w = serveSLO(f.test, respondAsSP(t, f.b, sentLogoutRequest(t, w)))
-	assert.Check(t, is.Equal(w.Code, http.StatusNoContent))
+	assert.Equal(t, w.Code, http.StatusNoContent)
 
-	assert.Assert(t, f.provider.result != nil)
-	assert.Check(t, f.provider.result.Partial())
-	assert.Check(t, is.Equal(f.provider.result.Participants[0].Outcome, LogoutOutcomeFailed))
-	assert.Check(t, is.Equal(f.provider.result.Participants[0].Reason, StatusPartialLogout))
-	assert.Check(t, is.Equal(f.provider.result.Participants[1].Outcome, LogoutOutcomeSuccess))
+	require.NotNil(t, f.provider.result)
+	assert.True(t, f.provider.result.Partial())
+	assert.Equal(t, f.provider.result.Participants[0].Outcome, LogoutOutcomeFailed)
+	assert.Equal(t, f.provider.result.Participants[0].Reason, StatusPartialLogout)
+	assert.Equal(t, f.provider.result.Participants[1].Outcome, LogoutOutcomeSuccess)
 }
 
 func TestServeSLOPartialWhenSaveFailsDuringSequence(t *testing.T) {
@@ -613,16 +613,16 @@ func TestServeSLOPartialWhenSaveFailsDuringSequence(t *testing.T) {
 	w, id := f.serveSLOFromA(t)
 
 	location, response := redirectedLogoutResponse(t, w)
-	assert.Check(t, is.Equal(location.Scheme+"://"+location.Host+location.Path, f.a.SloURL.String()))
-	assert.Check(t, is.Equal(response.InResponseTo, id))
-	assert.Check(t, is.Equal(response.Status.StatusCode.Value, StatusSuccess))
-	assert.Assert(t, response.Status.StatusCode.StatusCode != nil)
-	assert.Check(t, is.Equal(response.Status.StatusCode.StatusCode.Value, StatusPartialLogout))
-	assert.Check(t, f.a.ValidateLogoutResponseRedirect(location, []string{id}))
-	assert.Check(t, is.DeepEqual(f.provider.terminated, []*Session{f.session}))
+	assert.Equal(t, location.Scheme+"://"+location.Host+location.Path, f.a.SloURL.String())
+	assert.Equal(t, response.InResponseTo, id)
+	assert.Equal(t, response.Status.StatusCode.Value, StatusSuccess)
+	require.NotNil(t, response.Status.StatusCode.StatusCode)
+	assert.Equal(t, response.Status.StatusCode.StatusCode.Value, StatusPartialLogout)
+	assert.NoError(t, f.a.ValidateLogoutResponseRedirect(location, []string{id}))
+	assert.Equal(t, f.provider.terminated, []*Session{f.session})
 
 	// The state couldn't be claimed, so it is left to expire rather than deleted, as it may be a newer revision.
-	assert.Check(t, is.Len(f.provider.deleted, 0))
+	assert.Len(t, f.provider.deleted, 0)
 }
 
 func TestServeSLOResponderWhenTerminationFails(t *testing.T) {
@@ -633,9 +633,9 @@ func TestServeSLOResponderWhenTerminationFails(t *testing.T) {
 	w = serveSLO(f.test, respondAsSP(t, f.b, sentLogoutRequest(t, w)))
 
 	_, response := redirectedLogoutResponse(t, w)
-	assert.Check(t, is.Equal(response.InResponseTo, id))
-	assert.Check(t, is.Equal(response.Status.StatusCode.Value, StatusResponder))
-	assert.Check(t, statusSaysNothingOfTheRequest(response.Status))
+	assert.Equal(t, response.InResponseTo, id)
+	assert.Equal(t, response.Status.StatusCode.Value, StatusResponder)
+	assert.True(t, statusSaysNothingOfTheRequest(response.Status))
 }
 
 func TestServeSLOWithoutPropagationInterfacesUnchanged(t *testing.T) {
@@ -643,23 +643,23 @@ func TestServeSLOWithoutPropagationInterfacesUnchanged(t *testing.T) {
 
 	r, id := redirectLogoutRequest(t, &test.SP, nil)
 	location, response := redirectedLogoutResponse(t, serveSLO(test, r))
-	assert.Check(t, is.Equal(location.Scheme+"://"+location.Host+location.Path, test.SP.SloURL.String()))
-	assert.Check(t, is.Equal(response.InResponseTo, id))
-	assert.Check(t, is.Equal(response.Status.StatusCode.Value, StatusSuccess))
-	assert.Check(t, test.SP.ValidateLogoutResponseRedirect(location, []string{id}))
-	assert.Check(t, is.Len(provider.terminated, 1))
+	assert.Equal(t, location.Scheme+"://"+location.Host+location.Path, test.SP.SloURL.String())
+	assert.Equal(t, response.InResponseTo, id)
+	assert.Equal(t, response.Status.StatusCode.Value, StatusSuccess)
+	assert.NoError(t, test.SP.ValidateLogoutResponseRedirect(location, []string{id}))
+	assert.Len(t, provider.terminated, 1)
 }
 
 func TestServeSLOResponseUnknownState(t *testing.T) {
 	f := newPropagationFixture(t)
 
 	u, err := f.a.MakeRedirectLogoutResponse("id-unknown", "unknown-state")
-	assert.NilError(t, err)
+	require.NoError(t, err)
 
 	w := serveSLO(f.test, httptest.NewRequest(http.MethodGet, u.String(), nil))
-	assert.Check(t, is.Equal(w.Code, http.StatusBadRequest))
-	assert.Check(t, f.provider.result == nil)
-	assert.Check(t, is.Len(f.provider.deleted, 0))
+	assert.Equal(t, w.Code, http.StatusBadRequest)
+	assert.Nil(t, f.provider.result)
+	assert.Len(t, f.provider.deleted, 0)
 }
 
 func TestServeSLOResponseExpiredState(t *testing.T) {
@@ -671,10 +671,10 @@ func TestServeSLOResponseExpiredState(t *testing.T) {
 	f.provider.states[stateID].ExpireTime = TimeNow().Add(-time.Second)
 
 	w = serveSLO(f.test, respondAsSP(t, f.a, location))
-	assert.Check(t, is.Equal(w.Code, http.StatusBadRequest))
-	assert.Check(t, f.provider.result == nil)
-	assert.Check(t, is.Len(f.provider.deleted, 0))
-	assert.Check(t, is.Equal(f.provider.states[stateID].Participants[0].Outcome, LogoutOutcomePending))
+	assert.Equal(t, w.Code, http.StatusBadRequest)
+	assert.Nil(t, f.provider.result)
+	assert.Len(t, f.provider.deleted, 0)
+	assert.Equal(t, f.provider.states[stateID].Participants[0].Outcome, LogoutOutcomePending)
 }
 
 func TestServeSLOResponseForgedMarksFailed(t *testing.T) {
@@ -686,15 +686,15 @@ func TestServeSLOResponseForgedMarksFailed(t *testing.T) {
 	unsigned.SignatureMethod = ""
 	w = serveSLO(f.test, respondAsSP(t, &unsigned, sentLogoutRequest(t, w)))
 	w = serveSLO(f.test, respondAsSP(t, f.b, sentLogoutRequest(t, w)))
-	assert.Check(t, is.Equal(w.Code, http.StatusNoContent))
+	assert.Equal(t, w.Code, http.StatusNoContent)
 
-	assert.Assert(t, f.provider.result != nil)
-	assert.Check(t, f.provider.result.Partial())
-	assert.Check(t, is.DeepEqual(participantOutcomes(f.provider.result.Participants), map[string]LogoutOutcome{
+	require.NotNil(t, f.provider.result)
+	assert.True(t, f.provider.result.Partial())
+	assert.Equal(t, participantOutcomes(f.provider.result.Participants), map[string]LogoutOutcome{
 		f.a.MetadataURL.String(): LogoutOutcomeFailed,
 		f.b.MetadataURL.String(): LogoutOutcomeSuccess,
-	}))
-	assert.Check(t, is.Contains(f.provider.result.Participants[0].Reason, "not signed"))
+	})
+	assert.Contains(t, f.provider.result.Participants[0].Reason, "not signed")
 }
 
 func TestServeSLOResponseReplayedLeavesOutstandingParticipant(t *testing.T) {
@@ -709,19 +709,19 @@ func TestServeSLOResponseReplayedLeavesOutstandingParticipant(t *testing.T) {
 
 	// A's response is resubmitted while the request to B is outstanding.
 	w = serveSLO(f.test, httptest.NewRequest(http.MethodGet, stale.URL.String(), nil))
-	assert.Check(t, is.Equal(w.Code, http.StatusBadRequest))
-	assert.Check(t, f.provider.result == nil)
+	assert.Equal(t, w.Code, http.StatusBadRequest)
+	assert.Nil(t, f.provider.result)
 
 	after := f.provider.states[stateID]
-	assert.Check(t, is.Equal(after.Current, before.Current))
-	assert.Check(t, is.Equal(after.PendingRequestID, before.PendingRequestID))
-	assert.Check(t, is.Equal(after.Participants[1].Outcome, LogoutOutcomePending))
+	assert.Equal(t, after.Current, before.Current)
+	assert.Equal(t, after.PendingRequestID, before.PendingRequestID)
+	assert.Equal(t, after.Participants[1].Outcome, LogoutOutcomePending)
 
 	// B's own response is still accepted.
 	w = serveSLO(f.test, respondAsSP(t, f.b, toB))
-	assert.Check(t, is.Equal(w.Code, http.StatusNoContent))
-	assert.Assert(t, f.provider.result != nil)
-	assert.Check(t, !f.provider.result.Partial())
+	assert.Equal(t, w.Code, http.StatusNoContent)
+	require.NotNil(t, f.provider.result)
+	assert.False(t, f.provider.result.Partial())
 }
 
 func TestServeSLOResponseConcurrentCopiesConflict(t *testing.T) {
@@ -733,7 +733,7 @@ func TestServeSLOResponseConcurrentCopiesConflict(t *testing.T) {
 
 	// Two copies of A's response load the same revision; the first advances the logout to B.
 	stale, err := f.provider.memoryLogoutStateProvider.LoadLogoutState(nil, stateID)
-	assert.NilError(t, err)
+	require.NoError(t, err)
 
 	w = serveSLO(f.test, fromA)
 	toB := sentLogoutRequest(t, w)
@@ -742,26 +742,26 @@ func TestServeSLOResponseConcurrentCopiesConflict(t *testing.T) {
 	// The second can't overwrite that progress with a request to B of its own.
 	f.provider.stale = stale
 	w = serveSLO(f.test, httptest.NewRequest(http.MethodGet, fromA.URL.String(), nil))
-	assert.Check(t, is.Equal(w.Code, http.StatusConflict))
-	assert.Check(t, is.Equal(f.provider.states[stateID].Revision, advanced.Revision))
-	assert.Check(t, is.Equal(f.provider.states[stateID].PendingRequestID, advanced.PendingRequestID))
+	assert.Equal(t, w.Code, http.StatusConflict)
+	assert.Equal(t, f.provider.states[stateID].Revision, advanced.Revision)
+	assert.Equal(t, f.provider.states[stateID].PendingRequestID, advanced.PendingRequestID)
 
 	// Two copies of B's response: the first finishes the logout, and the second can't finish it again or recreate the
 	// deleted state.
 	fromB := respondAsSP(t, f.b, toB)
 	stale, err = f.provider.memoryLogoutStateProvider.LoadLogoutState(nil, stateID)
-	assert.NilError(t, err)
+	require.NoError(t, err)
 
 	w = serveSLO(f.test, fromB)
-	assert.Check(t, is.Equal(w.Code, http.StatusNoContent))
-	assert.Assert(t, f.provider.result != nil)
-	assert.Check(t, !f.provider.result.Partial())
+	assert.Equal(t, w.Code, http.StatusNoContent)
+	require.NotNil(t, f.provider.result)
+	assert.False(t, f.provider.result.Partial())
 
 	f.provider.stale = stale
 	w = serveSLO(f.test, httptest.NewRequest(http.MethodGet, fromB.URL.String(), nil))
-	assert.Check(t, is.Equal(w.Code, http.StatusConflict))
-	assert.Check(t, is.Equal(f.provider.finished, 1))
-	assert.Check(t, is.Len(f.provider.states, 0))
+	assert.Equal(t, w.Code, http.StatusConflict)
+	assert.Equal(t, f.provider.finished, 1)
+	assert.Len(t, f.provider.states, 0)
 }
 
 // postedInstead returns the LogoutResponse of the HTTP-Redirect request r on the HTTP-POST binding instead, with an
@@ -770,18 +770,18 @@ func postedInstead(t *testing.T, sp *ServiceProvider, r *http.Request) *http.Req
 	t.Helper()
 
 	compressed, err := base64.StdEncoding.DecodeString(r.URL.Query().Get("SAMLResponse"))
-	assert.NilError(t, err)
+	require.NoError(t, err)
 	buf, err := io.ReadAll(flate.NewReader(bytes.NewReader(compressed)))
-	assert.NilError(t, err)
+	require.NoError(t, err)
 
 	var response LogoutResponse
-	assert.NilError(t, xml.Unmarshal(buf, &response))
-	assert.NilError(t, sp.SignLogoutResponse(&response))
+	require.NoError(t, xml.Unmarshal(buf, &response))
+	require.NoError(t, sp.SignLogoutResponse(&response))
 
 	doc := etree.NewDocument()
 	doc.SetRoot(response.Element())
 	body, err := doc.WriteToBytes()
-	assert.NilError(t, err)
+	require.NoError(t, err)
 
 	form := url.Values{"SAMLResponse": {base64.StdEncoding.EncodeToString(body)}, "RelayState": {r.URL.Query().Get("RelayState")}}
 	posted := httptest.NewRequest(http.MethodPost, logoutTestSLOURL, strings.NewReader(form.Encode()))
@@ -796,10 +796,10 @@ func TestServeSLOResponsePost(t *testing.T) {
 	w := f.startLogout(t)
 	w = serveSLO(f.test, postedInstead(t, f.a, respondAsSP(t, f.a, sentLogoutRequest(t, w))))
 	w = serveSLO(f.test, postedInstead(t, f.b, respondAsSP(t, f.b, sentLogoutRequest(t, w))))
-	assert.Check(t, is.Equal(w.Code, http.StatusNoContent))
+	assert.Equal(t, w.Code, http.StatusNoContent)
 
-	assert.Assert(t, f.provider.result != nil)
-	assert.Check(t, !f.provider.result.Partial())
+	require.NotNil(t, f.provider.result)
+	assert.False(t, f.provider.result.Partial())
 }
 
 func TestServeSLOEndsSessionWhenPropagationCannotBegin(t *testing.T) {
@@ -814,12 +814,12 @@ func TestServeSLOEndsSessionWhenPropagationCannotBegin(t *testing.T) {
 			w, id := f.serveSLOFromA(t)
 
 			location, response := redirectedLogoutResponse(t, w)
-			assert.Check(t, is.Equal(response.InResponseTo, id))
-			assert.Check(t, is.Equal(response.Status.StatusCode.Value, StatusSuccess))
-			assert.Assert(t, response.Status.StatusCode.StatusCode != nil)
-			assert.Check(t, is.Equal(response.Status.StatusCode.StatusCode.Value, StatusPartialLogout))
-			assert.Check(t, f.a.ValidateLogoutResponseRedirect(location, []string{id}))
-			assert.Check(t, is.DeepEqual(f.provider.terminated, []*Session{f.session}))
+			assert.Equal(t, response.InResponseTo, id)
+			assert.Equal(t, response.Status.StatusCode.Value, StatusSuccess)
+			require.NotNil(t, response.Status.StatusCode.StatusCode)
+			assert.Equal(t, response.Status.StatusCode.StatusCode.Value, StatusPartialLogout)
+			assert.NoError(t, f.a.ValidateLogoutResponseRedirect(location, []string{id}))
+			assert.Equal(t, f.provider.terminated, []*Session{f.session})
 		})
 	}
 }
@@ -832,10 +832,10 @@ func TestServeSLOResponderWhenPropagationCannotBeginAndTerminationFails(t *testi
 	w, id := f.serveSLOFromA(t)
 
 	_, response := redirectedLogoutResponse(t, w)
-	assert.Check(t, is.Equal(response.InResponseTo, id))
-	assert.Check(t, is.Equal(response.Status.StatusCode.Value, StatusResponder))
-	assert.Check(t, response.Status.StatusCode.StatusCode == nil)
-	assert.Check(t, is.DeepEqual(f.provider.terminated, []*Session{f.session}))
+	assert.Equal(t, response.InResponseTo, id)
+	assert.Equal(t, response.Status.StatusCode.Value, StatusResponder)
+	assert.Nil(t, response.Status.StatusCode.StatusCode)
+	assert.Equal(t, f.provider.terminated, []*Session{f.session})
 }
 
 // matchingLogoutSessionProvider returns only the sessions that the request matches through MatchesSession, as a
@@ -866,21 +866,21 @@ func (f *propagationFixture) sso(t *testing.T, sp *ServiceProvider, policy *Name
 	f.provider.GetSessionFunc = func(http.ResponseWriter, *http.Request, *IdpAuthnRequest) *Session { return f.session }
 
 	request, err := sp.MakeAuthenticationRequest("https://idp.example.com/saml/sso", HTTPPostBinding, HTTPPostBinding)
-	assert.NilError(t, err)
+	require.NoError(t, err)
 
 	if policy != nil {
 		request.NameIDPolicy = policy
 		request.Signature = nil
 
 		if sp.SignatureMethod != "" {
-			assert.NilError(t, sp.SignAuthnRequest(request))
+			require.NoError(t, sp.SignAuthnRequest(request))
 		}
 	}
 
 	doc := etree.NewDocument()
 	doc.SetRoot(request.Element())
 	body, err := doc.WriteToBytes()
-	assert.NilError(t, err)
+	require.NoError(t, err)
 
 	form := url.Values{"SAMLRequest": {base64.StdEncoding.EncodeToString(body)}}
 	r := httptest.NewRequest(http.MethodPost, "https://idp.example.com/saml/sso", strings.NewReader(form.Encode()))
@@ -888,18 +888,18 @@ func (f *propagationFixture) sso(t *testing.T, sp *ServiceProvider, policy *Name
 
 	w := httptest.NewRecorder()
 	f.test.IDP.ServeSSO(w, r)
-	assert.Assert(t, is.Equal(w.Code, http.StatusOK), "body: %s", w.Body.String())
+	require.Equal(t, w.Code, http.StatusOK, "body: %s", w.Body.String())
 
 	// The assertion is encrypted to the service provider.
 	posted, response := postedResponse(t, w.Body.String())
-	assert.Assert(t, is.Equal(response.Status.StatusCode.Value, StatusSuccess))
+	require.Equal(t, response.Status.StatusCode.Value, StatusSuccess)
 
 	plaintext, err := xmlenc.Decrypt(sp.Key, posted.FindElement("//EncryptedAssertion/EncryptedData"))
-	assert.NilError(t, err)
+	require.NoError(t, err)
 
 	var assertion Assertion
-	assert.NilError(t, xml.Unmarshal(plaintext, &assertion))
-	assert.Assert(t, assertion.Subject != nil && assertion.Subject.NameID != nil)
+	require.NoError(t, xml.Unmarshal(plaintext, &assertion))
+	require.True(t, assertion.Subject != nil && assertion.Subject.NameID != nil)
 
 	return *assertion.Subject.NameID
 }
@@ -916,10 +916,10 @@ func (f *propagationFixture) sloWithNameID(t *testing.T, sp *ServiceProvider, na
 	w := serveSLO(f.test, r)
 
 	location, logoutResponse := redirectedLogoutResponse(t, w)
-	assert.Check(t, is.Equal(logoutResponse.InResponseTo, id))
-	assert.Check(t, is.Equal(logoutResponse.Status.StatusCode.Value, StatusSuccess))
-	assert.Check(t, sp.ValidateLogoutResponseRedirect(location, []string{id}))
-	assert.Check(t, is.DeepEqual(f.provider.terminated, []*Session{f.session}))
+	assert.Equal(t, logoutResponse.InResponseTo, id)
+	assert.Equal(t, logoutResponse.Status.StatusCode.Value, StatusSuccess)
+	assert.NoError(t, sp.ValidateLogoutResponseRedirect(location, []string{id}))
+	assert.Equal(t, f.provider.terminated, []*Session{f.session})
 }
 
 func TestServeSLOMatchesTransientNameIDThroughParticipant(t *testing.T) {
@@ -929,8 +929,8 @@ func TestServeSLOMatchesTransientNameIDThroughParticipant(t *testing.T) {
 
 	// The session leaves the format open, so ServeSSO issues a random transient NameID.
 	issued := f.sso(t, f.a, nil)
-	assert.Assert(t, issued.Value != f.session.NameID, "the fallback is only exercised when the NameID is not that of the session")
-	assert.Assert(t, is.Len(f.provider.participants[f.session.ID], 1))
+	require.True(t, issued.Value != f.session.NameID, "the fallback is only exercised when the NameID is not that of the session")
+	require.Len(t, f.provider.participants[f.session.ID], 1)
 
 	f.sloWithNameID(t, f.a, issued)
 }
@@ -945,7 +945,7 @@ func TestServeSLOMatchesAffiliationNameIDThroughParticipant(t *testing.T) {
 
 	affiliation := testAffiliationID
 	issued := f.sso(t, f.a, &NameIDPolicy{SPNameQualifier: &affiliation})
-	assert.Assert(t, is.Equal(issued.SPNameQualifier, testAffiliationID))
+	require.Equal(t, issued.SPNameQualifier, testAffiliationID)
 
 	f.sloWithNameID(t, f.a, issued)
 }
@@ -958,18 +958,18 @@ func TestStartLogoutSendsOneRequestForRepeatedTransientSSO(t *testing.T) {
 
 	first := f.sso(t, f.a, nil)
 	second := f.sso(t, f.a, nil)
-	assert.Check(t, is.Equal(first.Format, string(TransientNameIDFormat)))
-	assert.Check(t, first.Value != f.session.NameID)
-	assert.Check(t, is.DeepEqual(first, second))
-	assert.Assert(t, is.Len(f.provider.participants[f.session.ID], 2))
+	assert.Equal(t, first.Format, string(TransientNameIDFormat))
+	assert.True(t, first.Value != f.session.NameID)
+	assert.Equal(t, first, second)
+	require.Len(t, f.provider.participants[f.session.ID], 2)
 
 	w := f.startLogout(t)
 	w = serveSLO(f.test, respondAsSPForNameID(t, f.a, sentLogoutRequest(t, w), StatusCode{Value: StatusSuccess}, first.Value))
-	assert.Check(t, is.Equal(w.Code, http.StatusNoContent), "body: %s", w.Body.String())
+	assert.Equal(t, w.Code, http.StatusNoContent, "body: %s", w.Body.String())
 
-	assert.Assert(t, f.provider.result != nil)
-	assert.Check(t, is.Len(f.provider.result.Participants, 1))
-	assert.Check(t, is.DeepEqual(participantOutcomes(f.provider.result.Participants), map[string]LogoutOutcome{
+	require.NotNil(t, f.provider.result)
+	assert.Len(t, f.provider.result.Participants, 1)
+	assert.Equal(t, participantOutcomes(f.provider.result.Participants), map[string]LogoutOutcome{
 		f.a.MetadataURL.String(): LogoutOutcomeSuccess,
-	}))
+	})
 }

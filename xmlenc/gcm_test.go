@@ -11,15 +11,15 @@ import (
 	"time"
 
 	"github.com/beevik/etree"
-	"gotest.tools/assert"
-	is "gotest.tools/assert/cmp"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func gcmCipherValue(t *testing.T, el *etree.Element) string {
 	t.Helper()
 
 	value := el.FindElement("./CipherData/CipherValue")
-	assert.Assert(t, value != nil)
+	require.NotNil(t, value)
 
 	return value.Text()
 }
@@ -34,11 +34,11 @@ func TestGCMRoundTrip(t *testing.T) {
 	} {
 		t.Run(name, func(t *testing.T) {
 			el, err := AES128GCM.Encrypt(key, plaintext, nonce)
-			assert.NilError(t, err)
+			require.NoError(t, err)
 
 			decrypted, err := AES128GCM.Decrypt(key, el)
-			assert.NilError(t, err)
-			assert.Check(t, is.DeepEqual(plaintext, decrypted))
+			require.NoError(t, err)
+			assert.Equal(t, plaintext, decrypted)
 		})
 	}
 }
@@ -47,23 +47,23 @@ func TestGCMEncryptUsesThePlaintextAndAFreshNonce(t *testing.T) {
 	key := bytes.Repeat([]byte{7}, AES128GCM.KeySize())
 
 	first, err := AES128GCM.Encrypt(key, []byte("first message!!!"), nil)
-	assert.NilError(t, err)
+	require.NoError(t, err)
 	again, err := AES128GCM.Encrypt(key, []byte("first message!!!"), nil)
-	assert.NilError(t, err)
-	assert.Check(t, gcmCipherValue(t, first) != gcmCipherValue(t, again), "a nonce must not repeat")
+	require.NoError(t, err)
+	assert.True(t, gcmCipherValue(t, first) != gcmCipherValue(t, again), "a nonce must not repeat")
 
 	nonce := bytes.Repeat([]byte{9}, 12)
 	a, err := AES128GCM.Encrypt(key, []byte("first message!!!"), nonce)
-	assert.NilError(t, err)
+	require.NoError(t, err)
 	b, err := AES128GCM.Encrypt(key, []byte("other message!!!"), nonce)
-	assert.NilError(t, err)
-	assert.Check(t, gcmCipherValue(t, a) != gcmCipherValue(t, b), "the ciphertext must depend on the plaintext")
+	require.NoError(t, err)
+	assert.True(t, gcmCipherValue(t, a) != gcmCipherValue(t, b), "the ciphertext must depend on the plaintext")
 }
 
 func TestGCMEncryptRejectsAWrongNonceLength(t *testing.T) {
 	key := bytes.Repeat([]byte{7}, AES128GCM.KeySize())
 	_, err := AES128GCM.Encrypt(key, []byte("message"), []byte{1, 2, 3})
-	assert.Check(t, is.ErrorContains(err, "nonce"))
+	assert.ErrorContains(t, err, "nonce")
 }
 
 func TestGCMEncryptDoesNotModifyTheNonce(t *testing.T) {
@@ -71,13 +71,13 @@ func TestGCMEncryptDoesNotModifyTheNonce(t *testing.T) {
 	nonce := bytes.Repeat([]byte{9}, 12)
 	withSpareCapacity := append(make([]byte, 0, 64), nonce...)
 	_, err := AES128GCM.Encrypt(key, []byte("message"), withSpareCapacity)
-	assert.NilError(t, err)
-	assert.Check(t, is.DeepEqual(nonce, withSpareCapacity))
+	require.NoError(t, err)
+	assert.Equal(t, nonce, withSpareCapacity)
 }
 
 func TestGCMRoundTripThroughOAEP(t *testing.T) {
 	key, err := rsa.GenerateKey(rand.Reader, 2048)
-	assert.NilError(t, err)
+	require.NoError(t, err)
 
 	encrypter := OAEP()
 	encrypter.BlockCipher = AES128GCM
@@ -86,16 +86,16 @@ func TestGCMRoundTripThroughOAEP(t *testing.T) {
 	plaintext := []byte("<saml:Assertion>secret</saml:Assertion>")
 	template := &x509.Certificate{SerialNumber: big.NewInt(1), NotAfter: time.Now().Add(time.Hour)}
 	der, err := x509.CreateCertificate(rand.Reader, template, template, &key.PublicKey, key)
-	assert.NilError(t, err)
+	require.NoError(t, err)
 	certificate, err := x509.ParseCertificate(der)
-	assert.NilError(t, err)
+	require.NoError(t, err)
 
 	el, err := encrypter.Encrypt(certificate, plaintext, nil)
-	assert.NilError(t, err)
+	require.NoError(t, err)
 
 	decrypted, err := Decrypt(key, el)
-	assert.NilError(t, err)
-	assert.Check(t, is.DeepEqual(plaintext, decrypted))
+	require.NoError(t, err)
+	assert.Equal(t, plaintext, decrypted)
 }
 
 func TestGCMDecryptRejectsShortCiphertext(t *testing.T) {

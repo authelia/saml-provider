@@ -10,8 +10,8 @@ import (
 	"testing"
 
 	"github.com/beevik/etree"
-	"gotest.tools/assert"
-	is "gotest.tools/assert/cmp"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 const unspecifiedNameIDFormat20 = "urn:oasis:names:tc:SAML:2.0:nameid-format:unspecified"
@@ -39,13 +39,13 @@ func postSSOWithPolicy(t *testing.T, test *IdentityProviderTest, policy *NameIDP
 	t.Helper()
 
 	request, err := test.SP.MakeAuthenticationRequest("https://idp.example.com/saml/sso", HTTPPostBinding, HTTPPostBinding)
-	assert.NilError(t, err)
+	require.NoError(t, err)
 
 	request.NameIDPolicy = policy
 	doc := etree.NewDocument()
 	doc.SetRoot(request.Element())
 	body, err := doc.WriteToBytes()
-	assert.NilError(t, err)
+	require.NoError(t, err)
 
 	form := url.Values{"SAMLRequest": {base64.StdEncoding.EncodeToString(body)}}
 	r := httptest.NewRequest(http.MethodPost, "https://idp.example.com/saml/sso", strings.NewReader(form.Encode()))
@@ -53,7 +53,7 @@ func postSSOWithPolicy(t *testing.T, test *IdentityProviderTest, policy *NameIDP
 
 	w := httptest.NewRecorder()
 	test.IDP.ServeSSO(w, r)
-	assert.Check(t, is.Equal(w.Code, http.StatusOK), "body: %s", w.Body.String())
+	assert.Equal(t, w.Code, http.StatusOK, "body: %s", w.Body.String())
 
 	_, response := postedResponse(t, w.Body.String())
 
@@ -62,11 +62,11 @@ func postSSOWithPolicy(t *testing.T, test *IdentityProviderTest, policy *NameIDP
 
 func assertInvalidNameIDPolicy(t *testing.T, response Response) {
 	t.Helper()
-	assert.Check(t, is.Equal(response.Status.StatusCode.Value, StatusRequester))
-	assert.Assert(t, response.Status.StatusCode.StatusCode != nil)
-	assert.Check(t, is.Equal(response.Status.StatusCode.StatusCode.Value, StatusInvalidNameIDPolicy))
-	assert.Check(t, response.Assertion == nil)
-	assert.Check(t, response.EncryptedAssertion == nil)
+	assert.Equal(t, response.Status.StatusCode.Value, StatusRequester)
+	require.NotNil(t, response.Status.StatusCode.StatusCode)
+	assert.Equal(t, response.Status.StatusCode.StatusCode.Value, StatusInvalidNameIDPolicy)
+	assert.Nil(t, response.Assertion)
+	assert.Nil(t, response.EncryptedAssertion)
 }
 
 func TestServeSSOAcceptsSatisfiableNameIDPolicy(t *testing.T) {
@@ -93,7 +93,7 @@ func TestServeSSOAcceptsSatisfiableNameIDPolicy(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			test := NewIdentityProviderTest(t, applyKey)
 			response := serveSSOWithPolicy(t, test, &Session{ID: "s", NameID: "alice", NameIDFormat: tc.sessionFormat}, tc.policy)
-			assert.Check(t, is.Equal(response.Status.StatusCode.Value, StatusSuccess))
+			assert.Equal(t, response.Status.StatusCode.Value, StatusSuccess)
 		})
 	}
 }
@@ -126,7 +126,7 @@ func TestServeSSOUsesConfiguredNameIDPolicyEnforcer(t *testing.T) {
 		}}
 		test.IDP.NameIDPolicyEnforcer = nameIDPolicyEnforcerFunc(func(*IdpAuthnRequest, *Session) error { return nil })
 		response := serveSSOWithPolicy(t, test, &Session{ID: "s", NameID: "alice"}, &NameIDPolicy{Format: &email})
-		assert.Check(t, is.Equal(response.Status.StatusCode.Value, StatusSuccess))
+		assert.Equal(t, response.Status.StatusCode.Value, StatusSuccess)
 	})
 
 	t.Run("refuses per service provider", func(t *testing.T) {
@@ -139,7 +139,7 @@ func TestServeSSOUsesConfiguredNameIDPolicyEnforcer(t *testing.T) {
 			return errors.New("not established for this service provider")
 		})
 		assertInvalidNameIDPolicy(t, serveSSOWithPolicy(t, test, &Session{ID: "s", NameID: "alice"}, &NameIDPolicy{}))
-		assert.Check(t, is.Equal(seen, "https://sp.example.com/saml2/metadata"))
+		assert.Equal(t, seen, "https://sp.example.com/saml2/metadata")
 	})
 }
 
@@ -150,7 +150,7 @@ func TestServeSSODoesNotSendNameIDPolicyErrorText(t *testing.T) {
 		return errors.New("alice has no identifier")
 	})
 	response := serveSSOWithPolicy(t, test, &Session{ID: "s", NameID: "alice"}, &NameIDPolicy{})
-	assert.Check(t, statusSaysNothingOfTheRequest(response.Status))
+	assert.True(t, statusSaysNothingOfTheRequest(response.Status))
 }
 
 // An IdP-initiated response isn't answering a request, so there is no policy to enforce.
@@ -162,7 +162,7 @@ func TestServeIDPInitiatedSkipsNameIDPolicyEnforcer(t *testing.T) {
 	})
 	w := httptest.NewRecorder()
 	test.IDP.ServeIDPInitiated(w, httptest.NewRequest(http.MethodGet, "https://idp.example.com/saml/sso", nil), test.SP.MetadataURL.String(), "")
-	assert.Check(t, is.Equal(w.Code, http.StatusOK))
+	assert.Equal(t, w.Code, http.StatusOK)
 }
 
 // The encrypted format is a request, not the format of an identifier, so a session can't supply it.
@@ -171,7 +171,7 @@ func TestServeSSONeverAssertsEncryptedFormatFromSession(t *testing.T) {
 	captured := captureNameID(test)
 	encrypted := encryptedNameIDFormat
 	response := serveSSOWithPolicy(t, test, &Session{ID: "s", NameID: "alice", NameIDFormat: encrypted}, &NameIDPolicy{Format: &encrypted})
-	assert.Check(t, is.Equal(response.Status.StatusCode.Value, StatusSuccess))
-	assert.Assert(t, *captured != nil)
-	assert.Check(t, is.Equal((*captured).Format, string(TransientNameIDFormat)))
+	assert.Equal(t, response.Status.StatusCode.Value, StatusSuccess)
+	require.NotNil(t, *captured)
+	assert.Equal(t, (*captured).Format, string(TransientNameIDFormat))
 }

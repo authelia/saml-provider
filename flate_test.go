@@ -6,8 +6,8 @@ import (
 	"io"
 	"testing"
 
-	"gotest.tools/assert"
-	is "gotest.tools/assert/cmp"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func deflate(t *testing.T, data []byte) []byte {
@@ -16,11 +16,11 @@ func deflate(t *testing.T, data []byte) []byte {
 	var buf bytes.Buffer
 
 	w, err := flate.NewWriter(&buf, flate.BestCompression)
-	assert.NilError(t, err)
+	require.NoError(t, err)
 
 	_, err = w.Write(data)
-	assert.NilError(t, err)
-	assert.NilError(t, w.Close())
+	require.NoError(t, err)
+	require.NoError(t, w.Close())
 
 	return buf.Bytes()
 }
@@ -31,15 +31,15 @@ func TestSaferFlateReaderReadsMessageAtLimit(t *testing.T) {
 	data := bytes.Repeat([]byte("a"), flateUncompressLimit)
 
 	inflated, err := io.ReadAll(newSaferFlateReader(bytes.NewReader(deflate(t, data))))
-	assert.NilError(t, err)
-	assert.Check(t, is.Len(inflated, flateUncompressLimit))
+	require.NoError(t, err)
+	assert.Len(t, inflated, flateUncompressLimit)
 }
 
 func TestSaferFlateReaderRejectsMessageOverLimit(t *testing.T) {
 	data := bytes.Repeat([]byte("a"), flateUncompressLimit+1)
 
 	_, err := io.ReadAll(newSaferFlateReader(bytes.NewReader(deflate(t, data))))
-	assert.Error(t, err, "flate: uncompress limit exceeded (1048576 bytes)")
+	require.EqualError(t, err, "flate: uncompress limit exceeded (1048576 bytes)")
 }
 
 // A reader of a single byte at a time is not refused until it is given the byte past the limit.
@@ -48,9 +48,9 @@ func TestSaferFlateReaderSmallReads(t *testing.T) {
 	r := newSaferFlateReader(bytes.NewReader(deflate(t, data)))
 
 	inflated, err := io.ReadAll(io.LimitReader(r, flateUncompressLimit))
-	assert.NilError(t, err)
-	assert.Check(t, is.Len(inflated, flateUncompressLimit))
+	require.NoError(t, err)
+	assert.Len(t, inflated, flateUncompressLimit)
 
 	_, err = r.Read(make([]byte, 1))
-	assert.Error(t, err, "flate: uncompress limit exceeded (1048576 bytes)")
+	require.EqualError(t, err, "flate: uncompress limit exceeded (1048576 bytes)")
 }

@@ -8,8 +8,8 @@ import (
 	"time"
 
 	"github.com/beevik/etree"
-	"gotest.tools/assert"
-	is "gotest.tools/assert/cmp"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"authelia.com/provider/saml/internal/dsig"
 )
@@ -23,15 +23,15 @@ func rebindSignaturePrefix(t *testing.T, body, rootPrefix, attributes, used, pre
 	t.Helper()
 
 	start := strings.Index(body, rootPrefix)
-	assert.Assert(t, start >= 0)
+	require.True(t, start >= 0)
 	head, rest := body[:start], body[start:]
-	assert.Assert(t, strings.Contains(rest, signatureDeclaration))
+	require.True(t, strings.Contains(rest, signatureDeclaration))
 
 	open := "<" + prefix + ":Signature>"
 	shut := "</" + prefix + ":Signature>"
 	rest = strings.Replace(rest, signatureDeclaration, open, 1)
 	end := strings.Index(rest, "</ds:Signature>")
-	assert.Assert(t, end >= 0)
+	require.True(t, end >= 0)
 
 	deep := "<" + prefix + `:deep xmlns:` + prefix + `="urn:other"/>`
 	for range 12 {
@@ -64,12 +64,12 @@ func signedLogoutResponseForOtherDestination(t *testing.T) (*IdentityProviderTes
 	test.SP.MetadataURL = test.IDP.MetadataURL
 
 	response, err := test.SP.MakeLogoutResponse("https://other.example.com/slo", "id-request")
-	assert.NilError(t, err)
+	require.NoError(t, err)
 
 	doc := etree.NewDocument()
 	doc.SetRoot(response.Element())
 	body, err := doc.WriteToString()
-	assert.NilError(t, err)
+	require.NoError(t, err)
 
 	return test, body
 }
@@ -82,7 +82,7 @@ func TestValidateLogoutResponseUsesSignedAttributesWhenSignaturePrefixIsRebound(
 				`xmlns:Destination="`+test.SP.SloURL.String()+`"`, "Destination", prefix)
 
 			err := test.SP.ValidateLogoutResponseForm(base64.StdEncoding.EncodeToString([]byte(altered)), []string{"id-request"})
-			assert.Check(t, is.ErrorContains(err, "Destination"))
+			assert.ErrorContains(t, err, "Destination")
 		})
 	}
 }
@@ -99,8 +99,8 @@ func TestParseResponseUsesSignedAttributesWhenSignaturePrefixIsRebound(t *testin
 			_, err := test.SP.ParseXMLResponse([]byte(altered), []string{"id-request"}, test.SP.AcsURL)
 
 			var invalid *InvalidResponseError
-			assert.Assert(t, errors.As(err, &invalid), "got %v", err)
-			assert.Check(t, is.ErrorContains(invalid.PrivateErr, "response expired"))
+			require.True(t, errors.As(err, &invalid), "got %v", err)
+			assert.ErrorContains(t, invalid.PrivateErr, "response expired")
 		})
 	}
 }
@@ -109,7 +109,7 @@ func TestParseResponseUsesSignedAttributesWhenSignaturePrefixIsRebound(t *testin
 func TestParseAssertionUsesSignedAttributesWhenSignaturePrefixIsRebound(t *testing.T) {
 	test, body := signedResponseForSP(t)
 	doc := etree.NewDocument()
-	assert.NilError(t, doc.ReadFromString(body))
+	require.NoError(t, doc.ReadFromString(body))
 	doc.Root().RemoveChild(doc.Root().SelectElement("Signature"))
 
 	issued := TimeNow()
@@ -117,7 +117,7 @@ func TestParseAssertionUsesSignedAttributesWhenSignaturePrefixIsRebound(t *testi
 	now := later.UTC().Format(time.RFC3339)
 	doc.Root().CreateAttr("IssueInstant", now)
 	unsigned, err := doc.WriteToString()
-	assert.NilError(t, err)
+	require.NoError(t, err)
 
 	altered := rebindSignaturePrefix(t, unsigned, "<saml:Assertion ", `xmlns:IssueInstant="`+now+`"`, "IssueInstant", "ds")
 
@@ -125,8 +125,8 @@ func TestParseAssertionUsesSignedAttributesWhenSignaturePrefixIsRebound(t *testi
 	_, err = test.SP.ParseXMLResponse([]byte(altered), []string{"id-request"}, test.SP.AcsURL)
 
 	var invalid *InvalidResponseError
-	assert.Assert(t, errors.As(err, &invalid), "got %v", err)
-	assert.Check(t, is.ErrorContains(invalid.PrivateErr, "assertion expired at"))
+	require.True(t, errors.As(err, &invalid), "got %v", err)
+	assert.ErrorContains(t, invalid.PrivateErr, "assertion expired at")
 }
 
 // recordingVerifier verifies in the same way as the default, as an implementation outside of this
@@ -147,7 +147,7 @@ func TestSignatureVerifierPathIgnoresReboundSignaturePrefix(t *testing.T) {
 				`xmlns:Destination="`+test.SP.SloURL.String()+`"`, "Destination", prefix)
 
 			err := test.SP.ValidateLogoutResponseForm(base64.StdEncoding.EncodeToString([]byte(altered)), []string{"id-request"})
-			assert.Check(t, is.ErrorContains(err, "Destination"))
+			assert.ErrorContains(t, err, "Destination")
 		})
 	}
 }
@@ -155,12 +155,12 @@ func TestSignatureVerifierPathIgnoresReboundSignaturePrefix(t *testing.T) {
 // A prefix from outside of the subtree must not change what is declared on it.
 func TestElementToBytesDoesNotRebindDeclarationOnSubtree(t *testing.T) {
 	doc := etree.NewDocument()
-	assert.NilError(t, doc.ReadFromString(`<a:root xmlns:a="urn:a"><b:signed xmlns:b="urn:b"><c:x xmlns:c="urn:c"/></b:signed><b:out xmlns:b="urn:other"/></a:root>`))
+	require.NoError(t, doc.ReadFromString(`<a:root xmlns:a="urn:a"><b:signed xmlns:b="urn:b"><c:x xmlns:c="urn:c"/></b:signed><b:out xmlns:b="urn:other"/></a:root>`))
 
 	buf, err := elementToBytes(doc.Root().ChildElements()[0])
-	assert.NilError(t, err)
-	assert.Check(t, is.Contains(string(buf), `xmlns:b="urn:b"`))
-	assert.Check(t, !strings.Contains(string(buf), "urn:other"))
+	require.NoError(t, err)
+	assert.Contains(t, string(buf), `xmlns:b="urn:b"`)
+	assert.False(t, strings.Contains(string(buf), "urn:other"))
 }
 
 func TestParseArtifactResponseUsesSignedAttributes(t *testing.T) {
@@ -168,7 +168,7 @@ func TestParseArtifactResponseUsesSignedAttributes(t *testing.T) {
 	issued := TimeNow()
 
 	inner := etree.NewDocument()
-	assert.NilError(t, inner.ReadFromString(body))
+	require.NoError(t, inner.ReadFromString(body))
 
 	artifact := etree.NewElement("samlp:ArtifactResponse")
 	artifact.CreateAttr("xmlns:saml", "urn:oasis:names:tc:SAML:2.0:assertion")
@@ -183,23 +183,23 @@ func TestParseArtifactResponseUsesSignedAttributes(t *testing.T) {
 
 	req := &IdpAuthnRequest{IDP: &test.IDP}
 	signingContext, err := req.IDP.signingContext()
-	assert.NilError(t, err)
+	require.NoError(t, err)
 	signed, err := signingContext.SignEnveloped(artifact)
-	assert.NilError(t, err)
+	require.NoError(t, err)
 
 	doc := etree.NewDocument()
 	doc.SetRoot(signed)
 	signedBody, err := doc.WriteToString()
-	assert.NilError(t, err)
+	require.NoError(t, err)
 
 	parse := func(xml string) error {
 		parsed := etree.NewDocument()
-		assert.NilError(t, parsed.ReadFromString(xml))
+		require.NoError(t, parsed.ReadFromString(xml))
 		_, err := test.SP.parseArtifactResponse(parsed.Root(), []string{"id-request"}, "id-artifact", TimeNow(), test.SP.AcsURL)
 
 		return err
 	}
-	assert.NilError(t, parse(signedBody))
+	require.NoError(t, parse(signedBody))
 
 	later := issued.Add(10 * time.Hour)
 	TimeNow = func() time.Time { return later }
@@ -208,67 +208,67 @@ func TestParseArtifactResponseUsesSignedAttributes(t *testing.T) {
 	err = parse(altered)
 
 	var invalid *InvalidResponseError
-	assert.Assert(t, errors.As(err, &invalid), "got %v", err)
-	assert.Check(t, is.ErrorContains(invalid.PrivateErr, "response expired"))
+	require.True(t, errors.As(err, &invalid), "got %v", err)
+	assert.ErrorContains(t, invalid.PrivateErr, "response expired")
 }
 
 func TestVerifySignatureReturnsOnlyWhatTheSignatureCovers(t *testing.T) {
 	test, body := signedLogoutResponseForOtherDestination(t)
 	altered := addAttributes(t, body, "<samlp:LogoutResponse ", `xmlns:Destination="https://sp.example.com/saml2/slo"`)
 	doc := etree.NewDocument()
-	assert.NilError(t, doc.ReadFromString(altered))
+	require.NoError(t, doc.ReadFromString(altered))
 
 	verified, err := test.SP.verifySignature(doc.Root())
-	assert.NilError(t, err)
-	assert.Check(t, verified.SelectAttr("xmlns:Destination") == nil)
-	assert.Check(t, is.Equal(verified.SelectAttrValue("Destination", ""), "https://other.example.com/slo"))
+	require.NoError(t, err)
+	assert.Nil(t, verified.SelectAttr("xmlns:Destination"))
+	assert.Equal(t, verified.SelectAttrValue("Destination", ""), "https://other.example.com/slo")
 }
 
 // An inner declaration of a prefix applies only below it, even when it's the shallowest use.
 func TestElementToBytesUsesBindingsInScopeAtTheElement(t *testing.T) {
 	doc := etree.NewDocument()
-	assert.NilError(t, doc.ReadFromString(`<a:root xmlns:a="urn:a" xmlns:b="urn:outer">`+
+	require.NoError(t, doc.ReadFromString(`<a:root xmlns:a="urn:a" xmlns:b="urn:outer">`+
 		`<a:el><a:inner xmlns:b="urn:inner"><b:x/></a:inner><a:n><a:m><b:y/></a:m></a:n></a:el></a:root>`))
 
 	buf, err := elementToBytes(doc.Root().ChildElements()[0])
-	assert.NilError(t, err)
+	require.NoError(t, err)
 
 	parsed := etree.NewDocument()
-	assert.NilError(t, parsed.ReadFromBytes(buf))
-	assert.Check(t, is.Equal(parsed.Root().SelectAttrValue("xmlns:b", ""), "urn:outer"))
-	assert.Check(t, is.Equal(parsed.Root().FindElement(".//y").NamespaceURI(), "urn:outer"))
-	assert.Check(t, is.Equal(parsed.Root().FindElement(".//x").NamespaceURI(), "urn:inner"))
+	require.NoError(t, parsed.ReadFromBytes(buf))
+	assert.Equal(t, parsed.Root().SelectAttrValue("xmlns:b", ""), "urn:outer")
+	assert.Equal(t, parsed.Root().FindElement(".//y").NamespaceURI(), "urn:outer")
+	assert.Equal(t, parsed.Root().FindElement(".//x").NamespaceURI(), "urn:inner")
 }
 
 func TestElementToBytesLeavesInnerDeclarationsWithDescendants(t *testing.T) {
 	doc := etree.NewDocument()
-	assert.NilError(t, doc.ReadFromString(`<a:root xmlns:a="urn:a"><a:el><c:x xmlns:c="urn:c"/></a:el></a:root>`))
+	require.NoError(t, doc.ReadFromString(`<a:root xmlns:a="urn:a"><a:el><c:x xmlns:c="urn:c"/></a:el></a:root>`))
 
 	buf, err := elementToBytes(doc.Root().ChildElements()[0])
-	assert.NilError(t, err)
+	require.NoError(t, err)
 
 	parsed := etree.NewDocument()
-	assert.NilError(t, parsed.ReadFromBytes(buf))
-	assert.Check(t, parsed.Root().SelectAttr("xmlns:c") == nil)
-	assert.Check(t, is.Equal(parsed.Root().FindElement(".//x").NamespaceURI(), "urn:c"))
+	require.NoError(t, parsed.ReadFromBytes(buf))
+	assert.Nil(t, parsed.Root().SelectAttr("xmlns:c"))
+	assert.Equal(t, parsed.Root().FindElement(".//x").NamespaceURI(), "urn:c")
 }
 
 func TestElementToBytesCopiesDefaultNamespaceInScope(t *testing.T) {
 	doc := etree.NewDocument()
-	assert.NilError(t, doc.ReadFromString(`<a:root xmlns:a="urn:a" xmlns="urn:default"><el/></a:root>`))
+	require.NoError(t, doc.ReadFromString(`<a:root xmlns:a="urn:a" xmlns="urn:default"><el/></a:root>`))
 
 	buf, err := elementToBytes(doc.Root().ChildElements()[0])
-	assert.NilError(t, err)
+	require.NoError(t, err)
 
 	parsed := etree.NewDocument()
-	assert.NilError(t, parsed.ReadFromBytes(buf))
-	assert.Check(t, is.Equal(parsed.Root().NamespaceURI(), "urn:default"))
+	require.NoError(t, parsed.ReadFromBytes(buf))
+	assert.Equal(t, parsed.Root().NamespaceURI(), "urn:default")
 }
 
 func TestElementToBytesReturnsErrorForInvalidNamespaceContext(t *testing.T) {
 	doc := etree.NewDocument()
-	assert.NilError(t, doc.ReadFromString(`<a:root xmlns:a="urn:a" xmlns:xmlns="urn:reserved"><a:el/></a:root>`))
+	require.NoError(t, doc.ReadFromString(`<a:root xmlns:a="urn:a" xmlns:xmlns="urn:reserved"><a:el/></a:root>`))
 
 	_, err := elementToBytes(doc.Root().ChildElements()[0])
-	assert.Check(t, err != nil)
+	assert.NotNil(t, err)
 }

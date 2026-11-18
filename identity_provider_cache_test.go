@@ -5,8 +5,8 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"gotest.tools/assert"
-	is "gotest.tools/assert/cmp"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 // The page which posts the response carries the assertion, so a browser or proxy must not keep it.
@@ -27,12 +27,12 @@ func TestWriteResponseIsNotCached(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			test := NewIdentityProviderTest(t, applyKey)
 			req, err := hardeningValidate(test, hardeningRequest(`ID="id-1"`, TimeNow(), hardeningIssuer))
-			assert.NilError(t, err)
+			require.NoError(t, err)
 
 			w := httptest.NewRecorder()
-			assert.NilError(t, write(req, w))
-			assert.Check(t, is.Equal(w.Header().Get("Cache-Control"), "no-cache, no-store"))
-			assert.Check(t, is.Equal(w.Header().Get("Pragma"), "no-cache"))
+			require.NoError(t, write(req, w))
+			assert.Equal(t, w.Header().Get("Cache-Control"), "no-cache, no-store")
+			assert.Equal(t, w.Header().Get("Pragma"), "no-cache")
 		})
 	}
 }

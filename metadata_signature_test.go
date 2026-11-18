@@ -13,11 +13,11 @@ import (
 	"time"
 
 	"github.com/beevik/etree"
-	"gotest.tools/assert"
-	is "gotest.tools/assert/cmp"
-	"gotest.tools/golden"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"authelia.com/provider/saml/internal/dsig"
+	"authelia.com/provider/saml/internal/golden"
 )
 
 // metadataSigningTest returns an identity provider which signs with negotiationKey, whose certificate is valid
@@ -41,15 +41,15 @@ func signMetadataXML(t *testing.T, data string) string {
 	key, cert := negotiationKey()
 
 	doc := etree.NewDocument()
-	assert.NilError(t, doc.ReadFromString(data))
+	require.NoError(t, doc.ReadFromString(data))
 
 	signingContext, err := dsig.NewSigningContext(key, [][]byte{cert.Raw})
-	assert.NilError(t, err)
+	require.NoError(t, err)
 
 	signingContext.Canonicalizer = dsig.MakeC14N10ExclusiveCanonicalizerWithPrefixList("")
 
 	signed, err := signingContext.SignEnveloped(doc.Root())
-	assert.NilError(t, err)
+	require.NoError(t, err)
 
 	last := len(signed.Child) - 1
 	signature := signed.Child[last]
@@ -58,7 +58,7 @@ func signMetadataXML(t *testing.T, data string) string {
 	doc.SetRoot(signed)
 
 	out, err := doc.WriteToString()
-	assert.NilError(t, err)
+	require.NoError(t, err)
 
 	return out
 }
@@ -79,49 +79,49 @@ func TestSignedMetadataIsVerified(t *testing.T) {
 	test, verifier := metadataSigningTest(t)
 
 	signed, err := test.IDP.SignedMetadata()
-	assert.NilError(t, err)
+	require.NoError(t, err)
 
 	doc := etree.NewDocument()
-	assert.NilError(t, doc.ReadFromBytes(signed))
+	require.NoError(t, doc.ReadFromBytes(signed))
 
 	// SAMLMeta §3.1.2: the signature refers to the ID of the EntityDescriptor, and is its first child (the schema).
 	id := doc.Root().SelectAttrValue("ID", "")
-	assert.Check(t, strings.HasPrefix(id, "id-"))
-	assert.Check(t, is.Equal(dsig.SignatureTag, doc.Root().ChildElements()[0].Tag))
-	assert.Check(t, is.Equal("#"+id, doc.Root().FindElement("./Signature/SignedInfo/Reference").SelectAttrValue("URI", "")))
+	assert.True(t, strings.HasPrefix(id, "id-"))
+	assert.Equal(t, dsig.SignatureTag, doc.Root().ChildElements()[0].Tag)
+	assert.Equal(t, "#"+id, doc.Root().FindElement("./Signature/SignedInfo/Reference").SelectAttrValue("URI", ""))
 
 	verified, err := verifier.Verify(signed)
-	assert.NilError(t, err)
+	require.NoError(t, err)
 
 	var metadata EntityDescriptor
-	assert.NilError(t, xml.Unmarshal(verified, &metadata))
+	require.NoError(t, xml.Unmarshal(verified, &metadata))
 
 	expected := test.IDP.Metadata()
 
-	assert.Check(t, is.Equal(id, metadata.ID))
-	assert.Check(t, is.Equal(expected.EntityID, metadata.EntityID))
-	assert.Check(t, is.Equal(expected.ValidUntil, metadata.ValidUntil))
-	assert.Check(t, is.DeepEqual(expected.IDPSSODescriptors[0].SingleSignOnServices, metadata.IDPSSODescriptors[0].SingleSignOnServices))
-	assert.Check(t, is.Equal(expected.IDPSSODescriptors[0].KeyDescriptors[0].KeyInfo.X509Data.X509Certificates[0].Data,
-		metadata.IDPSSODescriptors[0].KeyDescriptors[0].KeyInfo.X509Data.X509Certificates[0].Data))
+	assert.Equal(t, id, metadata.ID)
+	assert.Equal(t, expected.EntityID, metadata.EntityID)
+	assert.Equal(t, expected.ValidUntil, metadata.ValidUntil)
+	assert.Equal(t, expected.IDPSSODescriptors[0].SingleSignOnServices, metadata.IDPSSODescriptors[0].SingleSignOnServices)
+	assert.Equal(t, expected.IDPSSODescriptors[0].KeyDescriptors[0].KeyInfo.X509Data.X509Certificates[0].Data,
+		metadata.IDPSSODescriptors[0].KeyDescriptors[0].KeyInfo.X509Data.X509Certificates[0].Data)
 }
 
 func TestSignedMetadataIDIsFreshForEachCall(t *testing.T) {
 	test, _ := metadataSigningTest(t)
 
 	first, err := test.IDP.SignedMetadata()
-	assert.NilError(t, err)
+	require.NoError(t, err)
 	second, err := test.IDP.SignedMetadata()
-	assert.NilError(t, err)
+	require.NoError(t, err)
 
 	idOf := func(data []byte) string {
 		doc := etree.NewDocument()
-		assert.NilError(t, doc.ReadFromBytes(data))
+		require.NoError(t, doc.ReadFromBytes(data))
 
 		return doc.Root().SelectAttrValue("ID", "")
 	}
 
-	assert.Check(t, idOf(first) != idOf(second))
+	assert.True(t, idOf(first) != idOf(second))
 }
 
 func TestServeMetadataIsSigned(t *testing.T) {
@@ -130,11 +130,11 @@ func TestServeMetadataIsSigned(t *testing.T) {
 	w := httptest.NewRecorder()
 	test.IDP.ServeMetadata(w, httptest.NewRequest(http.MethodGet, test.IDP.MetadataURL.String(), nil))
 
-	assert.Check(t, is.Equal(http.StatusOK, w.Code))
-	assert.Check(t, is.Equal("application/samlmetadata+xml", w.Header().Get("Content-Type")))
+	assert.Equal(t, http.StatusOK, w.Code)
+	assert.Equal(t, "application/samlmetadata+xml", w.Header().Get("Content-Type"))
 
 	_, err := verifier.Verify(w.Body.Bytes())
-	assert.Check(t, err)
+	assert.NoError(t, err)
 }
 
 func TestServeMetadataFailsWithoutAKeyToSignWith(t *testing.T) {
@@ -144,15 +144,15 @@ func TestServeMetadataFailsWithoutAKeyToSignWith(t *testing.T) {
 	w := httptest.NewRecorder()
 	test.IDP.ServeMetadata(w, httptest.NewRequest(http.MethodGet, test.IDP.MetadataURL.String(), nil))
 
-	assert.Check(t, is.Equal(http.StatusInternalServerError, w.Code))
-	assert.Check(t, !strings.Contains(w.Body.String(), "EntityDescriptor"))
+	assert.Equal(t, http.StatusInternalServerError, w.Code)
+	assert.False(t, strings.Contains(w.Body.String(), "EntityDescriptor"))
 }
 
 func TestMetadataVerifierRefuses(t *testing.T) {
 	test, verifier := metadataSigningTest(t)
 
 	signed, err := test.IDP.SignedMetadata()
-	assert.NilError(t, err)
+	require.NoError(t, err)
 
 	other := mustParseCertificate(golden.Get(t, "sp_cert.pem"))
 
@@ -227,7 +227,7 @@ func TestMetadataVerifierRefuses(t *testing.T) {
 			}
 
 			_, err := v.Verify([]byte(tc.data))
-			assert.Check(t, is.ErrorContains(err, tc.err))
+			assert.ErrorContains(t, err, tc.err)
 		})
 	}
 }
@@ -237,7 +237,7 @@ func TestMetadataVerifierAcceptsValidUntilWithinMaxValidity(t *testing.T) {
 	verifier.MaxValidity = 14 * 24 * time.Hour
 
 	_, err := verifier.Verify([]byte(signMetadataXML(t, testAggregate)))
-	assert.Check(t, err)
+	assert.NoError(t, err)
 }
 
 // Only the content that the signature covers is returned, so a comment outside the root is dropped.
@@ -245,19 +245,19 @@ func TestMetadataVerifierReturnsTheSignedContent(t *testing.T) {
 	_, verifier := metadataSigningTest(t)
 
 	verified, err := verifier.Verify([]byte(signMetadataXML(t, testAggregate) + "<!-- unsigned -->"))
-	assert.NilError(t, err)
-	assert.Check(t, !strings.Contains(string(verified), "unsigned"))
-	assert.Check(t, !strings.Contains(string(verified), "Signature"))
+	require.NoError(t, err)
+	assert.False(t, strings.Contains(string(verified), "unsigned"))
+	assert.False(t, strings.Contains(string(verified), "Signature"))
 }
 
 func TestParseServiceProvidersMetadataOfAVerifiedAggregate(t *testing.T) {
 	_, verifier := metadataSigningTest(t)
 
 	verified, err := verifier.Verify([]byte(signMetadataXML(t, testAggregate)))
-	assert.NilError(t, err)
+	require.NoError(t, err)
 
 	entities, err := ParseServiceProvidersMetadata(verified)
-	assert.NilError(t, err)
+	require.NoError(t, err)
 
 	ids := make([]string, 0, len(entities))
 	validUntil := map[string]time.Time{}
@@ -268,25 +268,25 @@ func TestParseServiceProvidersMetadataOfAVerifiedAggregate(t *testing.T) {
 	}
 
 	// The identity provider is skipped, and an entity expires with the earliest group around it (SAMLMeta §2.3.1).
-	assert.Check(t, is.DeepEqual([]string{"https://sp1.example.org/", "https://sp2.example.org/", "https://sp3.example.org/"}, ids))
-	assert.Check(t, is.Equal(time.Date(2015, 12, 10, 0, 0, 0, 0, time.UTC), validUntil["https://sp1.example.org/"].UTC()))
-	assert.Check(t, is.Equal(time.Date(2015, 12, 4, 0, 0, 0, 0, time.UTC), validUntil["https://sp2.example.org/"].UTC()))
-	assert.Check(t, is.Equal(time.Date(2015, 12, 5, 0, 0, 0, 0, time.UTC), validUntil["https://sp3.example.org/"].UTC()))
+	assert.Equal(t, []string{"https://sp1.example.org/", "https://sp2.example.org/", "https://sp3.example.org/"}, ids)
+	assert.Equal(t, time.Date(2015, 12, 10, 0, 0, 0, 0, time.UTC), validUntil["https://sp1.example.org/"].UTC())
+	assert.Equal(t, time.Date(2015, 12, 4, 0, 0, 0, 0, time.UTC), validUntil["https://sp2.example.org/"].UTC())
+	assert.Equal(t, time.Date(2015, 12, 5, 0, 0, 0, 0, time.UTC), validUntil["https://sp3.example.org/"].UTC())
 
 	first, err := ParseServiceProviderMetadata(verified)
-	assert.NilError(t, err)
-	assert.Check(t, is.Equal("https://sp1.example.org/", first.EntityID))
+	require.NoError(t, err)
+	assert.Equal(t, "https://sp1.example.org/", first.EntityID)
 }
 
 func TestParseServiceProvidersMetadataRefuses(t *testing.T) {
 	_, err := ParseServiceProvidersMetadata([]byte(`<md:EntitiesDescriptor xmlns:md="urn:oasis:names:tc:SAML:2.0:metadata"><md:EntityDescriptor entityID="https://idp.example.org/"/></md:EntitiesDescriptor>`))
-	assert.Check(t, is.ErrorContains(err, "metadata contained no service provider metadata"))
+	assert.ErrorContains(t, err, "metadata contained no service provider metadata")
 
 	_, err = ParseServiceProvidersMetadata([]byte(`<Response xmlns="urn:oasis:names:tc:SAML:2.0:protocol"/>`))
-	assert.Check(t, is.ErrorContains(err, "expected element type <EntityDescriptor> or <EntitiesDescriptor> but have <Response>"))
+	assert.ErrorContains(t, err, "expected element type <EntityDescriptor> or <EntitiesDescriptor> but have <Response>")
 
 	_, err = ParseServiceProvidersMetadata([]byte(`<EntityDescriptor xmlns="urn:example" entityID="x"/>`))
-	assert.Check(t, is.ErrorContains(err, "expected element type"))
+	assert.ErrorContains(t, err, "expected element type")
 }
 
 // xmlsec1Metadata writes data to a file, and returns the path of xmlsec1, of the file, and of negotiationKey and its
@@ -297,7 +297,7 @@ func xmlsec1Metadata(t *testing.T, data []byte) (xmlsec1, path, keyPath, certPat
 	xmlsec1, keyPath, certPath = xmlsec1Keys(t)
 
 	path = filepath.Join(t.TempDir(), "metadata.xml")
-	assert.NilError(t, os.WriteFile(path, data, 0o600))
+	require.NoError(t, os.WriteFile(path, data, 0o600))
 
 	return xmlsec1, path, keyPath, certPath
 }
@@ -307,13 +307,13 @@ func TestXMLSec1VerifiesSignedMetadata(t *testing.T) {
 	test, _ := metadataSigningTest(t)
 
 	signed, err := test.IDP.SignedMetadata()
-	assert.NilError(t, err)
+	require.NoError(t, err)
 
 	xmlsec1, path, _, certPath := xmlsec1Metadata(t, signed)
 
 	out, err := exec.Command(xmlsec1, "--verify", "--id-attr:ID", "urn:oasis:names:tc:SAML:2.0:metadata:EntityDescriptor",
 		"--trusted-pem", certPath, path).CombinedOutput()
-	assert.NilError(t, err, "xmlsec1: %s", out)
+	require.NoError(t, err, "xmlsec1: %s", out)
 }
 
 // What xmlsec1 signs, the verifier accepts.
@@ -331,19 +331,19 @@ func TestMetadataVerifierAcceptsXMLSec1Signature(t *testing.T) {
 
 	signed, err := exec.Command(xmlsec1, "--sign", "--lax-key-search", "--id-attr:ID", "urn:oasis:names:tc:SAML:2.0:metadata:EntitiesDescriptor",
 		"--privkey-pem", keyPath+","+certPath, path).CombinedOutput()
-	assert.NilError(t, err, "xmlsec1: %s", signed)
+	require.NoError(t, err, "xmlsec1: %s", signed)
 
 	_, verifier := metadataSigningTest(t)
 
 	verified, err := verifier.Verify(signed)
-	assert.NilError(t, err)
+	require.NoError(t, err)
 
 	entities, err := ParseServiceProvidersMetadata(verified)
-	assert.NilError(t, err)
-	assert.Check(t, is.Len(entities, 3))
+	require.NoError(t, err)
+	assert.Len(t, entities, 3)
 
 	_, err = verifier.Verify([]byte(strings.Replace(string(signed), "https://sp3.example.org/acs", "https://evil.example.org/acs", 1)))
-	assert.Check(t, is.ErrorContains(err, "cannot verify the signature of the metadata"))
+	assert.ErrorContains(t, err, "cannot verify the signature of the metadata")
 }
 
 // SAML2Int SDP-G01 requires clock skew to be allowed for in either direction when a validUntil is enforced: the
@@ -375,11 +375,11 @@ func TestMetadataVerifierAllowsClockSkew(t *testing.T) {
 
 			_, err := v.Verify([]byte(data))
 			if tc.err == "" {
-				assert.Check(t, err)
+				assert.NoError(t, err)
 				return
 			}
 
-			assert.Check(t, is.ErrorContains(err, tc.err))
+			assert.ErrorContains(t, err, tc.err)
 		})
 	}
 }

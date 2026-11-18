@@ -9,8 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"gotest.tools/assert"
-	is "gotest.tools/assert/cmp"
+	"github.com/stretchr/testify/assert"
 
 	"authelia.com/provider/saml"
 )
@@ -31,7 +30,7 @@ func captureDefaultOnError(t *testing.T, err error) string {
 
 	recorder := httptest.NewRecorder()
 	DefaultOnError(recorder, httptest.NewRequest("POST", "/saml/acs", nil), err)
-	assert.Check(t, is.Equal(403, recorder.Code))
+	assert.Equal(t, 403, recorder.Code)
 
 	return output.String()
 }
@@ -46,9 +45,9 @@ func TestDefaultOnErrorDoesNotAllowForgedLogLines(t *testing.T) {
 	} {
 		t.Run(name, func(t *testing.T) {
 			output := captureDefaultOnError(t, err)
-			assert.Check(t, is.Equal(1, strings.Count(output, "\n")), output)
-			assert.Check(t, !strings.Contains(output, "\r"), output)
-			assert.Check(t, strings.Contains(output, `x\nERROR: forged log line`), output)
+			assert.Equal(t, 1, strings.Count(output, "\n"), output)
+			assert.False(t, strings.Contains(output, "\r"), output)
+			assert.True(t, strings.Contains(output, `x\nERROR: forged log line`), output)
 		})
 	}
 }
@@ -59,9 +58,9 @@ func TestDefaultOnErrorLimitsLoggedResponse(t *testing.T) {
 		Now:        time.Unix(0, 0),
 		PrivateErr: errors.New("the reason"),
 	})
-	assert.Check(t, len(output) < 8192, "logged %d bytes", len(output))
-	assert.Check(t, strings.Contains(output, "truncated"))
-	assert.Check(t, strings.Contains(output, "the reason"))
+	assert.True(t, len(output) < 8192, "logged %d bytes", len(output))
+	assert.True(t, strings.Contains(output, "truncated"))
+	assert.True(t, strings.Contains(output, "the reason"))
 }
 
 func TestDefaultOnErrorKeepsShortResponse(t *testing.T) {
@@ -70,8 +69,8 @@ func TestDefaultOnErrorKeepsShortResponse(t *testing.T) {
 		Now:        time.Unix(0, 0),
 		PrivateErr: errors.New("the reason"),
 	})
-	assert.Check(t, strings.Contains(output, "<samlp:Response/>"), output)
-	assert.Check(t, !strings.Contains(output, "truncated"), output)
+	assert.True(t, strings.Contains(output, "<samlp:Response/>"), output)
+	assert.False(t, strings.Contains(output, "truncated"), output)
 }
 
 func TestDefaultOnErrorLimitsLoggedStatus(t *testing.T) {
@@ -79,9 +78,9 @@ func TestDefaultOnErrorLimitsLoggedStatus(t *testing.T) {
 		WithWrap(errors.New(strings.Repeat("c", 10*1024*1024)))
 
 	output := captureDefaultOnError(t, err)
-	assert.Check(t, len(output) < 4*8192, "logged %d bytes", len(output))
-	assert.Check(t, strings.Contains(output, "truncated"), output)
-	assert.Check(t, strings.Contains(output, "request_denied"), output)
-	assert.Check(t, strings.Contains(output, "denied"), output)
-	assert.Check(t, is.Len(err.Debug(), 10*1024*1024), "the error is unchanged")
+	assert.True(t, len(output) < 4*8192, "logged %d bytes", len(output))
+	assert.True(t, strings.Contains(output, "truncated"), output)
+	assert.True(t, strings.Contains(output, "request_denied"), output)
+	assert.True(t, strings.Contains(output, "denied"), output)
+	assert.Len(t, err.Debug(), 10*1024*1024, "the error is unchanged")
 }

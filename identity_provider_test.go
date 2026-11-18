@@ -21,11 +21,11 @@ import (
 	"time"
 
 	"github.com/beevik/etree"
-	"gotest.tools/assert"
-	is "gotest.tools/assert/cmp"
-	"gotest.tools/golden"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"authelia.com/provider/saml/internal/dsig"
+	"authelia.com/provider/saml/internal/golden"
 	"authelia.com/provider/saml/testsaml"
 	"authelia.com/provider/saml/xmlenc"
 )
@@ -258,7 +258,7 @@ func TestIDPCanProduceMetadata(t *testing.T) {
 			},
 		},
 	}
-	assert.Check(t, is.DeepEqual(expected, test.IDP.Metadata()))
+	assert.Equal(t, expected, test.IDP.Metadata())
 }
 
 func TestIDPHTTPCanHandleMetadataRequest(t *testing.T) {
@@ -266,9 +266,9 @@ func TestIDPHTTPCanHandleMetadataRequest(t *testing.T) {
 	w := httptest.NewRecorder()
 	r, _ := http.NewRequest("GET", "https://idp.example.com/saml/metadata", nil)
 	test.IDP.Handler().ServeHTTP(w, r)
-	assert.Check(t, is.Equal(http.StatusOK, w.Code))
-	assert.Check(t, is.Equal("application/samlmetadata+xml", w.Header().Get("Content-type")))
-	assert.Check(t, strings.HasPrefix(w.Body.String(), "<EntityDescriptor"),
+	assert.Equal(t, http.StatusOK, w.Code)
+	assert.Equal(t, "application/samlmetadata+xml", w.Header().Get("Content-type"))
+	assert.True(t, strings.HasPrefix(w.Body.String(), "<EntityDescriptor"),
 		w.Body.String())
 }
 
@@ -278,7 +278,7 @@ func TestIDPCanHandleRequestWithNewSession(t *testing.T) {
 		GetSessionFunc: func(w http.ResponseWriter, _ *http.Request, req *IdpAuthnRequest) *Session {
 			_, err := fmt.Fprintf(w, "RelayState: %s\nSAMLRequest: %s",
 				req.RelayState, req.RequestBuffer)
-			assert.NilError(t, err)
+			require.NoError(t, err)
 
 			return nil
 		},
@@ -287,16 +287,16 @@ func TestIDPCanHandleRequestWithNewSession(t *testing.T) {
 	w := httptest.NewRecorder()
 
 	requestURL, err := test.SP.MakeRedirectAuthenticationRequest("ThisIsTheRelayState")
-	assert.Check(t, err)
+	assert.NoError(t, err)
 
 	decodedRequest, err := testsaml.ParseRedirectRequest(requestURL)
-	assert.Check(t, err)
+	assert.NoError(t, err)
 	golden.Assert(t, string(decodedRequest), "idp_authn_request.xml")
-	assert.Check(t, is.Equal("ThisIsTheRelayState", requestURL.Query().Get("RelayState")))
+	assert.Equal(t, "ThisIsTheRelayState", requestURL.Query().Get("RelayState"))
 
 	r, _ := http.NewRequest("GET", requestURL.String(), nil)
 	test.IDP.ServeSSO(w, r)
-	assert.Check(t, is.Equal(200, w.Code))
+	assert.Equal(t, 200, w.Code)
 	golden.Assert(t, w.Body.String(), t.Name()+"_http_response_body")
 }
 
@@ -314,15 +314,15 @@ func TestIDPCanHandleRequestWithExistingSession(t *testing.T) {
 
 	w := httptest.NewRecorder()
 	requestURL, err := test.SP.MakeRedirectAuthenticationRequest("ThisIsTheRelayState")
-	assert.Check(t, err)
+	assert.NoError(t, err)
 
 	decodedRequest, err := testsaml.ParseRedirectRequest(requestURL)
-	assert.Check(t, err)
+	assert.NoError(t, err)
 	golden.Assert(t, string(decodedRequest), t.Name()+"_decodedRequest")
 
 	r, _ := http.NewRequest("GET", requestURL.String(), nil)
 	test.IDP.ServeSSO(w, r)
-	assert.Check(t, is.Equal(200, w.Code))
+	assert.Equal(t, 200, w.Code)
 	golden.Assert(t, w.Body.String(), t.Name()+"_http_response_body")
 }
 
@@ -341,9 +341,9 @@ func TestIDPCanHandlePostRequestWithExistingSession(t *testing.T) {
 	w := httptest.NewRecorder()
 
 	authRequest, err := test.SP.MakeAuthenticationRequest(test.SP.GetSSOBindingLocation(HTTPRedirectBinding), HTTPRedirectBinding, HTTPPostBinding)
-	assert.Check(t, err)
+	assert.NoError(t, err)
 	authRequestBuf, err := xml.Marshal(authRequest)
-	assert.Check(t, err)
+	assert.NoError(t, err)
 
 	q := url.Values{}
 	q.Set("SAMLRequest", base64.StdEncoding.EncodeToString(authRequestBuf))
@@ -353,7 +353,7 @@ func TestIDPCanHandlePostRequestWithExistingSession(t *testing.T) {
 	r.Header.Set("Content-type", "application/x-www-form-urlencoded")
 
 	test.IDP.ServeSSO(w, r)
-	assert.Check(t, is.Equal(200, w.Code))
+	assert.Equal(t, 200, w.Code)
 	golden.Assert(t, w.Body.String(), t.Name()+"_http_response_body")
 }
 
@@ -368,38 +368,38 @@ func TestIDPRejectsInvalidRequest(t *testing.T) {
 	w := httptest.NewRecorder()
 	r, _ := http.NewRequest("GET", "https://idp.example.com/saml/sso?RelayState=ThisIsTheRelayState&SAMLRequest=XXX", nil)
 	test.IDP.ServeSSO(w, r)
-	assert.Check(t, is.Equal(http.StatusBadRequest, w.Code))
+	assert.Equal(t, http.StatusBadRequest, w.Code)
 
 	w = httptest.NewRecorder()
 	r, _ = http.NewRequest("POST", "https://idp.example.com/saml/sso",
 		strings.NewReader("RelayState=ThisIsTheRelayState&SAMLRequest=XXX"))
 	r.Header.Set("Content-type", "application/x-www-form-urlencoded")
 	test.IDP.ServeSSO(w, r)
-	assert.Check(t, is.Equal(http.StatusBadRequest, w.Code))
+	assert.Equal(t, http.StatusBadRequest, w.Code)
 }
 
 func TestIDPCanParse(t *testing.T) {
 	test := NewIdentityProviderTest(t, applyKey)
 	r, _ := http.NewRequest("GET", "https://idp.example.com/saml/sso?RelayState=ThisIsTheRelayState&SAMLRequest=lJJBayoxFIX%2FypC9JhnU5wszAz7lgWCLaNtFd5fMbQ1MkmnunVb%2FfUfbUqEgdhs%2BTr5zkmLW8S5s8KVD4mzvm0Cl6FIwEciRCeCRDFuznd2sTD5Upk2Ro42NyGZEmNjFMI%2BBOo9pi%2BnVWbzfrEqxY27JSEntEPfg2waHNnpJ4JtcgiWRLfoLXYBjwDfu6p%2B8JIoiWy5K4eqBUipXIzVRUwXKKtRK53qkJ3qqQVuNPUjU4TIQQ%2BBS5EqPBzofKH2ntBn%2FMervo8jWnyX%2BuVC78FwKkT1gopNKX1JUxSklXTMIfM0gsv8xeeDL%2BPGk7%2FF0Qg0GdnwQ1cW5PDLUwFDID6uquO1Dlot1bJw9%2FPLRmia%2BzRMCYyk4dSiq6205QSDXOxfy3KAq5Pkvqt4DAAD%2F%2Fw%3D%3D", nil)
 	req, err := NewIdpAuthnRequest(&test.IDP, r)
-	assert.Check(t, err)
-	assert.Check(t, req.Validate())
+	assert.NoError(t, err)
+	assert.NoError(t, req.Validate())
 
 	r, _ = http.NewRequest("GET", "https://idp.example.com/saml/sso?RelayState=ThisIsTheRelayState", nil)
 	_, err = NewIdpAuthnRequest(&test.IDP, r)
-	assert.Check(t, is.Equal(errorDebug(err), "cannot decompress request: unexpected EOF"))
+	assert.Equal(t, errorDebug(err), "cannot decompress request: unexpected EOF")
 
 	r, _ = http.NewRequest("GET", "https://idp.example.com/saml/sso?RelayState=ThisIsTheRelayState&SAMLRequest=NotValidBase64", nil)
 	_, err = NewIdpAuthnRequest(&test.IDP, r)
-	assert.Check(t, is.Equal(errorDebug(err), "cannot decode request: illegal base64 data at input byte 12"))
+	assert.Equal(t, errorDebug(err), "cannot decode request: illegal base64 data at input byte 12")
 
 	r, _ = http.NewRequest("GET", "https://idp.example.com/saml/sso?RelayState=ThisIsTheRelayState&SAMLRequest=bm90IGZsYXRlIGVuY29kZWQ%3D", nil)
 	_, err = NewIdpAuthnRequest(&test.IDP, r)
-	assert.Check(t, is.Equal(errorDebug(err), "cannot decompress request: flate: corrupt input before offset 1"))
+	assert.Equal(t, errorDebug(err), "cannot decompress request: flate: corrupt input before offset 1")
 
 	r, _ = http.NewRequest("FROBNICATE", "https://idp.example.com/saml/sso?RelayState=ThisIsTheRelayState&SAMLRequest=lJJBayoxFIX%2FypC9JhnU5wszAz7lgWCLaNtFd5fMbQ1MkmnunVb%2FfUfbUqEgdhs%2BTr5zkmLW8S5s8KVD4mzvm0Cl6FIwEciRCeCRDFuznd2sTD5Upk2Ro42NyGZEmNjFMI%2BBOo9pi%2BnVWbzfrEqxY27JSEntEPfg2waHNnpJ4JtcgiWRLfoLXYBjwDfu6p%2B8JIoiWy5K4eqBUipXIzVRUwXKKtRK53qkJ3qqQVuNPUjU4TIQQ%2BBS5EqPBzofKH2ntBn%2FMervo8jWnyX%2BuVC78FwKkT1gopNKX1JUxSklXTMIfM0gsv8xeeDL%2BPGk7%2FF0Qg0GdnwQ1cW5PDLUwFDID6uquO1Dlot1bJw9%2FPLRmia%2BzRMCYyk4dSiq6205QSDXOxfy3KAq5Pkvqt4DAAD%2F%2Fw%3D%3D", nil)
 	_, err = NewIdpAuthnRequest(&test.IDP, r)
-	assert.Check(t, is.Equal(errorDebug(err), "method not allowed"))
+	assert.Equal(t, errorDebug(err), "method not allowed")
 }
 
 func TestIDPCanValidate(t *testing.T) {
@@ -420,19 +420,19 @@ func TestIDPCanValidate(t *testing.T) {
 			"    AllowCreate=\"true\">urn:oasis:names:tc:SAML:2.0:nameid-format:transient</NameIDPolicy>" +
 			"</AuthnRequest>"),
 	}
-	assert.Check(t, req.Validate())
-	assert.Check(t, req.ServiceProviderMetadata != nil)
-	assert.Check(t, is.DeepEqual(&IndexedEndpoint{
+	assert.NoError(t, req.Validate())
+	assert.NotNil(t, req.ServiceProviderMetadata)
+	assert.Equal(t, &IndexedEndpoint{
 		Binding: "urn:oasis:names:tc:SAML:2.0:bindings:HTTP-POST", Location: "https://sp.example.com/saml2/acs",
 		Index: 1,
-	}, req.ACSEndpoint))
+	}, req.ACSEndpoint)
 
 	req = IdpAuthnRequest{
 		Now:           TimeNow(),
 		IDP:           &test.IDP,
 		RequestBuffer: []byte("<AuthnRequest"),
 	}
-	assert.Check(t, is.Equal(errorDebug(req.Validate()), "XML syntax error on line 1: unexpected EOF"))
+	assert.Equal(t, errorDebug(req.Validate()), "XML syntax error on line 1: unexpected EOF")
 
 	req = IdpAuthnRequest{
 		Now: TimeNow(),
@@ -450,7 +450,7 @@ func TestIDPCanValidate(t *testing.T) {
 			"    AllowCreate=\"true\">urn:oasis:names:tc:SAML:2.0:nameid-format:transient</NameIDPolicy>" +
 			"</AuthnRequest>"),
 	}
-	assert.Check(t, is.Equal(errorDebug(req.Validate()), "expected destination to be \"https://idp.example.com/saml/sso\", not \"https://idp.wrongDestination.com/saml/sso\""))
+	assert.Equal(t, errorDebug(req.Validate()), "expected destination to be \"https://idp.example.com/saml/sso\", not \"https://idp.wrongDestination.com/saml/sso\"")
 
 	req = IdpAuthnRequest{
 		Now: TimeNow(),
@@ -468,7 +468,7 @@ func TestIDPCanValidate(t *testing.T) {
 			"    AllowCreate=\"true\">urn:oasis:names:tc:SAML:2.0:nameid-format:transient</NameIDPolicy>" +
 			"</AuthnRequest>"),
 	}
-	assert.Check(t, is.Equal(errorDebug(req.Validate()), "request expired at 2014-12-01 01:58:39 +0000 UTC"))
+	assert.Equal(t, errorDebug(req.Validate()), "request expired at 2014-12-01 01:58:39 +0000 UTC")
 
 	req = IdpAuthnRequest{
 		Now: TimeNow(),
@@ -486,7 +486,7 @@ func TestIDPCanValidate(t *testing.T) {
 			"    AllowCreate=\"true\">urn:oasis:names:tc:SAML:2.0:nameid-format:transient</NameIDPolicy>" +
 			"</AuthnRequest>"),
 	}
-	assert.Check(t, is.Equal(errorDebug(req.Validate()), "expected SAML request version 2.0 got 4.2"))
+	assert.Equal(t, errorDebug(req.Validate()), "expected SAML request version 2.0 got 4.2")
 
 	req = IdpAuthnRequest{
 		Now: TimeNow(),
@@ -504,7 +504,7 @@ func TestIDPCanValidate(t *testing.T) {
 			"    AllowCreate=\"true\">urn:oasis:names:tc:SAML:2.0:nameid-format:transient</NameIDPolicy>" +
 			"</AuthnRequest>"),
 	}
-	assert.Check(t, is.Equal(errorDebug(req.Validate()), "cannot handle request from unknown service provider https://unknownSP.example.com/saml2/metadata"))
+	assert.Equal(t, errorDebug(req.Validate()), "cannot handle request from unknown service provider https://unknownSP.example.com/saml2/metadata")
 
 	req = IdpAuthnRequest{
 		Now: TimeNow(),
@@ -522,7 +522,7 @@ func TestIDPCanValidate(t *testing.T) {
 			"    AllowCreate=\"true\">urn:oasis:names:tc:SAML:2.0:nameid-format:transient</NameIDPolicy>" +
 			"</AuthnRequest>"),
 	}
-	assert.Check(t, is.Equal(errorDebug(req.Validate()), "cannot find assertion consumer service: file does not exist"))
+	assert.Equal(t, errorDebug(req.Validate()), "cannot find assertion consumer service: file does not exist")
 }
 
 // testTransientNameID is the transient NameID that DefaultNameIDProvider makes from the bytes of
@@ -548,14 +548,14 @@ func TestIDPMakeAssertion(t *testing.T) {
 			"</AuthnRequest>"),
 	}
 	req.HTTPRequest, _ = http.NewRequest("POST", "http://idp.example.com/saml/sso", nil)
-	assert.Check(t, req.Validate())
+	assert.NoError(t, req.Validate())
 
 	err := DefaultAssertionMaker{}.MakeAssertion(&req, &Session{
 		ID:       "f00df00df00d",
 		NameID:   "alice",
 		UserName: "alice",
 	})
-	assert.Check(t, err)
+	assert.NoError(t, err)
 
 	expected := &Assertion{
 		ID:           "id-00020406080a0c0e10121416181a1c1e20222426",
@@ -602,7 +602,7 @@ func TestIDPMakeAssertion(t *testing.T) {
 		// The service provider requests no attributes, so none are released.
 		AttributeStatements: nil,
 	}
-	assert.Check(t, is.DeepEqual(expected, req.Assertion))
+	assert.Equal(t, expected, req.Assertion)
 
 	// Every candidate attribute, when the policy releases them all.
 	test.IDP.AttributeReleasePolicy = releaseEveryAttribute
@@ -619,7 +619,7 @@ func TestIDPMakeAssertion(t *testing.T) {
 		UserSurname:    "Smith",
 		UserGivenName:  "Alice",
 	})
-	assert.Check(t, err)
+	assert.NoError(t, err)
 
 	expectedAttributes := []Attribute{
 		{
@@ -709,8 +709,8 @@ func TestIDPMakeAssertion(t *testing.T) {
 		},
 	}
 
-	assert.Assert(t, is.Len(req.Assertion.AttributeStatements, 1))
-	assert.Check(t, is.DeepEqual(expectedAttributes, req.Assertion.AttributeStatements[0].Attributes))
+	require.Len(t, req.Assertion.AttributeStatements, 1)
+	assert.Equal(t, expectedAttributes, req.Assertion.AttributeStatements[0].Attributes)
 }
 
 func TestIDPMarshalAssertion(t *testing.T) {
@@ -735,15 +735,15 @@ func TestIDPMarshalAssertion(t *testing.T) {
 	}
 	req.HTTPRequest, _ = http.NewRequest("POST", "http://idp.example.com/saml/sso", nil)
 	err := req.Validate()
-	assert.Check(t, err)
+	assert.NoError(t, err)
 	err = DefaultAssertionMaker{}.MakeAssertion(&req, &Session{
 		ID:       "f00df00df00d",
 		NameID:   "alice",
 		UserName: "alice",
 	})
-	assert.Check(t, err)
+	assert.NoError(t, err)
 	err = req.MakeAssertionEl()
-	assert.Check(t, err)
+	assert.NoError(t, err)
 
 	// Compare the plaintext first.
 	expectedPlaintext := "<saml:Assertion xmlns:saml=\"urn:oasis:names:tc:SAML:2.0:assertion\" ID=\"id-00020406080a0c0e10121416181a1c1e20222426\" IssueInstant=\"2015-12-01T01:57:09Z\" Version=\"2.0\" xmlns:xs=\"http://www.w3.org/2001/XMLSchema\"><saml:Issuer Format=\"urn:oasis:names:tc:SAML:2.0:nameid-format:entity\">https://idp.example.com/saml/metadata</saml:Issuer><ds:Signature xmlns:ds=\"http://www.w3.org/2000/09/xmldsig#\"><ds:SignedInfo><ds:CanonicalizationMethod Algorithm=\"http://www.w3.org/2001/10/xml-exc-c14n#\"/><ds:SignatureMethod Algorithm=\"http://www.w3.org/2001/04/xmldsig-more#rsa-sha256\"/><ds:Reference URI=\"#id-00020406080a0c0e10121416181a1c1e20222426\"><ds:Transforms><ds:Transform Algorithm=\"http://www.w3.org/2000/09/xmldsig#enveloped-signature\"/><ds:Transform Algorithm=\"http://www.w3.org/2001/10/xml-exc-c14n#\"/></ds:Transforms><ds:DigestMethod Algorithm=\"http://www.w3.org/2001/04/xmlenc#sha256\"/><ds:DigestValue>RBHNGf1hWGMJ03hLA+upOvUf+xIDnEahKm+Y+e7vM1A=</ds:DigestValue></ds:Reference></ds:SignedInfo><ds:SignatureValue>c7UHcLlebeXx2BReLG9dPF9AH/6ftIN7EBtn28eiH4xRUhg+l+ngij/3KtEIFqjjV09MOjkhku5+BNGHZBCVG8bDcNJYZH9RDQhVN97UmRQxlxPvdQkGgy4BItiaC8pSD4n/YT3zUeOuU/ZHNkfJ0++cMXUHH9NosEuvU3Vgphc=</ds:SignatureValue><ds:KeyInfo><ds:X509Data><ds:X509Certificate>MIIB7zCCAVgCCQDFzbKIp7b3MTANBgkqhkiG9w0BAQUFADA8MQswCQYDVQQGEwJVUzELMAkGA1UECAwCR0ExDDAKBgNVBAoMA2ZvbzESMBAGA1UEAwwJbG9jYWxob3N0MB4XDTEzMTAwMjAwMDg1MVoXDTE0MTAwMjAwMDg1MVowPDELMAkGA1UEBhMCVVMxCzAJBgNVBAgMAkdBMQwwCgYDVQQKDANmb28xEjAQBgNVBAMMCWxvY2FsaG9zdDCBnzANBgkqhkiG9w0BAQEFAAOBjQAwgYkCgYEA1PMHYmhZj308kWLhZVT4vOulqx/9ibm5B86fPWwUKKQ2i12MYtz07tzukPymisTDhQaqyJ8Kqb/6JjhmeMnEOdTvSPmHO8m1ZVveJU6NoKRn/mP/BD7FW52WhbrUXLSeHVSKfWkNk6S4hk9MV9TswTvyRIKvRsw0X/gfnqkroJcCAwEAATANBgkqhkiG9w0BAQUFAAOBgQCMMlIO+GNcGekevKgkakpMdAqJfs24maGb90DvTLbRZRD7Xvn1MnVBBS9hzlXiFLYOInXACMW5gcoRFfeTQLSouMM8o57h0uKjfTmuoWHLQLi6hnF+cvCsEFiJZ4AbF+DgmO6TarJ8O05t8zvnOwJlNCASPZRH/JmF8tX0hoHuAQ==</ds:X509Certificate></ds:X509Data></ds:KeyInfo></ds:Signature><saml:Subject><saml:NameID Format=\"urn:oasis:names:tc:SAML:2.0:nameid-format:transient\" NameQualifier=\"https://idp.example.com/saml/metadata\" SPNameQualifier=\"https://sp.example.com/saml2/metadata\">" + testTransientNameID + "</saml:NameID><saml:SubjectConfirmation Method=\"urn:oasis:names:tc:SAML:2.0:cm:bearer\"><saml:SubjectConfirmationData InResponseTo=\"id-00020406080a0c0e10121416181a1c1e\" NotOnOrAfter=\"2015-12-01T01:58:39Z\" Recipient=\"https://sp.example.com/saml2/acs\"/></saml:SubjectConfirmation></saml:Subject><saml:Conditions NotBefore=\"2015-12-01T01:54:09Z\" NotOnOrAfter=\"2015-12-01T01:58:39Z\"><saml:AudienceRestriction><saml:Audience>https://sp.example.com/saml2/metadata</saml:Audience></saml:AudienceRestriction></saml:Conditions><saml:AuthnStatement AuthnInstant=\"0001-01-01T00:00:00Z\"><saml:SubjectLocality/><saml:AuthnContext><saml:AuthnContextClassRef>urn:oasis:names:tc:SAML:2.0:ac:classes:PasswordProtectedTransport</saml:AuthnContextClassRef></saml:AuthnContext></saml:AuthnStatement><saml:AttributeStatement><saml:Attribute FriendlyName=\"uid\" Name=\"urn:oid:0.9.2342.19200300.100.1.1\" NameFormat=\"urn:oasis:names:tc:SAML:2.0:attrname-format:uri\"><saml:AttributeValue xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\" xsi:type=\"xs:string\">alice</saml:AttributeValue></saml:Attribute></saml:AttributeStatement></saml:Assertion>"
@@ -753,17 +753,17 @@ func TestIDPMarshalAssertion(t *testing.T) {
 		doc.SetRoot(req.AssertionEl)
 		el := doc.FindElement("//EncryptedAssertion/EncryptedData")
 		actualPlaintextBuf, err := xmlenc.Decrypt(test.SPKey, el)
-		assert.Check(t, err)
+		assert.NoError(t, err)
 
 		actualPlaintext = string(actualPlaintextBuf)
 	}
 
-	assert.Check(t, is.Equal(expectedPlaintext, actualPlaintext))
+	assert.Equal(t, expectedPlaintext, actualPlaintext)
 
 	doc := etree.NewDocument()
 	doc.SetRoot(req.AssertionEl)
 	assertionBuffer, err := doc.WriteToBytes()
-	assert.Check(t, err)
+	assert.NoError(t, err)
 	golden.Assert(t, string(assertionBuffer), t.Name()+"_encrypted_assertion")
 }
 
@@ -787,19 +787,19 @@ func testMakeResponse(t *testing.T, test *IdentityProviderTest) {
 	}
 	req.HTTPRequest, _ = http.NewRequest("POST", "http://idp.example.com/saml/sso", nil)
 	err := req.Validate()
-	assert.Check(t, err)
+	assert.NoError(t, err)
 	err = DefaultAssertionMaker{}.MakeAssertion(&req, &Session{
 		ID:       "f00df00df00d",
 		NameID:   "alice",
 		UserName: "alice",
 	})
-	assert.Check(t, err)
+	assert.NoError(t, err)
 	err = req.MakeAssertionEl()
-	assert.Check(t, err)
+	assert.NoError(t, err)
 
 	req.AssertionEl = etree.NewElement("this-is-an-encrypted-assertion")
 	err = req.MakeResponse()
-	assert.Check(t, err)
+	assert.NoError(t, err)
 
 	certificateStore := &dsig.MemoryX509CertificateStore{
 		Roots: []*x509.Certificate{
@@ -809,17 +809,17 @@ func testMakeResponse(t *testing.T, test *IdentityProviderTest) {
 	validationCtx := dsig.NewDefaultValidationContext(certificateStore)
 	validationCtx.Clock = dsig.NewFakeClockAt(req.IDP.Certificate.NotBefore)
 	_, err = validationCtx.Validate(req.ResponseEl)
-	assert.Check(t, err)
+	assert.NoError(t, err)
 
 	response := Response{}
 	err = unmarshalEtreeHack(req.ResponseEl, &response)
-	assert.Check(t, err)
+	assert.NoError(t, err)
 
 	doc := etree.NewDocument()
 	doc.SetRoot(req.ResponseEl)
 	doc.Indent(2)
 	responseStr, err := doc.WriteToString()
-	assert.Check(t, err)
+	assert.NoError(t, err)
 	golden.Assert(t, responseStr, "TestIDPMakeResponse_response.xml")
 }
 
@@ -834,12 +834,12 @@ func TestIDPWriteResponse(t *testing.T) {
 	}
 	req.HTTPRequest, _ = http.NewRequest("POST", "http://idp.example.com/saml/sso", nil)
 	err := req.Validate()
-	assert.Check(t, err)
+	assert.NoError(t, err)
 
 	w := httptest.NewRecorder()
 	err = req.WriteResponse(w)
-	assert.Check(t, err)
-	assert.Check(t, is.Equal(200, w.Code))
+	assert.NoError(t, err)
+	assert.Equal(t, 200, w.Code)
 	golden.Assert(t, w.Body.String(), t.Name()+"response.html")
 }
 
@@ -848,7 +848,7 @@ func TestIDPIDPInitiatedNewSession(t *testing.T) {
 	test.IDP.SessionProvider = &mockSessionProvider{
 		GetSessionFunc: func(w http.ResponseWriter, _ *http.Request, req *IdpAuthnRequest) *Session {
 			_, err := fmt.Fprintf(w, "RelayState: %s", req.RelayState)
-			assert.NilError(t, err)
+			require.NoError(t, err)
 
 			return nil
 		},
@@ -857,8 +857,8 @@ func TestIDPIDPInitiatedNewSession(t *testing.T) {
 	w := httptest.NewRecorder()
 	r, _ := http.NewRequest("GET", "https://idp.example.com/services/sp/whoami", nil)
 	test.IDP.ServeIDPInitiated(w, r, test.SP.MetadataURL.String(), "ThisIsTheRelayState")
-	assert.Check(t, is.Equal(200, w.Code))
-	assert.Check(t, is.Equal("RelayState: ThisIsTheRelayState", w.Body.String()))
+	assert.Equal(t, 200, w.Code)
+	assert.Equal(t, "RelayState: ThisIsTheRelayState", w.Body.String())
 }
 
 func TestIDPIDPInitiatedExistingSession(t *testing.T) {
@@ -876,7 +876,7 @@ func TestIDPIDPInitiatedExistingSession(t *testing.T) {
 	w := httptest.NewRecorder()
 	r, _ := http.NewRequest("GET", "https://idp.example.com/services/sp/whoami", nil)
 	test.IDP.ServeIDPInitiated(w, r, test.SP.MetadataURL.String(), "ThisIsTheRelayState")
-	assert.Check(t, is.Equal(200, w.Code))
+	assert.Equal(t, 200, w.Code)
 	golden.Assert(t, w.Body.String(), t.Name()+"_response")
 }
 
@@ -895,7 +895,7 @@ func TestIDPIDPInitiatedBadServiceProvider(t *testing.T) {
 	w := httptest.NewRecorder()
 	r, _ := http.NewRequest("GET", "https://idp.example.com/services/sp/whoami", nil)
 	test.IDP.ServeIDPInitiated(w, r, "https://wrong.url/metadata", "ThisIsTheRelayState")
-	assert.Check(t, is.Equal(http.StatusNotFound, w.Code))
+	assert.Equal(t, http.StatusNotFound, w.Code)
 }
 
 func TestIDPCanHandleUnencryptedResponse(t *testing.T) {
@@ -910,7 +910,7 @@ func TestIDPCanHandleUnencryptedResponse(t *testing.T) {
 	err := xml.Unmarshal(
 		golden.Get(t, "TestIDPCanHandleUnencryptedResponse_idp_metadata.xml"),
 		&metadata)
-	assert.Check(t, err)
+	assert.NoError(t, err)
 
 	test.IDP.ServiceProviderProvider = &mockServiceProviderProvider{
 		GetServiceProviderFunc: func(_ *http.Request, serviceProviderID string) (*EntityDescriptor, error) {
@@ -929,18 +929,18 @@ func TestIDPCanHandleUnencryptedResponse(t *testing.T) {
 	}
 	req.HTTPRequest, _ = http.NewRequest("POST", "http://idp.example.com/saml/sso", nil)
 	err = req.Validate()
-	assert.Check(t, err)
+	assert.NoError(t, err)
 	err = DefaultAssertionMaker{}.MakeAssertion(&req, &Session{
 		ID:       "f00df00df00d",
 		NameID:   "alice",
 		UserName: "alice",
 	})
-	assert.Check(t, err)
+	assert.NoError(t, err)
 	err = req.MakeAssertionEl()
-	assert.Check(t, err)
+	assert.NoError(t, err)
 
 	err = req.MakeResponse()
-	assert.Check(t, err)
+	assert.NoError(t, err)
 
 	doc := etree.NewDocument()
 	doc.SetRoot(req.ResponseEl)
@@ -953,10 +953,10 @@ func TestIDPRequestedAttributes(t *testing.T) {
 	test := NewIdentityProviderTest(t, applyKey)
 	metadata := EntityDescriptor{}
 	err := xml.Unmarshal(golden.Get(t, "TestIDPRequestedAttributes_idp_metadata.xml"), &metadata)
-	assert.Check(t, err)
+	assert.NoError(t, err)
 
 	requestURL, err := test.SP.MakeRedirectAuthenticationRequest("ThisIsTheRelayState")
-	assert.Check(t, err)
+	assert.NoError(t, err)
 
 	r, _ := http.NewRequest("GET", requestURL.String(), nil)
 	req, err := NewIdpAuthnRequest(&test.IDP, r)
@@ -964,7 +964,7 @@ func TestIDPRequestedAttributes(t *testing.T) {
 	req.ACSEndpoint = &metadata.SPSSODescriptors[0].AssertionConsumerServices[0]
 	req.SPSSODescriptor = &metadata.SPSSODescriptors[0]
 
-	assert.Check(t, err)
+	assert.NoError(t, err)
 	err = DefaultAssertionMaker{}.MakeAssertion(req, &Session{
 		ID:             "f00df00df00d",
 		NameID:         "alice",
@@ -974,7 +974,7 @@ func TestIDPRequestedAttributes(t *testing.T) {
 		UserSurname:    "Smith",
 		UserCommonName: "Alice Smith",
 	})
-	assert.Check(t, err)
+	assert.NoError(t, err)
 
 	// Only the attributes that the service provider requests are released, under its own names.
 	expectedAttributes := []AttributeStatement{{
@@ -1025,7 +1025,7 @@ func TestIDPRequestedAttributes(t *testing.T) {
 			},
 		},
 	}}
-	assert.Check(t, is.DeepEqual(expectedAttributes, req.Assertion.AttributeStatements))
+	assert.Equal(t, expectedAttributes, req.Assertion.AttributeStatements)
 }
 
 func TestIDPNoDestination(t *testing.T) {
@@ -1038,7 +1038,7 @@ func TestIDPNoDestination(t *testing.T) {
 
 	metadata := EntityDescriptor{}
 	err := xml.Unmarshal(golden.Get(t, "TestIDPNoDestination_idp_metadata.xml"), &metadata)
-	assert.Check(t, err)
+	assert.NoError(t, err)
 
 	test.IDP.ServiceProviderProvider = &mockServiceProviderProvider{
 		GetServiceProviderFunc: func(_ *http.Request, serviceProviderID string) (*EntityDescriptor, error) {
@@ -1057,18 +1057,18 @@ func TestIDPNoDestination(t *testing.T) {
 	}
 	req.HTTPRequest, _ = http.NewRequest("POST", "http://idp.example.com/saml/sso", nil)
 	err = req.Validate()
-	assert.Check(t, err)
+	assert.NoError(t, err)
 	err = DefaultAssertionMaker{}.MakeAssertion(&req, &Session{
 		ID:       "f00df00df00d",
 		NameID:   "alice",
 		UserName: "alice",
 	})
-	assert.Check(t, err)
+	assert.NoError(t, err)
 	err = req.MakeAssertionEl()
-	assert.Check(t, err)
+	assert.NoError(t, err)
 
 	err = req.MakeResponse()
-	assert.Check(t, err)
+	assert.NoError(t, err)
 }
 
 func TestIDPRejectDecompressionBomb(t *testing.T) {
@@ -1077,7 +1077,7 @@ func TestIDPRejectDecompressionBomb(t *testing.T) {
 		GetSessionFunc: func(w http.ResponseWriter, _ *http.Request, req *IdpAuthnRequest) *Session {
 			_, err := fmt.Fprintf(w, "RelayState: %s\nSAMLRequest: %s",
 				req.RelayState, req.RequestBuffer)
-			assert.NilError(t, err)
+			require.NoError(t, err)
 
 			return nil
 		},
@@ -1089,9 +1089,9 @@ func TestIDPRejectDecompressionBomb(t *testing.T) {
 
 	w, _ := flate.NewWriter(&compressed, flate.BestCompression)
 	_, err := w.Write(data)
-	assert.Check(t, err)
+	assert.NoError(t, err)
 	err = w.Close()
-	assert.Check(t, err)
+	assert.NoError(t, err)
 
 	encoded := base64.StdEncoding.EncodeToString(compressed.Bytes())
 
@@ -1099,7 +1099,7 @@ func TestIDPRejectDecompressionBomb(t *testing.T) {
 		"SAMLRequest": {encoded},
 	}.Encode(), nil)
 	_, err = NewIdpAuthnRequest(&test.IDP, r)
-	assert.Check(t, is.Equal(errorDebug(err), "request exceeds the limit of 16384 bytes"))
+	assert.Equal(t, errorDebug(err), "request exceeds the limit of 16384 bytes")
 }
 
 func TestIDPHTTPCanHandleSSORequest(t *testing.T) {
@@ -1111,14 +1111,14 @@ func TestIDPHTTPCanHandleSSORequest(t *testing.T) {
 	r, _ := http.NewRequest("GET", "https://idp.example.com/saml/sso?RelayState=ThisIsTheRelayState&"+
 		"SAMLRequest="+validRequest, nil)
 	test.IDP.Handler().ServeHTTP(w, r)
-	assert.Check(t, is.Equal(http.StatusOK, w.Code))
+	assert.Equal(t, http.StatusOK, w.Code)
 
 	// rejects requests that are invalid.
 	w = httptest.NewRecorder()
 	r, _ = http.NewRequest("GET", "https://idp.example.com/saml/sso?RelayState=ThisIsTheRelayState&"+
 		"SAMLRequest=PEF1dGhuUmVxdWVzdA%3D%3D", nil)
 	test.IDP.Handler().ServeHTTP(w, r)
-	assert.Check(t, is.Equal(http.StatusBadRequest, w.Code))
+	assert.Equal(t, http.StatusBadRequest, w.Code)
 
 	// rejects requests that contain malformed XML.
 	{
@@ -1129,9 +1129,9 @@ func TestIDPHTTPCanHandleSSORequest(t *testing.T) {
 		f := bytes.Buffer{}
 		e, _ := flate.NewWriter(&f, flate.DefaultCompression)
 		_, err := e.Write(d)
-		assert.Check(t, err)
+		assert.NoError(t, err)
 		err = e.Close()
-		assert.Check(t, err)
+		assert.NoError(t, err)
 
 		g := base64.StdEncoding.EncodeToString(f.Bytes())
 		invalidRequest := url.QueryEscape(g)
@@ -1140,6 +1140,6 @@ func TestIDPHTTPCanHandleSSORequest(t *testing.T) {
 		r, _ = http.NewRequest("GET", "https://idp.example.com/saml/sso?RelayState=ThisIsTheRelayState&"+
 			"SAMLRequest="+invalidRequest, nil)
 		test.IDP.Handler().ServeHTTP(w, r)
-		assert.Check(t, is.Equal(http.StatusBadRequest, w.Code))
+		assert.Equal(t, http.StatusBadRequest, w.Code)
 	}
 }

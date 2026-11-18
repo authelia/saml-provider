@@ -16,11 +16,11 @@ import (
 	"time"
 
 	"github.com/beevik/etree"
-	"gotest.tools/assert"
-	is "gotest.tools/assert/cmp"
-	"gotest.tools/golden"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"authelia.com/provider/saml/internal/dsig"
+	"authelia.com/provider/saml/internal/golden"
 	"authelia.com/provider/saml/testsaml"
 )
 
@@ -84,26 +84,26 @@ func TestSPCanSetAuthenticationNameIDFormat(t *testing.T) {
 
 	// defaults to "transient".
 	req, err := s.MakeAuthenticationRequest("", HTTPRedirectBinding, HTTPPostBinding)
-	assert.Check(t, err)
-	assert.Check(t, is.Equal(string(TransientNameIDFormat), *req.NameIDPolicy.Format))
+	assert.NoError(t, err)
+	assert.Equal(t, string(TransientNameIDFormat), *req.NameIDPolicy.Format)
 
 	// explicitly set to "transient".
 	s.AuthnNameIDFormat = TransientNameIDFormat
 	req, err = s.MakeAuthenticationRequest("", HTTPRedirectBinding, HTTPPostBinding)
-	assert.Check(t, err)
-	assert.Check(t, is.Equal(string(TransientNameIDFormat), *req.NameIDPolicy.Format))
+	assert.NoError(t, err)
+	assert.Equal(t, string(TransientNameIDFormat), *req.NameIDPolicy.Format)
 
 	// explicitly set to "unspecified".
 	s.AuthnNameIDFormat = UnspecifiedNameIDFormat
 	req, err = s.MakeAuthenticationRequest("", HTTPRedirectBinding, HTTPPostBinding)
-	assert.Check(t, err)
-	assert.Check(t, is.Equal("", *req.NameIDPolicy.Format))
+	assert.NoError(t, err)
+	assert.Equal(t, "", *req.NameIDPolicy.Format)
 
 	// explicitly set to "emailAddress".
 	s.AuthnNameIDFormat = EmailAddressNameIDFormat
 	req, err = s.MakeAuthenticationRequest("", HTTPRedirectBinding, HTTPPostBinding)
-	assert.Check(t, err)
-	assert.Check(t, is.Equal(string(EmailAddressNameIDFormat), *req.NameIDPolicy.Format))
+	assert.NoError(t, err)
+	assert.Equal(t, string(EmailAddressNameIDFormat), *req.NameIDPolicy.Format)
 }
 
 func TestSPCanProduceMetadataWithEncryptionCert(t *testing.T) {
@@ -118,10 +118,10 @@ func TestSPCanProduceMetadataWithEncryptionCert(t *testing.T) {
 		LogoutBindings: []string{HTTPPostBinding},
 	}
 	err := xml.Unmarshal(test.IDPMetadata, &s.IDPMetadata)
-	assert.Check(t, err)
+	assert.NoError(t, err)
 
 	spMetadata, err := xml.MarshalIndent(s.Metadata(), "", "  ")
-	assert.Check(t, err)
+	assert.NoError(t, err)
 	golden.Assert(t, string(spMetadata), t.Name()+"_metadata")
 }
 
@@ -139,10 +139,10 @@ func TestSPCanProduceMetadataWithBothCerts(t *testing.T) {
 		SignatureMethod:   "not-empty",
 	}
 	err := xml.Unmarshal(test.IDPMetadata, &s.IDPMetadata)
-	assert.Check(t, err)
+	assert.NoError(t, err)
 
 	spMetadata, err := xml.MarshalIndent(s.Metadata(), "", "  ")
-	assert.Check(t, err)
+	assert.NoError(t, err)
 	golden.Assert(t, string(spMetadata), t.Name()+"_metadata")
 }
 
@@ -156,10 +156,10 @@ func TestCanProduceMetadataNoCerts(t *testing.T) {
 		LogoutBindings:    []string{HTTPPostBinding},
 	}
 	err := xml.Unmarshal(test.IDPMetadata, &s.IDPMetadata)
-	assert.Check(t, err)
+	assert.NoError(t, err)
 
 	spMetadata, err := xml.MarshalIndent(s.Metadata(), "", "  ")
-	assert.Check(t, err)
+	assert.NoError(t, err)
 	golden.Assert(t, string(spMetadata), t.Name()+"_metadata")
 }
 
@@ -173,10 +173,10 @@ func TestCanProduceMetadataEntityID(t *testing.T) {
 		LogoutBindings: []string{HTTPPostBinding},
 	}
 	err := xml.Unmarshal(test.IDPMetadata, &s.IDPMetadata)
-	assert.Check(t, err)
+	assert.NoError(t, err)
 
 	spMetadata, err := xml.MarshalIndent(s.Metadata(), "", "  ")
-	assert.Check(t, err)
+	assert.NoError(t, err)
 	golden.Assert(t, string(spMetadata), t.Name()+"_metadata")
 }
 
@@ -191,10 +191,10 @@ func TestSPCanProduceMetadataWithNoLougoutBindings(t *testing.T) {
 		IDPMetadata: &EntityDescriptor{},
 	}
 	err := xml.Unmarshal(test.IDPMetadata, &s.IDPMetadata)
-	assert.Check(t, err)
+	assert.NoError(t, err)
 
 	spMetadata, err := xml.MarshalIndent(s.Metadata(), "", "  ")
-	assert.Check(t, err)
+	assert.NoError(t, err)
 	golden.Assert(t, string(spMetadata), t.Name()+"_metadata")
 }
 
@@ -210,10 +210,10 @@ func TestSPCanProduceMetadataWithBothLougoutBindings(t *testing.T) {
 		LogoutBindings: []string{HTTPPostBinding, HTTPRedirectBinding},
 	}
 	err := xml.Unmarshal(test.IDPMetadata, &s.IDPMetadata)
-	assert.Check(t, err)
+	assert.NoError(t, err)
 
 	spMetadata, err := xml.MarshalIndent(s.Metadata(), "", "  ")
-	assert.Check(t, err)
+	assert.NoError(t, err)
 	golden.Assert(t, string(spMetadata), t.Name()+"_metadata")
 }
 
@@ -232,17 +232,17 @@ func TestSPCanProduceRedirectRequest(t *testing.T) {
 		IDPMetadata: &EntityDescriptor{},
 	}
 	err := xml.Unmarshal(test.IDPMetadata, &s.IDPMetadata)
-	assert.Check(t, err)
+	assert.NoError(t, err)
 
 	redirectURL, err := s.MakeRedirectAuthenticationRequest("relayState")
-	assert.Check(t, err)
+	assert.NoError(t, err)
 
 	decodedRequest, err := testsaml.ParseRedirectRequest(redirectURL)
-	assert.Check(t, err)
-	assert.Check(t, is.Equal("idp.testshib.org",
-		redirectURL.Host))
-	assert.Check(t, is.Equal("/idp/profile/SAML2/Redirect/SSO",
-		redirectURL.Path))
+	assert.NoError(t, err)
+	assert.Equal(t, "idp.testshib.org",
+		redirectURL.Host)
+	assert.Equal(t, "/idp/profile/SAML2/Redirect/SSO",
+		redirectURL.Path)
 	golden.Assert(t, string(decodedRequest), t.Name()+"_decoded_request")
 }
 
@@ -260,10 +260,10 @@ func TestSPCanProducePostRequest(t *testing.T) {
 		IDPMetadata: &EntityDescriptor{},
 	}
 	err := xml.Unmarshal(test.IDPMetadata, &s.IDPMetadata)
-	assert.Check(t, err)
+	assert.NoError(t, err)
 
 	form, err := s.MakePostAuthenticationRequest("relayState")
-	assert.Check(t, err)
+	assert.NoError(t, err)
 	golden.Assert(t, string(form), t.Name()+"_form")
 }
 
@@ -291,16 +291,16 @@ func TestSPCanProduceSignedRequestRedirectBinding(t *testing.T) {
 				SignatureMethod: alg,
 			}
 			err := xml.Unmarshal(test.IDPMetadata, &s.IDPMetadata)
-			assert.Check(t, err)
+			assert.NoError(t, err)
 
 			redirectURL, err := s.MakeRedirectAuthenticationRequest("relayState")
-			assert.Assert(t, err)
+			require.NoError(t, err)
 			// Signature we check against in the query string was validated with
 			// https://www.samltool.com/validate_authn_req.php . Once we add
 			// support for validating signed AuthN requests in the IDP implementation
 			// we can switch to testing using that.
 			signed, signature := signedRedirectQuery(t, redirectURL.RawQuery)
-			assert.Check(t, test.Certificate.CheckSignature(map[string]x509.SignatureAlgorithm{
+			assert.NoError(t, test.Certificate.CheckSignature(map[string]x509.SignatureAlgorithm{
 				dsig.RSASHA1SignatureMethod:   x509.SHA1WithRSA,
 				dsig.RSASHA256SignatureMethod: x509.SHA256WithRSA,
 				dsig.RSASHA384SignatureMethod: x509.SHA384WithRSA,
@@ -309,11 +309,11 @@ func TestSPCanProduceSignedRequestRedirectBinding(t *testing.T) {
 			golden.Assert(t, redirectURL.RawQuery, t.Name()+"_queryString")
 
 			decodedRequest, err := testsaml.ParseRedirectRequest(redirectURL)
-			assert.Check(t, err)
-			assert.Check(t, is.Equal("idp.testshib.org",
-				redirectURL.Host))
-			assert.Check(t, is.Equal("/idp/profile/SAML2/Redirect/SSO",
-				redirectURL.Path))
+			assert.NoError(t, err)
+			assert.Equal(t, "idp.testshib.org",
+				redirectURL.Host)
+			assert.Equal(t, "/idp/profile/SAML2/Redirect/SSO",
+				redirectURL.Path)
 			// Contains no enveloped signature.
 			golden.Assert(t, string(decodedRequest), t.Name()+"_decodedRequest")
 		})
@@ -336,17 +336,17 @@ func TestSPCanProduceSignedRequestPostBinding(t *testing.T) {
 		SignatureMethod: dsig.RSASHA1SignatureMethod,
 	}
 	err := xml.Unmarshal(test.IDPMetadata, &s.IDPMetadata)
-	assert.Check(t, err)
+	assert.NoError(t, err)
 
 	htmlForm, err := s.MakePostAuthenticationRequest("relayState")
-	assert.Check(t, err)
+	assert.NoError(t, err)
 
 	rgx := regexp.MustCompile(`\"SAMLRequest\" value=\"(.*?)\" /><input`)
 	rs := rgx.FindStringSubmatch(string(htmlForm))
-	assert.Check(t, len(rs) == 2)
+	assert.True(t, len(rs) == 2)
 
 	decodedRequest, err := base64.StdEncoding.DecodeString(html.UnescapeString(rs[1]))
-	assert.Check(t, err)
+	assert.NoError(t, err)
 	golden.Assert(t, string(decodedRequest), t.Name()+"_decodedRequest")
 }
 
@@ -366,10 +366,10 @@ func TestSPFailToProduceSignedRequestWithBogusSignatureMethod(t *testing.T) {
 		SignatureMethod: "bogus",
 	}
 	err := xml.Unmarshal(test.IDPMetadata, &s.IDPMetadata)
-	assert.Check(t, err)
+	assert.NoError(t, err)
 
 	_, err = s.MakeRedirectAuthenticationRequest("relayState")
-	assert.Check(t, is.ErrorContains(err, "invalid signing method bogus"))
+	assert.ErrorContains(t, err, "invalid signing method bogus")
 }
 
 func TestSPCanProducePostLogoutRequest(t *testing.T) {
@@ -386,10 +386,10 @@ func TestSPCanProducePostLogoutRequest(t *testing.T) {
 		IDPMetadata: &EntityDescriptor{},
 	}
 	err := xml.Unmarshal(test.IDPMetadata, &s.IDPMetadata)
-	assert.Check(t, err)
+	assert.NoError(t, err)
 
 	form, err := s.MakePostLogoutRequest("ros@octolabs.io", "relayState")
-	assert.Check(t, err)
+	assert.NoError(t, err)
 	golden.Assert(t, string(form), t.Name()+"_form")
 }
 
@@ -408,17 +408,17 @@ func TestSPCanProduceRedirectLogoutRequest(t *testing.T) {
 		IDPMetadata: &EntityDescriptor{},
 	}
 	err := xml.Unmarshal(test.IDPMetadata, &s.IDPMetadata)
-	assert.Check(t, err)
+	assert.NoError(t, err)
 
 	redirectURL, err := s.MakeRedirectLogoutRequest("ross@octolabs.io", "relayState")
-	assert.Check(t, err)
+	assert.NoError(t, err)
 
 	decodedRequest, err := testsaml.ParseRedirectRequest(redirectURL)
-	assert.Check(t, err)
-	assert.Check(t, is.Equal("idp.testshib.org",
-		redirectURL.Host))
-	assert.Check(t, is.Equal("/idp/profile/SAML2/Redirect/SLO",
-		redirectURL.Path))
+	assert.NoError(t, err)
+	assert.Equal(t, "idp.testshib.org",
+		redirectURL.Host)
+	assert.Equal(t, "/idp/profile/SAML2/Redirect/SLO",
+		redirectURL.Path)
 	golden.Assert(t, string(decodedRequest), t.Name()+"_decodedRequest")
 }
 
@@ -436,10 +436,10 @@ func TestSPCanProducePostLogoutResponse(t *testing.T) {
 		IDPMetadata: &EntityDescriptor{},
 	}
 	err := xml.Unmarshal(test.IDPMetadata, &s.IDPMetadata)
-	assert.Check(t, err)
+	assert.NoError(t, err)
 
 	form, err := s.MakePostLogoutResponse("id-d40c15c104b52691eccf0a2a5c8a15595be75423", "relayState")
-	assert.Check(t, err)
+	assert.NoError(t, err)
 	golden.Assert(t, string(form), t.Name()+"_form")
 }
 
@@ -458,13 +458,13 @@ func TestSPCanProduceRedirectLogoutResponse(t *testing.T) {
 		IDPMetadata: &EntityDescriptor{},
 	}
 	err := xml.Unmarshal(test.IDPMetadata, &s.IDPMetadata)
-	assert.Check(t, err)
+	assert.NoError(t, err)
 
 	redirectURL, err := s.MakeRedirectLogoutResponse("id-d40c15c104b52691eccf0a2a5c8a15595be75423", "relayState")
-	assert.Check(t, err)
+	assert.NoError(t, err)
 
 	decodedResponse, err := testsaml.ParseRedirectResponse(redirectURL)
-	assert.Check(t, err)
+	assert.NoError(t, err)
 	golden.Assert(t, string(decodedResponse), t.Name()+"_decodedResponse")
 }
 
@@ -488,15 +488,15 @@ func TestSPCanHandleOneloginResponse(t *testing.T) {
 		IDPMetadata: &EntityDescriptor{},
 	}
 	err := xml.Unmarshal(test.IDPMetadata, &s.IDPMetadata)
-	assert.Check(t, err)
+	assert.NoError(t, err)
 
 	req := http.Request{PostForm: url.Values{}, URL: &s.AcsURL}
 	req.PostForm.Set("SAMLResponse", string(SamlResponse))
 	assertion, err := s.ParseResponse(&req, []string{"id-d40c15c104b52691eccf0a2a5c8a15595be75423"})
-	assert.Check(t, err)
+	assert.NoError(t, err)
 
-	assert.Check(t, is.Equal("ross@kndr.org", assertion.Subject.NameID.Value))
-	assert.Check(t, is.DeepEqual([]Attribute{
+	assert.Equal(t, "ross@kndr.org", assertion.Subject.NameID.Value)
+	assert.Equal(t, []Attribute{
 		{
 			Name:       "User.email",
 			NameFormat: "urn:oasis:names:tc:SAML:2.0:attrname-format:basic",
@@ -548,7 +548,7 @@ func TestSPCanHandleOneloginResponse(t *testing.T) {
 			},
 		},
 	},
-		assertion.AttributeStatements[0].Attributes))
+		assertion.AttributeStatements[0].Attributes)
 }
 
 func TestSPCanHandleOktaSignedResponseEncryptedAssertion(t *testing.T) {
@@ -569,15 +569,15 @@ func TestSPCanHandleOktaSignedResponseEncryptedAssertion(t *testing.T) {
 		IDPMetadata: &EntityDescriptor{},
 	}
 	err := xml.Unmarshal(test.IDPMetadata, &s.IDPMetadata)
-	assert.Check(t, err)
+	assert.NoError(t, err)
 
 	req := http.Request{PostForm: url.Values{}, URL: &s.AcsURL}
 	req.PostForm.Set("SAMLResponse", string(SamlResponse))
 	assertion, err := s.ParseResponse(&req, []string{"id-a7364d1e4432aa9085a7a8bd824ea2fa8fa8f684"})
-	assert.Check(t, err)
+	assert.NoError(t, err)
 
-	assert.Check(t, is.Equal("testuser@testrsc.com", assertion.Subject.NameID.Value))
-	assert.Check(t, is.DeepEqual([]Attribute{
+	assert.Equal(t, "testuser@testrsc.com", assertion.Subject.NameID.Value)
+	assert.Equal(t, []Attribute{
 		{
 			Name:       "Username",
 			NameFormat: "urn:oasis:names:tc:SAML:2.0:attrname-format:unspecified",
@@ -588,7 +588,7 @@ func TestSPCanHandleOktaSignedResponseEncryptedAssertion(t *testing.T) {
 				},
 			},
 		},
-	}, assertion.AttributeStatements[0].Attributes))
+	}, assertion.AttributeStatements[0].Attributes)
 }
 
 func TestSPCanHandleOktaResponseEncryptedSignedAssertion(t *testing.T) {
@@ -610,15 +610,15 @@ func TestSPCanHandleOktaResponseEncryptedSignedAssertion(t *testing.T) {
 		IDPMetadata: &EntityDescriptor{},
 	}
 	err := xml.Unmarshal(test.IDPMetadata, &s.IDPMetadata)
-	assert.Check(t, err)
+	assert.NoError(t, err)
 
 	req := http.Request{PostForm: url.Values{}, URL: &s.AcsURL}
 	req.PostForm.Set("SAMLResponse", string(SamlResponse))
 	assertion, err := s.ParseResponse(&req, []string{"id-6d976cdde8e76df5df0a8ff58148fc0b7ec6796d"})
-	assert.Check(t, err)
+	assert.NoError(t, err)
 
-	assert.Check(t, is.Equal("testuser@testrsc.com", assertion.Subject.NameID.Value))
-	assert.Check(t, is.DeepEqual([]Attribute{
+	assert.Equal(t, "testuser@testrsc.com", assertion.Subject.NameID.Value)
+	assert.Equal(t, []Attribute{
 		{
 			Name:       "Username",
 			NameFormat: "urn:oasis:names:tc:SAML:2.0:attrname-format:unspecified",
@@ -629,7 +629,7 @@ func TestSPCanHandleOktaResponseEncryptedSignedAssertion(t *testing.T) {
 				},
 			},
 		},
-	}, assertion.AttributeStatements[0].Attributes))
+	}, assertion.AttributeStatements[0].Attributes)
 }
 
 func TestSPCanHandleOktaResponseEncryptedAssertionBothSigned(t *testing.T) {
@@ -651,15 +651,15 @@ func TestSPCanHandleOktaResponseEncryptedAssertionBothSigned(t *testing.T) {
 		IDPMetadata: &EntityDescriptor{},
 	}
 	err := xml.Unmarshal(test.IDPMetadata, &s.IDPMetadata)
-	assert.Check(t, err)
+	assert.NoError(t, err)
 
 	req := http.Request{PostForm: url.Values{}, URL: &s.AcsURL}
 	req.PostForm.Set("SAMLResponse", string(SamlResponse))
 	assertion, err := s.ParseResponse(&req, []string{"id-953d4cab69ff475c5901d12e585b0bb15a7b85fe"})
-	assert.Check(t, err)
+	assert.NoError(t, err)
 
-	assert.Check(t, is.Equal("testuser@testrsc.com", assertion.Subject.NameID.Value))
-	assert.Check(t, is.DeepEqual([]Attribute{
+	assert.Equal(t, "testuser@testrsc.com", assertion.Subject.NameID.Value)
+	assert.Equal(t, []Attribute{
 		{
 			Name:       "Username",
 			NameFormat: "urn:oasis:names:tc:SAML:2.0:attrname-format:unspecified",
@@ -670,7 +670,7 @@ func TestSPCanHandleOktaResponseEncryptedAssertionBothSigned(t *testing.T) {
 				},
 			},
 		},
-	}, assertion.AttributeStatements[0].Attributes))
+	}, assertion.AttributeStatements[0].Attributes)
 }
 
 func TestSPCanHandlePlaintextResponse(t *testing.T) {
@@ -692,15 +692,15 @@ func TestSPCanHandlePlaintextResponse(t *testing.T) {
 		IDPMetadata: &EntityDescriptor{},
 	}
 	err := xml.Unmarshal(test.IDPMetadata, &s.IDPMetadata)
-	assert.Check(t, err)
+	assert.NoError(t, err)
 
 	req := http.Request{PostForm: url.Values{}, URL: &s.AcsURL}
 	req.PostForm.Set("SAMLResponse", string(SamlResponse))
 	assertion, err := s.ParseResponse(&req, []string{"id-fd419a5ab0472645427f8e07d87a3a5dd0b2e9a6"})
-	assert.Check(t, err)
+	assert.NoError(t, err)
 
-	assert.Check(t, is.Equal("ross@octolabs.io", assertion.Subject.NameID.Value))
-	assert.Check(t, is.DeepEqual([]Attribute{
+	assert.Equal(t, "ross@octolabs.io", assertion.Subject.NameID.Value)
+	assert.Equal(t, []Attribute{
 		{
 			Name:   "phone",
 			Values: nil,
@@ -731,7 +731,7 @@ func TestSPCanHandlePlaintextResponse(t *testing.T) {
 				},
 			},
 		},
-	}, assertion.AttributeStatements[0].Attributes))
+	}, assertion.AttributeStatements[0].Attributes)
 }
 
 func TestSPRejectsInjectedComment(t *testing.T) {
@@ -754,15 +754,15 @@ func TestSPRejectsInjectedComment(t *testing.T) {
 		IDPMetadata: &EntityDescriptor{},
 	}
 	err := xml.Unmarshal(test.IDPMetadata, &s.IDPMetadata)
-	assert.Check(t, err)
+	assert.NoError(t, err)
 
 	// this is a valid response.
 	{
 		req := http.Request{PostForm: url.Values{}, URL: &s.AcsURL}
 		req.PostForm.Set("SAMLResponse", string(SamlResponse))
 		assertion, err := s.ParseResponse(&req, []string{"id-fd419a5ab0472645427f8e07d87a3a5dd0b2e9a6"})
-		assert.Check(t, err)
-		assert.Check(t, is.Equal("ross@octolabs.io", assertion.Subject.NameID.Value))
+		assert.NoError(t, err)
+		assert.Equal(t, "ross@octolabs.io", assertion.Subject.NameID.Value)
 	}
 
 	// this is a valid response but with a comment injected.
@@ -780,8 +780,8 @@ func TestSPRejectsInjectedComment(t *testing.T) {
 		// the signature, perhaps because xml-c18n isn't being implemented correctly by
 		// dsig.
 		if err == nil {
-			assert.Check(t, is.Equal("ross@octolabs.io",
-				assertion.Subject.NameID.Value))
+			assert.Equal(t, "ross@octolabs.io",
+				assertion.Subject.NameID.Value)
 		}
 	}
 
@@ -796,11 +796,11 @@ func TestSPRejectsInjectedComment(t *testing.T) {
 		req := http.Request{PostForm: url.Values{}, URL: &s.AcsURL}
 		req.PostForm.Set("SAMLResponse", string(SamlResponse))
 		_, err := s.ParseResponse(&req, []string{"id-fd419a5ab0472645427f8e07d87a3a5dd0b2e9a6"})
-		assert.Check(t, err != nil)
+		assert.NotNil(t, err)
 
 		realErr := err.(*InvalidResponseError).PrivateErr
-		assert.Check(t, is.Error(realErr,
-			"cannot validate signature on Response: Signature could not be verified"))
+		assert.EqualError(t, realErr,
+			"cannot validate signature on Response: Signature could not be verified")
 	}
 }
 
@@ -814,14 +814,14 @@ func TestSPCanParseResponse(t *testing.T) {
 		IDPMetadata: &EntityDescriptor{},
 	}
 	err := xml.Unmarshal(test.IDPMetadata, &s.IDPMetadata)
-	assert.Check(t, err)
+	assert.NoError(t, err)
 
 	req := http.Request{PostForm: url.Values{}, URL: &s.AcsURL}
 	req.PostForm.Set("SAMLResponse", base64.StdEncoding.EncodeToString(test.SamlResponse))
 	assertion, err := s.ParseResponse(&req, []string{"id-9e61753d64e928af5a7a341a97f420c9"})
-	assert.Check(t, err)
+	assert.NoError(t, err)
 
-	assert.Check(t, is.DeepEqual([]Attribute{
+	assert.Equal(t, []Attribute{
 		{
 			FriendlyName: "uid",
 			Name:         "urn:oid:0.9.2342.19200300.100.1.1",
@@ -939,7 +939,7 @@ func TestSPCanParseResponse(t *testing.T) {
 				},
 			},
 		},
-	}, assertion.AttributeStatements[0].Attributes))
+	}, assertion.AttributeStatements[0].Attributes)
 }
 
 func (test *ServiceProviderTest) replaceDestination(newDestination string) {
@@ -962,20 +962,20 @@ func TestSPCanProcessResponseWithoutDestination(t *testing.T) {
 		IDPMetadata: &EntityDescriptor{},
 	}
 	err := xml.Unmarshal(test.IDPMetadata, &s.IDPMetadata)
-	assert.Check(t, err)
+	assert.NoError(t, err)
 
 	req := http.Request{PostForm: url.Values{}, URL: &s.AcsURL}
 
 	test.replaceDestination("")
 	req.PostForm.Set("SAMLResponse", base64.StdEncoding.EncodeToString(test.SamlResponse))
 	_, err = s.ParseResponse(&req, []string{"id-9e61753d64e928af5a7a341a97f420c9"})
-	assert.Check(t, err)
+	assert.NoError(t, err)
 }
 
 func (test *ServiceProviderTest) responseDom(t *testing.T) (doc *etree.Document) {
 	doc = etree.NewDocument()
 	err := doc.ReadFromBytes(test.SamlResponse)
-	assert.Check(t, err)
+	assert.NoError(t, err)
 
 	return doc
 }
@@ -1014,15 +1014,15 @@ func TestServiceProviderMismatchedDestinationsWithSignaturePresent(t *testing.T)
 		IDPMetadata: &EntityDescriptor{},
 	}
 	err := xml.Unmarshal(test.IDPMetadata, &s.IDPMetadata)
-	assert.Check(t, err)
+	assert.NoError(t, err)
 
 	req := http.Request{PostForm: url.Values{}, URL: &s.AcsURL}
 	s.AcsURL = mustParseURL("https://wrong/saml2/acs")
 	bytes, _ := test.responseDom(t).WriteToBytes()
 	req.PostForm.Set("SAMLResponse", base64.StdEncoding.EncodeToString(bytes))
 	_, err = s.ParseResponse(&req, []string{"id-9e61753d64e928af5a7a341a97f420c9"})
-	assert.Check(t, is.Error(err.(*InvalidResponseError).PrivateErr,
-		"`Destination` does not match requested URL or AcsURL (destination \"https://15661444.ngrok.io/saml2/acs\", requested \"https://wrong/saml2/acs\", acs \"https://wrong/saml2/acs\")"))
+	assert.EqualError(t, err.(*InvalidResponseError).PrivateErr,
+		"`Destination` does not match requested URL or AcsURL (destination \"https://15661444.ngrok.io/saml2/acs\", requested \"https://wrong/saml2/acs\", acs \"https://wrong/saml2/acs\")")
 }
 
 func TestDestinationMatchesCurrentUrlButNotAcsUrlWithSignaturePresent(t *testing.T) {
@@ -1035,7 +1035,7 @@ func TestDestinationMatchesCurrentUrlButNotAcsUrlWithSignaturePresent(t *testing
 		IDPMetadata: &EntityDescriptor{},
 	}
 	err := xml.Unmarshal(test.IDPMetadata, &s.IDPMetadata)
-	assert.Check(t, err)
+	assert.NoError(t, err)
 
 	currentURL := mustParseURL("https://15661444.ngrok.io/saml2/acs?current=true")
 	req := http.Request{PostForm: url.Values{}, URL: &currentURL}
@@ -1047,8 +1047,8 @@ func TestDestinationMatchesCurrentUrlButNotAcsUrlWithSignaturePresent(t *testing
 		t.Logf("%s", err.(*InvalidResponseError).PrivateErr)
 	}
 
-	assert.Check(t, err)
-	assert.Check(t, is.Equal("_41bd295976dadd70e1480f318e772841", assertion.Subject.NameID.Value))
+	assert.NoError(t, err)
+	assert.Equal(t, "_41bd295976dadd70e1480f318e772841", assertion.Subject.NameID.Value)
 }
 
 func TestDestinationMatchesAcsUrlButNotCurrentUrlWithSignaturePresent(t *testing.T) {
@@ -1061,7 +1061,7 @@ func TestDestinationMatchesAcsUrlButNotCurrentUrlWithSignaturePresent(t *testing
 		IDPMetadata: &EntityDescriptor{},
 	}
 	err := xml.Unmarshal(test.IDPMetadata, &s.IDPMetadata)
-	assert.Check(t, err)
+	assert.NoError(t, err)
 
 	currentURL := mustParseURL("https://15661444.ngrok.io/saml2/acs?query=param")
 	req := http.Request{PostForm: url.Values{}, URL: &currentURL}
@@ -1073,8 +1073,8 @@ func TestDestinationMatchesAcsUrlButNotCurrentUrlWithSignaturePresent(t *testing
 		t.Logf("%s", err.(*InvalidResponseError).PrivateErr)
 	}
 
-	assert.Check(t, err)
-	assert.Check(t, is.Equal("_41bd295976dadd70e1480f318e772841", assertion.Subject.NameID.Value))
+	assert.NoError(t, err)
+	assert.Equal(t, "_41bd295976dadd70e1480f318e772841", assertion.Subject.NameID.Value)
 }
 
 func TestServiceProviderMissingDestinationWithSignaturePresent(t *testing.T) {
@@ -1087,14 +1087,14 @@ func TestServiceProviderMissingDestinationWithSignaturePresent(t *testing.T) {
 		IDPMetadata: &EntityDescriptor{},
 	}
 	err := xml.Unmarshal(test.IDPMetadata, &s.IDPMetadata)
-	assert.Check(t, err)
+	assert.NoError(t, err)
 
 	req := http.Request{PostForm: url.Values{}, URL: &s.AcsURL}
 	bytes, _ := removeDestinationFromDocument(addSignatureToDocument(test.responseDom(t))).WriteToBytes()
 	req.PostForm.Set("SAMLResponse", base64.StdEncoding.EncodeToString(bytes))
 	_, err = s.ParseResponse(&req, []string{"id-9e61753d64e928af5a7a341a97f420c9"})
-	assert.Check(t, is.Error(err.(*InvalidResponseError).PrivateErr,
-		"`Destination` does not match requested URL or AcsURL (destination \"\", requested \"https://15661444.ngrok.io/saml2/acs\", acs \"https://15661444.ngrok.io/saml2/acs\")"))
+	assert.EqualError(t, err.(*InvalidResponseError).PrivateErr,
+		"`Destination` does not match requested URL or AcsURL (destination \"\", requested \"https://15661444.ngrok.io/saml2/acs\", acs \"https://15661444.ngrok.io/saml2/acs\")")
 }
 
 func TestSPMismatchedDestinationsWithSignaturePresent(t *testing.T) {
@@ -1107,7 +1107,7 @@ func TestSPMismatchedDestinationsWithSignaturePresent(t *testing.T) {
 		IDPMetadata: &EntityDescriptor{},
 	}
 	err := xml.Unmarshal(test.IDPMetadata, &s.IDPMetadata)
-	assert.Check(t, err)
+	assert.NoError(t, err)
 
 	req := http.Request{PostForm: url.Values{}, URL: &s.AcsURL}
 
@@ -1115,8 +1115,8 @@ func TestSPMismatchedDestinationsWithSignaturePresent(t *testing.T) {
 	bytes, _ := addSignatureToDocument(test.responseDom(t)).WriteToBytes()
 	req.PostForm.Set("SAMLResponse", base64.StdEncoding.EncodeToString(bytes))
 	_, err = s.ParseResponse(&req, []string{"id-9e61753d64e928af5a7a341a97f420c9"})
-	assert.Check(t, is.Error(err.(*InvalidResponseError).PrivateErr,
-		"`Destination` does not match requested URL or AcsURL (destination \"https://wrong/saml2/acs\", requested \"https://15661444.ngrok.io/saml2/acs\", acs \"https://15661444.ngrok.io/saml2/acs\")"))
+	assert.EqualError(t, err.(*InvalidResponseError).PrivateErr,
+		"`Destination` does not match requested URL or AcsURL (destination \"https://wrong/saml2/acs\", requested \"https://15661444.ngrok.io/saml2/acs\", acs \"https://15661444.ngrok.io/saml2/acs\")")
 }
 
 func TestSPMismatchedDestinationsWithNoSignaturePresent(t *testing.T) {
@@ -1129,7 +1129,7 @@ func TestSPMismatchedDestinationsWithNoSignaturePresent(t *testing.T) {
 		IDPMetadata: &EntityDescriptor{},
 	}
 	err := xml.Unmarshal(test.IDPMetadata, &s.IDPMetadata)
-	assert.Check(t, err)
+	assert.NoError(t, err)
 
 	req := http.Request{PostForm: url.Values{}, URL: &s.AcsURL}
 
@@ -1137,8 +1137,8 @@ func TestSPMismatchedDestinationsWithNoSignaturePresent(t *testing.T) {
 	bytes, _ := test.responseDom(t).WriteToBytes()
 	req.PostForm.Set("SAMLResponse", base64.StdEncoding.EncodeToString(bytes))
 	_, err = s.ParseResponse(&req, []string{"id-9e61753d64e928af5a7a341a97f420c9"})
-	assert.Check(t, is.Error(err.(*InvalidResponseError).PrivateErr,
-		"`Destination` does not match requested URL or AcsURL (destination \"https://wrong/saml2/acs\", requested \"https://15661444.ngrok.io/saml2/acs\", acs \"https://15661444.ngrok.io/saml2/acs\")"))
+	assert.EqualError(t, err.(*InvalidResponseError).PrivateErr,
+		"`Destination` does not match requested URL or AcsURL (destination \"https://wrong/saml2/acs\", requested \"https://15661444.ngrok.io/saml2/acs\", acs \"https://15661444.ngrok.io/saml2/acs\")")
 }
 
 func TestSPMissingDestinationWithSignaturePresent(t *testing.T) {
@@ -1151,7 +1151,7 @@ func TestSPMissingDestinationWithSignaturePresent(t *testing.T) {
 		IDPMetadata: &EntityDescriptor{},
 	}
 	err := xml.Unmarshal(test.IDPMetadata, &s.IDPMetadata)
-	assert.Check(t, err)
+	assert.NoError(t, err)
 
 	req := http.Request{PostForm: url.Values{}, URL: &s.AcsURL}
 
@@ -1159,8 +1159,8 @@ func TestSPMissingDestinationWithSignaturePresent(t *testing.T) {
 	bytes, _ := addSignatureToDocument(test.responseDom(t)).WriteToBytes()
 	req.PostForm.Set("SAMLResponse", base64.StdEncoding.EncodeToString(bytes))
 	_, err = s.ParseResponse(&req, []string{"id-9e61753d64e928af5a7a341a97f420c9"})
-	assert.Check(t, is.Error(err.(*InvalidResponseError).PrivateErr,
-		"`Destination` does not match requested URL or AcsURL (destination \"\", requested \"https://15661444.ngrok.io/saml2/acs\", acs \"https://15661444.ngrok.io/saml2/acs\")"))
+	assert.EqualError(t, err.(*InvalidResponseError).PrivateErr,
+		"`Destination` does not match requested URL or AcsURL (destination \"\", requested \"https://15661444.ngrok.io/saml2/acs\", acs \"https://15661444.ngrok.io/saml2/acs\")")
 }
 
 func TestSPInvalidAssertions(t *testing.T) {
@@ -1173,92 +1173,92 @@ func TestSPInvalidAssertions(t *testing.T) {
 		IDPMetadata: &EntityDescriptor{},
 	}
 	err := xml.Unmarshal(test.IDPMetadata, &s.IDPMetadata)
-	assert.Check(t, err)
+	assert.NoError(t, err)
 
 	// HACK: decrypt response without verifying assertions.
 	var assertionBuf []byte
 	{
 		doc := etree.NewDocument()
-		assert.Check(t, doc.ReadFromBytes(test.SamlResponse))
+		assert.NoError(t, doc.ReadFromBytes(test.SamlResponse))
 		encryptedEL := doc.Root().FindElement("//EncryptedAssertion")
 		assertionEl, err := s.decryptElement(encryptedEL)
-		assert.Check(t, err)
+		assert.NoError(t, err)
 
 		doc = etree.NewDocument()
 		doc.SetRoot(assertionEl)
 		assertionBuf, err = doc.WriteToBytes()
-		assert.Check(t, err)
+		assert.NoError(t, err)
 	}
 
 	assertion := Assertion{}
 	err = xml.Unmarshal(assertionBuf, &assertion)
-	assert.Check(t, err)
+	assert.NoError(t, err)
 
 	err = s.validateAssertion(&assertion, []string{"id-9e61753d64e928af5a7a341a97f420c9"}, TimeNow().Add(time.Hour))
-	assert.Check(t, is.Error(err, "assertion expired at 2015-12-01 01:57:51.375 +0000 UTC"))
+	assert.EqualError(t, err, "assertion expired at 2015-12-01 01:57:51.375 +0000 UTC")
 
 	assertion.Issuer.Value = "bob"
 	err = s.validateAssertion(&assertion, []string{"id-9e61753d64e928af5a7a341a97f420c9"}, TimeNow())
-	assert.Check(t, is.Error(err, "issuer is not \"https://idp.testshib.org/idp/shibboleth\""))
+	assert.EqualError(t, err, "issuer is not \"https://idp.testshib.org/idp/shibboleth\"")
 
 	assertion = Assertion{}
-	assert.Check(t, xml.Unmarshal(assertionBuf, &assertion))
+	assert.NoError(t, xml.Unmarshal(assertionBuf, &assertion))
 
 	assertion.Subject.NameID.NameQualifier = "bob"
 	err = s.validateAssertion(&assertion, []string{"id-9e61753d64e928af5a7a341a97f420c9"}, TimeNow())
-	assert.Check(t, err) // not verified.
+	assert.NoError(t, err) // not verified.
 
 	assertion = Assertion{}
-	assert.Check(t, xml.Unmarshal(assertionBuf, &assertion))
+	assert.NoError(t, xml.Unmarshal(assertionBuf, &assertion))
 
 	assertion.Subject.NameID.SPNameQualifier = "bob"
 	err = s.validateAssertion(&assertion, []string{"id-9e61753d64e928af5a7a341a97f420c9"}, TimeNow())
-	assert.Check(t, err) // not verified.
+	assert.NoError(t, err) // not verified.
 
 	assertion = Assertion{}
-	assert.Check(t, xml.Unmarshal(assertionBuf, &assertion))
+	assert.NoError(t, xml.Unmarshal(assertionBuf, &assertion))
 
 	err = s.validateAssertion(&assertion, []string{"any request id"}, TimeNow())
-	assert.Check(t, is.Error(err, "assertion SubjectConfirmation one of the possible request IDs ([any request id])"))
+	assert.EqualError(t, err, "assertion SubjectConfirmation one of the possible request IDs ([any request id])")
 
 	assertion.Subject.SubjectConfirmations[0].SubjectConfirmationData.Recipient = "wrong/acs/url"
 	err = s.validateAssertion(&assertion, []string{"id-9e61753d64e928af5a7a341a97f420c9"}, TimeNow())
-	assert.Check(t, is.Error(err, "assertion SubjectConfirmation Recipient is not https://15661444.ngrok.io/saml2/acs"))
+	assert.EqualError(t, err, "assertion SubjectConfirmation Recipient is not https://15661444.ngrok.io/saml2/acs")
 
 	assertion = Assertion{}
-	assert.Check(t, xml.Unmarshal(assertionBuf, &assertion))
+	assert.NoError(t, xml.Unmarshal(assertionBuf, &assertion))
 
 	assertion.Subject.SubjectConfirmations[0].SubjectConfirmationData.NotOnOrAfter = TimeNow().Add(-1 * time.Hour)
 	err = s.validateAssertion(&assertion, []string{"id-9e61753d64e928af5a7a341a97f420c9"}, TimeNow())
-	assert.Check(t, is.Error(err, "assertion SubjectConfirmationData is expired"))
+	assert.EqualError(t, err, "assertion SubjectConfirmationData is expired")
 
 	assertion = Assertion{}
-	assert.Check(t, xml.Unmarshal(assertionBuf, &assertion))
+	assert.NoError(t, xml.Unmarshal(assertionBuf, &assertion))
 
 	assertion.Conditions.NotBefore = TimeNow().Add(time.Hour)
 	err = s.validateAssertion(&assertion, []string{"id-9e61753d64e928af5a7a341a97f420c9"}, TimeNow())
-	assert.Check(t, is.Error(err, "assertion Conditions is not yet valid"))
+	assert.EqualError(t, err, "assertion Conditions is not yet valid")
 
 	assertion = Assertion{}
-	assert.Check(t, xml.Unmarshal(assertionBuf, &assertion))
+	assert.NoError(t, xml.Unmarshal(assertionBuf, &assertion))
 
 	assertion.Conditions.NotOnOrAfter = TimeNow().Add(-1 * time.Hour)
 	err = s.validateAssertion(&assertion, []string{"id-9e61753d64e928af5a7a341a97f420c9"}, TimeNow())
-	assert.Check(t, is.Error(err, "assertion Conditions is expired"))
+	assert.EqualError(t, err, "assertion Conditions is expired")
 
 	assertion = Assertion{}
-	assert.Check(t, xml.Unmarshal(assertionBuf, &assertion))
+	assert.NoError(t, xml.Unmarshal(assertionBuf, &assertion))
 
 	assertion.Conditions.AudienceRestrictions[0].Audiences[0].Value = "not/our/metadata/url"
 	err = s.validateAssertion(&assertion, []string{"id-9e61753d64e928af5a7a341a97f420c9"}, TimeNow())
-	assert.Check(t, is.Error(err, "assertion Conditions AudienceRestriction does not contain \"https://15661444.ngrok.io/saml2/metadata\""))
+	assert.EqualError(t, err, "assertion Conditions AudienceRestriction does not contain \"https://15661444.ngrok.io/saml2/metadata\"")
 
 	assertion = Assertion{}
-	assert.Check(t, xml.Unmarshal(assertionBuf, &assertion))
+	assert.NoError(t, xml.Unmarshal(assertionBuf, &assertion))
 
 	assertion.Conditions.AudienceRestrictions = []AudienceRestriction{}
 	err = s.validateAssertion(&assertion, []string{"id-9e61753d64e928af5a7a341a97f420c9"}, TimeNow())
-	assert.Check(t, is.Error(err, "assertion Conditions does not contain an AudienceRestriction"))
+	assert.EqualError(t, err, "assertion Conditions does not contain an AudienceRestriction")
 }
 
 func TestSPValidateRequestIDAllowIDPInitiated(t *testing.T) {
@@ -1335,11 +1335,11 @@ func TestSPValidateRequestIDAllowIDPInitiated(t *testing.T) {
 
 			err := s.validateRequestID(Response{InResponseTo: tc.inResponseTo}, tc.possibleRequestIDs)
 			if tc.err != "" {
-				assert.Check(t, is.Error(err, tc.err))
+				assert.EqualError(t, err, tc.err)
 				return
 			}
 
-			assert.Check(t, err)
+			assert.NoError(t, err)
 		})
 	}
 }
@@ -1410,29 +1410,29 @@ func TestSPValidateAssertionInResponseToAllowIDPInitiated(t *testing.T) {
 				IDPMetadata:       &EntityDescriptor{},
 				AllowIDPInitiated: tc.allowIDPInitiated,
 			}
-			assert.NilError(t, xml.Unmarshal(test.IDPMetadata, &s.IDPMetadata))
+			require.NoError(t, xml.Unmarshal(test.IDPMetadata, &s.IDPMetadata))
 
 			doc := etree.NewDocument()
-			assert.NilError(t, doc.ReadFromBytes(test.SamlResponse))
+			require.NoError(t, doc.ReadFromBytes(test.SamlResponse))
 			assertionEl, err := s.decryptElement(doc.Root().FindElement("//EncryptedAssertion"))
-			assert.NilError(t, err)
+			require.NoError(t, err)
 
 			doc = etree.NewDocument()
 			doc.SetRoot(assertionEl)
 			assertionBuf, err := doc.WriteToBytes()
-			assert.NilError(t, err)
+			require.NoError(t, err)
 
 			assertion := Assertion{}
-			assert.NilError(t, xml.Unmarshal(assertionBuf, &assertion))
+			require.NoError(t, xml.Unmarshal(assertionBuf, &assertion))
 			assertion.Subject.SubjectConfirmations[0].SubjectConfirmationData.InResponseTo = tc.inResponseTo
 
 			err = s.validateAssertion(&assertion, tc.possibleRequestIDs, TimeNow())
 			if tc.err != "" {
-				assert.Check(t, is.Error(err, tc.err))
+				assert.EqualError(t, err, tc.err)
 				return
 			}
 
-			assert.Check(t, err)
+			assert.NoError(t, err)
 		})
 	}
 }
@@ -1502,15 +1502,15 @@ func TestSPValidateAudienceRestriction(t *testing.T) {
 			}
 
 			conditions := &Conditions{}
-			assert.NilError(t, xml.Unmarshal([]byte(`<saml:Conditions xmlns:saml="urn:oasis:names:tc:SAML:2.0:assertion">`+tc.audiences+`</saml:Conditions>`), conditions))
+			require.NoError(t, xml.Unmarshal([]byte(`<saml:Conditions xmlns:saml="urn:oasis:names:tc:SAML:2.0:assertion">`+tc.audiences+`</saml:Conditions>`), conditions))
 
 			err := s.validateAudienceRestriction(&Assertion{Conditions: conditions})
 			if tc.err != "" {
-				assert.Check(t, is.Error(err, tc.err))
+				assert.EqualError(t, err, tc.err)
 				return
 			}
 
-			assert.Check(t, err)
+			assert.NoError(t, err)
 		})
 	}
 }
@@ -1544,29 +1544,29 @@ func TestSPValidateAssertionWithoutConditions(t *testing.T) {
 				IDPMetadata:                 &EntityDescriptor{},
 				ValidateAudienceRestriction: tc.validateAudienceRestriction,
 			}
-			assert.NilError(t, xml.Unmarshal(test.IDPMetadata, &s.IDPMetadata))
+			require.NoError(t, xml.Unmarshal(test.IDPMetadata, &s.IDPMetadata))
 
 			doc := etree.NewDocument()
-			assert.NilError(t, doc.ReadFromBytes(test.SamlResponse))
+			require.NoError(t, doc.ReadFromBytes(test.SamlResponse))
 			assertionEl, err := s.decryptElement(doc.Root().FindElement("//EncryptedAssertion"))
-			assert.NilError(t, err)
+			require.NoError(t, err)
 
 			doc = etree.NewDocument()
 			doc.SetRoot(assertionEl)
 			assertionBuf, err := doc.WriteToBytes()
-			assert.NilError(t, err)
+			require.NoError(t, err)
 
 			assertion := Assertion{}
-			assert.NilError(t, xml.Unmarshal(assertionBuf, &assertion))
+			require.NoError(t, xml.Unmarshal(assertionBuf, &assertion))
 			assertion.Conditions = nil
 
 			err = s.validateAssertion(&assertion, []string{"id-9e61753d64e928af5a7a341a97f420c9"}, TimeNow())
 			if tc.err != "" {
-				assert.Check(t, is.Error(err, tc.err))
+				assert.EqualError(t, err, tc.err)
 				return
 			}
 
-			assert.Check(t, err)
+			assert.NoError(t, err)
 		})
 	}
 }
@@ -1723,11 +1723,11 @@ func TestSPValidateAssertionSubjectConfirmations(t *testing.T) {
 
 			err := s.validateAssertion(assertion, []string{requestID}, TimeNow())
 			if tc.err != "" {
-				assert.Check(t, is.Error(err, tc.err))
+				assert.EqualError(t, err, tc.err)
 				return
 			}
 
-			assert.Check(t, err)
+			assert.NoError(t, err)
 		})
 	}
 }
@@ -1750,13 +1750,13 @@ func TestXswPermutationOneIsRejected(t *testing.T) {
 		IDPMetadata: &EntityDescriptor{},
 	}
 	err := xml.Unmarshal(idpMetadata, &s.IDPMetadata)
-	assert.Check(t, err)
+	assert.NoError(t, err)
 
 	req := http.Request{PostForm: url.Values{}, URL: &s.AcsURL}
 	req.PostForm.Set("SAMLResponse", string(respStr))
 	_, err = s.ParseResponse(&req, []string{"id-d40c15c104b52691eccf0a2a5c8a15595be75423"})
-	assert.Check(t, is.Error(err.(*InvalidResponseError).PrivateErr,
-		"cannot validate signature on Response: Missing signature referencing the top-level element"))
+	assert.EqualError(t, err.(*InvalidResponseError).PrivateErr,
+		"cannot validate signature on Response: Missing signature referencing the top-level element")
 }
 
 func TestXswPermutationTwoIsRejected(t *testing.T) {
@@ -1777,13 +1777,13 @@ func TestXswPermutationTwoIsRejected(t *testing.T) {
 		IDPMetadata: &EntityDescriptor{},
 	}
 	err := xml.Unmarshal(idpMetadata, &s.IDPMetadata)
-	assert.Check(t, err)
+	assert.NoError(t, err)
 
 	req := http.Request{PostForm: url.Values{}, URL: &s.AcsURL}
 	req.PostForm.Set("SAMLResponse", string(respStr))
 	_, err = s.ParseResponse(&req, []string{"id-d40c15c104b52691eccf0a2a5c8a15595be75423"})
-	assert.Check(t, is.Error(err.(*InvalidResponseError).PrivateErr,
-		"cannot validate signature on Response: Missing signature referencing the top-level element"))
+	assert.EqualError(t, err.(*InvalidResponseError).PrivateErr,
+		"cannot validate signature on Response: Missing signature referencing the top-level element")
 }
 
 func TestXswPermutationThreeIsRejected(t *testing.T) {
@@ -1804,7 +1804,7 @@ func TestXswPermutationThreeIsRejected(t *testing.T) {
 		IDPMetadata: &EntityDescriptor{},
 	}
 	err := xml.Unmarshal(idpMetadata, &s.IDPMetadata)
-	assert.Check(t, err)
+	assert.NoError(t, err)
 
 	req := http.Request{PostForm: url.Values{}, URL: &s.AcsURL}
 	req.PostForm.Set("SAMLResponse", string(respStr))
@@ -1815,7 +1815,7 @@ func TestXswPermutationThreeIsRejected(t *testing.T) {
 	//
 	// When no assertions are valid, we return the first error encountered, which in this case is that
 	// there is no Signature on the element.
-	assert.Check(t, is.Error(err.(*InvalidResponseError).PrivateErr, "signature element not present"))
+	assert.EqualError(t, err.(*InvalidResponseError).PrivateErr, "signature element not present")
 }
 
 func TestXswPermutationFourIsRejected(t *testing.T) {
@@ -1836,7 +1836,7 @@ func TestXswPermutationFourIsRejected(t *testing.T) {
 		IDPMetadata: &EntityDescriptor{},
 	}
 	err := xml.Unmarshal(idpMetadata, &s.IDPMetadata)
-	assert.Check(t, err)
+	assert.NoError(t, err)
 
 	req := http.Request{PostForm: url.Values{}, URL: &s.AcsURL}
 	req.PostForm.Set("SAMLResponse", string(respStr))
@@ -1845,7 +1845,7 @@ func TestXswPermutationFourIsRejected(t *testing.T) {
 	// This permutation contains a signed assertion embedded within an unsigned assertion.
 	// I'm pretty sure this is just not allowed, so we properly decide that there are no
 	// signed assertions at all.
-	assert.Check(t, is.Error(err.(*InvalidResponseError).PrivateErr, "signature element not present"))
+	assert.EqualError(t, err.(*InvalidResponseError).PrivateErr, "signature element not present")
 }
 
 func TestXswPermutationFiveIsRejected(t *testing.T) {
@@ -1866,13 +1866,13 @@ func TestXswPermutationFiveIsRejected(t *testing.T) {
 		IDPMetadata: &EntityDescriptor{},
 	}
 	err := xml.Unmarshal(idpMetadata, &s.IDPMetadata)
-	assert.Check(t, err)
+	assert.NoError(t, err)
 
 	req := http.Request{PostForm: url.Values{}, URL: &s.AcsURL}
 	req.PostForm.Set("SAMLResponse", string(respStr))
 	_, err = s.ParseResponse(&req, []string{"ONELOGIN_4fee3b046395c4e751011e97f8900b5273d56685"})
-	assert.Check(t, is.Error(err.(*InvalidResponseError).PrivateErr,
-		"cannot validate signature on Assertion: Missing signature referencing the top-level element"))
+	assert.EqualError(t, err.(*InvalidResponseError).PrivateErr,
+		"cannot validate signature on Assertion: Missing signature referencing the top-level element")
 }
 
 func TestXswPermutationSixIsRejected(t *testing.T) {
@@ -1893,13 +1893,13 @@ func TestXswPermutationSixIsRejected(t *testing.T) {
 		IDPMetadata: &EntityDescriptor{},
 	}
 	err := xml.Unmarshal(idpMetadata, &s.IDPMetadata)
-	assert.Check(t, err)
+	assert.NoError(t, err)
 
 	req := http.Request{PostForm: url.Values{}, URL: &s.AcsURL}
 	req.PostForm.Set("SAMLResponse", string(respStr))
 	_, err = s.ParseResponse(&req, []string{"ONELOGIN_4fee3b046395c4e751011e97f8900b5273d56685"})
-	assert.Check(t, is.Error(err.(*InvalidResponseError).PrivateErr,
-		"cannot validate signature on Assertion: Missing signature referencing the top-level element"))
+	assert.EqualError(t, err.(*InvalidResponseError).PrivateErr,
+		"cannot validate signature on Assertion: Missing signature referencing the top-level element")
 }
 
 func TestXswPermutationSevenIsRejected(t *testing.T) {
@@ -1923,7 +1923,7 @@ func TestXswPermutationSevenIsRejected(t *testing.T) {
 		IDPMetadata: &EntityDescriptor{},
 	}
 	err := xml.Unmarshal(idpMetadata, &s.IDPMetadata)
-	assert.Check(t, err)
+	assert.NoError(t, err)
 
 	req := http.Request{PostForm: url.Values{}, URL: &s.AcsURL}
 	req.PostForm.Set("SAMLResponse", string(respStr))
@@ -1931,8 +1931,8 @@ func TestXswPermutationSevenIsRejected(t *testing.T) {
 	// It's the assertion signature that can't be verified. goxmldsig now runs the
 	// signature check before the digest comparison, so the underlying
 	// crypto error surfaces instead of the generic "Signature could not be verified".
-	assert.Check(t, is.Error(err.(*InvalidResponseError).PrivateErr,
-		"cannot validate signature on Assertion: crypto/rsa: verification error"))
+	assert.EqualError(t, err.(*InvalidResponseError).PrivateErr,
+		"cannot validate signature on Assertion: crypto/rsa: verification error")
 }
 
 func TestXswPermutationEightIsRejected(t *testing.T) {
@@ -1956,7 +1956,7 @@ func TestXswPermutationEightIsRejected(t *testing.T) {
 		IDPMetadata: &EntityDescriptor{},
 	}
 	err := xml.Unmarshal(idpMetadata, &s.IDPMetadata)
-	assert.Check(t, err)
+	assert.NoError(t, err)
 
 	req := http.Request{PostForm: url.Values{}, URL: &s.AcsURL}
 	req.PostForm.Set("SAMLResponse", string(respStr))
@@ -1964,8 +1964,8 @@ func TestXswPermutationEightIsRejected(t *testing.T) {
 	// It's the assertion signature that can't be verified. goxmldsig now runs the
 	// signature check before the digest comparison, so the underlying
 	// crypto error surfaces instead of the generic "Signature could not be verified".
-	assert.Check(t, is.Error(err.(*InvalidResponseError).PrivateErr,
-		"cannot validate signature on Assertion: crypto/rsa: verification error"))
+	assert.EqualError(t, err.(*InvalidResponseError).PrivateErr,
+		"cannot validate signature on Assertion: crypto/rsa: verification error")
 }
 
 func TestXswPermutationNineIsRejected(t *testing.T) {
@@ -1989,7 +1989,7 @@ func TestXswPermutationNineIsRejected(t *testing.T) {
 		IDPMetadata: &EntityDescriptor{},
 	}
 	err := xml.Unmarshal(idpMetadata, &s.IDPMetadata)
-	assert.Check(t, err)
+	assert.NoError(t, err)
 
 	req := http.Request{PostForm: url.Values{}, URL: &s.AcsURL}
 	req.PostForm.Set("SAMLResponse", string(respStr))
@@ -1997,8 +1997,8 @@ func TestXswPermutationNineIsRejected(t *testing.T) {
 	// It's the assertion signature that can't be verified. goxmldsig now runs the
 	// signature check before the digest comparison, so the underlying
 	// crypto error surfaces instead of the generic "Signature could not be verified".
-	assert.Check(t, is.Error(err.(*InvalidResponseError).PrivateErr,
-		"cannot validate signature on Assertion: Missing signature referencing the top-level element"))
+	assert.EqualError(t, err.(*InvalidResponseError).PrivateErr,
+		"cannot validate signature on Assertion: Missing signature referencing the top-level element")
 }
 
 func TestSPRealWorldKeyInfoHasRSAPublicKeyNotX509Cert(t *testing.T) {
@@ -2018,17 +2018,17 @@ func TestSPRealWorldKeyInfoHasRSAPublicKeyNotX509Cert(t *testing.T) {
 		IDPMetadata: &EntityDescriptor{},
 	}
 	err := xml.Unmarshal(idpMetadata, &s.IDPMetadata)
-	assert.Check(t, err)
+	assert.NoError(t, err)
 
 	req := http.Request{PostForm: url.Values{}, URL: &s.AcsURL}
 	req.PostForm.Set("SAMLResponse", base64.StdEncoding.EncodeToString(respStr))
 
 	_, err = s.ParseResponse(&req, []string{"id-3992f74e652d89c3cf1efd6c7e472abaac9bc917"})
 	if err != nil {
-		assert.Check(t, err.(*InvalidResponseError).PrivateErr)
+		assert.NoError(t, err.(*InvalidResponseError).PrivateErr)
 	}
 
-	assert.Check(t, err)
+	assert.NoError(t, err)
 }
 
 func TestSPRealWorldAssertionSignedNotResponse(t *testing.T) {
@@ -2051,17 +2051,17 @@ func TestSPRealWorldAssertionSignedNotResponse(t *testing.T) {
 		IDPMetadata: &EntityDescriptor{},
 	}
 	err := xml.Unmarshal(idpMetadata, &s.IDPMetadata)
-	assert.Check(t, err)
+	assert.NoError(t, err)
 
 	req := http.Request{PostForm: url.Values{}, URL: &s.AcsURL}
 	req.PostForm.Set("SAMLResponse", base64.StdEncoding.EncodeToString(respStr))
 
 	_, err = s.ParseResponse(&req, []string{"id-3992f74e652d89c3cf1efd6c7e472abaac9bc917"})
 	if err != nil {
-		assert.Check(t, err.(*InvalidResponseError).PrivateErr)
+		assert.NoError(t, err.(*InvalidResponseError).PrivateErr)
 	}
 
-	assert.Check(t, err)
+	assert.NoError(t, err)
 }
 
 func TestServiceProviderCanHandleSignedAssertionsResponse(t *testing.T) {
@@ -2092,7 +2092,7 @@ func TestServiceProviderCanHandleSignedAssertionsResponse(t *testing.T) {
 		IDPMetadata: &EntityDescriptor{},
 	}
 	err := xml.Unmarshal(test.IDPMetadata, &s.IDPMetadata)
-	assert.Check(t, err)
+	assert.NoError(t, err)
 
 	req := http.Request{PostForm: url.Values{}, URL: &s.AcsURL}
 	req.PostForm.Set("SAMLResponse", string(SamlResponse))
@@ -2102,10 +2102,10 @@ func TestServiceProviderCanHandleSignedAssertionsResponse(t *testing.T) {
 		t.Logf("%s", err.(*InvalidResponseError).PrivateErr)
 	}
 
-	assert.Check(t, err)
+	assert.NoError(t, err)
 
-	assert.Check(t, is.Equal("_ce3d2948b4cf20146dee0a0b3dd6f69b6cf86f62d7", assertion.Subject.NameID.Value))
-	assert.Check(t, is.DeepEqual([]Attribute{
+	assert.Equal(t, "_ce3d2948b4cf20146dee0a0b3dd6f69b6cf86f62d7", assertion.Subject.NameID.Value)
+	assert.Equal(t, []Attribute{
 		{
 			Name:       "uid",
 			NameFormat: "urn:oasis:names:tc:SAML:2.0:attrname-format:basic",
@@ -2140,7 +2140,7 @@ func TestServiceProviderCanHandleSignedAssertionsResponse(t *testing.T) {
 				},
 			},
 		},
-	}, assertion.AttributeStatements[0].Attributes))
+	}, assertion.AttributeStatements[0].Attributes)
 }
 
 func TestSPResponseWithNoIssuer(t *testing.T) {
@@ -2157,7 +2157,7 @@ func TestSPResponseWithNoIssuer(t *testing.T) {
 		IDPMetadata: &EntityDescriptor{},
 	}
 	err := xml.Unmarshal(test.IDPMetadata, &s.IDPMetadata)
-	assert.Check(t, err)
+	assert.NoError(t, err)
 
 	req := http.Request{PostForm: url.Values{}, URL: &s.AcsURL}
 
@@ -2165,7 +2165,7 @@ func TestSPResponseWithNoIssuer(t *testing.T) {
 	samlResponse := golden.Get(t, "TestSPResponseWithNoIssuer_response")
 	req.PostForm.Set("SAMLResponse", base64.StdEncoding.EncodeToString(samlResponse))
 	_, err = s.ParseResponse(&req, []string{"id-9e61753d64e928af5a7a341a97f420c9"})
-	assert.Check(t, err)
+	assert.NoError(t, err)
 }
 
 func TestGetArtifactBindingLocation(t *testing.T) {
@@ -2181,13 +2181,13 @@ func TestGetArtifactBindingLocation(t *testing.T) {
 	}
 
 	location := sp.GetArtifactBindingLocation(SOAPBinding)
-	assert.Check(t, is.Equal(location, ""))
+	assert.Equal(t, location, "")
 
 	err := xml.Unmarshal(test.IDPMetadata, &sp.IDPMetadata)
-	assert.Check(t, err)
+	assert.NoError(t, err)
 
 	location = sp.GetArtifactBindingLocation(SOAPBinding)
-	assert.Check(t, is.Equal(location, "https://samltest.id/idp/profile/SAML2/SOAP/ArtifactResolution"))
+	assert.Equal(t, location, "https://samltest.id/idp/profile/SAML2/SOAP/ArtifactResolution")
 }
 
 func TestMakeArtifactResolveRequest(t *testing.T) {
@@ -2202,10 +2202,10 @@ func TestMakeArtifactResolveRequest(t *testing.T) {
 	}
 
 	req, err := sp.MakeArtifactResolveRequest("artifactId")
-	assert.Check(t, err)
+	assert.NoError(t, err)
 
 	x, err := xml.Marshal(req)
-	assert.Check(t, err)
+	assert.NoError(t, err)
 	golden.Assert(t, string(x), t.Name())
 }
 
@@ -2222,10 +2222,10 @@ func TestMakeSignedArtifactResolveRequest(t *testing.T) {
 	}
 
 	req, err := sp.MakeArtifactResolveRequest("artifactId")
-	assert.Check(t, err)
+	assert.NoError(t, err)
 
 	x, err := xml.Marshal(req)
-	assert.Check(t, err)
+	assert.NoError(t, err)
 	golden.Assert(t, string(x), t.Name())
 }
 
@@ -2242,7 +2242,7 @@ func TestMakeSignedArtifactResolveRequestWithBogusSignatureMethod(t *testing.T) 
 	}
 
 	_, err := sp.MakeArtifactResolveRequest("artifactId")
-	assert.Check(t, is.ErrorContains(err, "invalid signing method bogus"))
+	assert.ErrorContains(t, err, "invalid signing method bogus")
 }
 
 func TestParseXMLArtifactResponse(t *testing.T) {
@@ -2266,16 +2266,16 @@ func TestParseXMLArtifactResponse(t *testing.T) {
 	}
 
 	err := xml.Unmarshal(test.IDPMetadata, &sp.IDPMetadata)
-	assert.Check(t, err)
+	assert.NoError(t, err)
 
 	possibleReqIDs := []string{"id-f3c7bc7d626a4ededa6028b718e5252c6e770b94"}
 	reqID := "id-218eb155248f7db7c85fe4e2709a3f17a70d09c7"
 
 	assertion, err := sp.ParseXMLArtifactResponse(samlResponse, possibleReqIDs, reqID, sp.AcsURL)
-	assert.Check(t, err)
+	assert.NoError(t, err)
 
 	x, err := xml.Marshal(assertion)
-	assert.Check(t, err)
+	assert.NoError(t, err)
 
 	golden.Assert(t, string(x), t.Name()+"_assertion")
 }
@@ -2304,17 +2304,17 @@ func TestParseBadXMLArtifactResponse(t *testing.T) {
 	}
 
 	assertion, err := sp.ParseXMLArtifactResponse(samlResponse, possibleReqIDs, reqID, sp.AcsURL)
-	assert.Check(t, is.Error(err.(*InvalidResponseError).PrivateErr,
-		"response Issuer does not match the IDP metadata (expected \"\")"))
-	assert.Check(t, is.Nil(assertion))
+	assert.EqualError(t, err.(*InvalidResponseError).PrivateErr,
+		"response Issuer does not match the IDP metadata (expected \"\")")
+	assert.Nil(t, assertion)
 
 	err = xml.Unmarshal(test.IDPMetadata, &sp.IDPMetadata)
-	assert.Check(t, err)
+	assert.NoError(t, err)
 
 	assertion, err = sp.ParseXMLArtifactResponse(samlResponse, possibleReqIDs, reqID, sp.AcsURL)
-	assert.Check(t, is.Error(err.(*InvalidResponseError).PrivateErr,
-		"`Destination` does not match requested URL or AcsURL (destination \"http://localhost:8000/saml/acs\", requested \"https://example.com/saml2/acs\", acs \"https://example.com/saml2/acs\")"))
-	assert.Check(t, is.Nil(assertion))
+	assert.EqualError(t, err.(*InvalidResponseError).PrivateErr,
+		"`Destination` does not match requested URL or AcsURL (destination \"http://localhost:8000/saml/acs\", requested \"https://example.com/saml2/acs\", acs \"https://example.com/saml2/acs\")")
+	assert.Nil(t, assertion)
 
 	sp.AcsURL = mustParseURL("http://localhost:8000/saml/acs")
 
@@ -2325,9 +2325,9 @@ func TestParseBadXMLArtifactResponse(t *testing.T) {
 	}
 
 	assertion, err = sp.ParseXMLArtifactResponse(samlResponse, possibleReqIDs, reqID, sp.AcsURL)
-	assert.Check(t, is.Error(err.(*InvalidResponseError).PrivateErr,
-		"response expired at 2021-08-17 10:28:50.146 +0000 UTC"))
-	assert.Check(t, is.Nil(assertion))
+	assert.EqualError(t, err.(*InvalidResponseError).PrivateErr,
+		"response expired at 2021-08-17 10:28:50.146 +0000 UTC")
+	assert.Nil(t, assertion)
 
 	// Clock is used to verify the certificate.
 	Clock = dsig.NewFakeClockAt(func() time.Time {
@@ -2340,41 +2340,41 @@ func TestParseBadXMLArtifactResponse(t *testing.T) {
 	}
 
 	assertion, err = sp.ParseXMLArtifactResponse(samlResponse, possibleReqIDs, reqID, sp.AcsURL)
-	assert.Check(t, is.Error(err.(*InvalidResponseError).PrivateErr,
-		"cannot validate signature on ArtifactResponse: Cert is not valid at this time"))
-	assert.Check(t, is.Nil(assertion))
+	assert.EqualError(t, err.(*InvalidResponseError).PrivateErr,
+		"cannot validate signature on ArtifactResponse: Cert is not valid at this time")
+	assert.Nil(t, assertion)
 
 	Clock = dsig.NewFakeClockAt(TimeNow())
 
 	wrongReqID := "id-218eb155248f7db7c85fe4e2709a3f17a70d09c8"
 	assertion, err = sp.ParseXMLArtifactResponse(samlResponse, possibleReqIDs, wrongReqID, sp.AcsURL)
-	assert.Check(t, is.Error(err.(*InvalidResponseError).PrivateErr,
-		"`InResponseTo` does not match the artifact request ID (expected id-218eb155248f7db7c85fe4e2709a3f17a70d09c8)"))
-	assert.Check(t, is.Nil(assertion))
+	assert.EqualError(t, err.(*InvalidResponseError).PrivateErr,
+		"`InResponseTo` does not match the artifact request ID (expected id-218eb155248f7db7c85fe4e2709a3f17a70d09c8)")
+	assert.Nil(t, assertion)
 
 	wrongPossibleReqIDs := []string{"id-f3c7bc7d626a4ededa6028b718e5252c6e770b95"}
 	assertion, err = sp.ParseXMLArtifactResponse(samlResponse, wrongPossibleReqIDs, reqID, sp.AcsURL)
-	assert.Check(t, is.Error(err.(*InvalidResponseError).PrivateErr,
-		"`InResponseTo` does not match any of the possible request IDs (expected [id-f3c7bc7d626a4ededa6028b718e5252c6e770b95])"))
-	assert.Check(t, is.Nil(assertion))
+	assert.EqualError(t, err.(*InvalidResponseError).PrivateErr,
+		"`InResponseTo` does not match any of the possible request IDs (expected [id-f3c7bc7d626a4ededa6028b718e5252c6e770b95])")
+	assert.Nil(t, assertion)
 
 	// random other key.
 	sp.Key = mustParsePrivateKey(golden.Get(t, "key_2017.pem")).(*rsa.PrivateKey)
 	assertion, err = sp.ParseXMLArtifactResponse(samlResponse, possibleReqIDs, reqID, sp.AcsURL)
-	assert.Check(t, is.Error(err.(*InvalidResponseError).PrivateErr,
-		"failed to decrypt EncryptedAssertion: failed to decrypt key from response: certificate does not match provided key"))
-	assert.Check(t, is.Nil(assertion))
+	assert.EqualError(t, err.(*InvalidResponseError).PrivateErr,
+		"failed to decrypt EncryptedAssertion: failed to decrypt key from response: certificate does not match provided key")
+	assert.Nil(t, assertion)
 
 	// no input.
 	assertion, err = sp.ParseXMLArtifactResponse([]byte("<!-- no xml root -->"), possibleReqIDs, reqID, sp.AcsURL)
-	assert.Check(t, is.Error(err.(*InvalidResponseError).PrivateErr,
-		"invalid xml: no root"))
-	assert.Check(t, is.Nil(assertion))
+	assert.EqualError(t, err.(*InvalidResponseError).PrivateErr,
+		"invalid xml: no root")
+	assert.Nil(t, assertion)
 
 	assertion, err = sp.ParseXMLArtifactResponse([]byte("<invalid xml"), possibleReqIDs, reqID, sp.AcsURL)
-	assert.Check(t, is.Error(err.(*InvalidResponseError).PrivateErr,
-		"invalid xml: XML syntax error on line 1: unexpected EOF"))
-	assert.Check(t, is.Nil(assertion))
+	assert.EqualError(t, err.(*InvalidResponseError).PrivateErr,
+		"invalid xml: XML syntax error on line 1: unexpected EOF")
+	assert.Nil(t, assertion)
 }
 
 func TestParseBadXMLResponse(t *testing.T) {
@@ -2394,14 +2394,14 @@ func TestParseBadXMLResponse(t *testing.T) {
 	}
 
 	assertion, err := sp.ParseXMLResponse([]byte("<!-- no xml root -->"), []string{}, mustParseURL("http://test.com"))
-	assert.Check(t, is.Error(err.(*InvalidResponseError).PrivateErr,
-		"invalid xml: no root"))
-	assert.Check(t, is.Nil(assertion))
+	assert.EqualError(t, err.(*InvalidResponseError).PrivateErr,
+		"invalid xml: no root")
+	assert.Nil(t, assertion)
 
 	assertion, err = sp.ParseXMLResponse([]byte("<invalid xml"), []string{}, mustParseURL("http://test.com"))
-	assert.Check(t, is.Error(err.(*InvalidResponseError).PrivateErr,
-		"invalid xml: XML syntax error on line 1: unexpected EOF"))
-	assert.Check(t, is.Nil(assertion))
+	assert.EqualError(t, err.(*InvalidResponseError).PrivateErr,
+		"invalid xml: XML syntax error on line 1: unexpected EOF")
+	assert.Nil(t, assertion)
 }
 
 func TestMultipleAssertions(t *testing.T) {
@@ -2420,14 +2420,14 @@ func TestMultipleAssertions(t *testing.T) {
 		IDPMetadata: &EntityDescriptor{},
 	}
 	err := xml.Unmarshal(idpMetadata, &s.IDPMetadata)
-	assert.Check(t, err)
+	assert.NoError(t, err)
 
 	req := http.Request{PostForm: url.Values{}, URL: &s.AcsURL}
 	req.PostForm.Set("SAMLResponse", base64.StdEncoding.EncodeToString(respStr))
 	profile, err := s.ParseResponse(&req, []string{"id-3992f74e652d89c3cf1efd6c7e472abaac9bc917"})
 
-	assert.Check(t, err)
-	assert.Check(t, profile.Subject.NameID.Value != "admin@evil.com")
+	assert.NoError(t, err)
+	assert.True(t, profile.Subject.NameID.Value != "admin@evil.com")
 }
 
 func TestSPRejectsMalformedResponse(t *testing.T) {
@@ -2449,15 +2449,15 @@ func TestSPRejectsMalformedResponse(t *testing.T) {
 		IDPMetadata: &EntityDescriptor{},
 	}
 	err := xml.Unmarshal(test.IDPMetadata, &s.IDPMetadata)
-	assert.Check(t, err)
+	assert.NoError(t, err)
 
 	// this is a valid response.
 	{
 		req := http.Request{PostForm: url.Values{}, URL: &s.AcsURL}
 		req.PostForm.Set("SAMLResponse", string(SamlResponse))
 		assertion, err := s.ParseResponse(&req, []string{"id-fd419a5ab0472645427f8e07d87a3a5dd0b2e9a6"})
-		assert.Check(t, err)
-		assert.Check(t, is.Equal("ross@octolabs.io", assertion.Subject.NameID.Value))
+		assert.NoError(t, err)
+		assert.Equal(t, "ross@octolabs.io", assertion.Subject.NameID.Value)
 	}
 
 	// this is a valid response but with a comment injected.
@@ -2469,8 +2469,8 @@ func TestSPRejectsMalformedResponse(t *testing.T) {
 		req := http.Request{PostForm: url.Values{}, URL: &s.AcsURL}
 		req.PostForm.Set("SAMLResponse", string(SamlResponse))
 		assertion, err := s.ParseResponse(&req, []string{"id-fd419a5ab0472645427f8e07d87a3a5dd0b2e9a6"})
-		assert.Check(t, err != nil)
-		assert.Check(t, is.Nil(assertion))
+		assert.NotNil(t, err)
+		assert.Nil(t, assertion)
 	}
 }
 
@@ -2484,23 +2484,23 @@ func TestSPInvalidResponses(t *testing.T) {
 		IDPMetadata: &EntityDescriptor{},
 	}
 	err := xml.Unmarshal(test.IDPMetadata, &s.IDPMetadata)
-	assert.Check(t, err)
+	assert.NoError(t, err)
 
 	req := http.Request{PostForm: url.Values{}, URL: &s.AcsURL}
 	req.PostForm.Set("SAMLResponse", "???")
 	_, err = s.ParseResponse(&req, []string{"id-9e61753d64e928af5a7a341a97f420c9"})
-	assert.Check(t, is.Error(err.(*InvalidResponseError).PrivateErr,
-		"cannot parse base64: illegal base64 data at input byte 0"))
+	assert.EqualError(t, err.(*InvalidResponseError).PrivateErr,
+		"cannot parse base64: illegal base64 data at input byte 0")
 
 	req.PostForm.Set("SAMLResponse", base64.StdEncoding.EncodeToString([]byte("<hello>World!</hello>")))
 	_, err = s.ParseResponse(&req, []string{"id-9e61753d64e928af5a7a341a97f420c9"})
-	assert.Check(t, is.Error(err.(*InvalidResponseError).PrivateErr,
-		"cannot unmarshal response: expected element type <Response> but have <hello>"))
+	assert.EqualError(t, err.(*InvalidResponseError).PrivateErr,
+		"cannot unmarshal response: expected element type <Response> but have <hello>")
 
 	req.PostForm.Set("SAMLResponse", base64.StdEncoding.EncodeToString(test.SamlResponse))
 	_, err = s.ParseResponse(&req, []string{"wrongRequestID"})
-	assert.Check(t, is.Error(err.(*InvalidResponseError).PrivateErr,
-		"`InResponseTo` does not match any of the possible request IDs (expected [wrongRequestID])"))
+	assert.EqualError(t, err.(*InvalidResponseError).PrivateErr,
+		"`InResponseTo` does not match any of the possible request IDs (expected [wrongRequestID])")
 
 	TimeNow = func() time.Time {
 		rv, _ := time.Parse("Mon Jan 2 15:04:05 MST 2006", "Mon Nov 30 20:57:09 UTC 2016")
@@ -2510,8 +2510,8 @@ func TestSPInvalidResponses(t *testing.T) {
 
 	req.PostForm.Set("SAMLResponse", base64.StdEncoding.EncodeToString(test.SamlResponse))
 	_, err = s.ParseResponse(&req, []string{"id-9e61753d64e928af5a7a341a97f420c9"})
-	assert.Check(t, is.Error(err.(*InvalidResponseError).PrivateErr,
-		"response expired at 2015-12-01 01:57:51.375 +0000 UTC"))
+	assert.EqualError(t, err.(*InvalidResponseError).PrivateErr,
+		"response expired at 2015-12-01 01:57:51.375 +0000 UTC")
 
 	TimeNow = func() time.Time {
 		rv, _ := time.Parse("Mon Jan 2 15:04:05 MST 2006", "Mon Dec 1 01:57:09 UTC 2015")
@@ -2523,8 +2523,8 @@ func TestSPInvalidResponses(t *testing.T) {
 
 	req.PostForm.Set("SAMLResponse", base64.StdEncoding.EncodeToString(test.SamlResponse))
 	_, err = s.ParseResponse(&req, []string{"id-9e61753d64e928af5a7a341a97f420c9"})
-	assert.Check(t, is.Error(err.(*InvalidResponseError).PrivateErr,
-		"response Issuer does not match the IDP metadata (expected \"http://snakeoil.com\")"))
+	assert.EqualError(t, err.(*InvalidResponseError).PrivateErr,
+		"response Issuer does not match the IDP metadata (expected \"http://snakeoil.com\")")
 
 	s.IDPMetadata.EntityID = "https://idp.testshib.org/idp/shibboleth"
 
@@ -2536,10 +2536,10 @@ func TestSPInvalidResponses(t *testing.T) {
 	// The status of the identity provider is exposed as a StatusError, which the InvalidResponseError wraps.
 	var statusErr *StatusError
 
-	assert.Assert(t, errors.As(err, &statusErr), "%v", err)
-	assert.Check(t, errors.Is(err, ErrReceivedStatus))
-	assert.Check(t, is.Equal(statusErr.TopLevelField, "urn:oasis:names:tc:SAML:2.0:status:Success"))
-	assert.Check(t, is.Equal(err.Error(), "Authentication failed"))
+	require.True(t, errors.As(err, &statusErr), "%v", err)
+	assert.True(t, errors.Is(err, ErrReceivedStatus))
+	assert.Equal(t, statusErr.TopLevelField, "urn:oasis:names:tc:SAML:2.0:status:Success")
+	assert.Equal(t, err.Error(), "Authentication failed")
 
 	StatusSuccess = oldSpStatusSuccess
 
@@ -2547,16 +2547,16 @@ func TestSPInvalidResponses(t *testing.T) {
 
 	req.PostForm.Set("SAMLResponse", base64.StdEncoding.EncodeToString(test.SamlResponse))
 	_, err = s.ParseResponse(&req, []string{"id-9e61753d64e928af5a7a341a97f420c9"})
-	assert.Check(t, is.Error(err.(*InvalidResponseError).PrivateErr,
-		"cannot validate signature on Assertion: cannot parse certificate: illegal base64 data at input byte 4"))
+	assert.EqualError(t, err.(*InvalidResponseError).PrivateErr,
+		"cannot validate signature on Assertion: cannot parse certificate: illegal base64 data at input byte 4")
 
 	s.IDPMetadata.IDPSSODescriptors[0].KeyDescriptors[0].KeyInfo.X509Data.X509Certificates[0].Data = "aW52YWxpZA=="
 
 	req.PostForm.Set("SAMLResponse", base64.StdEncoding.EncodeToString(test.SamlResponse))
 	_, err = s.ParseResponse(&req, []string{"id-9e61753d64e928af5a7a341a97f420c9"})
 
-	assert.Check(t, is.Error(err.(*InvalidResponseError).PrivateErr,
-		"cannot validate signature on Assertion: x509: malformed certificate"))
+	assert.EqualError(t, err.(*InvalidResponseError).PrivateErr,
+		"cannot validate signature on Assertion: x509: malformed certificate")
 }
 
 func newTestAssertion(t *testing.T) (*ServiceProvider, *Assertion) {
@@ -2568,20 +2568,20 @@ func newTestAssertion(t *testing.T) (*ServiceProvider, *Assertion) {
 		AcsURL:      mustParseURL("https://15661444.ngrok.io/saml2/acs"),
 		IDPMetadata: &EntityDescriptor{},
 	}
-	assert.NilError(t, xml.Unmarshal(test.IDPMetadata, &s.IDPMetadata))
+	require.NoError(t, xml.Unmarshal(test.IDPMetadata, &s.IDPMetadata))
 
 	doc := etree.NewDocument()
-	assert.NilError(t, doc.ReadFromBytes(test.SamlResponse))
+	require.NoError(t, doc.ReadFromBytes(test.SamlResponse))
 	assertionEl, err := s.decryptElement(doc.Root().FindElement("//EncryptedAssertion"))
-	assert.NilError(t, err)
+	require.NoError(t, err)
 
 	doc = etree.NewDocument()
 	doc.SetRoot(assertionEl)
 	assertionBuf, err := doc.WriteToBytes()
-	assert.NilError(t, err)
+	require.NoError(t, err)
 
 	assertion := &Assertion{}
-	assert.NilError(t, xml.Unmarshal(assertionBuf, assertion))
+	require.NoError(t, xml.Unmarshal(assertionBuf, assertion))
 
 	return s, assertion
 }

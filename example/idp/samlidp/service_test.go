@@ -11,11 +11,11 @@ import (
 	"strings"
 	"testing"
 
-	"gotest.tools/assert"
-	is "gotest.tools/assert/cmp"
-	"gotest.tools/golden"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"authelia.com/provider/saml"
+	"authelia.com/provider/saml/internal/golden"
 )
 
 func TestServicesCrud(t *testing.T) {
@@ -24,40 +24,40 @@ func TestServicesCrud(t *testing.T) {
 	w := httptest.NewRecorder()
 	r, _ := http.NewRequest("GET", "https://idp.example.com/services/", nil)
 	test.Server.ServeHTTP(w, r)
-	assert.Check(t, is.Equal(http.StatusOK, w.Code))
-	assert.Check(t, is.Equal("{\"services\":[]}\n", w.Body.String()))
+	assert.Equal(t, http.StatusOK, w.Code)
+	assert.Equal(t, "{\"services\":[]}\n", w.Body.String())
 
 	w = httptest.NewRecorder()
 	r, _ = http.NewRequest("PUT", "https://idp.example.com/services/sp",
 		bytes.NewReader(golden.Get(t, "sp_metadata.xml")))
 	test.Server.ServeHTTP(w, r)
-	assert.Check(t, is.Equal(http.StatusNoContent, w.Code))
+	assert.Equal(t, http.StatusNoContent, w.Code)
 
 	w = httptest.NewRecorder()
 	r, _ = http.NewRequest("GET", "https://idp.example.com/services/sp", nil)
 	test.Server.ServeHTTP(w, r)
-	assert.Check(t, is.Equal(http.StatusOK, w.Code))
+	assert.Equal(t, http.StatusOK, w.Code)
 	golden.Assert(t, w.Body.String(), "sp_metadata.xml")
 
 	w = httptest.NewRecorder()
 	r, _ = http.NewRequest("GET", "https://idp.example.com/services/", nil)
 	test.Server.ServeHTTP(w, r)
-	assert.Check(t, is.Equal(http.StatusOK, w.Code))
-	assert.Check(t, is.Equal("{\"services\":[\"sp\"]}\n", w.Body.String()))
+	assert.Equal(t, http.StatusOK, w.Code)
+	assert.Equal(t, "{\"services\":[\"sp\"]}\n", w.Body.String())
 
-	assert.Check(t, is.Len(test.Server.serviceProviders, 2))
+	assert.Len(t, test.Server.serviceProviders, 2)
 
 	w = httptest.NewRecorder()
 	r, _ = http.NewRequest("DELETE", "https://idp.example.com/services/sp", nil)
 	test.Server.ServeHTTP(w, r)
-	assert.Check(t, is.Equal(http.StatusNoContent, w.Code))
+	assert.Equal(t, http.StatusNoContent, w.Code)
 
 	w = httptest.NewRecorder()
 	r, _ = http.NewRequest("GET", "https://idp.example.com/services/", nil)
 	test.Server.ServeHTTP(w, r)
-	assert.Check(t, is.Equal(http.StatusOK, w.Code))
-	assert.Check(t, is.Equal("{\"services\":[]}\n", w.Body.String()))
-	assert.Check(t, is.Len(test.Server.serviceProviders, 1))
+	assert.Equal(t, http.StatusOK, w.Code)
+	assert.Equal(t, "{\"services\":[]}\n", w.Body.String())
+	assert.Len(t, test.Server.serviceProviders, 1)
 }
 
 func TestServiceEntityIDOwnership(t *testing.T) {
@@ -148,23 +148,23 @@ func TestServiceEntityIDOwnership(t *testing.T) {
 					test.Server.HandleDeleteService(w, r)
 				}
 
-				assert.Check(t, is.Equal(step.code, w.Code), "%s %s", step.method, step.id)
+				assert.Equal(t, step.code, w.Code, "%s %s", step.method, step.id)
 			}
 
 			for entityID, id := range tc.registered {
 				metadata, err := test.Server.GetServiceProvider(nil, entityID)
 				if id == "" {
-					assert.Check(t, errors.Is(err, os.ErrNotExist), "%s: got %v", entityID, err)
+					assert.True(t, errors.Is(err, os.ErrNotExist), "%s: got %v", entityID, err)
 					continue
 				}
 
-				assert.NilError(t, err)
-				assert.Check(t, is.Equal("https://"+id+".example.net/acs", metadata.SPSSODescriptors[0].AssertionConsumerServices[0].Location))
+				require.NoError(t, err)
+				assert.Equal(t, "https://"+id+".example.net/acs", metadata.SPSSODescriptors[0].AssertionConsumerServices[0].Location)
 			}
 
 			metadata, err := test.Server.GetServiceProvider(nil, "https://sp.example.com/saml2/metadata")
-			assert.NilError(t, err)
-			assert.Check(t, is.Equal("https://sp.example.com/saml2/acs", metadata.SPSSODescriptors[0].AssertionConsumerServices[0].Location))
+			require.NoError(t, err)
+			assert.Equal(t, "https://sp.example.com/saml2/acs", metadata.SPSSODescriptors[0].AssertionConsumerServices[0].Location)
 		})
 	}
 }
@@ -173,15 +173,15 @@ func TestNewRejectsDuplicateServiceEntityID(t *testing.T) {
 	store := &MemoryStore{}
 	for _, id := range []string{"a", "b"} {
 		metadata, err := saml.ParseServiceProviderMetadata([]byte(testServiceMetadata("https://one.example.com/metadata", id)))
-		assert.NilError(t, err)
-		assert.NilError(t, store.Put("/services/"+id, &Service{Metadata: *metadata}))
+		require.NoError(t, err)
+		require.NoError(t, store.Put("/services/"+id, &Service{Metadata: *metadata}))
 	}
 
 	_, err := New(Options{
 		URL:   url.URL{Scheme: "https", Host: "idp.example.com"},
 		Store: store,
 	})
-	assert.Check(t, is.Error(err, `services "a" and "b" both register entity ID "https://one.example.com/metadata": remove one of them from the store`))
+	assert.EqualError(t, err, `services "a" and "b" both register entity ID "https://one.example.com/metadata": remove one of them from the store`)
 }
 
 func testServiceMetadata(entityID, id string) string {
@@ -206,15 +206,15 @@ func TestNewReportsDuplicateServicesInSortedOrder(t *testing.T) {
 	store := &MemoryStore{}
 	for _, id := range []string{"a", "b"} {
 		metadata, err := saml.ParseServiceProviderMetadata([]byte(testServiceMetadata("https://one.example.com/metadata", id)))
-		assert.NilError(t, err)
-		assert.NilError(t, store.Put("/services/"+id, &Service{Metadata: *metadata}))
+		require.NoError(t, err)
+		require.NoError(t, store.Put("/services/"+id, &Service{Metadata: *metadata}))
 	}
 
 	_, err := New(Options{
 		URL:   url.URL{Scheme: "https", Host: "idp.example.com"},
 		Store: reversedListStore{store},
 	})
-	assert.Check(t, is.Error(err, `services "a" and "b" both register entity ID "https://one.example.com/metadata": remove one of them from the store`))
+	assert.EqualError(t, err, `services "a" and "b" both register entity ID "https://one.example.com/metadata": remove one of them from the store`)
 }
 
 // failingGetStore fails reads of one key with an error other than ErrNotFound.
@@ -243,19 +243,20 @@ func TestPutServiceFailsWhenThePreviousRecordCannotBeRead(t *testing.T) {
 		test.Server.ServeHTTP(w, r)
 		return w.Code
 	}
-	assert.Check(t, is.Equal(http.StatusNoContent, put(oldEntityID)))
+	assert.Equal(t, http.StatusNoContent, put(oldEntityID))
 
 	test.Server.Store = failingGetStore{Store: &test.Store, key: "/services/a"}
-	assert.Check(t, is.Equal(http.StatusInternalServerError, put(newEntityID)))
+
+	assert.Equal(t, http.StatusInternalServerError, put(newEntityID))
 
 	stored := Service{}
-	assert.NilError(t, test.Store.Get("/services/a", &stored))
-	assert.Check(t, is.Equal(oldEntityID, stored.Metadata.EntityID), "the record must not be overwritten")
+	require.NoError(t, test.Store.Get("/services/a", &stored))
+	assert.Equal(t, oldEntityID, stored.Metadata.EntityID, "the record must not be overwritten")
 
 	_, err := test.Server.GetServiceProvider(nil, oldEntityID)
-	assert.Check(t, err, "the old entity ID stays registered with the unchanged record")
+	assert.NoError(t, err, "the old entity ID stays registered with the unchanged record")
 	_, err = test.Server.GetServiceProvider(nil, newEntityID)
-	assert.Check(t, is.Equal(os.ErrNotExist, err), "the new entity ID must not be registered")
+	assert.Equal(t, os.ErrNotExist, err, "the new entity ID must not be registered")
 }
 
 func TestPutServiceRejectsUnrecognizedKeyUse(t *testing.T) {
@@ -279,7 +280,7 @@ func TestPutServiceRejectsUnrecognizedKeyUse(t *testing.T) {
 			w := httptest.NewRecorder()
 			r, _ := http.NewRequest("PUT", "https://idp.example.com/services/use", strings.NewReader(metadata(use)))
 			test.Server.ServeHTTP(w, r)
-			assert.Check(t, is.Equal(code, w.Code))
+			assert.Equal(t, code, w.Code)
 		})
 	}
 }

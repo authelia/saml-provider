@@ -8,8 +8,7 @@ import (
 	"net/url"
 	"testing"
 
-	"gotest.tools/assert"
-	is "gotest.tools/assert/cmp"
+	"github.com/stretchr/testify/assert"
 )
 
 // captureDefaultLog makes [slog.Default] write to the buffer that it returns, until the test ends.
@@ -35,7 +34,7 @@ func TestIDPNilObserverLogs(t *testing.T) {
 		r := httptest.NewRequest("GET", "https://idp.example.com/saml/sso?SAMLRequest=%21", nil)
 		w := httptest.NewRecorder()
 		test.IDP.ServeSSO(w, r)
-		assert.Check(t, is.Equal(http.StatusBadRequest, w.Code))
+		assert.Equal(t, http.StatusBadRequest, w.Code)
 	})
 
 	t.Run("ServeIDPInitiated", func(t *testing.T) {
@@ -49,7 +48,7 @@ func TestIDPNilObserverLogs(t *testing.T) {
 		r := httptest.NewRequest("GET", "https://idp.example.com/saml/idp-initiated", nil)
 		w := httptest.NewRecorder()
 		test.IDP.ServeIDPInitiated(w, r, "https://unknown.example.com/metadata", "")
-		assert.Check(t, is.Equal(http.StatusNotFound, w.Code))
+		assert.Equal(t, http.StatusNotFound, w.Code)
 	})
 
 	t.Run("unknown AttributeConsumingServiceIndex", func(t *testing.T) {
@@ -58,8 +57,8 @@ func TestIDPNilObserverLogs(t *testing.T) {
 		test := NewIdentityProviderTest(t, applyKey)
 		test.IDP.Observer = nil
 		req := attributeReleaseRequest(t, test, "3")
-		assert.Check(t, is.Len(releasedAttributes(t, req, attributeReleaseSession()), 0))
-		assert.Check(t, is.Contains(logged.String(), "releasing no attributes"))
+		assert.Len(t, releasedAttributes(t, req, attributeReleaseSession()), 0)
+		assert.Contains(t, logged.String(), "releasing no attributes")
 	})
 
 	t.Run("ServeSLO", func(t *testing.T) {
@@ -70,6 +69,6 @@ func TestIDPNilObserverLogs(t *testing.T) {
 		}.Encode(), nil)
 		w := httptest.NewRecorder()
 		test.IDP.ServeSLO(w, r)
-		assert.Check(t, is.Equal(http.StatusBadRequest, w.Code))
+		assert.Equal(t, http.StatusBadRequest, w.Code)
 	})
 }

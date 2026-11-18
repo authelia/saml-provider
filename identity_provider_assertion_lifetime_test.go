@@ -4,8 +4,8 @@ import (
 	"testing"
 	"time"
 
-	"gotest.tools/assert"
-	is "gotest.tools/assert/cmp"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 // lifetimeAssertion validates a current request and makes an assertion for it.
@@ -13,7 +13,7 @@ func lifetimeAssertion(t *testing.T, test *IdentityProviderTest) (*IdpAuthnReque
 	t.Helper()
 
 	req, err := hardeningValidate(test, hardeningRequest(`ID="id-1"`, TimeNow(), hardeningIssuer))
-	assert.NilError(t, err)
+	require.NoError(t, err)
 
 	return req, DefaultAssertionMaker{}.MakeAssertion(req, &Session{ID: "f00d", NameID: "alice"})
 }
@@ -21,12 +21,12 @@ func lifetimeAssertion(t *testing.T, test *IdentityProviderTest) (*IdpAuthnReque
 func TestIDPAssertionLifetimeDefault(t *testing.T) {
 	test := NewIdentityProviderTest(t, applyKey)
 	req, err := lifetimeAssertion(t, test)
-	assert.NilError(t, err)
+	require.NoError(t, err)
 
 	confirmation := req.Assertion.Subject.SubjectConfirmations[0].SubjectConfirmationData
-	assert.Check(t, req.Assertion.Conditions.NotBefore.Equal(TimeNow().Add(-MaxClockSkew)))
-	assert.Check(t, req.Assertion.Conditions.NotOnOrAfter.Equal(TimeNow().Add(MaxIssueDelay)))
-	assert.Check(t, confirmation.NotOnOrAfter.Equal(TimeNow().Add(MaxIssueDelay)))
+	assert.True(t, req.Assertion.Conditions.NotBefore.Equal(TimeNow().Add(-MaxClockSkew)))
+	assert.True(t, req.Assertion.Conditions.NotOnOrAfter.Equal(TimeNow().Add(MaxIssueDelay)))
+	assert.True(t, confirmation.NotOnOrAfter.Equal(TimeNow().Add(MaxIssueDelay)))
 }
 
 func TestIDPAssertionLifetime(t *testing.T) {
@@ -35,14 +35,14 @@ func TestIDPAssertionLifetime(t *testing.T) {
 			test := NewIdentityProviderTest(t, applyKey)
 			test.IDP.AssertionLifetime = lifetime
 			req, err := lifetimeAssertion(t, test)
-			assert.NilError(t, err)
+			require.NoError(t, err)
 
 			confirmation := req.Assertion.Subject.SubjectConfirmations[0].SubjectConfirmationData
-			assert.Check(t, req.Assertion.Conditions.NotOnOrAfter.Equal(TimeNow().Add(lifetime)),
+			assert.True(t, req.Assertion.Conditions.NotOnOrAfter.Equal(TimeNow().Add(lifetime)),
 				"Conditions NotOnOrAfter=%s", req.Assertion.Conditions.NotOnOrAfter)
-			assert.Check(t, confirmation.NotOnOrAfter.Equal(TimeNow().Add(lifetime)),
+			assert.True(t, confirmation.NotOnOrAfter.Equal(TimeNow().Add(lifetime)),
 				"SubjectConfirmationData NotOnOrAfter=%s", confirmation.NotOnOrAfter)
-			assert.Check(t, req.Assertion.Conditions.NotBefore.Equal(TimeNow().Add(-MaxClockSkew)),
+			assert.True(t, req.Assertion.Conditions.NotBefore.Equal(TimeNow().Add(-MaxClockSkew)),
 				"the lifetime must not move NotBefore")
 		})
 	}
@@ -52,7 +52,7 @@ func TestIDPAssertionLifetimeNegative(t *testing.T) {
 	test := NewIdentityProviderTest(t, applyKey)
 	test.IDP.AssertionLifetime = -time.Second
 	_, err := lifetimeAssertion(t, test)
-	assert.Check(t, is.ErrorContains(err, "AssertionLifetime"))
+	assert.ErrorContains(t, err, "AssertionLifetime")
 }
 
 func TestIDPAssertionLifetimeDoesNotChangeRequestAge(t *testing.T) {
@@ -61,5 +61,5 @@ func TestIDPAssertionLifetimeDoesNotChangeRequestAge(t *testing.T) {
 	old := hardeningRequest(`ID="id-1"`, TimeNow().Add(-MaxIssueDelay-MaxClockSkew), hardeningIssuer)
 
 	_, err := hardeningValidate(test, old)
-	assert.Check(t, is.ErrorContains(err, "expired"), "MaxAuthnRequestAge must not default to AssertionLifetime")
+	assert.ErrorContains(t, err, "expired", "MaxAuthnRequestAge must not default to AssertionLifetime")
 }

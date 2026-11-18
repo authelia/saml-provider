@@ -6,8 +6,8 @@ import (
 	"time"
 
 	"github.com/beevik/etree"
-	"gotest.tools/assert"
-	is "gotest.tools/assert/cmp"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 // setClockSkew sets MaxClockSkew for the test.
@@ -31,26 +31,26 @@ func TestClockSkewValidity(t *testing.T) {
 			setClockSkew(t, skew)
 
 			// NotBefore: the clock of this party may be behind that of the party that stated it.
-			assert.Check(t, !beforeValidity(now, now))
-			assert.Check(t, !beforeValidity(now.Add(skew), now), "at the clock skew")
-			assert.Check(t, beforeValidity(now.Add(skew+time.Millisecond), now), "beyond the clock skew")
-			assert.Check(t, !beforeValidity(time.Time{}, now), "no NotBefore")
+			assert.False(t, beforeValidity(now, now))
+			assert.False(t, beforeValidity(now.Add(skew), now), "at the clock skew")
+			assert.True(t, beforeValidity(now.Add(skew+time.Millisecond), now), "beyond the clock skew")
+			assert.False(t, beforeValidity(time.Time{}, now), "no NotBefore")
 
 			// NotOnOrAfter: the clock of this party may be ahead.
-			assert.Check(t, !pastValidity(now.Add(time.Millisecond), now))
-			assert.Check(t, !pastValidity(now.Add(-skew+time.Millisecond), now), "within the clock skew")
-			assert.Check(t, pastValidity(now.Add(-skew), now), "at the clock skew")
-			assert.Check(t, pastValidity(time.Time{}, now), "the zero time is in the past")
+			assert.False(t, pastValidity(now.Add(time.Millisecond), now))
+			assert.False(t, pastValidity(now.Add(-skew+time.Millisecond), now), "within the clock skew")
+			assert.True(t, pastValidity(now.Add(-skew), now), "at the clock skew")
+			assert.True(t, pastValidity(time.Time{}, now), "the zero time is in the past")
 
 			// validUntil is a NotOnOrAfter that may be absent.
-			assert.Check(t, !expiredAt(now.Add(-skew+time.Millisecond), now), "within the clock skew")
-			assert.Check(t, expiredAt(now.Add(-skew), now), "at the clock skew")
-			assert.Check(t, !expiredAt(time.Time{}, now), "no validUntil")
+			assert.False(t, expiredAt(now.Add(-skew+time.Millisecond), now), "within the clock skew")
+			assert.True(t, expiredAt(now.Add(-skew), now), "at the clock skew")
+			assert.False(t, expiredAt(time.Time{}, now), "no validUntil")
 
 			// A validUntil that is too far ahead: the clock of the publisher may be ahead.
-			assert.Check(t, !validBeyond(now.Add(time.Hour), now, time.Hour))
-			assert.Check(t, !validBeyond(now.Add(time.Hour+skew), now, time.Hour), "at the clock skew")
-			assert.Check(t, validBeyond(now.Add(time.Hour+skew+time.Millisecond), now, time.Hour), "beyond the clock skew")
+			assert.False(t, validBeyond(now.Add(time.Hour), now, time.Hour))
+			assert.False(t, validBeyond(now.Add(time.Hour+skew), now, time.Hour), "at the clock skew")
+			assert.True(t, validBeyond(now.Add(time.Hour+skew+time.Millisecond), now, time.Hour), "beyond the clock skew")
 		})
 	}
 }
@@ -81,16 +81,16 @@ func TestCheckIssueInstant(t *testing.T) {
 			for _, tc := range issueInstantBounds {
 				err := checkIssueInstant("request", now.Add(tc.offset()), now, MaxIssueDelay)
 				if tc.accepted {
-					assert.Check(t, err, tc.name)
+					assert.NoError(t, err, tc.name)
 					continue
 				}
 
-				assert.Check(t, is.ErrorContains(err, "request "+tc.err), tc.name)
+				assert.ErrorContains(t, err, "request "+tc.err, tc.name)
 			}
 
 			// The time in the error is the one that the message stated, without the clock skew.
 			err := checkIssueInstant("response", now.Add(-time.Hour), now, MaxIssueDelay)
-			assert.Check(t, is.Error(err, "response expired at "+now.Add(-time.Hour+MaxIssueDelay).String()))
+			assert.EqualError(t, err, "response expired at "+now.Add(-time.Hour+MaxIssueDelay).String())
 		})
 	}
 }
@@ -143,7 +143,7 @@ func TestIDPAllowsClockSkewOnIssueInstant(t *testing.T) {
 		"ManageNameIDRequest": func(t *testing.T, issueInstant time.Time) bool {
 			test, _ := manageNameIDTestIDP(t)
 			result := manageNameIDBindings["soap"](t, test, manageNameIDOptions{mutate: func(r *ManageNameIDRequest) { r.IssueInstant = issueInstant }})
-			assert.Assert(t, result.Response != nil, "HTTP status %d", result.Code)
+			require.True(t, result.Response != nil, "HTTP status %d", result.Code)
 
 			return status(result.Response.Status)
 		},
@@ -180,7 +180,7 @@ func TestIDPAllowsClockSkewOnIssueInstant(t *testing.T) {
 				// The fixture sets the clock, which the offset is from.
 				NewIdentityProviderTest(t, applyKey)
 
-				assert.Check(t, is.Equal(accepted(t, TimeNow().Add(tc.offset())), tc.accepted))
+				assert.Equal(t, accepted(t, TimeNow().Add(tc.offset())), tc.accepted)
 			})
 		}
 	}
@@ -198,9 +198,9 @@ func TestIDPRecordsRequestForTheClockSkewOfAcceptance(t *testing.T) {
 	r, _ := soapLogoutRequest(t, &test.SP, func(r *LogoutRequest) { r.IssueInstant = issued })
 	assertLogoutStatus(t, soapLogoutResponse(t, serveSOAPLogout(test, r)), StatusSuccess, "")
 
-	assert.Assert(t, is.Equal(store.calls(), 1))
-	assert.Check(t, store.expiries[0].Equal(issued.Add(MaxIssueDelay+2*MaxClockSkew)))
-	assert.Check(t, store.expiries[0].After(TimeNow().Add(MaxClockSkew)))
+	require.Equal(t, store.calls(), 1)
+	assert.True(t, store.expiries[0].Equal(issued.Add(MaxIssueDelay+2*MaxClockSkew)))
+	assert.True(t, store.expiries[0].After(TimeNow().Add(MaxClockSkew)))
 }
 
 // clockSkewAssertion returns a service provider and an assertion that it accepts at now.
@@ -287,11 +287,11 @@ func TestSPAllowsClockSkewOnAssertion(t *testing.T) {
 
 			err := sp.validateAssertion(assertion, []string{"id-request"}, now)
 			if tc.err == "" {
-				assert.Check(t, err)
+				assert.NoError(t, err)
 				return
 			}
 
-			assert.Check(t, is.ErrorContains(err, tc.err))
+			assert.ErrorContains(t, err, tc.err)
 		})
 	}
 }
@@ -309,11 +309,11 @@ func TestSPAllowsClockSkewOnResponse(t *testing.T) {
 
 			_, err := test.SP.ParseXMLResponse([]byte(body), []string{"id-request"}, test.SP.AcsURL)
 			if tc.accepted {
-				assert.Check(t, err)
+				assert.NoError(t, err)
 				return
 			}
 
-			assert.Check(t, is.ErrorContains(privateError(err), "response "+tc.err))
+			assert.ErrorContains(t, privateError(err), "response "+tc.err)
 		})
 	}
 }
@@ -332,11 +332,11 @@ func TestSPAllowsClockSkewOnLogoutResponse(t *testing.T) {
 
 			err := f.sp.ValidateLogoutResponseForm(form, []string{"id-request"})
 			if tc.accepted {
-				assert.Check(t, err)
+				assert.NoError(t, err)
 				return
 			}
 
-			assert.Check(t, is.ErrorContains(privateError(err), "response "+tc.err))
+			assert.ErrorContains(t, privateError(err), "response "+tc.err)
 		})
 	}
 }
@@ -350,7 +350,7 @@ func TestSPAllowsClockSkewOnArtifactResponse(t *testing.T) {
 			sp, _ := clockSkewAssertion(now)
 
 			doc := etree.NewDocument()
-			assert.NilError(t, doc.ReadFromString(`<soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/"><soapenv:Body><samlp:ArtifactResponse xmlns:samlp="urn:oasis:names:tc:SAML:2.0:protocol" ID="id-response" InResponseTo="id-resolve" Version="2.0" IssueInstant="`+
+			require.NoError(t, doc.ReadFromString(`<soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/"><soapenv:Body><samlp:ArtifactResponse xmlns:samlp="urn:oasis:names:tc:SAML:2.0:protocol" ID="id-response" InResponseTo="id-resolve" Version="2.0" IssueInstant="`+
 				now.Add(tc.offset()).Format(timeFormat)+`"><saml:Issuer xmlns:saml="urn:oasis:names:tc:SAML:2.0:assertion">https://other.example.com</saml:Issuer></samlp:ArtifactResponse></soapenv:Body></soapenv:Envelope>`))
 
 			TimeNow = func() time.Time { return now }
@@ -359,11 +359,11 @@ func TestSPAllowsClockSkewOnArtifactResponse(t *testing.T) {
 
 			// The IssueInstant is checked before the Issuer, which is not that of the identity provider here.
 			if tc.accepted {
-				assert.Check(t, is.ErrorContains(privateError(err), "response Issuer does not match"))
+				assert.ErrorContains(t, privateError(err), "response Issuer does not match")
 				return
 			}
 
-			assert.Check(t, is.ErrorContains(privateError(err), "response "+tc.err))
+			assert.ErrorContains(t, privateError(err), "response "+tc.err)
 		})
 	}
 }
@@ -372,7 +372,7 @@ func mustWriteDocument(t *testing.T, doc *etree.Document) []byte {
 	t.Helper()
 
 	buf, err := doc.WriteToBytes()
-	assert.NilError(t, err)
+	require.NoError(t, err)
 
 	return buf
 }
@@ -389,12 +389,12 @@ func TestMetadataValidUntilAllowsClockSkew(t *testing.T) {
 		return &EntityDescriptor{EntityID: "https://sp.example.com/metadata", ValidUntil: entity, SPSSODescriptors: []SPSSODescriptor{descriptor}}
 	}
 
-	assert.Check(t, CurrentMetadata(metadata(within, nil), now) != nil)
-	assert.Check(t, CurrentMetadata(metadata(ago, nil), now) == nil)
-	assert.Check(t, CurrentMetadata(metadata(time.Time{}, &within), now) != nil)
-	assert.Check(t, CurrentMetadata(metadata(time.Time{}, &ago), now) == nil)
+	assert.True(t, CurrentMetadata(metadata(within, nil), now) != nil)
+	assert.True(t, CurrentMetadata(metadata(ago, nil), now) == nil)
+	assert.True(t, CurrentMetadata(metadata(time.Time{}, &within), now) != nil)
+	assert.True(t, CurrentMetadata(metadata(time.Time{}, &ago), now) == nil)
 
 	idp := &IdentityProvider{}
-	assert.Check(t, idp.CheckServiceProviderMetadata(metadata(within, nil), now))
-	assert.Check(t, is.ErrorContains(idp.CheckServiceProviderMetadata(metadata(ago, nil), now), "expired"))
+	assert.NoError(t, idp.CheckServiceProviderMetadata(metadata(within, nil), now))
+	assert.ErrorContains(t, idp.CheckServiceProviderMetadata(metadata(ago, nil), now), "expired")
 }

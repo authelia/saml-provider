@@ -11,8 +11,9 @@ import (
 	"net/url"
 	"testing"
 
-	"gotest.tools/assert"
-	"gotest.tools/golden"
+	"github.com/stretchr/testify/assert"
+
+	"authelia.com/provider/saml/internal/golden"
 )
 
 type mockTransport func(req *http.Request) (*http.Response, error)
@@ -75,5 +76,5 @@ func TestCanParseTestshibMetadata(t *testing.T) {
 	_, err := FetchMetadata(context.Background(),
 		&httpClient,
 		mustParseURL("https://ipa.example.com/idp/saml2/metadata"))
-	assert.Check(t, err)
+	assert.NoError(t, err)
 }

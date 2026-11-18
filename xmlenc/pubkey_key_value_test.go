@@ -12,58 +12,58 @@ import (
 	"testing"
 
 	"github.com/beevik/etree"
-	"gotest.tools/assert"
-	is "gotest.tools/assert/cmp"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 // A bare RSA key is encrypted to like one in a certificate, and the EncryptedKey identifies it by its KeyValue
 // (XML Signature §4.4.2.2), as there is no certificate to identify it by.
 func TestRSAEncryptToBarePublicKey(t *testing.T) {
 	key, err := rsa.GenerateKey(rand.Reader, 2048)
-	assert.NilError(t, err)
+	require.NoError(t, err)
 
 	for name, encrypter := range map[string]RSA{"RSA-OAEP-MGF1P": OAEP(), "RSA-OAEP": OAEP_SHA256()} {
 		t.Run(name, func(t *testing.T) {
 			el, err := encrypter.Encrypt(&key.PublicKey, []byte("<plaintext/>"), nil)
-			assert.NilError(t, err)
+			require.NoError(t, err)
 
 			// It is parsed again, as the receiver finds it.
 			doc := etree.NewDocument()
 			doc.SetRoot(el)
 
 			buf, err := doc.WriteToBytes()
-			assert.NilError(t, err)
+			require.NoError(t, err)
 
 			doc = etree.NewDocument()
-			assert.NilError(t, doc.ReadFromBytes(buf))
+			require.NoError(t, doc.ReadFromBytes(buf))
 
 			keyInfo := doc.Root().FindElement("./KeyInfo/EncryptedKey/KeyInfo")
-			assert.Assert(t, keyInfo != nil)
-			assert.Check(t, keyInfo.FindElement("./X509Data") == nil)
-			assert.Check(t, is.Len(keyInfo.ChildElements(), 1))
+			require.NotNil(t, keyInfo)
+			assert.Nil(t, keyInfo.FindElement("./X509Data"))
+			assert.Len(t, keyInfo.ChildElements(), 1)
 
 			rsaKeyValue := keyInfo.FindElement("./KeyValue/RSAKeyValue")
-			assert.Assert(t, rsaKeyValue != nil)
-			assert.Check(t, is.Equal(rsaKeyValue.NamespaceURI(), "http://www.w3.org/2000/09/xmldsig#"))
+			require.NotNil(t, rsaKeyValue)
+			assert.Equal(t, rsaKeyValue.NamespaceURI(), "http://www.w3.org/2000/09/xmldsig#")
 
 			modulus, err := base64.StdEncoding.DecodeString(rsaKeyValue.FindElement("./Modulus").Text())
-			assert.NilError(t, err)
-			assert.Check(t, is.Equal(new(big.Int).SetBytes(modulus).Cmp(key.N), 0))
+			require.NoError(t, err)
+			assert.Equal(t, new(big.Int).SetBytes(modulus).Cmp(key.N), 0)
 
 			// ds:CryptoBinary has no leading zero octet.
-			assert.Check(t, modulus[0] != 0)
-			assert.Check(t, is.Equal(rsaKeyValue.FindElement("./Exponent").Text(), "AQAB"))
+			assert.True(t, modulus[0] != 0)
+			assert.Equal(t, rsaKeyValue.FindElement("./Exponent").Text(), "AQAB")
 
 			plaintext, err := Decrypt(key, doc.Root())
-			assert.NilError(t, err)
-			assert.Check(t, is.Equal(string(plaintext), "<plaintext/>"))
+			require.NoError(t, err)
+			assert.Equal(t, string(plaintext), "<plaintext/>")
 		})
 	}
 }
 
 func TestRSAEncryptRejectsOtherKeys(t *testing.T) {
 	ecKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
-	assert.NilError(t, err)
+	require.NoError(t, err)
 
 	for name, key := range map[string]any{
 		"nil":                        nil,
@@ -80,8 +80,8 @@ func TestRSAEncryptRejectsOtherKeys(t *testing.T) {
 
 			var incorrect ErrIncorrectKeyType
 
-			assert.Check(t, errors.As(err, &incorrect), "err=%v", err)
-			assert.Check(t, el == nil)
+			assert.True(t, errors.As(err, &incorrect), "err=%v", err)
+			assert.Nil(t, el)
 		})
 	}
 }

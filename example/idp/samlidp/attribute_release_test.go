@@ -4,8 +4,8 @@ import (
 	"net/url"
 	"testing"
 
-	"gotest.tools/assert"
-	is "gotest.tools/assert/cmp"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"authelia.com/provider/saml"
 )
@@ -31,12 +31,12 @@ func TestNewUsesAttributeReleasePolicy(t *testing.T) {
 			return candidates, nil
 		}),
 	})
-	assert.NilError(t, err)
+	require.NoError(t, err)
 	server.IDP.EncryptionKeyEnforcer = test.Server.IDP.EncryptionKeyEnforcer
 	server.serviceProviders["https://sp.example.com/saml2/metadata"] = test.SP.Metadata()
 	test.Server = server
 
 	hardeningAssertSAMLResponse(t, hardeningSubmitLogin(t, test, hardeningStartSSO(t, test), "hunter2"), "frob")
-	assert.Check(t, is.Equal(serviceProvider, "https://sp.example.com/saml2/metadata"))
-	assert.Check(t, is.Equal(user, "alice"))
+	assert.Equal(t, serviceProvider, "https://sp.example.com/saml2/metadata")
+	assert.Equal(t, user, "alice")
 }

@@ -14,9 +14,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	"golang.org/x/crypto/bcrypt"
-	"gotest.tools/assert"
-	is "gotest.tools/assert/cmp"
 
 	"authelia.com/provider/saml"
 )
@@ -49,15 +49,15 @@ func serveAdminRoute(s *Server, method, path string) *httptest.ResponseRecorder 
 func TestAdminRoutesDeniedWithoutAuthorizer(t *testing.T) {
 	test := NewServerTest(t)
 	test.Server.AdminAuthorizer = nil
-	assert.NilError(t, test.Store.Put("/users/x", User{Name: "x"}))
+	require.NoError(t, test.Store.Put("/users/x", User{Name: "x"}))
 
 	for _, route := range adminRoutes {
 		w := serveAdminRoute(test.Server, route.method, route.path)
-		assert.Check(t, is.Equal(http.StatusForbidden, w.Code), "%s %s", route.method, route.path)
+		assert.Equal(t, http.StatusForbidden, w.Code, "%s %s", route.method, route.path)
 	}
 
 	user := User{}
-	assert.Check(t, test.Store.Get("/users/x", &user), "denied DELETE must not remove the user")
+	assert.NoError(t, test.Store.Get("/users/x", &user), "denied DELETE must not remove the user")
 }
 
 func TestAdminRoutesDeniedWhenAuthorizerRefuses(t *testing.T) {
@@ -70,15 +70,16 @@ func TestAdminRoutesDeniedWhenAuthorizerRefuses(t *testing.T) {
 
 	for _, route := range adminRoutes {
 		w := serveAdminRoute(test.Server, route.method, route.path)
-		assert.Check(t, is.Equal(http.StatusForbidden, w.Code), "%s %s", route.method, route.path)
+		assert.Equal(t, http.StatusForbidden, w.Code, "%s %s", route.method, route.path)
 	}
-	assert.Check(t, is.Equal(len(adminRoutes), len(seen)))
+
+	assert.Equal(t, len(adminRoutes), len(seen))
 }
 
 func TestAdminRoutesAllowedWhenAuthorized(t *testing.T) {
 	test := NewServerTest(t)
 	w := serveAdminRoute(test.Server, "GET", "/users/")
-	assert.Check(t, is.Equal(http.StatusOK, w.Code))
+	assert.Equal(t, http.StatusOK, w.Code)
 }
 
 func TestPublicRoutesDoNotRequireAuthorizer(t *testing.T) {
@@ -86,13 +87,13 @@ func TestPublicRoutesDoNotRequireAuthorizer(t *testing.T) {
 	test.Server.AdminAuthorizer = nil
 	for _, path := range []string{"/metadata", "/login"} {
 		w := serveAdminRoute(test.Server, "GET", path)
-		assert.Check(t, is.Equal(http.StatusOK, w.Code), path)
+		assert.Equal(t, http.StatusOK, w.Code, path)
 	}
 }
 
 func TestMemoryStoreListIsSafeForConcurrentUse(t *testing.T) {
 	store := &MemoryStore{}
-	assert.NilError(t, store.Put("/a/seed", "v"))
+	require.NoError(t, store.Put("/a/seed", "v"))
 
 	var wg sync.WaitGroup
 	for i := range 4 {
@@ -100,14 +101,14 @@ func TestMemoryStoreListIsSafeForConcurrentUse(t *testing.T) {
 		go func() {
 			defer wg.Done()
 			for j := range 2000 {
-				assert.Check(t, store.Put(fmt.Sprintf("/a/%d-%d", i, j), "v"))
+				assert.NoError(t, store.Put(fmt.Sprintf("/a/%d-%d", i, j), "v"))
 			}
 		}()
 		go func() {
 			defer wg.Done()
 			for range 200 {
 				_, err := store.List("/a/")
-				assert.Check(t, err)
+				assert.NoError(t, err)
 			}
 		}()
 	}
@@ -134,8 +135,8 @@ func (s *queueWriterStore) Get(key string, value interface{}) error {
 
 func TestIDPInitiatedDoesNotDeadlockWithConfigWriter(t *testing.T) {
 	test := NewServerTest(t)
-	assert.NilError(t, test.Store.Put("/shortcuts/app", Shortcut{ServiceProviderID: "https://sp.example.com/saml2/metadata"}))
-	assert.NilError(t, test.Store.Put("/sessions/s", saml.Session{ID: "s", NameID: "alice", ExpireTime: saml.TimeNow().Add(time.Hour)}))
+	require.NoError(t, test.Store.Put("/shortcuts/app", Shortcut{ServiceProviderID: "https://sp.example.com/saml2/metadata"}))
+	require.NoError(t, test.Store.Put("/sessions/s", saml.Session{ID: "s", NameID: "alice", ExpireTime: saml.TimeNow().Add(time.Hour)}))
 	test.Server.Store = &queueWriterStore{Store: &test.Store, mu: &test.Server.idpConfigMu}
 
 	done := make(chan int, 1)
@@ -149,7 +150,7 @@ func TestIDPInitiatedDoesNotDeadlockWithConfigWriter(t *testing.T) {
 
 	select {
 	case code := <-done:
-		assert.Check(t, is.Equal(http.StatusOK, code))
+		assert.Equal(t, http.StatusOK, code)
 	case <-time.After(5 * time.Second):
 		t.Fatal("IDP-initiated login deadlocked against a writer")
 	}
@@ -158,8 +159,8 @@ func TestIDPInitiatedDoesNotDeadlockWithConfigWriter(t *testing.T) {
 func hardeningAddUser(t *testing.T, test *ServerTest) {
 	t.Helper()
 	hash, err := bcrypt.GenerateFromPassword([]byte("hunter2"), bcrypt.MinCost)
-	assert.NilError(t, err)
-	assert.NilError(t, test.Store.Put("/users/alice", User{Name: "alice", Email: "alice@example.com", HashedPassword: hash}))
+	require.NoError(t, err)
+	require.NoError(t, test.Store.Put("/users/alice", User{Name: "alice", Email: "alice@example.com", HashedPassword: hash}))
 }
 
 func TestSessionCookieAttributes(t *testing.T) {
@@ -191,10 +192,10 @@ func TestSessionCookieAttributes(t *testing.T) {
 			test.Server.ServeHTTP(w, r)
 
 			cookies := w.Result().Cookies()
-			assert.Assert(t, is.Len(cookies, 1))
-			assert.Check(t, is.Equal(tc.secure, cookies[0].Secure))
-			assert.Check(t, cookies[0].HttpOnly)
-			assert.Check(t, is.Equal(http.SameSiteLaxMode, cookies[0].SameSite))
+			require.Len(t, cookies, 1)
+			assert.Equal(t, tc.secure, cookies[0].Secure)
+			assert.True(t, cookies[0].HttpOnly)
+			assert.Equal(t, http.SameSiteLaxMode, cookies[0].SameSite)
 		})
 	}
 }
@@ -204,14 +205,14 @@ var hardeningFormRE = regexp.MustCompile(`action="([^"]*)"`)
 func hardeningHidden(t *testing.T, body, name string) string {
 	t.Helper()
 	m := regexp.MustCompile(`name="` + name + `" value="([^"]*)"`).FindStringSubmatch(body)
-	assert.Assert(t, m != nil, "no %s in %s", name, body)
+	require.True(t, m != nil, "no %s in %s", name, body)
 	return html.UnescapeString(m[1])
 }
 
 func hardeningFormAction(t *testing.T, body string) string {
 	t.Helper()
 	m := hardeningFormRE.FindStringSubmatch(body)
-	assert.Assert(t, m != nil, "no form in %s", body)
+	require.True(t, m != nil, "no form in %s", body)
 	return html.UnescapeString(m[1])
 }
 
@@ -233,22 +234,22 @@ func hardeningSubmitLogin(t *testing.T, test *ServerTest, form, password string)
 
 func hardeningAssertSAMLResponse(t *testing.T, w *httptest.ResponseRecorder, relayState string) {
 	t.Helper()
-	assert.Check(t, is.Equal(http.StatusOK, w.Code))
+	assert.Equal(t, http.StatusOK, w.Code)
 	body := w.Body.String()
-	assert.Check(t, is.Equal("https://sp.example.com/saml2/acs", hardeningFormAction(t, body)))
-	assert.Check(t, is.Equal(relayState, hardeningHidden(t, body, "RelayState")))
+	assert.Equal(t, "https://sp.example.com/saml2/acs", hardeningFormAction(t, body))
+	assert.Equal(t, relayState, hardeningHidden(t, body, "RelayState"))
 	response, err := base64.StdEncoding.DecodeString(hardeningHidden(t, body, "SAMLResponse"))
-	assert.NilError(t, err)
-	assert.Check(t, strings.Contains(string(response), "EncryptedAssertion"), string(response))
+	require.NoError(t, err)
+	assert.True(t, strings.Contains(string(response), "EncryptedAssertion"), string(response))
 }
 
 func hardeningStartSSO(t *testing.T, test *ServerTest) string {
 	t.Helper()
 	u, err := test.SP.MakeRedirectAuthenticationRequest("frob")
-	assert.NilError(t, err)
+	require.NoError(t, err)
 	w := httptest.NewRecorder()
 	test.Server.ServeHTTP(w, httptest.NewRequest("GET", u.String(), nil))
-	assert.Assert(t, is.Equal(http.StatusOK, w.Code))
+	require.Equal(t, http.StatusOK, w.Code)
 	return w.Body.String()
 }
 
@@ -257,7 +258,7 @@ func TestFirstLoginReturnsToServiceProvider(t *testing.T) {
 	hardeningAddUser(t, test)
 
 	form := hardeningStartSSO(t, test)
-	assert.Check(t, is.Equal("https://idp.example.com/sso", hardeningFormAction(t, form)))
+	assert.Equal(t, "https://idp.example.com/sso", hardeningFormAction(t, form))
 
 	hardeningAssertSAMLResponse(t, hardeningSubmitLogin(t, test, form, "hunter2"), "frob")
 }
@@ -267,7 +268,7 @@ func TestFailedLoginKeepsTheRequestInProgress(t *testing.T) {
 	hardeningAddUser(t, test)
 
 	w := hardeningSubmitLogin(t, test, hardeningStartSSO(t, test), "wrong")
-	assert.Check(t, strings.Contains(w.Body.String(), "Invalid username or password"), w.Body.String())
+	assert.True(t, strings.Contains(w.Body.String(), "Invalid username or password"), w.Body.String())
 
 	hardeningAssertSAMLResponse(t, hardeningSubmitLogin(t, test, w.Body.String(), "hunter2"), "frob")
 }
@@ -275,19 +276,19 @@ func TestFailedLoginKeepsTheRequestInProgress(t *testing.T) {
 func TestStandaloneLoginFormPostsToLogin(t *testing.T) {
 	test := NewServerTest(t)
 	w := serveAdminRoute(test.Server, "GET", "/login")
-	assert.Check(t, is.Equal("https://idp.example.com/login", hardeningFormAction(t, w.Body.String())))
+	assert.Equal(t, "https://idp.example.com/login", hardeningFormAction(t, w.Body.String()))
 }
 
 func TestFirstLoginThroughShortcut(t *testing.T) {
 	test := NewServerTest(t)
 	hardeningAddUser(t, test)
-	assert.NilError(t, test.Store.Put("/shortcuts/app", Shortcut{
+	require.NoError(t, test.Store.Put("/shortcuts/app", Shortcut{
 		ServiceProviderID:     "https://sp.example.com/saml2/metadata",
 		URISuffixAsRelayState: true,
 	}))
 
 	w := serveAdminRoute(test.Server, "GET", "/login/app/whoami")
-	assert.Check(t, is.Equal("https://idp.example.com/login/app/whoami", hardeningFormAction(t, w.Body.String())))
+	assert.Equal(t, "https://idp.example.com/login/app/whoami", hardeningFormAction(t, w.Body.String()))
 
 	hardeningAssertSAMLResponse(t, hardeningSubmitLogin(t, test, w.Body.String(), "hunter2"), "/whoami")
 }
@@ -321,8 +322,8 @@ func TestLoginFormCanBeSubmittedAfterRequestDelay(t *testing.T) {
 			}
 
 			response := samlResponseXML(t, w)
-			assert.Check(t, is.Contains(response, saml.StatusRequestDenied))
-			assert.Check(t, !strings.Contains(response, "EncryptedAssertion"), response)
+			assert.Contains(t, response, saml.StatusRequestDenied)
+			assert.False(t, strings.Contains(response, "EncryptedAssertion"), response)
 		})
 	}
 }
@@ -342,13 +343,13 @@ func TestShortcutLoginFormStaysOnTheShortcutPath(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			test := NewServerTest(t)
 			hardeningAddUser(t, test)
-			assert.NilError(t, test.Store.Put("/shortcuts/app", Shortcut{
+			require.NoError(t, test.Store.Put("/shortcuts/app", Shortcut{
 				ServiceProviderID:     "https://sp.example.com/saml2/metadata",
 				URISuffixAsRelayState: true,
 			}))
 
 			w := serveAdminRoute(test.Server, "GET", "/login/app"+tc.suffix)
-			assert.Check(t, is.Equal("https://idp.example.com"+tc.action, hardeningFormAction(t, w.Body.String())))
+			assert.Equal(t, "https://idp.example.com"+tc.action, hardeningFormAction(t, w.Body.String()))
 
 			hardeningAssertSAMLResponse(t, hardeningSubmitLogin(t, test, w.Body.String(), "hunter2"), tc.relayState)
 		})
@@ -359,23 +360,23 @@ func TestShortcutLoginFormRejectsDotSegments(t *testing.T) {
 	for _, suffix := range []string{"%2e%2e", "%2e", ".%2e"} {
 		t.Run(suffix, func(t *testing.T) {
 			test := NewServerTest(t)
-			assert.NilError(t, test.Store.Put("/shortcuts/app", Shortcut{
+			require.NoError(t, test.Store.Put("/shortcuts/app", Shortcut{
 				ServiceProviderID:     "https://sp.example.com/saml2/metadata",
 				URISuffixAsRelayState: true,
 			}))
 
 			w := serveAdminRoute(test.Server, "GET", "/login/app/"+suffix)
-			assert.Check(t, is.Equal(http.StatusBadRequest, w.Code), w.Body.String())
+			assert.Equal(t, http.StatusBadRequest, w.Code, w.Body.String())
 		})
 	}
 }
 
 func TestShortcutGetIgnoresMalformedQuery(t *testing.T) {
 	test := NewServerTest(t)
-	assert.NilError(t, test.Store.Put("/shortcuts/app", Shortcut{ServiceProviderID: "https://sp.example.com/saml2/metadata"}))
+	require.NoError(t, test.Store.Put("/shortcuts/app", Shortcut{ServiceProviderID: "https://sp.example.com/saml2/metadata"}))
 
 	w := serveAdminRoute(test.Server, "GET", "/login/app?a=%zz")
-	assert.Check(t, is.Equal(http.StatusOK, w.Code))
+	assert.Equal(t, http.StatusOK, w.Code)
 }
 
 func TestSignedRedirectResumesAfterLogin(t *testing.T) {
@@ -403,5 +404,5 @@ func TestSignedRedirectResumesAfterLogin(t *testing.T) {
 
 	// Without the signed query the request is refused, so the field can't simply be dropped.
 	failed := hardeningSubmitLogin(t, test, form, "hunter2")
-	assert.Check(t, is.Equal(http.StatusBadRequest, failed.Code))
+	assert.Equal(t, http.StatusBadRequest, failed.Code)
 }

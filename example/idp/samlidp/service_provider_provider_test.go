@@ -10,8 +10,8 @@ import (
 	"testing"
 	"time"
 
-	"gotest.tools/assert"
-	is "gotest.tools/assert/cmp"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"authelia.com/provider/saml"
 )
@@ -29,37 +29,37 @@ func TestServiceProviderProviderIsAskedForUnregisteredServices(t *testing.T) {
 		testServiceMetadata(registered, "federation") + testServiceMetadata(federated, "federation") + `</EntitiesDescriptor>`
 	path := filepath.Join(t.TempDir(), "federation.xml")
 
-	assert.NilError(t, os.WriteFile(path, []byte(group), 0o600))
+	require.NoError(t, os.WriteFile(path, []byte(group), 0o600))
 
 	resolver, err := saml.NewServiceProviderMetadataResolver(saml.ServiceProviderMetadataResolverOptions{
 		Sources: []saml.MetadataSource{{File: path}},
 	})
-	assert.NilError(t, err)
-	assert.NilError(t, resolver.Refresh(context.Background()))
+	require.NoError(t, err)
+	require.NoError(t, resolver.Refresh(context.Background()))
 
 	store := &MemoryStore{}
 
 	metadata, err := saml.ParseServiceProviderMetadata([]byte(testServiceMetadata(registered, "sp")))
-	assert.NilError(t, err)
-	assert.NilError(t, store.Put("/services/sp", &Service{Metadata: *metadata}))
+	require.NoError(t, err)
+	require.NoError(t, store.Put("/services/sp", &Service{Metadata: *metadata}))
 
 	server, err := New(Options{
 		URL:                     url.URL{Scheme: "https", Host: "idp.example.com"},
 		Store:                   store,
 		ServiceProviderProvider: resolver,
 	})
-	assert.NilError(t, err)
+	require.NoError(t, err)
 
 	r, _ := http.NewRequest(http.MethodGet, "https://idp.example.com/sso", nil)
 
 	metadata, err = server.GetServiceProvider(r, federated)
-	assert.NilError(t, err)
-	assert.Check(t, is.Equal("https://federation.example.net/acs", metadata.SPSSODescriptors[0].AssertionConsumerServices[0].Location))
+	require.NoError(t, err)
+	assert.Equal(t, "https://federation.example.net/acs", metadata.SPSSODescriptors[0].AssertionConsumerServices[0].Location)
 
 	metadata, err = server.GetServiceProvider(r, registered)
-	assert.NilError(t, err)
-	assert.Check(t, is.Equal("https://sp.example.net/acs", metadata.SPSSODescriptors[0].AssertionConsumerServices[0].Location))
+	require.NoError(t, err)
+	assert.Equal(t, "https://sp.example.net/acs", metadata.SPSSODescriptors[0].AssertionConsumerServices[0].Location)
 
 	_, err = server.GetServiceProvider(r, "https://unknown.example.com/metadata")
-	assert.Check(t, errors.Is(err, os.ErrNotExist))
+	assert.True(t, errors.Is(err, os.ErrNotExist))
 }

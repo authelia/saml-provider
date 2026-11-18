@@ -9,8 +9,8 @@ import (
 	"testing"
 
 	"github.com/beevik/etree"
-	"gotest.tools/assert"
-	is "gotest.tools/assert/cmp"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"authelia.com/provider/saml/internal/dsig"
 )
@@ -81,14 +81,14 @@ func requestEncryptedID(req *IdpAuthnRequest) {
 func respond(t *testing.T, req *IdpAuthnRequest) string {
 	t.Helper()
 
-	assert.NilError(t, DefaultAssertionMaker{}.MakeAssertion(req, encryptedPartsSession))
-	assert.NilError(t, req.MakeResponse())
+	require.NoError(t, DefaultAssertionMaker{}.MakeAssertion(req, encryptedPartsSession))
+	require.NoError(t, req.MakeResponse())
 
 	doc := etree.NewDocument()
 	doc.SetRoot(req.ResponseEl)
 
 	body, err := doc.WriteToString()
-	assert.NilError(t, err)
+	require.NoError(t, err)
 
 	return body
 }
@@ -99,13 +99,13 @@ func sentAssertionElement(t *testing.T, test *IdentityProviderTest, body string)
 	t.Helper()
 
 	doc := etree.NewDocument()
-	assert.NilError(t, doc.ReadFromString(body))
+	require.NoError(t, doc.ReadFromString(body))
 
 	encryptedAssertion := doc.Root().FindElement("./EncryptedAssertion")
-	assert.Assert(t, encryptedAssertion != nil, "the assertion is not encrypted: %s", body)
+	require.True(t, encryptedAssertion != nil, "the assertion is not encrypted: %s", body)
 
 	el, err := test.SP.decryptElement(encryptedAssertion)
-	assert.NilError(t, err)
+	require.NoError(t, err)
 
 	return el
 }
@@ -129,49 +129,49 @@ func TestIDPIssuesEncryptedIDWhenRequested(t *testing.T) {
 	body := respond(t, req)
 
 	// What the identity provider keeps is in plaintext, for the enforcers and the participant record.
-	assert.Assert(t, req.Assertion.Subject.NameID != nil)
-	assert.Check(t, req.Assertion.Subject.EncryptedID == nil)
+	require.NotNil(t, req.Assertion.Subject.NameID)
+	assert.Nil(t, req.Assertion.Subject.EncryptedID)
 
 	sent := sentAssertionElement(t, test, body)
-	assert.Check(t, sent.FindElement("./Subject/NameID") == nil)
-	assert.Check(t, !strings.Contains(elementToString(sent.FindElement("./Subject")), req.Assertion.Subject.NameID.Value))
+	assert.Nil(t, sent.FindElement("./Subject/NameID"))
+	assert.False(t, strings.Contains(elementToString(sent.FindElement("./Subject")), req.Assertion.Subject.NameID.Value))
 
 	// SAMLCore §2.2.4 and §6.1.
 	encryptedID := sent.FindElement("./Subject/EncryptedID")
-	assert.Assert(t, encryptedID != nil)
-	assert.Check(t, is.Equal(encryptedID.Index(), 0))
-	assert.Check(t, is.Equal(xmlencElementType, encryptedID.FindElement("./EncryptedData").SelectAttrValue("Type", "")))
-	assert.Check(t, is.Equal(test.SP.MetadataURL.String(), encryptedID.FindElement("./EncryptedData/KeyInfo/EncryptedKey").SelectAttrValue("Recipient", "")))
+	require.NotNil(t, encryptedID)
+	assert.Equal(t, encryptedID.Index(), 0)
+	assert.Equal(t, xmlencElementType, encryptedID.FindElement("./EncryptedData").SelectAttrValue("Type", ""))
+	assert.Equal(t, test.SP.MetadataURL.String(), encryptedID.FindElement("./EncryptedData/KeyInfo/EncryptedKey").SelectAttrValue("Recipient", ""))
 
 	// The service provider of this library lists AES-128-GCM first, which is therefore what is negotiated.
-	assert.Check(t, is.Equal(aes128GCM, encryptedID.FindElement("./EncryptedData/EncryptionMethod").SelectAttrValue("Algorithm", "")))
+	assert.Equal(t, aes128GCM, encryptedID.FindElement("./EncryptedData/EncryptionMethod").SelectAttrValue("Algorithm", ""))
 
 	// SAMLCore §6.2: the NameID is encrypted first, so the signature of the assertion covers the EncryptedID.
-	assert.Check(t, test.SP.validateSignature(sent))
+	assert.NoError(t, test.SP.validateSignature(sent))
 
 	assertion, err := test.SP.ParseXMLResponse([]byte(body), []string{"id-request"}, test.SP.AcsURL)
-	assert.NilError(t, err)
-	assert.Assert(t, assertion.Subject != nil && assertion.Subject.NameID != nil)
+	require.NoError(t, err)
+	require.True(t, assertion.Subject != nil && assertion.Subject.NameID != nil)
 
 	// Errata E6: the identifier that was encrypted has a format of its own, not the encrypted one, which here
 	// is that of the session.
-	assert.Check(t, is.DeepEqual(*req.Assertion.Subject.NameID, *assertion.Subject.NameID))
-	assert.Check(t, is.Equal(assertion.Subject.NameID.Format, string(EmailAddressNameIDFormat)))
-	assert.Check(t, is.Equal(assertion.Subject.NameID.Value, "alice@example.com"))
-	assert.Check(t, is.Len(assertion.Subject.SubjectConfirmations, 1))
+	assert.Equal(t, *req.Assertion.Subject.NameID, *assertion.Subject.NameID)
+	assert.Equal(t, assertion.Subject.NameID.Format, string(EmailAddressNameIDFormat))
+	assert.Equal(t, assertion.Subject.NameID.Value, "alice@example.com")
+	assert.Len(t, assertion.Subject.SubjectConfirmations, 1)
 }
 
 func TestIDPDoesNotEncryptPartsUnasked(t *testing.T) {
 	test, req := encryptedPartsRequest(t)
 
 	sent := sentAssertionElement(t, test, respond(t, req))
-	assert.Check(t, sent.FindElement("./Subject/NameID") != nil)
-	assert.Check(t, sent.FindElement("./Subject/EncryptedID") == nil)
-	assert.Check(t, sent.FindElement("./AttributeStatement/EncryptedAttribute") == nil)
+	assert.NotNil(t, sent.FindElement("./Subject/NameID"))
+	assert.Nil(t, sent.FindElement("./Subject/EncryptedID"))
+	assert.Nil(t, sent.FindElement("./AttributeStatement/EncryptedAttribute"))
 
 	participant, err := (&IdpAuthnRequest{IDP: &test.IDP}).sessionParticipant()
-	assert.NilError(t, err)
-	assert.Check(t, participant == nil)
+	require.NoError(t, err)
+	assert.Nil(t, participant)
 }
 
 func TestIDPEncryptsNameIDByPolicy(t *testing.T) {
@@ -188,12 +188,12 @@ func TestIDPEncryptsNameIDByPolicy(t *testing.T) {
 
 			body := respond(t, req)
 			sent := sentAssertionElement(t, test, body)
-			assert.Check(t, is.Equal(tc.encrypted, sent.FindElement("./Subject/EncryptedID") != nil))
-			assert.Check(t, is.Equal(tc.encrypted, sent.FindElement("./Subject/NameID") == nil))
+			assert.Equal(t, tc.encrypted, sent.FindElement("./Subject/EncryptedID") != nil)
+			assert.Equal(t, tc.encrypted, sent.FindElement("./Subject/NameID") == nil)
 
 			assertion, err := test.SP.ParseXMLResponse([]byte(body), []string{"id-request"}, test.SP.AcsURL)
-			assert.NilError(t, err)
-			assert.Check(t, is.DeepEqual(*req.Assertion.Subject.NameID, *assertion.Subject.NameID))
+			require.NoError(t, err)
+			assert.Equal(t, *req.Assertion.Subject.NameID, *assertion.Subject.NameID)
 		})
 	}
 }
@@ -205,18 +205,18 @@ func TestIDPEncryptsAttributesByPolicy(t *testing.T) {
 
 		body := respond(t, req)
 		sent := sentAssertionElement(t, test, body)
-		assert.Check(t, sent.FindElement("./AttributeStatement/Attribute") == nil)
-		assert.Check(t, is.Len(sent.FindElements("./AttributeStatement/EncryptedAttribute"), 4))
-		assert.Check(t, sent.FindElement("./Subject/NameID") != nil)
+		assert.Nil(t, sent.FindElement("./AttributeStatement/Attribute"))
+		assert.Len(t, sent.FindElements("./AttributeStatement/EncryptedAttribute"), 4)
+		assert.NotNil(t, sent.FindElement("./Subject/NameID"))
 
 		// The NameID is the email address here, so only the other values show that the attributes are hidden.
-		assert.Check(t, !strings.Contains(elementToString(sent), "admins"))
-		assert.Check(t, test.SP.validateSignature(sent))
+		assert.False(t, strings.Contains(elementToString(sent), "admins"))
+		assert.NoError(t, test.SP.validateSignature(sent))
 
 		assertion, err := test.SP.ParseXMLResponse([]byte(body), []string{"id-request"}, test.SP.AcsURL)
-		assert.NilError(t, err)
-		assert.Check(t, is.DeepEqual(req.Assertion.AttributeStatements, assertion.AttributeStatements))
-		assert.Check(t, is.DeepEqual([]string{"uid", "mail", "eduPersonPrincipalName", "eduPersonAffiliation"}, friendlyNames(assertion.AttributeStatements)))
+		require.NoError(t, err)
+		assert.Equal(t, req.Assertion.AttributeStatements, assertion.AttributeStatements)
+		assert.Equal(t, []string{"uid", "mail", "eduPersonPrincipalName", "eduPersonAffiliation"}, friendlyNames(assertion.AttributeStatements))
 	})
 
 	t.Run("chosen attributes", func(t *testing.T) {
@@ -225,7 +225,7 @@ func TestIDPEncryptsAttributesByPolicy(t *testing.T) {
 		var asked []string
 
 		test.IDP.ElementEncryptionPolicy = elementEncryptionPolicyFunc{attribute: func(req *IdpAuthnRequest, attribute Attribute) bool {
-			assert.Check(t, is.Equal(req.ServiceProviderMetadata.EntityID, test.SP.MetadataURL.String()))
+			assert.Equal(t, req.ServiceProviderMetadata.EntityID, test.SP.MetadataURL.String())
 
 			asked = append(asked, attribute.FriendlyName)
 
@@ -233,7 +233,7 @@ func TestIDPEncryptsAttributesByPolicy(t *testing.T) {
 		}}
 
 		body := respond(t, req)
-		assert.Check(t, is.DeepEqual([]string{"uid", "mail", "eduPersonPrincipalName", "eduPersonAffiliation"}, asked))
+		assert.Equal(t, []string{"uid", "mail", "eduPersonPrincipalName", "eduPersonAffiliation"}, asked)
 
 		sent := sentAssertionElement(t, test, body)
 
@@ -244,19 +244,19 @@ func TestIDPEncryptsAttributesByPolicy(t *testing.T) {
 			tags = append(tags, child.Tag)
 		}
 
-		assert.Check(t, is.DeepEqual([]string{"Attribute", "Attribute", "EncryptedAttribute", "EncryptedAttribute"}, tags))
-		assert.Check(t, !strings.Contains(elementToString(sent), "admins"))
+		assert.Equal(t, []string{"Attribute", "Attribute", "EncryptedAttribute", "EncryptedAttribute"}, tags)
+		assert.False(t, strings.Contains(elementToString(sent), "admins"))
 
 		assertion, err := test.SP.ParseXMLResponse([]byte(body), []string{"id-request"}, test.SP.AcsURL)
-		assert.NilError(t, err)
-		assert.Check(t, is.DeepEqual([]string{"uid", "eduPersonPrincipalName", "mail", "eduPersonAffiliation"}, friendlyNames(assertion.AttributeStatements)))
+		require.NoError(t, err)
+		assert.Equal(t, []string{"uid", "eduPersonPrincipalName", "mail", "eduPersonAffiliation"}, friendlyNames(assertion.AttributeStatements))
 
 		groups := assertion.AttributeStatements[0].Attributes[3]
-		assert.Check(t, is.DeepEqual([]AttributeValue{{Type: "xs:string", Value: "admins"}, {Type: "xs:string", Value: "users"}}, groups.Values))
+		assert.Equal(t, []AttributeValue{{Type: "xs:string", Value: "admins"}, {Type: "xs:string", Value: "users"}}, groups.Values)
 
 		// The assertion the identity provider keeps is not changed.
-		assert.Check(t, is.DeepEqual([]string{"uid", "mail", "eduPersonPrincipalName", "eduPersonAffiliation"}, friendlyNames(req.Assertion.AttributeStatements)))
-		assert.Check(t, is.Len(req.Assertion.AttributeStatements[0].EncryptedAttributes, 0))
+		assert.Equal(t, []string{"uid", "mail", "eduPersonPrincipalName", "eduPersonAffiliation"}, friendlyNames(req.Assertion.AttributeStatements))
+		assert.Len(t, req.Assertion.AttributeStatements[0].EncryptedAttributes, 0)
 	})
 
 	t.Run("name id and attributes", func(t *testing.T) {
@@ -267,12 +267,12 @@ func TestIDPEncryptsAttributesByPolicy(t *testing.T) {
 
 		body := respond(t, req)
 		sent := sentAssertionElement(t, test, body)
-		assert.Check(t, !strings.Contains(elementToString(sent), "alice"))
+		assert.False(t, strings.Contains(elementToString(sent), "alice"))
 
 		assertion, err := test.SP.ParseXMLResponse([]byte(body), []string{"id-request"}, test.SP.AcsURL)
-		assert.NilError(t, err)
-		assert.Check(t, is.DeepEqual(*req.Assertion.Subject.NameID, *assertion.Subject.NameID))
-		assert.Check(t, is.DeepEqual(req.Assertion.AttributeStatements, assertion.AttributeStatements))
+		require.NoError(t, err)
+		assert.Equal(t, *req.Assertion.Subject.NameID, *assertion.Subject.NameID)
+		assert.Equal(t, req.Assertion.AttributeStatements, assertion.AttributeStatements)
 	})
 }
 
@@ -291,12 +291,12 @@ func TestIDPSendsNothingWhenAPartCannotBeEncrypted(t *testing.T) {
 		req.Assertion = &Assertion{Subject: &Subject{NameID: &NameID{Value: "alice"}}}
 
 		err := req.MakeAssertionEl()
-		assert.Check(t, errors.Is(err, ErrInvalidNameIDPolicy), "error: %v", err)
-		assert.Check(t, req.AssertionEl == nil)
-		assert.Check(t, is.ErrorContains(DefaultNameIDPolicyEnforcer{}.EnforceNameIDPolicy(req, nil), "the service provider has no encryption key"))
+		assert.True(t, errors.Is(err, ErrInvalidNameIDPolicy), "error: %v", err)
+		assert.Nil(t, req.AssertionEl)
+		assert.ErrorContains(t, DefaultNameIDPolicyEnforcer{}.EnforceNameIDPolicy(req, nil), "the service provider has no encryption key")
 
 		_, err = req.resolveNameID(encryptedPartsSession)
-		assert.Check(t, errors.Is(err, ErrInvalidNameIDPolicy), "error: %v", err)
+		assert.True(t, errors.Is(err, ErrInvalidNameIDPolicy), "error: %v", err)
 	})
 
 	t.Run("name id by policy", func(t *testing.T) {
@@ -305,12 +305,12 @@ func TestIDPSendsNothingWhenAPartCannotBeEncrypted(t *testing.T) {
 
 		test.IDP.ElementEncryptionPolicy = elementEncryptionPolicyFunc{nameID: func(*IdpAuthnRequest) bool { return true }}
 
-		assert.NilError(t, DefaultAssertionMaker{}.MakeAssertion(req, encryptedPartsSession))
+		require.NoError(t, DefaultAssertionMaker{}.MakeAssertion(req, encryptedPartsSession))
 
 		err := req.MakeResponse()
-		assert.Check(t, is.ErrorContains(err, "the NameID must be encrypted, and the service provider has no encryption key"))
-		assert.Check(t, !errors.Is(err, ErrInvalidNameIDPolicy))
-		assert.Check(t, req.AssertionEl == nil && req.ResponseEl == nil)
+		assert.ErrorContains(t, err, "the NameID must be encrypted, and the service provider has no encryption key")
+		assert.False(t, errors.Is(err, ErrInvalidNameIDPolicy))
+		assert.True(t, req.AssertionEl == nil && req.ResponseEl == nil)
 	})
 
 	t.Run("attribute by policy", func(t *testing.T) {
@@ -321,9 +321,9 @@ func TestIDPSendsNothingWhenAPartCannotBeEncrypted(t *testing.T) {
 			return attribute.FriendlyName == "mail"
 		}}
 
-		assert.NilError(t, DefaultAssertionMaker{}.MakeAssertion(req, encryptedPartsSession))
-		assert.Check(t, is.ErrorContains(req.MakeResponse(), `the attribute "urn:oid:0.9.2342.19200300.100.1.3" must be encrypted`))
-		assert.Check(t, req.AssertionEl == nil && req.ResponseEl == nil)
+		require.NoError(t, DefaultAssertionMaker{}.MakeAssertion(req, encryptedPartsSession))
+		assert.ErrorContains(t, req.MakeResponse(), `the attribute "urn:oid:0.9.2342.19200300.100.1.3" must be encrypted`)
+		assert.True(t, req.AssertionEl == nil && req.ResponseEl == nil)
 	})
 
 	t.Run("served", func(t *testing.T) {
@@ -341,10 +341,10 @@ func TestServeSSOIssuesEncryptedID(t *testing.T) {
 	encrypted := string(EncryptedNameIDFormat)
 
 	response := serveSSOWithPolicy(t, test, &Session{ID: "s", NameID: "alice"}, &NameIDPolicy{Format: &encrypted})
-	assert.Check(t, is.Equal(response.Status.StatusCode.Value, StatusSuccess))
-	assert.Check(t, response.EncryptedAssertion != nil)
-	assert.Assert(t, *captured != nil)
-	assert.Check(t, is.Equal((*captured).Format, string(TransientNameIDFormat)))
+	assert.Equal(t, response.Status.StatusCode.Value, StatusSuccess)
+	assert.NotNil(t, response.EncryptedAssertion)
+	require.NotNil(t, *captured)
+	assert.Equal(t, (*captured).Format, string(TransientNameIDFormat))
 }
 
 func TestSessionParticipantRecordsEncryptedNameID(t *testing.T) {
@@ -361,14 +361,14 @@ func TestSessionParticipantRecordsEncryptedNameID(t *testing.T) {
 			}
 
 			respond(t, req)
-			assert.NilError(t, req.PublishResponse(func() error { return nil }))
+			require.NoError(t, req.PublishResponse(func() error { return nil }))
 
 			participants := provider.participants[encryptedPartsSession.ID]
-			assert.Assert(t, is.Len(participants, 1))
-			assert.Check(t, is.Equal(requested, participants[0].NameIDEncrypted))
+			require.Len(t, participants, 1)
+			assert.Equal(t, requested, participants[0].NameIDEncrypted)
 
 			// The record has the identifier itself, which a logout is matched against.
-			assert.Check(t, is.DeepEqual(*req.Assertion.Subject.NameID, participants[0].NameID))
+			assert.Equal(t, *req.Assertion.Subject.NameID, participants[0].NameID)
 		})
 	}
 }
@@ -378,31 +378,31 @@ func TestSessionParticipantRecordsEncryptedNameID(t *testing.T) {
 func plaintextAssertionResponse(t *testing.T, req *IdpAuthnRequest, mutate func(sent *Assertion)) string {
 	t.Helper()
 
-	assert.NilError(t, DefaultAssertionMaker{}.MakeAssertion(req, encryptedPartsSession))
+	require.NoError(t, DefaultAssertionMaker{}.MakeAssertion(req, encryptedPartsSession))
 
 	sent, err := req.sentAssertion(req.elementEncrypter)
-	assert.NilError(t, err)
+	require.NoError(t, err)
 
 	if mutate != nil {
 		mutate(sent)
 	}
 
 	signingContext, err := req.IDP.signingContext()
-	assert.NilError(t, err)
+	require.NoError(t, err)
 
 	signed, err := signingContext.SignEnveloped(sent.Element())
-	assert.NilError(t, err)
+	require.NoError(t, err)
 
 	sent.Signature = signed.ChildElements()[len(signed.ChildElements())-1]
 	req.AssertionEl = sent.Element()
 
-	assert.NilError(t, req.MakeResponse())
+	require.NoError(t, req.MakeResponse())
 
 	doc := etree.NewDocument()
 	doc.SetRoot(req.ResponseEl)
 
 	body, err := doc.WriteToString()
-	assert.NilError(t, err)
+	require.NoError(t, err)
 
 	return body
 }
@@ -417,16 +417,16 @@ func TestSPDecryptsPartsOfPlaintextAssertion(t *testing.T) {
 		// SAMLCore §2.4.1.1: a SubjectConfirmation may identify the confirming entity with an EncryptedID too.
 		sent.Subject.SubjectConfirmations[0].EncryptedID = sent.Subject.EncryptedID
 	})
-	assert.Check(t, strings.Contains(body, "<saml:Assertion"))
-	assert.Check(t, !strings.Contains(body, "EncryptedAssertion"))
-	assert.Check(t, !strings.Contains(body, "admins"))
-	assert.Check(t, !strings.Contains(body, req.Assertion.Subject.NameID.Value))
+	assert.True(t, strings.Contains(body, "<saml:Assertion"))
+	assert.False(t, strings.Contains(body, "EncryptedAssertion"))
+	assert.False(t, strings.Contains(body, "admins"))
+	assert.False(t, strings.Contains(body, req.Assertion.Subject.NameID.Value))
 
 	assertion, err := test.SP.ParseXMLResponse([]byte(body), []string{"id-request"}, test.SP.AcsURL)
-	assert.NilError(t, err)
-	assert.Check(t, is.DeepEqual(*req.Assertion.Subject.NameID, *assertion.Subject.NameID))
-	assert.Check(t, is.DeepEqual(*req.Assertion.Subject.NameID, *assertion.Subject.SubjectConfirmations[0].NameID))
-	assert.Check(t, is.DeepEqual(req.Assertion.AttributeStatements, assertion.AttributeStatements))
+	require.NoError(t, err)
+	assert.Equal(t, *req.Assertion.Subject.NameID, *assertion.Subject.NameID)
+	assert.Equal(t, *req.Assertion.Subject.NameID, *assertion.Subject.SubjectConfirmations[0].NameID)
+	assert.Equal(t, req.Assertion.AttributeStatements, assertion.AttributeStatements)
 }
 
 func TestSPRejectsEncryptedPartsItCannotDecrypt(t *testing.T) {
@@ -443,19 +443,19 @@ func TestSPRejectsEncryptedPartsItCannotDecrypt(t *testing.T) {
 		test, body := response(t)
 
 		other, err := rsa.GenerateKey(rand.Reader, 2048)
-		assert.NilError(t, err)
+		require.NoError(t, err)
 
 		test.SP.Key = other
 
 		assertion, err := test.SP.ParseXMLResponse([]byte(body), []string{"id-request"}, test.SP.AcsURL)
-		assert.Check(t, assertion == nil)
-		assert.Assert(t, err != nil)
+		assert.Nil(t, assertion)
+		require.NotNil(t, err)
 
 		// The reason is for the service provider's own log, never for the user agent.
 		invalid := &InvalidResponseError{}
-		assert.Assert(t, errors.As(err, &invalid))
-		assert.Check(t, is.ErrorContains(invalid.PrivateErr, "failed to decrypt EncryptedID"))
-		assert.Check(t, !strings.Contains(err.Error(), "decrypt"))
+		require.True(t, errors.As(err, &invalid))
+		assert.ErrorContains(t, invalid.PrivateErr, "failed to decrypt EncryptedID")
+		assert.False(t, strings.Contains(err.Error(), "decrypt"))
 	})
 
 	t.Run("no key", func(t *testing.T) {
@@ -463,7 +463,7 @@ func TestSPRejectsEncryptedPartsItCannotDecrypt(t *testing.T) {
 		test.SP.Key = nil
 
 		_, err := test.SP.ParseXMLResponse([]byte(body), []string{"id-request"}, test.SP.AcsURL)
-		assert.Assert(t, err != nil)
+		require.NotNil(t, err)
 	})
 
 	// The signature covers the ciphertext, so a change to it is found before anything is decrypted.
@@ -471,10 +471,10 @@ func TestSPRejectsEncryptedPartsItCannotDecrypt(t *testing.T) {
 		test, body := response(t)
 
 		doc := etree.NewDocument()
-		assert.NilError(t, doc.ReadFromString(body))
+		require.NoError(t, doc.ReadFromString(body))
 
 		value := doc.Root().FindElement("./Assertion/Subject/EncryptedID/EncryptedData/CipherData/CipherValue")
-		assert.Assert(t, value != nil)
+		require.NotNil(t, value)
 
 		text := value.Text()
 		value.SetText(text[:10] + "AAAA" + text[14:])
@@ -483,13 +483,13 @@ func TestSPRejectsEncryptedPartsItCannotDecrypt(t *testing.T) {
 		doc.Root().RemoveChild(doc.Root().FindElement("./Signature"))
 
 		altered, err := doc.WriteToString()
-		assert.NilError(t, err)
+		require.NoError(t, err)
 
 		_, err = test.SP.ParseXMLResponse([]byte(altered), []string{"id-request"}, test.SP.AcsURL)
 
 		invalid := &InvalidResponseError{}
-		assert.Assert(t, errors.As(err, &invalid))
-		assert.Check(t, !strings.Contains(invalid.PrivateErr.Error(), "decrypt"), "error: %v", invalid.PrivateErr)
+		require.True(t, errors.As(err, &invalid))
+		assert.False(t, strings.Contains(invalid.PrivateErr.Error(), "decrypt"), "error: %v", invalid.PrivateErr)
 	})
 }
 
@@ -499,7 +499,7 @@ func TestSPRejectsSubjectWithTwoIdentifiers(t *testing.T) {
 	encrypter := &elementEncrypter{certificate: test.SPCertificate, encrypter: testElementEncrypter(t).encrypter}
 
 	encryptedID, err := encrypter.encryptNameID(&testEncryptedNameID)
-	assert.NilError(t, err)
+	require.NoError(t, err)
 
 	for name, build := range map[string]func(subject *etree.Element){
 		"name id and encrypted id": func(subject *etree.Element) {
@@ -517,7 +517,7 @@ func TestSPRejectsSubjectWithTwoIdentifiers(t *testing.T) {
 			build(assertion.CreateElement("saml:Subject"))
 
 			err := test.SP.decryptAssertionParts(reparse(t, assertion))
-			assert.Check(t, is.ErrorContains(err, "the Subject has more than one of NameID and EncryptedID"))
+			assert.ErrorContains(t, err, "the Subject has more than one of NameID and EncryptedID")
 		})
 	}
 
@@ -527,9 +527,9 @@ func TestSPRejectsSubjectWithTwoIdentifiers(t *testing.T) {
 		assertion.CreateElement("saml:Subject").AddChild(encryptedID.Copy())
 
 		el := reparse(t, assertion)
-		assert.NilError(t, test.SP.decryptAssertionParts(el))
-		assert.Check(t, el.FindElement("./Subject/EncryptedID") == nil)
-		assert.Check(t, is.Equal(testEncryptedNameID.Value, el.FindElement("./Subject/NameID").Text()))
+		require.NoError(t, test.SP.decryptAssertionParts(el))
+		assert.Nil(t, el.FindElement("./Subject/EncryptedID"))
+		assert.Equal(t, testEncryptedNameID.Value, el.FindElement("./Subject/NameID").Text())
 	})
 }
 
@@ -547,21 +547,21 @@ func TestQueryAnswerEncryptsPartsByPolicy(t *testing.T) {
 
 	response := f.queryAttributes(t, f.attributeQuery())
 	assertQueryStatus(t, response, StatusSuccess, "")
-	assert.Assert(t, is.Len(response.AssertionEls, 1))
-	assert.Check(t, is.Equal(response.Encrypted, 1))
+	require.Len(t, response.AssertionEls, 1)
+	assert.Equal(t, response.Encrypted, 1)
 
-	assert.Assert(t, is.Len(f.store.saved, 1))
+	require.Len(t, f.store.saved, 1)
 
 	for name, el := range map[string]*etree.Element{
 		"sent":  response.AssertionEls[0],
 		"saved": f.store.assertions[f.store.saved[0]].assertion,
 	} {
 		t.Run(name, func(t *testing.T) {
-			assert.Check(t, el.FindElement("./Subject/EncryptedID") != nil)
-			assert.Check(t, el.FindElement("./Subject/NameID") == nil)
-			assert.Check(t, el.FindElement("./AttributeStatement/EncryptedAttribute") != nil)
-			assert.Check(t, el.FindElement("./AttributeStatement/Attribute") == nil)
-			assert.Check(t, el.FindElement("./Signature") != nil)
+			assert.NotNil(t, el.FindElement("./Subject/EncryptedID"))
+			assert.Nil(t, el.FindElement("./Subject/NameID"))
+			assert.NotNil(t, el.FindElement("./AttributeStatement/EncryptedAttribute"))
+			assert.Nil(t, el.FindElement("./AttributeStatement/Attribute"))
+			assert.NotNil(t, el.FindElement("./Signature"))
 		})
 	}
 }
