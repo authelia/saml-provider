@@ -287,11 +287,18 @@ func TestIDPCheckEncryptionKeys(t *testing.T) {
 			},
 			err: "IdentityProvider.EncryptionCertificate and EncryptionKey must be set together",
 		},
-		"certificate with an ecdsa key": {
+		"certificate with an ecdsa key and an rsa private key": {
 			configure: func(test *IdentityProviderTest) {
 				test.IDP.EncryptionCertificate, test.IDP.EncryptionKey = ecdsaCertificate, current.Key
 			},
-			err: "IdentityProvider.EncryptionCertificate: the certificate does not have an RSA key",
+			err: "IdentityProvider.EncryptionKey: the private key of an elliptic curve certificate must be an *ecdsa.PrivateKey or an xmlenc.KeyAgreer",
+		},
+		"rsa certificate with an ecdsa private key": {
+			configure: func(test *IdentityProviderTest) {
+				key, _ := newECDSATestKey(t, elliptic.P256())
+				test.IDP.EncryptionCertificate, test.IDP.EncryptionKey = current.Certificate, key
+			},
+			err: "IdentityProvider.EncryptionKey: the private key of an RSA certificate must be a crypto.Decrypter",
 		},
 		"short key": {
 			configure: func(test *IdentityProviderTest) {

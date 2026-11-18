@@ -1394,9 +1394,11 @@ func (sp *ServiceProvider) DecryptNameID(encryptedID *etree.Element) (*NameID, e
 	return sp.elementDecrypter().decryptNameID(encryptedID)
 }
 
-// idpElementEncrypter returns the encrypter of elements to the identity provider: to the first RSA key in its
-// metadata that is for encryption, or else the first that is for any use, with the algorithms negotiated from the
-// EncryptionMethods of that key (SAMLProfiles §4.4.5, SAMLMeta §2.4.1.1).
+// idpElementEncrypter returns the encrypter of elements to the identity provider: to the first key in its metadata
+// that is for encryption, or else the first that is for any use, which it can encrypt to, with the algorithms
+// negotiated from the EncryptionMethods of that key (SAMLProfiles §4.4.5, SAMLMeta §2.4.1.1). The key is an RSA
+// key, which the key is transported to with RSA-OAEP, or an elliptic curve key on P-256, P-384 or P-521, with which
+// a key is agreed by ECDH-ES.
 func (sp *ServiceProvider) idpElementEncrypter() (*elementEncrypter, error) {
 	if sp.IDPMetadata == nil {
 		return nil, errors.New("cannot encrypt to the identity provider without its metadata")
@@ -1414,17 +1416,16 @@ func (sp *ServiceProvider) idpElementEncrypter() (*elementEncrypter, error) {
 					continue
 				}
 
-				// Only RSA key transport is supported, so a key of another type can't be encrypted to.
 				cert, err := parseCert(firstCertificateData(keyDescriptor))
 				if err != nil {
 					continue
 				}
 
-				if _, ok := cert.PublicKey.(*rsa.PublicKey); !ok {
+				if !isEncryptableKey(cert.PublicKey) {
 					continue
 				}
 
-				encrypter, err := policy.encrypter(keyDescriptor.EncryptionMethods)
+				encrypter, err := policy.encrypterFor(keyDescriptor.EncryptionMethods, Issuance{}, cert.PublicKey)
 				if err != nil {
 					return nil, fmt.Errorf("%s: %w", sp.IDPMetadata.EntityID, err)
 				}
@@ -1434,7 +1435,7 @@ func (sp *ServiceProvider) idpElementEncrypter() (*elementEncrypter, error) {
 		}
 	}
 
-	return nil, fmt.Errorf("the identity provider %q has no RSA encryption key in its metadata", sp.IDPMetadata.EntityID)
+	return nil, fmt.Errorf("the identity provider %q has no encryption key in its metadata that can be encrypted to", sp.IDPMetadata.EntityID)
 }
 
 // validateAssertion checks that the conditions specified in assertion match

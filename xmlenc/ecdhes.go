@@ -304,10 +304,10 @@ func concatKDF(hash crypto.Hash, shared, otherInfo []byte, keyLen int) ([]byte, 
 }
 
 // agreedKey returns the keySize bytes of the key encryption key of encryptedKeyEl that its AgreementMethod agrees
-// with the private key of the recipient, which is an *[ecdsa.PrivateKey] or an *[ecdh.PrivateKey]. Only ECDH-ES
+// with the private key of the recipient, which is an *[ecdsa.PrivateKey] or a KeyAgreer. Only ECDH-ES
 // with ConcatKDF is supported.
 func agreedKey(key interface{}, encryptedKeyEl *etree.Element, keySize int) ([]byte, error) {
-	private, err := ecdhPrivateKey(key)
+	private, curve, err := ecdhPrivateKey(key)
 	if err != nil {
 		return nil, err
 	}
@@ -335,7 +335,7 @@ func agreedKey(key interface{}, encryptedKeyEl *etree.Element, keySize int) ([]b
 		return nil, err
 	}
 
-	originator, err := readECKeyValue(agreementEl.FindElement("./OriginatorKeyInfo/KeyValue/ECKeyValue"), private.Curve())
+	originator, err := readECKeyValue(agreementEl.FindElement("./OriginatorKeyInfo/KeyValue/ECKeyValue"), curve)
 	if err != nil {
 		return nil, fmt.Errorf("the OriginatorKeyInfo: %w", err)
 	}
@@ -348,25 +348,60 @@ func agreedKey(key interface{}, encryptedKeyEl *etree.Element, keySize int) ([]b
 	return concatKDF(hash, shared, params.otherInfo(), keySize)
 }
 
-// ecdhPrivateKey returns the private key of the recipient of ECDH-ES, which is an *[ecdsa.PrivateKey] or an
-// *[ecdh.PrivateKey].
-func ecdhPrivateKey(key interface{}) (*ecdh.PrivateKey, error) {
+// KeyAgreer is a private key with which the recipient agrees a key by ECDH-ES. An *[ecdh.PrivateKey] is one, and
+// so may be a key held elsewhere, such as in a hardware security module, whose Public returns an *[ecdh.PublicKey]
+// or an *[ecdsa.PublicKey] on P-256, P-384 or P-521.
+type KeyAgreer interface {
+	// Public returns the public key.
+	Public() crypto.PublicKey
+
+	// ECDH returns the shared secret of the private key and remote, which is on its curve.
+	ECDH(remote *ecdh.PublicKey) ([]byte, error)
+}
+
+// ecdhPrivateKey returns the private key of the recipient of ECDH-ES, which is an *[ecdsa.PrivateKey] or a
+// KeyAgreer, and its curve.
+func ecdhPrivateKey(key interface{}) (KeyAgreer, ecdh.Curve, error) {
+	var agreer KeyAgreer
+
 	switch k := key.(type) {
 	case *ecdsa.PrivateKey:
 		if k == nil {
-			return nil, ErrIncorrectKeyType("*ecdsa.PrivateKey")
+			return nil, nil, ErrIncorrectKeyType("*ecdsa.PrivateKey")
 		}
 
-		return k.ECDH()
+		private, err := k.ECDH()
+		if err != nil {
+			return nil, nil, err
+		}
+
+		agreer = private
 	case *ecdh.PrivateKey:
 		if k == nil {
-			return nil, ErrIncorrectKeyType("*ecdh.PrivateKey")
+			return nil, nil, ErrIncorrectKeyType("*ecdh.PrivateKey")
 		}
 
-		return k, nil
+		agreer = k
+	case KeyAgreer:
+		agreer = k
 	default:
-		return nil, ErrIncorrectKeyType("[]byte, *ecdsa.PrivateKey or *ecdh.PrivateKey")
+		return nil, nil, ErrIncorrectKeyType("[]byte, *ecdsa.PrivateKey, *ecdh.PrivateKey or KeyAgreer")
 	}
+
+	switch public := agreer.Public().(type) {
+	case *ecdh.PublicKey:
+		if public != nil {
+			return agreer, public.Curve(), nil
+		}
+	case *ecdsa.PublicKey:
+		if public != nil {
+			if curve, ok := curveOf(public.Curve); ok {
+				return agreer, curve.ecdh, nil
+			}
+		}
+	}
+
+	return nil, nil, ErrIncorrectKeyType("key agreement key on P-256, P-384 or P-521")
 }
 
 // readConcatKDFParams returns the parameters and the hash of an xenc11:ConcatKDFParams element.

@@ -121,9 +121,10 @@ least the subset of SAML known as [interoperable SAML](https://kantarainitiative
 
 [^ecdsa]: Signatures use the `r||s` encoding XML Signature requires, and DER signatures are rejected unless
     `SignatureVerifier` is set. The IdP encrypts to the elliptic curve key of an SP by ECDH-ES (see **Encrypt
-    `Assertion`**), but only decrypts with an RSA key, so its metadata does not advertise encryption for an ECDSA
-    certificate, and neither does the metadata of the SP. An IdP that signs with ECDSA can have an RSA
-    `EncryptionKey`. XML signatures are verified against `xmlsec1` 1.3.13
+    `Assertion`**), and decrypts with an elliptic curve `EncryptionKey` (see **Encryption key and its rollover**),
+    but never with its ECDSA signing key, so its metadata does not advertise encryption for its ECDSA signing
+    certificate. The SP only decrypts with an RSA key, so its metadata does not advertise encryption for an ECDSA
+    certificate either. An IdP that signs with ECDSA can have an RSA or an elliptic curve `EncryptionKey`. XML signatures are verified against `xmlsec1` 1.3.13
     in both directions, on P-256, P-384 and P-521. HTTP-Redirect signatures are covered by unit tests only, and other
     implementations have not been tested.
 
@@ -1087,13 +1088,23 @@ without acting on it. See **`Scoping` and `ProxyRestriction`** below.
 - **Encryption key and its rollover:** `IdentityProvider.EncryptionCertificate` and `EncryptionKey`
   (`samlidp.Options` has both) are the key pair that SPs encrypt an `EncryptedID` or `NewEncryptedID` to. The metadata
   publishes the certificate in the one `KeyDescriptor` with `use="encryption"`, and the signing keys with
-  `use="signing"` only. The key is a `crypto.Decrypter`, so it can be an `*rsa.PrivateKey` or a key in an HSM, and the
-  IdP can sign with an ECDSA key or a `Signer` and still be encrypted to. It must be an RSA key, as only RSA-OAEP key
-  transport is supported, and is given `*rsa.OAEPOptions` with the digest and MGF1 hash of the sender. A device that
-  can't do every combination needs `KeyTransportMethods` and `KeyTransportDigestMethods` set to those it can.
+  `use="signing"` only. The IdP can sign with an ECDSA key or a `Signer` and still be encrypted to.
+  - **RSA:** an RSA key of at least 2048 bits is a `crypto.Decrypter`, so it can be an `*rsa.PrivateKey` or a key in
+    an HSM, the key of an `EncryptedKey` is transported to it with RSA-OAEP, and it is given `*rsa.OAEPOptions` with
+    the digest and MGF1 hash of the sender. A device that can't do every combination needs `KeyTransportMethods` and
+    `KeyTransportDigestMethods` set to those it can.
+  - **Elliptic curve:** a key on P-256, P-384 or P-521 is an `*ecdsa.PrivateKey`, an `*ecdh.PrivateKey`, or an
+    `xmlenc.KeyAgreer` for a key in an HSM, which is given the ephemeral public key of the sender and returns the
+    shared secret. A key is agreed with it by ECDH-ES (XML Encryption 1.1 §5.6.4), and the metadata lists ECDH-ES
+    and `KeyWrapMethods` for it, after the block ciphers, and no key transport. The IdP accepts an `EncryptedKey`
+    whose `AgreementMethod` is ECDH-ES with ConcatKDF and SHA-256, SHA-384 or SHA-512, and whose key wrap is one of
+    `KeyWrapMethods`. SHA-1, which XML Encryption 1.1 keeps for backwards compatibility, is not accepted. Its
+    certificate must have no `KeyUsage` extension or one with `keyAgreement`. What `xmlsec1` 1.3.13 encrypts to it
+    is decrypted, and the SP of this package encrypts to it.
   - **Fallback:** when they are not set, `Certificate` and `Key` are the encryption key, if `Key` is an RSA private key
-    and the certificate has no `KeyUsage` extension or one with `keyEncipherment`. Otherwise the metadata lists no
-    encryption key. A separate key is the better practice: with the fallback, changing the signing key also changes
+    and the certificate has no `KeyUsage` extension or one with `keyEncipherment`. An ECDSA signing key is never
+    used to decrypt, so that one key does not both sign and agree keys. Otherwise the metadata lists no encryption
+    key. A separate key is the better practice: with the fallback, changing the signing key also changes
     the encryption key.
   - **Rollover:** `IdentityProvider.DecryptionKeys` (`samlidp.Options.DecryptionKeys`) are key pairs which are
     decrypted with but never published. To change the encryption key without downtime:
@@ -1105,10 +1116,14 @@ without acting on it. See **`Scoping` and `ProxyRestriction`** below.
        be removed at once instead.
 
     A previous signing key that was the encryption key by the fallback is kept in `DecryptionKeys` in the same way.
+    The two keys may be of different types, so an RSA encryption key can be replaced by an elliptic curve one, and
+    the other way round.
     The next encryption certificate is not published ahead of the switch, unlike `RolloverCertificates`: an SP may
     encrypt to any encryption key in the metadata as soon as it sees it (Metadata Interoperability Profile §2.6.1),
     so the IdP must decrypt with a key before it publishes it, and only ever publishes one.
-  - **Key selection:** the keys tried for an `EncryptedKey` are those whose certificate its `KeyInfo` identifies, by
+  - **Key selection:** the keys tried for an `EncryptedKey` are those of the type it is for, elliptic curve keys when
+    it has an `AgreementMethod` and RSA keys otherwise, and of them those whose certificate its `KeyInfo`, or the
+    `RecipientKeyInfo` of its `AgreementMethod`, identifies, by
     `X509Certificate`, `X509SKI`, `X509SubjectName`, `X509Digest`, `RSAKeyValue`, or a `KeyName` which is the subject
     or its common name, and every key if it identifies none. `X509IssuerSerial` is not read. Every key that is tried
     is used, also after one has decrypted, so the number of private key operations depends on the `KeyInfo` and the

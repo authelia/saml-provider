@@ -144,7 +144,7 @@ func TestSPDoesNotSendNameIDItCannotEncrypt(t *testing.T) {
 	}
 
 	_, rsaCertificate := negotiationKey()
-	_, ecdsaCertificate := newECDSATestKey(t, elliptic.P256())
+	_, ecdsaCertificate := newECDSATestKey(t, elliptic.P224())
 
 	for name, tc := range map[string]struct {
 		metadata *EntityDescriptor
@@ -156,14 +156,14 @@ func TestSPDoesNotSendNameIDItCannotEncrypt(t *testing.T) {
 			&EntityDescriptor{EntityID: "https://idp.example.com", IDPSSODescriptors: []IDPSSODescriptor{{SSODescriptor: SSODescriptor{RoleDescriptor: RoleDescriptor{
 				KeyDescriptors: []KeyDescriptor{keyDescriptor("signing", rsaCertificate.Raw)},
 			}}}}},
-			`the identity provider "https://idp.example.com" has no RSA encryption key in its metadata`, "",
+			`the identity provider "https://idp.example.com" has no encryption key in its metadata that can be encrypted to`, "",
 		},
-		// Only RSA key transport is supported, so an ECDSA key is never encrypted to.
-		"ecdsa key": {
+		// ECDH-ES is only supported on P-256, P-384 and P-521, so a key on another curve is never encrypted to.
+		"ecdsa key on another curve": {
 			&EntityDescriptor{EntityID: "https://idp.example.com", IDPSSODescriptors: []IDPSSODescriptor{{SSODescriptor: SSODescriptor{RoleDescriptor: RoleDescriptor{
 				KeyDescriptors: []KeyDescriptor{keyDescriptor("encryption", ecdsaCertificate.Raw), keyDescriptor("", ecdsaCertificate.Raw)},
 			}}}}},
-			"has no RSA encryption key in its metadata", "",
+			"has no encryption key in its metadata that can be encrypted to", "",
 		},
 		"only algorithms that are not supported": {
 			&EntityDescriptor{EntityID: "https://idp.example.com", IDPSSODescriptors: []IDPSSODescriptor{{SSODescriptor: SSODescriptor{RoleDescriptor: RoleDescriptor{

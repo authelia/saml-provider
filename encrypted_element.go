@@ -275,12 +275,17 @@ func (d elementDecrypter) decryptOneKey(encryptedKeyEl *etree.Element) ([]byte, 
 		return nil, errors.New("there is no private key to decrypt with")
 	}
 
+	candidates := d.candidateKeys(encryptedKeyEl)
+	if len(candidates) == 0 {
+		return nil, errors.New("there is no private key of the type that the EncryptedKey is for")
+	}
+
 	var (
 		decrypted []byte
 		firstErr  error
 	)
 
-	for _, candidate := range d.candidateKeys(encryptedKeyEl) {
+	for _, candidate := range candidates {
 		key, err := xmlenc.Decrypt(candidate.key, encryptedKeyEl)
 
 		switch {
@@ -298,31 +303,40 @@ func (d elementDecrypter) decryptOneKey(encryptedKeyEl *etree.Element) ([]byte, 
 	return decrypted, nil
 }
 
-// candidateKeys returns the keys of this entity to decrypt encryptedKeyEl with: those whose certificate its
-// KeyInfo identifies, or all of them if it identifies none. The KeyInfo is a hint, which the Metadata
-// Interoperability Profile §2.5.1 says of every form but the key itself, so several keys may be identified, such as
-// by a name that the certificates of one entity share. A hint for a key that this entity doesn't hold rules
-// nothing out, except that xmlenc refuses to decrypt with a key which is not that of an X509Certificate.
+// candidateKeys returns the keys of this entity to decrypt encryptedKeyEl with: those of the type it is for, an
+// elliptic curve key when it has an AgreementMethod and an RSA key otherwise, and of those the ones whose
+// certificate its KeyInfo identifies, or the RecipientKeyInfo of its AgreementMethod, or all of them if it
+// identifies none. The KeyInfo is a hint, which the Metadata Interoperability Profile §2.5.1 says of every form but
+// the key itself, so several keys may be identified, such as by a name that the certificates of one entity share.
+// A hint for a key that this entity doesn't hold rules nothing out, except that xmlenc refuses to decrypt with an
+// RSA key which is not that of an X509Certificate.
 func (d elementDecrypter) candidateKeys(encryptedKeyEl *etree.Element) []decryptionKey {
-	if len(d.keys) < 2 {
-		return d.keys
+	agreementEl := encryptedKeyEl.FindElement("./KeyInfo/AgreementMethod")
+
+	keys := slices.DeleteFunc(slices.Clone(d.keys), func(k decryptionKey) bool { return k.agreesKeys() != (agreementEl != nil) })
+	if len(keys) < 2 {
+		return keys
 	}
 
 	keyInfoEl, err := findChild(encryptedKeyEl, xmldsigNamespace, "KeyInfo")
+	if agreementEl != nil {
+		keyInfoEl, err = findChild(agreementEl, xmlencNamespace, "RecipientKeyInfo")
+	}
+
 	if err != nil || keyInfoEl == nil {
-		return d.keys
+		return keys
 	}
 
 	var identified []decryptionKey
 
-	for _, key := range d.keys {
+	for _, key := range keys {
 		if key.certificate != nil && keyInfoIdentifies(keyInfoEl, key.certificate) {
 			identified = append(identified, key)
 		}
 	}
 
 	if len(identified) == 0 {
-		return d.keys
+		return keys
 	}
 
 	return identified
@@ -490,7 +504,8 @@ func (policy *encryptionPolicy) acceptsContentEncryption(encryptedDataEl *etree.
 
 // acceptsKeyTransport returns an error unless the policy allows the key transport algorithm of encryptedKeyEl
 // with its digest and mask generation function. Those it doesn't name are SHA-1 and MGF1 with SHA-1 (XML
-// Encryption §5.4.2 and XML Encryption 1.1 §5.5.2).
+// Encryption §5.4.2 and XML Encryption 1.1 §5.5.2). A key that is wrapped with a key agreed by ECDH-ES is
+// accepted as acceptsKeyAgreement says.
 func (policy *encryptionPolicy) acceptsKeyTransport(encryptedKeyEl *etree.Element) error {
 	methodEl := encryptedKeyEl.FindElement("./EncryptionMethod")
 	if methodEl == nil {
@@ -498,6 +513,11 @@ func (policy *encryptionPolicy) acceptsKeyTransport(encryptedKeyEl *etree.Elemen
 	}
 
 	algorithm := methodEl.SelectAttrValue("Algorithm", "")
+
+	if slices.Contains(keyWrapIdentifiers, algorithm) {
+		return policy.acceptsKeyAgreement(encryptedKeyEl, algorithm)
+	}
+
 	if !slices.Contains(policy.keyTransports, algorithm) {
 		return fmt.Errorf("the key transport algorithm %q is not allowed", algorithm)
 	}
@@ -523,6 +543,49 @@ func (policy *encryptionPolicy) acceptsKeyTransport(encryptedKeyEl *etree.Elemen
 
 	if !slices.ContainsFunc(policy.digests, func(d keyTransportDigest) bool { return d.mgf == mgf }) {
 		return fmt.Errorf("the mask generation function %q is not allowed", mgf)
+	}
+
+	return nil
+}
+
+// keyAgreementDigests are the digests of ConcatKDF that are accepted in what is encrypted to this entity by
+// ECDH-ES: SHA-256, which XML Encryption 1.1 §5.4.1 requires, and the stronger SHA-384 and SHA-512. SHA-1, which it
+// keeps only for backwards compatibility, is not.
+var keyAgreementDigests = []string{
+	"http://www.w3.org/2001/04/xmlenc#sha256",
+	"http://www.w3.org/2001/04/xmldsig-more#sha384",
+	"http://www.w3.org/2001/04/xmlenc#sha512",
+}
+
+// acceptsKeyAgreement returns an error unless encryptedKeyEl wraps its key with keyWrap, which the policy allows,
+// under a key that its AgreementMethod agrees by ECDH-ES with ConcatKDF and a digest of keyAgreementDigests. A
+// key that is wrapped under one which this entity would have to hold already isn't supported.
+func (policy *encryptionPolicy) acceptsKeyAgreement(encryptedKeyEl *etree.Element, keyWrap string) error {
+	if !slices.ContainsFunc(policy.keyWraps, func(w xmlenc.KeyWrap) bool { return w.Algorithm() == keyWrap }) {
+		return fmt.Errorf("the key wrap algorithm %q is not allowed", keyWrap)
+	}
+
+	agreementEl := encryptedKeyEl.FindElement("./KeyInfo/AgreementMethod")
+	if agreementEl == nil {
+		return errors.New("the EncryptedKey is wrapped with a key that is not agreed with this entity")
+	}
+
+	if algorithm := agreementEl.SelectAttrValue("Algorithm", ""); algorithm != algorithmECDHES {
+		return fmt.Errorf("the key agreement algorithm %q is not allowed", algorithm)
+	}
+
+	derivationEl := agreementEl.FindElement("./KeyDerivationMethod")
+	if derivationEl == nil || derivationEl.SelectAttrValue("Algorithm", "") != "http://www.w3.org/2009/xmlenc11#ConcatKDF" {
+		return errors.New("the key agreement does not derive its key with ConcatKDF")
+	}
+
+	digest := ""
+	if digestEl := derivationEl.FindElement("./ConcatKDFParams/DigestMethod"); digestEl != nil {
+		digest = digestEl.SelectAttrValue("Algorithm", "")
+	}
+
+	if !slices.Contains(keyAgreementDigests, digest) {
+		return fmt.Errorf("the key derivation digest %q is not allowed", digest)
 	}
 
 	return nil
