@@ -107,7 +107,7 @@ least the subset of SAML known as [interoperable SAML](https://kantarainitiative
 | ECDSA signatures (SHA-1/256/384/512)[^ecdsa][^sha1] | ✅  | ✅  |
 | Encrypt `Assertion`                          | ⚠️  | N/A |
 | Decrypt `EncryptedAssertion`                 | N/A | ✅  |
-| `EncryptedID` and `EncryptedAttribute`       | ⚠️  | ✅  |
+| `EncryptedID` and `EncryptedAttribute`       | ✅  | ✅  |
 
 [^sha1]: The IdP refuses a signature that it receives if its signature or digest algorithm is SHA-1, unless
     `IdentityProvider.SignatureMethods` and `DigestMethods` list it. The SP accepts SHA-1.
@@ -719,9 +719,14 @@ without acting on it. See **`Scoping` and `ProxyRestriction`** below.
   with the algorithms the IdP allows and GCM first. One that can't be decrypted is answered like a `NameID` which names no
   session, with `Success`, so that the answer says nothing about the ciphertext, and the reason is only reported to the `Observer`
   (`IdpLogoutRequest.Unidentified`). An SP that was sent an `EncryptedID` is sent one again in the `LogoutRequest` of a
-  propagated logout, and is skipped if it can no longer be encrypted to. `BaseID`, an `EncryptedID` that holds
-  anything but a `NameID`, and one in the `Subject` of an `AuthnRequest` or of a query are not supported, although
-  SAMLConformance §3.4 requires an `EncryptedID` to be accepted wherever a `NameID` is. The answer to
+  propagated logout, and is skipped if it can no longer be encrypted to. An `EncryptedID` is accepted wherever a
+  `NameID` is, as SAMLConformance §3.4 requires: in a `LogoutRequest`, a `ManageNameIDRequest`, a
+  `NameIDMappingRequest`, and the `Subject` of an `AuthnRequest` or of a query. One in an `AuthnRequest` is only
+  decrypted when the request is signed, as SAMLCore §6.2 has the SP encrypt and then sign and errata E93 has the
+  receiver require the integrity of a ciphertext before it acts on it, so an unsigned one is answered
+  `Requester/RequestUnsupported`. So is one in the `Subject` of an `AuthnRequest` or a query from an SP with no
+  encryption key, as the identifier is sent back encrypted. A `BaseID` is answered the same way, as SAMLCore defines
+  no concrete type of it that an IdP could act on. The answer to
   a query is made like any other assertion, so its `NameID` and attributes are encrypted when the policy says so, and
   `AssertionStore` is given the assertion as it was signed, with those parts encrypted.
 - **Name Identifier Management:** `IdentityProvider.ServeManageNameID` handles a `ManageNameIDRequest` from an SP on the
