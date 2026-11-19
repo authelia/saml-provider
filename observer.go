@@ -69,6 +69,9 @@ const (
 	// EventAssertionIDRequest is an AssertionIDRequest at ServeAssertionIDRequest.
 	EventAssertionIDRequest EventKind = "assertion_id_request"
 
+	// EventAssertionURI is a request for an assertion by its ID at ServeAssertionURI, on the SAML URI binding.
+	EventAssertionURI EventKind = "assertion_uri"
+
 	// EventNameIDManagement is a ManageNameIDRequest at ServeManageNameID or ServeSOAPManageNameID.
 	EventNameIDManagement EventKind = "name_id_management"
 

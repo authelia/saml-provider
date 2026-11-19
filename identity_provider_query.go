@@ -966,7 +966,8 @@ func (req *IdpAuthnRequest) saveAssertion(signedAssertionEl *etree.Element) {
 // addQueryMetadata adds the services of the assertion query and request protocol to the metadata, each only
 // when its URL is set and what it needs is there: an AttributeAuthorityDescriptor (SAMLMeta §2.4.7) and an
 // AuthnAuthorityDescriptor (SAMLMeta §2.4.5) with a QuerySessionProvider, and an AssertionIDRequestService in
-// those and in the IDPSSODescriptor (SAMLMeta §2.4.3) with an AssertionStore.
+// those and in the IDPSSODescriptor (SAMLMeta §2.4.3) with an AssertionStore: one on the SOAP binding, and one on
+// the URI binding with a URIRequesterAuthenticator too (SAMLBind §3.7.5.5).
 func (idp *IdentityProvider) addQueryMetadata(ed *EntityDescriptor, keyDescriptors []KeyDescriptor, nameIDFormats []NameIDFormat) {
 	_, queries := idp.SessionProvider.(QuerySessionProvider)
 
@@ -978,6 +979,10 @@ func (idp *IdentityProvider) addQueryMetadata(ed *EntityDescriptor, keyDescripto
 	var assertionIDRequestServices []Endpoint
 	if idp.AssertionStore != nil && idp.AssertionIDRequestServiceURL.String() != "" {
 		assertionIDRequestServices = []Endpoint{{Binding: SOAPBinding, Location: idp.AssertionIDRequestServiceURL.String()}}
+	}
+
+	if idp.assertionURIEnabled() {
+		assertionIDRequestServices = append(assertionIDRequestServices, Endpoint{Binding: URIBinding, Location: idp.AssertionURIURL.String()})
 	}
 
 	ed.IDPSSODescriptors[0].AssertionIDRequestServices = assertionIDRequestServices

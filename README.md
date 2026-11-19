@@ -72,6 +72,7 @@ least the subset of SAML known as [interoperable SAML](https://kantarainitiative
 | HTTP POST (`Response`)         | ✅  | ✅ |
 | HTTP Artifact (`Response`)     | ✅  | ✅ |
 | SOAP                           | ✅  | ⚠️ |
+| SAML URI                       | ✅  | ❌ |
 | HTTP POST "SimpleSign"         | ❌  | ❌ |
 | Reverse SOAP (PAOS)            | N/A | ❌ |
 
@@ -332,10 +333,11 @@ without acting on it. See **`Scoping` and `ProxyRestriction`** below.
   - Only the SSO `Response` is sent by artifact. Logout messages are not, and the IdP does not receive artifacts.
     `samlidp` does not serve the endpoint.
 - **Assertion Query/Request and Attribute Query:** `AttributeQuery`, `AuthnQuery` and `AssertionIDRequest` are served
-  on the SOAP binding only (SAMLProf §6). The SAML URI binding, which SAMLConformance §2 requires of authentication and
-  attribute authorities, and `AuthzDecisionQuery` are not supported. Each has its own handler and URL: `ServeAttributeQuery` at `IdentityProvider.AttributeServiceURL`, `ServeAuthnQuery` at
-  `AuthnQueryServiceURL` and `ServeAssertionIDRequest` at `AssertionIDRequestServiceURL`, and `Handler` serves those
-  that are set.
+  on the SOAP binding (SAMLProf §6), and an assertion can also be fetched by its ID on the SAML URI binding (SAMLBind
+  §3.7). `AuthzDecisionQuery` is not supported. Each has its own handler and URL: `ServeAttributeQuery` at
+  `IdentityProvider.AttributeServiceURL`, `ServeAuthnQuery` at `AuthnQueryServiceURL`, `ServeAssertionIDRequest` at
+  `AssertionIDRequestServiceURL` and `ServeAssertionURI` at `AssertionURIURL`, and `Handler` serves those that are
+  set.
   - The request must carry an enveloped signature by its issuer, as for a `LogoutRequest` over SOAP, and is answered
     on the same connection with a signed `Response`. One that is unsigned or can't be verified is answered
     `Requester/RequestDenied`, another message `Requester/RequestUnsupported`, and a wrong version, age or
@@ -345,9 +347,12 @@ without acting on it. See **`Scoping` and `ProxyRestriction`** below.
     sessions by the `NameID` of the query. Without it they are answered `Responder/RequestUnsupported`, and the
     metadata has no `AttributeAuthorityDescriptor` or `AuthnAuthorityDescriptor`. The provider decides which NameIDs
     an SP may ask about, and a transient NameID can only be found if the application stores the ones it issues. The
-    `Subject` must be a `NameID` alone: an `EncryptedID`, a `BaseID` or a `SubjectConfirmation` is answered
+    `Subject` must be a single `NameID` or `EncryptedID`. An `EncryptedID` is decrypted with the encryption key of the
+    IdP, and the assertion carries the identifier back to the SP as an `EncryptedID`; an SP with no encryption key gets
+    `Requester/RequestUnsupported` for one. A `BaseID` or a `SubjectConfirmation` is answered
     `Requester/RequestUnsupported`, a `SPNameQualifier` that isn't the SP or an affiliation it is a member of
-    `Requester/RequestDenied`. A principal that isn't found is answered `Success` with no assertion.
+    `Requester/RequestDenied`. A principal that isn't found, or an `EncryptedID` that can't be decrypted, is answered
+    `Success` with no assertion.
   - The assertion carries the `NameID` of the query and no `SubjectConfirmation`, is signed, and is encrypted as for
     single sign-on: when the SP has an encryption key, unless `IssuancePolicy` says otherwise. When there is nothing
     to state the answer is `Success` with no assertion (SAMLCore §3.3.4).
@@ -364,6 +369,18 @@ without acting on it. See **`Scoping` and `ProxyRestriction`** below.
     sign-on or a query issues, signed and before encryption. Without it the request is answered
     `Responder/RequestUnsupported` and the service isn't in the metadata. An assertion is only returned to the SP it
     was issued to, and at most 32 are returned for one request. `samlidp` implements neither interface.
+  - The URI binding is a `GET` of `AssertionURIURL` with a single `ID` parameter, answered with the stored assertion
+    as `application/samlassertion+xml` and `Cache-Control: no-cache, no-store`. It needs `AssertionStore` and
+    `IdentityProvider.URIRequesterAuthenticator`, which names the SP that sent the request; without them it is not
+    served or listed in the metadata. The library authenticates nobody itself: the application does, by HTTP basic
+    authentication, mutual TLS or a header from a trusted proxy (SAMLConformance §3.5). Errors are an HTTP status with
+    an empty body: 405 for another method, 400 for a query that isn't a single `ID`, 403 for a requester that isn't
+    authenticated or isn't a known SP, and 404 for an assertion that is unknown or was issued to another SP, which
+    can't be told apart. The binding can't carry an `EncryptedAssertion`, so an assertion that single sign-on would
+    encrypt as a whole for the SP is refused with 403 rather than sent in plaintext: in practice only an SP with no
+    encryption key, or one for which `IssuancePolicy` gives `NoAssertionEncryption`, can use it. Any `EncryptedID`
+    or `EncryptedAttribute` is returned as it was issued, and the requester relies on TLS for the integrity of the
+    assertion (SAMLBind §3.7.3). `AssertionURIURL` may share a path with `AssertionIDRequestServiceURL`.
 - **SOAP:** used for single logout, artifact resolution, the assertion query and request protocol, ECP, and name
   identifier management and mapping, which is every profile on the SOAP binding but `AuthzDecisionQuery`. The URLs of
   these services may share a path with each other, and with `SSOURL`, `LogoutURL` or `ManageNameIDURL`: `Handler`

@@ -10,13 +10,14 @@ import (
 
 // Handler returns an [http.Handler] that serves the metadata and SSO URLs, and each of the other URLs that is set:
 // LogoutURL, SOAPLogoutURL, ECPURL, ArtifactResolutionURL, AttributeServiceURL, AuthnQueryServiceURL,
-// AssertionIDRequestServiceURL, ManageNameIDURL, SOAPManageNameIDURL and NameIDMappingURL. A URL with an empty path
-// is served at "/".
+// AssertionIDRequestServiceURL, AssertionURIURL, ManageNameIDURL, SOAPManageNameIDURL and NameIDMappingURL. A URL
+// with an empty path is served at "/". AssertionURIURL is only served with an AssertionStore and a
+// URIRequesterAuthenticator.
 //
 // URLs may share a path, and Handler doesn't panic when they do. A request that is not a SOAP request, which is a
 // POST with a text/xml body that no front-channel binding sends, goes to the front-channel service of its path:
-// ServeMetadata, ServeSSO, ServeSLO or ServeManageNameID, or the first of them in that order if several share the
-// path. A SOAP request
+// ServeMetadata, ServeSSO, ServeSLO, ServeAssertionURI or ServeManageNameID, or the first of them in that order if
+// several share the path. A SOAP request
 // goes to the service on the SOAP binding of its path. If several of those share the path, the body is read, up to
 // the size that a SOAP request may have, and the request goes to the service of the SAML message in the Body of
 // the envelope: a LogoutRequest to ServeSOAPLogout, an AuthnRequest to ServeECP, an ArtifactResolve to
@@ -60,6 +61,10 @@ func (idp *IdentityProvider) Handler() http.Handler {
 
 	if idp.AssertionIDRequestServiceURL.String() != "" {
 		routes.addSOAP(idp.AssertionIDRequestServiceURL, assertionIDRequestMessage, idp.ServeAssertionIDRequest)
+	}
+
+	if idp.assertionURIEnabled() {
+		routes.addFront(idp.AssertionURIURL, idp.ServeAssertionURI)
 	}
 
 	if idp.ManageNameIDURL.String() != "" {
