@@ -2178,19 +2178,31 @@ func firstSet(a, b string) string {
 
 // findChildren returns all the elements matching childNS/childTag that are direct children of parentEl.
 func findChildren(parentEl *etree.Element, childNS string, childTag string) ([]*etree.Element, error) {
-	var rv []*etree.Element
+	var (
+		rv        []*etree.Element
+		parentCtx *etreeutils.NSContext
+	)
 
 	for _, childEl := range parentEl.ChildElements() {
 		if childEl.Tag != childTag {
 			continue
 		}
 
-		ctx, err := etreeutils.NSBuildParentContext(childEl)
-		if err != nil {
-			return nil, err
+		// The context of parentEl is the same for every child, so it is built once, for the first that may match.
+		if parentCtx == nil {
+			ctx, err := etreeutils.NSBuildParentContext(parentEl)
+			if err != nil {
+				return nil, err
+			}
+
+			if ctx, err = ctx.SubContext(parentEl); err != nil {
+				return nil, err
+			}
+
+			parentCtx = &ctx
 		}
 
-		ctx, err = ctx.SubContext(childEl)
+		ctx, err := parentCtx.SubContext(childEl)
 		if err != nil {
 			return nil, err
 		}

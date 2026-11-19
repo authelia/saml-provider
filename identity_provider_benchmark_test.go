@@ -16,6 +16,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"authelia.com/provider/saml/internal/dsig"
+	"authelia.com/provider/saml/internal/dsig/etreeutils"
 )
 
 // benchmarkRequestSizes are the sizes of the requests that are made to cost the most, up to maxAuthnRequestSize. A
@@ -115,21 +116,20 @@ var benchmarkShapes = []benchmarkShape{
 		},
 	},
 	{
-		// Namespace declarations on the root element, and elements that are named as the signature is, for each
-		// of which the namespaces in scope are collected to tell whether it is one. It needs no signature, so it
-		// is what a request to a service provider that doesn't sign its requests can cost too.
+		// Namespace declarations on the root element, and elements that are named as the signature is and declare a
+		// namespace each, for each of which the namespaces in scope are copied and looked into to tell whether it is
+		// one. It needs no signature, so it is what a request to a service provider that doesn't sign its requests
+		// can cost too.
 		name:      "namespaces and signature named elements, unsigned",
 		signature: benchmarkSignatureNone,
 		refusal:   benchmarkRefusalUnsigned,
 		fill: func(budget int) (attrs, before, after string) {
-			before = strings.Repeat("<Signature/>", budget/2/len("<Signature/>"))
-
-			return benchmarkRepeat(budget-len(before), benchmarkDeclaration), before, ""
+			return benchmarkFillNamespaces(budget, `<Signature xmlns:x="u"/>`)
 		},
 	},
 	{
-		// Namespace declarations on the root element, and elements before the signature, for each of which the
-		// search for the signature copies the namespaces in scope.
+		// Namespace declarations on the root element, and elements before the signature that declare a namespace
+		// each, for each of which the search for the signature copies the namespaces in scope.
 		name:      "namespaces and elements, forged",
 		signature: benchmarkSignatureForged,
 		refusal:   benchmarkRefusalSignature,
@@ -145,12 +145,36 @@ var benchmarkShapes = []benchmarkShape{
 	},
 }
 
-// benchmarkFillNamespacesAndElements gives half of the budget to elements, which is what makes the most pairs of
-// an element and a namespace in scope, until there are as many elements as there can be.
+// benchmarkFillNamespacesAndElements fills the request with namespaces and elements that each declare one more,
+// before the signature.
 func benchmarkFillNamespacesAndElements(budget int) (attrs, before, after string) {
-	before = strings.Repeat("<a/>", min(benchmarkElements, budget/2/len("<a/>")))
+	return benchmarkFillNamespaces(budget, `<a xmlns:x="u"/>`)
+}
 
-	return benchmarkRepeat(budget-len(before), benchmarkDeclaration), before, ""
+// benchmarkDeclarations is the most namespace declarations that can be added to the root element of a request:
+// internal/dsig refuses a request with more than etreeutils.MaxPrefixes namespace prefixes in scope, and the
+// request has six in scope before any are added, with those of the signature, and an element added declares one.
+const benchmarkDeclarations = etreeutils.MaxPrefixes - 8
+
+// benchmarkFillNamespaces declares as many namespaces on the root element as can be in half of the budget, and gives
+// the rest to as many of element as can be added, as declarations that nothing uses don't change the digest. Each element declares a namespace, so its context is a copy of
+// every namespace in scope, which is what makes the most pairs of an element and a namespace in scope.
+func benchmarkFillNamespaces(budget int, element string) (attrs, before, after string) {
+	var declarations strings.Builder
+
+	for i := range benchmarkDeclarations {
+		declaration := benchmarkDeclaration(i)
+		if declarations.Len()+len(declaration) > budget/2 {
+			break
+		}
+
+		declarations.WriteString(declaration)
+	}
+
+	attrs = declarations.String()
+	before = strings.Repeat(element, min(benchmarkElements, (budget-len(attrs))/len(element)))
+
+	return attrs, before, ""
 }
 
 // benchmarkDeclaration returns the declaration of namespace prefix i.
