@@ -135,13 +135,13 @@ func (idp *IdentityProvider) verifyFrontChannelRequester(r *http.Request, root *
 		return nil, nil, ErrSignatureRequired.WithDebug("request is not signed")
 	}
 
-	certificates, err := serviceProviderSigningCertificates(metadata)
+	keys, err := serviceProviderSigningKeys(metadata)
 	if err != nil {
 		return nil, nil, ErrServerError.WithDebugError(err)
 	}
 
-	if len(certificates) == 0 {
-		return nil, nil, ErrInvalidSignature.WithDebug("request is signed but the service provider has no signing certificate")
+	if len(keys) == 0 {
+		return nil, nil, ErrInvalidSignature.WithDebug("request is signed but the service provider has no signing key")
 	}
 
 	// A list that can't be used is a fault of the identity provider, and not of the requester.
@@ -153,7 +153,7 @@ func (idp *IdentityProvider) verifyFrontChannelRequester(r *http.Request, root *
 	var verified *etree.Element
 
 	if redirectQuery != "" {
-		if err = verifyRedirectSignature(redirectQuery, "SAMLRequest", certificates, policy); err != nil {
+		if err = verifyRedirectSignature(redirectQuery, "SAMLRequest", keys, policy); err != nil {
 			return nil, nil, ErrInvalidSignature.WithDebugf("invalid request signature: %s", err).WithWrap(err)
 		}
 
@@ -162,7 +162,7 @@ func (idp *IdentityProvider) verifyFrontChannelRequester(r *http.Request, root *
 	}
 
 	if signatureEl != nil {
-		if verified, err = verifyEnvelopedSignature(root, certificates, policy); err != nil {
+		if verified, err = verifyEnvelopedSignature(root, keys, policy); err != nil {
 			return nil, nil, ErrInvalidSignature.WithDebugf("invalid request signature: %s", err).WithWrap(err)
 		}
 	}

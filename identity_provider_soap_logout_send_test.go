@@ -136,7 +136,7 @@ func soapLogoutSPReadRequest(sp *ServiceProvider, r *http.Request) (*LogoutReque
 		return nil, nil, err
 	}
 
-	verified, err := verifyEnvelopedSignature(message.Message, certificates, anySignaturePolicy)
+	verified, err := verifyEnvelopedSignature(message.Message, certificateVerificationKeys(certificates), anySignaturePolicy)
 	if err != nil {
 		return nil, nil, err
 	}

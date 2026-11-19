@@ -375,6 +375,16 @@ without acting on it. See **`Scoping` and `ProxyRestriction`** below.
   algorithms of the signature are held to `IdentityProvider.SignatureMethods` and `DigestMethods` (see **Accepted
   signature algorithms**). A custom login form must send `IdpAuthnRequest.RedirectQuery` in the `SAMLRedirectQuery`
   field, because the signature of a redirect does not survive being re-presented as a POST.
+  - The keys that this and every other signature of an SP is verified with are those of the `KeyDescriptor`s of its
+    metadata with `use="signing"` or no `use`, in either form that the Metadata Interoperability Profile (§2.6.1)
+    requires a consumer of metadata to support: its `X509Certificate`s, or when a descriptor has none a bare key in a
+    `ds:KeyValue` with an `RSAKeyValue`. When a descriptor has both, the certificate is the one used. A `ds:KeyValue`
+    with another type of key, such as a `dsig11:ECKeyValue`, is not read and is passed over, as is a descriptor that
+    only names its key with a `KeyName`. A certificate or `RSAKeyValue` that is there and can't be parsed fails every
+    signed message of the SP instead.
+  - A key in a certificate only verifies while the certificate is valid, and a signature whose `KeyInfo` holds a
+    certificate must hold that one. A key given as a `ds:KeyValue` has no certificate, so it has no validity period and
+    verifies a signature whatever the `KeyInfo` holds. As with a certificate, the size of the key is not checked.
 - **`NameIDPolicy`:** a request that the assertion can't satisfy receives an `InvalidNameIDPolicy` status. The
   `NameIDProvider` of `IdentityProvider` issues the `NameID`, and `DefaultNameIDProvider` is used if there is none. The
   metadata advertises `NameIDProvider.NameIDFormats`, which is transient by default.
@@ -1078,7 +1088,8 @@ without acting on it. See **`Scoping` and `ProxyRestriction`** below.
   `IgnoreKeyUsage` or a lower `MinimumRSAKeySize`, each of which relaxes only its own check, or to a custom enforcer
   to decide differently for each SP: it is given a `ServiceProviderEncryptionKey` with the `PublicKey` and the
   `Certificate`, which is nil for a `ds:KeyValue`, and is asked before anything is encrypted to any key. With
-  `samlidp`, set it on `Server.IDP`. The certificates used to verify signed requests from SPs are not checked.
+  `samlidp`, set it on `Server.IDP`. The certificates used to verify signed requests from SPs are not checked, and
+  neither are signing keys that an SP gives only as a `ds:KeyValue`.
 - **Signing key rollover:** `IdentityProvider.RolloverCertificates` (`samlidp.Options.RolloverCertificates`) publishes
   further signing certificates in the metadata after `Certificate`, each in its own `KeyDescriptor`, as the Metadata
   Interoperability Profile §2.5 allows, but never signs with them. Publish the next certificate there until every SP has

@@ -898,13 +898,13 @@ func (req *IdpLogoutRequest) verifySignature() error {
 		return ErrSignatureRequired.WithDebug("request is not signed")
 	}
 
-	certificates, err := serviceProviderSigningCertificates(req.ServiceProviderMetadata)
+	keys, err := serviceProviderSigningKeys(req.ServiceProviderMetadata)
 	if err != nil {
 		return ErrServerError.WithDebugError(err)
 	}
 
-	if len(certificates) == 0 {
-		return errors.New("request is signed but the service provider has no signing certificate")
+	if len(keys) == 0 {
+		return errors.New("request is signed but the service provider has no signing key")
 	}
 
 	// A list that can't be used is a fault of the identity provider, and not of the requester.
@@ -914,7 +914,7 @@ func (req *IdpLogoutRequest) verifySignature() error {
 	}
 
 	if req.RedirectQuery != "" {
-		if err := verifyRedirectSignature(req.RedirectQuery, "SAMLRequest", certificates, policy); err != nil {
+		if err := verifyRedirectSignature(req.RedirectQuery, "SAMLRequest", keys, policy); err != nil {
 			return fmt.Errorf("invalid request signature: %w", err)
 		}
 
@@ -923,7 +923,7 @@ func (req *IdpLogoutRequest) verifySignature() error {
 	}
 
 	if signatureEl != nil {
-		verified, err := verifyEnvelopedSignature(doc.Root(), certificates, policy)
+		verified, err := verifyEnvelopedSignature(doc.Root(), keys, policy)
 		if err != nil {
 			return fmt.Errorf("invalid request signature: %w", err)
 		}

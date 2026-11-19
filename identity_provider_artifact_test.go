@@ -200,7 +200,7 @@ func artifactResponse(t *testing.T, w *httptest.ResponseRecorder) (*ArtifactResp
 	require.True(t, len(names) >= 3)
 	assert.Equal(t, names[:3], []string{"Issuer", "Signature", "Status"})
 
-	verified, err := verifyEnvelopedSignature(el, []*x509.Certificate{mustParseCertificate(golden.Get(t, "idp_cert.pem"))}, anySignaturePolicy)
+	verified, err := verifyEnvelopedSignature(el, certificateVerificationKeys([]*x509.Certificate{mustParseCertificate(golden.Get(t, "idp_cert.pem"))}), anySignaturePolicy)
 	require.NoError(t, err)
 
 	response := &ArtifactResponse{}
@@ -985,7 +985,7 @@ func TestServeArtifactResolution(t *testing.T) {
 	message := assertResolvedArtifactResponse(t, serveArtifactResolution(test, r), id, authnRequestID)
 
 	// The message is the signed Response that the POST binding would have delivered, unchanged.
-	_, err := verifyEnvelopedSignature(message, []*x509.Certificate{mustParseCertificate(golden.Get(t, "idp_cert.pem"))}, anySignaturePolicy)
+	_, err := verifyEnvelopedSignature(message, certificateVerificationKeys([]*x509.Certificate{mustParseCertificate(golden.Get(t, "idp_cert.pem"))}), anySignaturePolicy)
 	require.NoError(t, err)
 	assert.Equal(t, message.SelectAttrValue("Destination", ""), "https://sp.example.com/saml2/acs")
 

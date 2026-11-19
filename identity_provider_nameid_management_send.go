@@ -273,16 +273,16 @@ func verifyManageNameIDResponseSignature(root *etree.Element, response *ManageNa
 		return response, nil
 	}
 
-	certificates, err := serviceProviderSigningCertificates(metadata)
+	keys, err := serviceProviderSigningKeys(metadata)
 	if err != nil {
 		return nil, err
 	}
 
-	if len(certificates) == 0 {
-		return nil, errors.New("response is signed but the service provider has no signing certificate")
+	if len(keys) == 0 {
+		return nil, errors.New("response is signed but the service provider has no signing key")
 	}
 
-	verified, err := verifyEnvelopedSignature(root, certificates, policy)
+	verified, err := verifyEnvelopedSignature(root, keys, policy)
 	if err != nil {
 		return nil, fmt.Errorf("invalid response signature: %w", err)
 	}

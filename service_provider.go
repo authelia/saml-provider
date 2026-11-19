@@ -2042,7 +2042,7 @@ func (sp *ServiceProvider) ValidateLogoutResponseRedirect(u *url.URL, possibleRe
 			return retErr
 		}
 
-		if err := verifyRedirectSignature(u.RawQuery, "SAMLResponse", certificates, anySignaturePolicy); err != nil {
+		if err := verifyRedirectSignature(u.RawQuery, "SAMLResponse", certificateVerificationKeys(certificates), anySignaturePolicy); err != nil {
 			retErr.PrivateErr = err
 			return retErr
 		}

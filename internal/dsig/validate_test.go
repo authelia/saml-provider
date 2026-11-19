@@ -511,3 +511,52 @@ func TestValidateRefusesAlgorithmsThatAreNotListed(t *testing.T) {
 	require.Error(t, validate(sha256, []string{}, nil))
 	require.Error(t, validate(sha256, nil, []string{}))
 }
+
+// A key that is trusted without a certificate verifies a signature whatever its KeyInfo holds, and no other key
+// does.
+func TestValidateWithKey(t *testing.T) {
+	signer := RandomKeyStoreForTest()
+	signingContext := NewDefaultSigningContext(signer)
+
+	el := &etree.Element{Tag: "ExampleElement"}
+	el.CreateAttr("ID", "id1234")
+
+	signed, err := signingContext.SignEnveloped(el)
+	require.NoError(t, err)
+
+	key, _, err := signer.GetKeyPair()
+	require.NoError(t, err)
+
+	// The store is empty, so the certificate in the KeyInfo of the signature is not trusted.
+	validationContext := NewDefaultValidationContext(&MemoryX509CertificateStore{})
+	validationContext.SignatureMethods = []string{RSASHA256SignatureMethod}
+	validationContext.DigestMethods = []string{SHA256DigestMethod}
+
+	_, err = validationContext.Validate(signed)
+	require.Error(t, err)
+
+	verified, err := validationContext.ValidateWithKey(signed, &key.PublicKey)
+	require.NoError(t, err)
+	require.Equal(t, "ExampleElement", verified.Tag)
+	require.Equal(t, "id1234", verified.SelectAttrValue("ID", ""))
+
+	other, _, err := RandomKeyStoreForTest().GetKeyPair()
+	require.NoError(t, err)
+
+	_, err = validationContext.ValidateWithKey(signed, &other.PublicKey)
+	require.Error(t, err)
+
+	_, err = validationContext.ValidateWithKey(signed, nil)
+	require.Error(t, err)
+
+	validationContext.SignatureMethods = []string{RSASHA512SignatureMethod}
+	_, err = validationContext.ValidateWithKey(signed, &key.PublicKey)
+	require.ErrorContains(t, err, "is not allowed")
+
+	altered := signed.Copy()
+	altered.CreateAttr("Other", "value")
+
+	validationContext.SignatureMethods = nil
+	_, err = validationContext.ValidateWithKey(altered, &key.PublicKey)
+	require.Error(t, err)
+}

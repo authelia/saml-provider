@@ -4,6 +4,7 @@ package dsig
 
 import (
 	"bytes"
+	"crypto"
 	"crypto/x509"
 	"encoding/base64"
 	"encoding/xml"
@@ -230,7 +231,7 @@ func (ctx *ValidationContext) getCanonicalSignedInfo(sig *types.Signature) ([]by
 	return canonical, nil
 }
 
-func (ctx *ValidationContext) validateSignature(el *etree.Element, sig *types.Signature, cert *x509.Certificate) (*etree.Element, error) {
+func (ctx *ValidationContext) validateSignature(el *etree.Element, sig *types.Signature, public crypto.PublicKey) (*etree.Element, error) {
 
 	// Actually verify the 'SignedInfo' was signed by a trusted source
 	signatureMethod := sig.SignedInfo.SignatureMethod.Algorithm
@@ -263,7 +264,7 @@ func (ctx *ValidationContext) validateSignature(el *etree.Element, sig *types.Si
 		return nil, errors.New("Could not decode signature")
 	}
 
-	err = checkSignature(cert, algo, canonicalSignedInfoBytes, decodedSignature)
+	err = checkSignature(public, algo, canonicalSignedInfoBytes, decodedSignature)
 	if err != nil {
 		return nil, err
 	}
@@ -570,5 +571,27 @@ func (ctx *ValidationContext) Validate(el *etree.Element) (*etree.Element, error
 		return nil, err
 	}
 
-	return ctx.validateSignature(el, sig, cert)
+	return ctx.validateSignature(el, sig, cert.PublicKey)
+}
+
+// ValidateWithKey verifies that the passed element contains a valid enveloped signature made with the key which
+// public is the public half of, and returns the content that the signature covers. It is for a key that is
+// trusted without a certificate, such as one that metadata gives as a ds:KeyValue, so the CertificateStore of the
+// context has no part in it, and nor has the KeyInfo of the signature: whatever key or certificate that names,
+// the signature is only valid if public verifies it. The key has no validity period to check. The SignatureMethods
+// and DigestMethods of the context are held to as they are by Validate.
+func (ctx *ValidationContext) ValidateWithKey(el *etree.Element, public crypto.PublicKey) (*etree.Element, error) {
+	if public == nil {
+		return nil, errors.New("missing key to verify the signature with")
+	}
+
+	// Make a copy of the element to avoid mutating the one we were passed.
+	el = el.Copy()
+
+	sig, err := ctx.findSignature(el)
+	if err != nil {
+		return nil, err
+	}
+
+	return ctx.validateSignature(el, sig, public)
 }
