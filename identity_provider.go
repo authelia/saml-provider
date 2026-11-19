@@ -714,6 +714,17 @@ type IdentityProvider struct {
 	// AssertionIDRequest is then refused.
 	AssertionStore AssertionStore
 
+	// AssertionURIURL is the endpoint of the SAML URI binding (SAMLBind §3.7), which ServeAssertionURI
+	// handles: a GET with a single ID parameter returns the assertion with that ID from the AssertionStore. It
+	// must have no query string of its own (SAMLBind §3.7.5.1), and may share a path with
+	// AssertionIDRequestServiceURL. When it, AssertionStore and URIRequesterAuthenticator are set, the
+	// metadata lists it and Handler serves it.
+	AssertionURIURL url.URL
+
+	// URIRequesterAuthenticator names the service provider that sent a request to AssertionURIURL, as the URI
+	// binding carries no signed message. Without it the URI binding is not served.
+	URIRequesterAuthenticator URIRequesterAuthenticator
+
 	// AuthnContextEnforcer decides whether the authentication of a session satisfies a
 	// RequestedAuthnContext. Defaults to a DefaultAuthnContextEnforcer with no Strength, which only
 	// accepts a class that the request lists, and never satisfies the better comparison.
@@ -3014,27 +3025,40 @@ func (req *IdpAuthnRequest) MakeAssertionEl() error {
 // itself when the service provider has no encryption key or the IssuancePolicy gives
 // NoAssertionEncryption for it. The encryption key is then not looked at, as nothing is encrypted.
 func (req *IdpAuthnRequest) encryptAssertionEl(signedAssertionEl *etree.Element) (*etree.Element, error) {
+	encrypter, err := req.wholeAssertionEncrypter()
+	if err != nil {
+		return nil, err
+	}
+
+	if encrypter == nil {
+		return signedAssertionEl, nil
+	}
+
+	return encrypter.encryptAssertion(signedAssertionEl)
+}
+
+// wholeAssertionEncrypter returns the encrypter that the assertion is encrypted with as a whole, or nil if it is sent
+// in plaintext: when the IssuancePolicy gives NoAssertionEncryption for the service provider, or the service
+// provider has no encryption key and the policy doesn't require encryption. The encryption key is not looked at
+// under NoAssertionEncryption. An error is returned if the assertion can't be sent either way.
+func (req *IdpAuthnRequest) wholeAssertionEncrypter() (*elementEncrypter, error) {
 	issuance, err := req.Issuance(req.Session)
 	if err != nil {
 		return nil, err
 	}
 
 	if issuance.AssertionEncryption == NoAssertionEncryption {
-		return signedAssertionEl, nil
+		return nil, nil
 	}
 
 	encrypter, err := req.elementEncrypter()
 	if errors.Is(err, os.ErrNotExist) {
-		if err := req.checkPlaintextAssertion(issuance); err != nil {
-			return nil, err
-		}
-
-		return signedAssertionEl, nil
+		return nil, req.checkPlaintextAssertion(issuance)
 	} else if err != nil {
 		return nil, err
 	}
 
-	return encrypter.encryptAssertion(signedAssertionEl)
+	return encrypter, nil
 }
 
 // checkPlaintextAssertion returns an error if issuance, which is that of the request, doesn't allow an assertion
