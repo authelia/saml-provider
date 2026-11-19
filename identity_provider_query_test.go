@@ -70,23 +70,16 @@ func (p *querySessionProvider) record(r *http.Request, req *IdpQueryRequest, nam
 	p.serviceProviders = append(p.serviceProviders, req.ServiceProviderMetadata.EntityID)
 }
 
-// storedAssertion is an assertion in a testAssertionStore.
-type storedAssertion struct {
-	serviceProviderID string
-	assertion         *etree.Element
-	notOnOrAfter      time.Time
-}
-
 // testAssertionStore is an AssertionStore in memory which records what it was asked.
 type testAssertionStore struct {
-	assertions map[string]storedAssertion
+	assertions map[string]*StoredAssertion
 	saved      []string
 	gets       []string
 	saveErr    error
 	getErr     error
 }
 
-func (s *testAssertionStore) SaveAssertion(r *http.Request, serviceProviderEntityID string, assertion *etree.Element, notOnOrAfter time.Time) error {
+func (s *testAssertionStore) SaveAssertion(r *http.Request, assertion *StoredAssertion) error {
 	if r == nil {
 		panic("the store must get the HTTP request")
 	}
@@ -96,29 +89,24 @@ func (s *testAssertionStore) SaveAssertion(r *http.Request, serviceProviderEntit
 	}
 
 	if s.assertions == nil {
-		s.assertions = map[string]storedAssertion{}
+		s.assertions = map[string]*StoredAssertion{}
 	}
 
-	id := assertion.SelectAttrValue("ID", "")
-	s.assertions[id] = storedAssertion{serviceProviderEntityID, assertion, notOnOrAfter}
+	id := assertion.Assertion.SelectAttrValue("ID", "")
+	s.assertions[id] = assertion
 	s.saved = append(s.saved, id)
 
 	return nil
 }
 
-func (s *testAssertionStore) GetAssertion(_ *http.Request, id string) (*etree.Element, string, error) {
+func (s *testAssertionStore) GetAssertion(_ *http.Request, id string) (*StoredAssertion, error) {
 	s.gets = append(s.gets, id)
 
 	if s.getErr != nil {
-		return nil, "", s.getErr
+		return nil, s.getErr
 	}
 
-	stored, ok := s.assertions[id]
-	if !ok {
-		return nil, "", nil
-	}
-
-	return stored.assertion, stored.serviceProviderID, nil
+	return s.assertions[id], nil
 }
 
 // queryFixture is an identity provider with every service of the assertion query and request protocol, and a
@@ -623,8 +611,8 @@ func TestServeQueryRejects(t *testing.T) {
 			t.Run(service.name+"/"+tc.name, func(t *testing.T) {
 				f := newQueryFixture(t)
 				f.requestAttributes(requested(mailAttributeName, uriAttrNameFormat))
-				f.store.assertions = map[string]storedAssertion{
-					queryTestStoredAssertionID: {f.test.SP.MetadataURL.String(), etree.NewElement("saml:Assertion"), time.Time{}},
+				f.store.assertions = map[string]*StoredAssertion{
+					queryTestStoredAssertionID: {ServiceProvider: f.test.SP.MetadataURL.String(), Assertion: etree.NewElement("saml:Assertion")},
 				}
 
 				response := f.answer(t, f.serve(service, tc.request(t, f, service)))
@@ -814,11 +802,12 @@ func TestServeAttributeQuery(t *testing.T) {
 	require.Equal(t, f.store.saved, []string{assertion.ID})
 
 	saved := f.store.assertions[assertion.ID]
-	assert.Equal(t, saved.serviceProviderID, f.test.SP.MetadataURL.String())
-	assert.True(t, saved.notOnOrAfter.Equal(assertion.Conditions.NotOnOrAfter))
-	assert.Equal(t, saved.assertion.Tag, "Assertion")
+	assert.Equal(t, saved.ServiceProvider, f.test.SP.MetadataURL.String())
+	assert.True(t, saved.NotOnOrAfter.Equal(assertion.Conditions.NotOnOrAfter))
+	assert.Equal(t, saved.Assertion.Tag, "Assertion")
+	assert.True(t, saved.Encrypted, "it was sent encrypted")
 
-	_, err := verifyEnvelopedSignature(saved.assertion, certificateVerificationKeys([]*x509.Certificate{f.test.Certificate}), anySignaturePolicy)
+	_, err := verifyEnvelopedSignature(saved.Assertion, certificateVerificationKeys([]*x509.Certificate{f.test.Certificate}), anySignaturePolicy)
 	assert.NoError(t, err)
 }
 
@@ -1460,10 +1449,10 @@ func (f *queryFixture) storeAssertion(t *testing.T, id, serviceProviderID string
 	require.NoError(t, err)
 
 	if f.store.assertions == nil {
-		f.store.assertions = map[string]storedAssertion{}
+		f.store.assertions = map[string]*StoredAssertion{}
 	}
 
-	f.store.assertions[id] = storedAssertion{serviceProviderID, signed, TimeNow().Add(MaxIssueDelay)}
+	f.store.assertions[id] = &StoredAssertion{ServiceProvider: serviceProviderID, Assertion: signed, NotOnOrAfter: TimeNow().Add(MaxIssueDelay)}
 
 	return signed
 }
@@ -1536,7 +1525,7 @@ func TestServeAssertionIDRequestSelects(t *testing.T) {
 				el := etree.NewElement("samlp:Response")
 				el.CreateAttr("xmlns:samlp", samlProtocolNS)
 				el.CreateAttr("ID", "id-response")
-				f.store.assertions["id-response"] = storedAssertion{f.test.SP.MetadataURL.String(), el, time.Time{}}
+				f.store.assertions["id-response"] = &StoredAssertion{ServiceProvider: f.test.SP.MetadataURL.String(), Assertion: el}
 			},
 			top: StatusSuccess,
 		},
@@ -1574,6 +1563,63 @@ func TestServeAssertionIDRequestSelects(t *testing.T) {
 			}
 
 			assert.Equal(t, found, tc.found)
+		})
+	}
+}
+
+func TestServeAssertionIDRequestKeepsEncryption(t *testing.T) {
+	noEncryption := func(f *queryFixture) {
+		encryption := NoAssertionEncryption
+		f.test.IDP.IssuancePolicy = DefaultIssuancePolicy{ServiceProviders: map[string]ServiceProviderIssuance{
+			f.test.SP.MetadataURL.String(): {AssertionEncryption: &encryption},
+		}}
+	}
+
+	noKey := func(f *queryFixture) {
+		f.metadata = func(metadata *EntityDescriptor) {
+			descriptor := &metadata.SPSSODescriptors[0]
+
+			signing := descriptor.KeyDescriptors[:0]
+			for _, keyDescriptor := range descriptor.KeyDescriptors {
+				if keyDescriptor.Use == "signing" {
+					signing = append(signing, keyDescriptor)
+				}
+			}
+
+			descriptor.KeyDescriptors = signing
+		}
+	}
+
+	testCases := []struct {
+		name      string
+		sent      bool
+		setup     []func(*queryFixture)
+		top       string
+		encrypted int
+	}{
+		{name: "sent in plaintext, now no assertion encryption", setup: []func(*queryFixture){noEncryption}, top: StatusSuccess},
+		{name: "sent encrypted, now no assertion encryption", sent: true, setup: []func(*queryFixture){noEncryption}, top: StatusSuccess, encrypted: 1},
+		{name: "sent in plaintext, now without a key", setup: []func(*queryFixture){noKey}, top: StatusSuccess},
+		{name: "sent encrypted, now without a key", sent: true, setup: []func(*queryFixture){noKey}, top: StatusResponder},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			f := newQueryFixture(t)
+			f.storeAssertion(t, queryTestStoredAssertionID, f.test.SP.MetadataURL.String())
+			f.store.assertions[queryTestStoredAssertionID].Encrypted = tc.sent
+
+			for _, setup := range tc.setup {
+				setup(f)
+			}
+
+			response := f.requestAssertions(t, f.assertionIDRequest(queryTestStoredAssertionID))
+			assertQueryStatus(t, response, tc.top, "")
+
+			if tc.top == StatusSuccess {
+				require.Len(t, response.Assertions, 1)
+				assert.Equal(t, tc.encrypted, response.Encrypted)
+			}
 		})
 	}
 }
@@ -1653,9 +1699,10 @@ func TestServeSSOSavesAssertion(t *testing.T) {
 	require.Equal(t, f.store.saved, []string{id})
 
 	saved := f.store.assertions[id]
-	assert.Equal(t, saved.serviceProviderID, f.test.SP.MetadataURL.String())
-	assert.True(t, saved.notOnOrAfter.Equal(TimeNow().Add(MaxIssueDelay)))
-	assert.Equal(t, elementString(t, saved.assertion), elementString(t, assertionEl))
+	assert.Equal(t, saved.ServiceProvider, f.test.SP.MetadataURL.String())
+	assert.True(t, saved.NotOnOrAfter.Equal(TimeNow().Add(MaxIssueDelay)))
+	assert.Equal(t, elementString(t, saved.Assertion), elementString(t, assertionEl))
+	assert.True(t, saved.Encrypted, "it was sent encrypted")
 
 	// The service provider can fetch what it was sent.
 	fetched := f.requestAssertions(t, f.assertionIDRequest(id))

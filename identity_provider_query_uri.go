@@ -43,10 +43,10 @@ func (idp *IdentityProvider) assertionURIEnabled() bool {
 // issued to another service provider is answered 404 Not Found, in the same way, so that a requester can't learn
 // which assertions there are.
 //
-// The URI binding returns an Assertion, never an EncryptedAssertion, so an assertion that single sign-on would
-// encrypt as a whole for the service provider is refused with 403 Forbidden rather than sent in plaintext: that
-// is the case for a service provider with an encryption key, unless the IssuancePolicy gives NoAssertionEncryption
-// for it. An EncryptedID or EncryptedAttribute in the assertion is returned as it was issued. The requester relies
+// The URI binding returns an Assertion, never an EncryptedAssertion, so an assertion that was sent encrypted as a
+// whole, or that single sign-on would now encrypt as a whole for the service provider, is refused with 403
+// Forbidden rather than sent in plaintext. Single sign-on encrypts for a service provider with an encryption key,
+// unless the IssuancePolicy gives NoAssertionEncryption for it. An EncryptedID or EncryptedAttribute in the assertion is returned as it was issued. The requester relies
 // on TLS for the identity of the identity provider and the integrity of the assertion (SAMLBind §3.7.3).
 //
 // Without an AssertionStore or a URIRequesterAuthenticator every request is answered 404 Not Found. Each request
@@ -135,15 +135,21 @@ func (idp *IdentityProvider) assertionURI(r *http.Request, state *requestState) 
 
 	state.serviceProvider, state.verified = metadata.EntityID, true
 
-	assertion, serviceProviderID, err := idp.AssertionStore.GetAssertion(r, id)
+	stored, err := idp.AssertionStore.GetAssertion(r, id)
 	if err != nil {
 		return nil, http.StatusInternalServerError, ErrServerError.WithDebugf("cannot get an assertion: %s", err).WithWrap(err)
 	}
 
 	// An assertion issued to another service provider is answered as an unknown one, so that the answer
 	// doesn't tell a requester which IDs there are.
-	if assertion == nil || serviceProviderID != metadata.EntityID || !isAssertionWithID(assertion, id) {
+	if !stored.isFor(metadata.EntityID, id) {
 		return nil, http.StatusNotFound, ErrRequestDenied.WithDebug("the assertion is unknown, or was not issued to the requester")
+	}
+
+	// The URI binding has no EncryptedAssertion, and an assertion that was sent encrypted is never sent in
+	// plaintext, whatever the IssuancePolicy now gives.
+	if stored.Encrypted {
+		return nil, http.StatusForbidden, ErrRequestDenied.WithDebug("the assertion was sent encrypted, which the URI binding can't carry")
 	}
 
 	query := &IdpQueryRequest{IDP: idp, HTTPRequest: r, ServiceProviderMetadata: metadata, Now: TimeNow()}
@@ -166,7 +172,7 @@ func (idp *IdentityProvider) assertionURI(r *http.Request, state *requestState) 
 		return nil, http.StatusForbidden, ErrRequestDenied.WithDebug("the assertion would be encrypted for the service provider, which the URI binding can't carry")
 	}
 
-	return assertion, http.StatusOK, nil
+	return stored.Assertion, http.StatusOK, nil
 }
 
 // assertionURIID returns the ID that a request on the SAML URI binding asks for, which is the only query

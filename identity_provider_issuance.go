@@ -211,11 +211,10 @@ type IssuancePolicy interface {
 	// sign-on only the ContentEncryptionMethod and the key transport of the answer are then used, and req has the
 	// SPSSODescriptor whose key is encrypted to, and an HTTPRequest that the identity provider made itself.
 	//
-	// An assertion from the AssertionStore is returned to a service provider on the AssertionEncryption that is
-	// given for a req that only has the HTTPRequest of the requester, ServiceProviderMetadata, SPSSODescriptor and
-	// Defaults. Unless that is NoAssertionEncryption, an AssertionIDRequest gets it encrypted as single sign-on
-	// would, and the URI binding refuses it. A policy that has single sign-on encrypt the assertion must not give
-	// NoAssertionEncryption for that req, or the assertion can be fetched in plaintext.
+	// When an assertion is fetched from the AssertionStore, it is asked again, with a req that only has the
+	// HTTPRequest of the requester, ServiceProviderMetadata, SPSSODescriptor and Defaults. Its AssertionEncryption
+	// can then have the assertion encrypted, or refused on the URI binding, but can't have one that was sent
+	// encrypted returned in plaintext.
 	//
 	// Whatever is returned, the Assertion is signed if the SPSSODescriptor of the service provider sets
 	// WantAssertionsSigned.

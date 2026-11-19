@@ -312,7 +312,7 @@ func TestServeAssertionURIHidesOtherServiceProviders(t *testing.T) {
 			name: "store returns another assertion",
 			setup: func(f *uriFixture) {
 				other := f.storeAssertion(t, "id-else", f.test.SP.MetadataURL.String())
-				f.store.assertions[queryTestStoredAssertionID] = storedAssertion{f.test.SP.MetadataURL.String(), other, TimeNow()}
+				f.store.assertions[queryTestStoredAssertionID] = &StoredAssertion{ServiceProvider: f.test.SP.MetadataURL.String(), Assertion: other, NotOnOrAfter: TimeNow()}
 			},
 		},
 		{
@@ -321,7 +321,7 @@ func TestServeAssertionURIHidesOtherServiceProviders(t *testing.T) {
 				el := etree.NewElement("saml:Response")
 				el.CreateAttr("xmlns:saml", samlAssertionNS)
 				el.CreateAttr("ID", queryTestStoredAssertionID)
-				f.store.assertions = map[string]storedAssertion{queryTestStoredAssertionID: {f.test.SP.MetadataURL.String(), el, TimeNow()}}
+				f.store.assertions = map[string]*StoredAssertion{queryTestStoredAssertionID: {ServiceProvider: f.test.SP.MetadataURL.String(), Assertion: el, NotOnOrAfter: TimeNow()}}
 			},
 		},
 	}
@@ -352,6 +352,7 @@ func TestServeAssertionURIRefusesWhenEncrypted(t *testing.T) {
 	}
 
 	keepKeys := func(f *uriFixture) { f.metadata = nil }
+	sentEncrypted := func(f *uriFixture) { f.store.assertions[queryTestStoredAssertionID].Encrypted = true }
 
 	testCases := []struct {
 		name  string
@@ -361,6 +362,8 @@ func TestServeAssertionURIRefusesWhenEncrypted(t *testing.T) {
 		{name: "default policy with an encryption key", setup: []func(*uriFixture){keepKeys}, code: http.StatusForbidden},
 		{name: "required encryption without a key", setup: []func(*uriFixture){policy(RequireAssertionEncryption)}, code: http.StatusForbidden},
 		{name: "no assertion encryption with a key", setup: []func(*uriFixture){keepKeys, policy(NoAssertionEncryption)}, code: http.StatusOK},
+		{name: "sent encrypted, now no assertion encryption with a key", setup: []func(*uriFixture){sentEncrypted, keepKeys, policy(NoAssertionEncryption)}, code: http.StatusForbidden},
+		{name: "sent encrypted, now without a key", setup: []func(*uriFixture){sentEncrypted}, code: http.StatusForbidden},
 	}
 
 	for _, tc := range testCases {

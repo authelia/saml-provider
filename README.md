@@ -366,9 +366,12 @@ without acting on it. See **`Scoping` and `ProxyRestriction`** below.
     `SessionIndex` of the query, and satisfies its `RequestedAuthnContext` by `IdentityProvider.AuthnContextEnforcer`.
     Nobody is authenticated by it.
   - An `AssertionIDRequest` needs `IdentityProvider.AssertionStore`, which is given every assertion that single
-    sign-on or a query issues, signed and before encryption. Without it the request is answered
-    `Responder/RequestUnsupported` and the service isn't in the metadata. An assertion is only returned to the SP it
-    was issued to, and at most 32 are returned for one request. `samlidp` implements neither interface.
+    sign-on or a query issues as a `StoredAssertion`: signed, before encryption, and with whether it was sent as an
+    `EncryptedAssertion`. Without it the request is answered `Responder/RequestUnsupported` and the service isn't in
+    the metadata. An assertion is only returned to the SP it was issued to, and at most 32 are returned for one
+    request. One that was sent encrypted is always encrypted again, to the current key of the SP, whatever
+    `IssuancePolicy` now gives, and the request is answered `Responder` if the SP no longer has a key; otherwise
+    `IssuancePolicy` decides as for single sign-on. `samlidp` implements neither interface.
   - The URI binding is a `GET` of `AssertionURIURL` with a single `ID` parameter, answered with the stored assertion
     as `application/samlassertion+xml` and `Cache-Control: no-cache, no-store`. It needs `AssertionStore` and
     `IdentityProvider.URIRequesterAuthenticator`, which names the SP that sent the request; without them it is not
@@ -376,11 +379,12 @@ without acting on it. See **`Scoping` and `ProxyRestriction`** below.
     authentication, mutual TLS or a header from a trusted proxy (SAMLConformance §3.5). Errors are an HTTP status with
     an empty body: 405 for another method, 400 for a query that isn't a single `ID`, 403 for a requester that isn't
     authenticated or isn't a known SP, and 404 for an assertion that is unknown or was issued to another SP, which
-    can't be told apart. The binding can't carry an `EncryptedAssertion`, so an assertion that single sign-on would
-    encrypt as a whole for the SP is refused with 403 rather than sent in plaintext: in practice only an SP with no
-    encryption key, or one for which `IssuancePolicy` gives `NoAssertionEncryption`, can use it. Any `EncryptedID`
-    or `EncryptedAttribute` is returned as it was issued, and the requester relies on TLS for the integrity of the
-    assertion (SAMLBind §3.7.3). `AssertionURIURL` may share a path with `AssertionIDRequestServiceURL`.
+    can't be told apart. The binding can't carry an `EncryptedAssertion`, so an assertion that was sent encrypted, or
+    that single sign-on would now encrypt as a whole for the SP, is refused with 403 rather than sent in plaintext: in
+    practice only an SP with no encryption key, or one for which `IssuancePolicy` gives `NoAssertionEncryption`, can
+    use it. Any `EncryptedID` or `EncryptedAttribute` is returned as it was issued, and the requester relies on TLS
+    for the integrity of the assertion (SAMLBind §3.7.3). `AssertionURIURL` may share a path with
+    `AssertionIDRequestServiceURL`.
 - **SOAP:** used for single logout, artifact resolution, the assertion query and request protocol, ECP, and name
   identifier management and mapping, which is every profile on the SOAP binding but `AuthzDecisionQuery`. The URLs of
   these services may share a path with each other, and with `SSOURL`, `LogoutURL` or `ManageNameIDURL`: `Handler`
