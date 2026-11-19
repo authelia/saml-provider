@@ -350,6 +350,22 @@ def soap_request(client, case):
     return client.apply_binding(saml2.BINDING_SOAP, str(message), destination, sign=False)["data"]
 
 
+def uri_request(client, case):
+    """Returns the query string of the GET that pysaml2 makes on the SAML URI binding (SAMLBind §3.7) for a case: to
+    the AssertionIDRequestService of that binding in the identity provider metadata, for the assertion the case
+    names."""
+    idp = next(iter(client.metadata.identity_providers()))
+    destination = client.metadata.assertion_id_request_service(idp, saml2.BINDING_URI, "idpsso")[0]["location"]
+    _, ref = client.create_assertion_id_request(issued(case["assertion_of"])["assertion_id"])
+    url = client.apply_binding(saml2.BINDING_URI, ref, destination)["url"]
+
+    base, _, query = url.partition("?")
+    if base != destination:
+        raise RuntimeError(f"{case['id']}: pysaml2 sends the request to {base!r}, not {destination!r}")
+
+    return query
+
+
 def issued(case_id):
     """Returns what the identity provider issued for a case on a replay, as TestInteropIssued records it."""
     try:
@@ -428,7 +444,7 @@ def make_case(client, case, files, versions, previous):
     if "encrypt_subject" in case:
         made_by = "pysaml2+xmlsec1"
     case = dict(case, made_by=made_by, request_id="id-" + case["id"])
-    path = f"sp/requests/{case['id']}.{ {'redirect-signed': 'query', 'soap': 'soap'}.get(case['binding'], 'form') }"
+    path = f"sp/requests/{case['id']}.{ {'redirect-signed': 'query', 'uri': 'query', 'soap': 'soap'}.get(case['binding'], 'form') }"
 
     unmakeable = case.pop("unmakeable", None)
     known_bug = case.pop("known_bug", None)
@@ -445,6 +461,8 @@ def make_case(client, case, files, versions, previous):
     try:
         if case["binding"] == "soap":
             body = soap_request(client, case)
+        elif case["binding"] == "uri":
+            body = uri_request(client, case)
         elif "encrypt_subject" in case:
             body = encrypted_subject_request(client, case)
         else:

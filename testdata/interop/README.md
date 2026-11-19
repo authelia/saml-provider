@@ -72,9 +72,12 @@ The cases are listed in `pysaml2/config.py`, and `generate.py` writes them to `m
 - the service provider (`sp`), whose pysaml2 configuration is in `config.py`;
 - how the identity provider is set up (`idp_profile`), a name in `interopProfiles` in `interop_test.go`, which holds
   everything that service provider metadata can't express, such as whether the assertion is encrypted;
-- the binding of the request: `redirect-signed` or `post-signed` through the browser, or `soap`, which posts a SOAP
+- the binding of the request: `redirect-signed` or `post-signed` through the browser; `soap`, which posts a SOAP
   envelope to the service its `endpoint` names (`attribute`, `authn-query`, `assertion-id` or `artifact`) and reads
-  the message in the Body of the answer, which must hold no Fault;
+  the message in the Body of the answer, which must hold no Fault; or `uri`, the SAML URI binding, which gets the
+  assertion named by the query string that pysaml2 made, as the service provider of the case, and reads the
+  assertion it is answered with. The replay names that service provider in a header, as a proxy that authenticated
+  it would, which the `URIRequesterAuthenticator` of the fixtures trusts;
 - optionally the case it comes `after`, which is replayed first on the same identity provider;
 - what the replay asserts (`expect`), and what `verify.py` checks (`verify`).
 
