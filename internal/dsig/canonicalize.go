@@ -4,7 +4,6 @@ package dsig
 
 import (
 	"maps"
-	"sort"
 
 	"github.com/beevik/etree"
 
@@ -29,7 +28,7 @@ func (c *NullCanonicalizer) Algorithm() AlgorithmID {
 }
 
 func (c *NullCanonicalizer) Canonicalize(el *etree.Element) ([]byte, error) {
-	return canonicalSerialize(canonicalPrep(el, false, true))
+	return canonicalPrepSerialize(el, false, true)
 }
 
 type c14N10ExclusiveCanonicalizer struct {
@@ -92,7 +91,7 @@ func MakeC14N11WithCommentsCanonicalizer() Canonicalizer {
 
 // Canonicalize transforms the input Element into a serialized XML document in canonical form.
 func (c *c14N11Canonicalizer) Canonicalize(el *etree.Element) ([]byte, error) {
-	return canonicalSerialize(canonicalPrep(el, true, c.comments))
+	return canonicalPrepSerialize(el, true, c.comments)
 }
 
 func (c *c14N11Canonicalizer) Algorithm() AlgorithmID {
@@ -125,7 +124,7 @@ func (c *c14N10RecCanonicalizer) Canonicalize(inputXML *etree.Element) ([]byte, 
 	parentNamespaceAttributes, parentXmlAttributes := getParentNamespaceAndXmlAttributes(inputXML)
 	inputXMLCopy := inputXML.Copy()
 	enhanceNamespaceAttributes(inputXMLCopy, parentNamespaceAttributes, parentXmlAttributes)
-	return canonicalSerialize(canonicalPrep(inputXMLCopy, true, c.comments))
+	return canonicalPrepSerialize(inputXMLCopy, true, c.comments)
 }
 
 func (c *c14N10RecCanonicalizer) Algorithm() AlgorithmID {
@@ -162,16 +161,32 @@ const nsSpace = "xmlns"
 //
 // TODO(russell_h): This is very similar to excCanonicalPrep - perhaps they should
 // be unified into one parameterized function?
-func canonicalPrep(el *etree.Element, strip bool, comments bool) *etree.Element {
-	return canonicalPrepInner(el, make(map[string]string), strip, comments)
+func canonicalPrep(el *etree.Element, strip bool, comments bool) (*etree.Element, error) {
+	// The prefixes that the ancestors of el declare, which its attributes may have.
+	outer, _ := getParentNamespaceAndXmlAttributes(el)
+
+	return canonicalPrepInner(el, make(map[string]string), outer, strip, comments)
 }
 
-func canonicalPrepInner(el *etree.Element, seenSoFar map[string]string, strip bool, comments bool) *etree.Element {
+// canonicalPrepSerialize serializes el in inclusive canonical form.
+func canonicalPrepSerialize(el *etree.Element, strip bool, comments bool) ([]byte, error) {
+	prepared, err := canonicalPrep(el, strip, comments)
+	if err != nil {
+		return nil, err
+	}
+
+	return canonicalSerialize(prepared)
+}
+
+func canonicalPrepInner(el *etree.Element, seenSoFar, outer map[string]string, strip bool, comments bool) (*etree.Element, error) {
 	_seenSoFar := make(map[string]string)
 	maps.Copy(_seenSoFar, seenSoFar)
 
 	ne := el.Copy()
-	sort.Sort(etreeutils.SortedAttrs(ne.Attr))
+
+	if err := etreeutils.SortAttrs(ne.Attr, prefixNamespaces(ne, seenSoFar, outer)); err != nil {
+		return nil, err
+	}
 	n := 0
 	for _, attr := range ne.Attr {
 		if attr.Space != nsSpace && !(attr.Space == "" && attr.Key == nsSpace) {
@@ -211,11 +226,53 @@ func canonicalPrepInner(el *etree.Element, seenSoFar map[string]string, strip bo
 	for i, token := range ne.Child {
 		childElement, ok := token.(*etree.Element)
 		if ok {
-			ne.Child[i] = canonicalPrepInner(childElement, _seenSoFar, strip, comments)
+			child, err := canonicalPrepInner(childElement, _seenSoFar, outer, strip, comments)
+			if err != nil {
+				return nil, err
+			}
+
+			ne.Child[i] = child
 		}
 	}
 
-	return ne
+	return ne, nil
+}
+
+// prefixNamespaces returns what looks up the namespace of a prefix of an attribute of el: one that el declares, then
+// one that its ancestors in the canonicalized element declared, which are in seenSoFar, then one that the ancestors
+// of the canonicalized element declare, which are in outer.
+func prefixNamespaces(el *etree.Element, seenSoFar, outer map[string]string) func(prefix string) (string, error) {
+	var own map[string]string
+
+	return func(prefix string) (string, error) {
+		if prefix == "xml" {
+			return etreeutils.XMLNamespace, nil
+		}
+
+		if own == nil {
+			own = make(map[string]string)
+
+			for _, attr := range el.Attr {
+				if attr.Space == nsSpace {
+					own[attr.Key] = attr.Value
+				}
+			}
+		}
+
+		if uri, ok := own[prefix]; ok {
+			return uri, nil
+		}
+
+		if uri, ok := seenSoFar[nsSpace+":"+prefix]; ok {
+			return uri, nil
+		}
+
+		if uri, ok := outer[prefix]; ok {
+			return uri, nil
+		}
+
+		return "", etreeutils.ErrUndeclaredNSPrefix{Prefix: prefix}
+	}
 }
 
 func canonicalSerialize(el *etree.Element) ([]byte, error) {

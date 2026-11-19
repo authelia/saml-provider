@@ -1,83 +1,67 @@
 package etreeutils
 
-import "github.com/beevik/etree"
+import (
+	"cmp"
+	"slices"
 
-// SortedAttrs provides sorting capabilities, compatible with XML C14N, on top
-// of an []etree.Attr
-type SortedAttrs []etree.Attr
+	"github.com/beevik/etree"
+)
 
-func (a SortedAttrs) Len() int {
-	return len(a)
+// SortAttrs sorts the attributes of an element into the order of XML C14N 1.0 section 2.2 and Exclusive XML C14N 1.0:
+// the default namespace declaration, the other namespace declarations by prefix, and then the attributes by namespace
+// URI, with the unqualified ones first, and then by local name. The namespace URI of a prefix is the one that
+// namespace returns, which is the one in scope at the element, and an undeclared prefix is an
+// ErrUndeclaredNSPrefix.
+//
+// The key of each attribute is found once before the attributes are sorted, so that the cost is in proportion to
+// n log n for n attributes, as an element is canonicalized before its signature is verified.
+func SortAttrs(attrs []etree.Attr, namespace func(prefix string) (string, error)) error {
+	type keyed struct {
+		attr etree.Attr
+
+		// class is 0 for the default namespace declaration, 1 for another namespace declaration, and 2 for an
+		// attribute.
+		class int
+		uri   string
+		local string
+	}
+
+	sorted := make([]keyed, len(attrs))
+
+	for i, attr := range attrs {
+		k := keyed{attr: attr, local: attr.Key}
+
+		switch {
+		case attr.Space == defaultPrefix && attr.Key == xmlnsPrefix:
+			k.class = 0
+		case attr.Space == xmlnsPrefix:
+			k.class = 1
+		case attr.Space == defaultPrefix:
+			k.class = 2
+		default:
+			uri, err := namespace(attr.Space)
+			if err != nil {
+				return err
+			}
+
+			k.class, k.uri = 2, uri
+		}
+
+		sorted[i] = k
+	}
+
+	slices.SortStableFunc(sorted, func(a, b keyed) int {
+		return cmp.Or(cmp.Compare(a.class, b.class), cmp.Compare(a.uri, b.uri), cmp.Compare(a.local, b.local))
+	})
+
+	for i, k := range sorted {
+		attrs[i] = k.attr
+	}
+
+	return nil
 }
 
-func (a SortedAttrs) Swap(i, j int) {
-	a[i], a[j] = a[j], a[i]
-}
-
-func (a SortedAttrs) Less(i, j int) bool {
-	// This is the best reference I've found on sort order:
-	// http://dst.lbl.gov/~ksb/Scratch/XMLC14N.html
-
-	// If attr j is a default namespace declaration, attr i may
-	// not be strictly "less" than it.
-	if a[j].Space == defaultPrefix && a[j].Key == xmlnsPrefix {
-		return false
-	}
-
-	// Otherwise, if attr i is a default namespace declaration, it
-	// must be less than anything else.
-	if a[i].Space == defaultPrefix && a[i].Key == xmlnsPrefix {
-		return true
-	}
-
-	// Next, namespace prefix declarations, sorted by prefix, come before
-	// anythign else.
-	if a[i].Space == xmlnsPrefix {
-		if a[j].Space == xmlnsPrefix {
-			return a[i].Key < a[j].Key
-		}
-		return true
-	}
-
-	if a[j].Space == xmlnsPrefix {
-		return false
-	}
-
-	// Then come unprefixed attributes, sorted by key.
-	if a[i].Space == defaultPrefix {
-		if a[j].Space == defaultPrefix {
-			return a[i].Key < a[j].Key
-		}
-		return true
-	}
-
-	if a[j].Space == defaultPrefix {
-		return false
-	}
-
-	// Attributes with the same prefix should be sorted by their keys.
-	if a[i].Space == a[j].Space {
-		return a[i].Key < a[j].Key
-	}
-
-	// Attributes in the same namespace are sorted by their Namespace URI, not the prefix.
-	// NOTE: This implementation is not complete because it does not consider namespace
-	// prefixes declared in ancestor elements. A complete solution would ideally use the
-	// Attribute.NamespaceURI() method obtain a namespace URI for sorting, but the
-	// beevik/etree library needs to be fixed to provide the correct value first.
-	if a[i].Key == a[j].Key {
-		var leftNS, rightNS etree.Attr
-		for n := range a {
-			if a[i].Space == a[n].Key {
-				leftNS = a[n]
-			}
-			if a[j].Space == a[n].Key {
-				rightNS = a[n]
-			}
-		}
-		// Sort based on the NS URIs
-		return leftNS.Value < rightNS.Value
-	}
-
-	return a[i].Key < a[j].Key
+// SortAttrsCtx sorts the attributes of an element with the namespaces of ctx, which is the context of the element.
+func SortAttrsCtx(ctx NSContext, attrs []etree.Attr) error {
+	return SortAttrs(attrs, ctx.LookupPrefix)
 }

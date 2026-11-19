@@ -147,3 +147,39 @@ func TestC14N10RecCanonicalizerWithNamespaceInheritance(t *testing.T) {
 	require.Equal(t, strings.TrimSpace(expected), strings.TrimSpace(string(canonicalized)))
 
 }
+
+// The attributes of an element in several namespaces, some of them declared on its parent, are sorted by namespace
+// URI before local name, whatever their prefixes are. The canonical forms are those of libxml2 (xmllint --c14n and
+// --exc-c14n), which sorts them by URI, as C14N 1.0 section 2.2 has it, where they were sorted by local name.
+const (
+	attributeNamespacesDoc                    = `<r xmlns:a="urn:b" xmlns:b="urn:a"><e a:k="1" b:k="2" xml:lang="en" c="3" b:z="4" xmlns:x="http://x/y" x:a="5"/></r>`
+	attributeNamespacesExclusiveCanonicalized = `<r><e xmlns:a="urn:b" xmlns:b="urn:a" xmlns:x="http://x/y" c="3" xml:lang="en" x:a="5" b:k="2" b:z="4" a:k="1"></e></r>`
+	attributeNamespacesCanonicalized          = `<r xmlns:a="urn:b" xmlns:b="urn:a"><e xmlns:x="http://x/y" c="3" xml:lang="en" x:a="5" b:k="2" b:z="4" a:k="1"></e></r>`
+)
+
+func TestExcC14N10AttributeNamespaces(t *testing.T) {
+	runCanonicalizationTest(t, MakeC14N10ExclusiveCanonicalizerWithPrefixList(""), attributeNamespacesDoc, attributeNamespacesExclusiveCanonicalized)
+}
+
+func TestC14N10AttributeNamespaces(t *testing.T) {
+	runCanonicalizationTest(t, MakeC14N10RecCanonicalizer(), attributeNamespacesDoc, attributeNamespacesCanonicalized)
+	runCanonicalizationTest(t, MakeC14N11Canonicalizer(), attributeNamespacesDoc, attributeNamespacesCanonicalized)
+}
+
+// An element is canonicalized on its own with the namespaces that its ancestors declare.
+func TestC14N10AttributeNamespacesOfAncestors(t *testing.T) {
+	raw := etree.NewDocument()
+	require.NoError(t, raw.ReadFromString(attributeNamespacesDoc))
+
+	canonicalized, err := MakeC14N10RecCanonicalizer().Canonicalize(raw.Root().SelectElement("e"))
+	require.NoError(t, err)
+	require.Equal(t, `<e xmlns:a="urn:b" xmlns:b="urn:a" xmlns:x="http://x/y" c="3" xml:lang="en" x:a="5" b:k="2" b:z="4" a:k="1"></e>`, string(canonicalized))
+}
+
+func TestC14N10UndeclaredAttributePrefix(t *testing.T) {
+	raw := etree.NewDocument()
+	require.NoError(t, raw.ReadFromString(`<e a:k="1"/>`))
+
+	_, err := MakeC14N10RecCanonicalizer().Canonicalize(raw.Root())
+	require.ErrorContains(t, err, "undeclared namespace prefix: 'a'")
+}
