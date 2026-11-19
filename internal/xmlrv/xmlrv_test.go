@@ -43,6 +43,11 @@ func TestValidate(t *testing.T) {
 		`<x:>`,
 		`</x:>`,
 		`<Root><! <<!-- -->!-- x --> y></Root>`,
+
+		// The xmlns attributes that encoding/xml adds for these are undone in the order it adds them. They were
+		// once refused, as the xmlns attribute of the document was undone in the place of one that was added.
+		`<x:Root xmlns:x="a" x:attr="1" y:b="2"/>`,
+		`<a:e xmlns:a="u" xmlns:b="v" b:x="1" a:y="2" b:z="3" c="4" xmlns:_xmlns="w" _xmlns:q="5"/>`,
 	}
 
 	for _, doc := range docs {
@@ -149,18 +154,18 @@ func TestValidateRoundtripError(t *testing.T) {
 		line, column int64
 	}{
 		"first line": {
-			doc:    `<x:Root xmlns:x="a" x:attr="1" y:b="2"/>`,
-			source: `<x:Root xmlns:x="a" x:attr="1" y:b="2"/>`,
-			line:   1, column: 1,
+			doc:    `<a><![CDATA[]]></a>`,
+			source: `<![CDATA[]]>`,
+			line:   1, column: 4,
 		},
 		"nested": {
-			doc:    "<Root>\r\n  <x:Element xmlns:x=\"a\" x:attr=\"1\" y:b=\"2\"></x:Element>\r\n</Root>",
-			source: `<x:Element xmlns:x="a" x:attr="1" y:b="2">`,
-			line:   2, column: 3,
+			doc:    "<Root>\r\n  <a><![CDATA[]]></a>\r\n</Root>",
+			source: `<![CDATA[]]>`,
+			line:   2, column: 6,
 		},
 		"after text": {
-			doc:    "<Root>\n\ntext<x:E xmlns:x=\"a\" x:a=\"1\" y:b=\"2\"/></Root>",
-			source: `<x:E xmlns:x="a" x:a="1" y:b="2"/>`,
+			doc:    "<Root>\n\ntext<![CDATA[]]></Root>",
+			source: `<![CDATA[]]>`,
 			line:   3, column: 5,
 		},
 	}
@@ -183,13 +188,14 @@ func TestValidateRoundtripError(t *testing.T) {
 }
 
 // The token that was read back is reported as it was read, not as it was fixed to be compared.
-func TestValidateRoundtripErrorObserved(t *testing.T) {
-	var roundtripErr RoundtripError
+// The token that was read back is reported as it was read, so it is left as it was when it is fixed to be compared.
+func TestStartElementEqualsLeavesAfterAsRead(t *testing.T) {
+	before := tokenize(t, `<x:Root xmlns:x="a" x:attr="1" y:b="2">`).(xml.StartElement)
+	after := roundtrip(t, before)
+	read := xml.CopyToken(after)
 
-	require.True(t, errors.As(Validate([]byte(`<x:Root xmlns:x="a" x:attr="1" y:b="2"/>`)), &roundtripErr))
-
-	observed, ok := roundtripErr.Observed.(xml.StartElement)
-	require.True(t, ok)
+	assert.True(t, startElementEquals(before, after))
+	assert.Equal(t, read, after)
 	assert.Equal(t, xml.StartElement{
 		Name: xml.Name{Local: "Root"},
 		Attr: []xml.Attr{
@@ -201,7 +207,62 @@ func TestValidateRoundtripErrorObserved(t *testing.T) {
 			{Name: xml.Name{Space: "xmlns", Local: "y"}, Value: "y"},
 			{Name: xml.Name{Space: "y", Local: "b"}, Value: "2"},
 		},
-	}, observed)
+	}, after)
+}
+
+func TestFixNamespacePrefixes(t *testing.T) {
+	elements := []xml.StartElement{
+		tokenize(t, `<Root>`).(xml.StartElement),
+		tokenize(t, `<x:Root>`).(xml.StartElement),
+		tokenize(t, `<x:Root xmlns:x="a" x:attr="1" y:b="2">`).(xml.StartElement),
+		tokenize(t, `<Root a:x="1" b:y="2" a:z="3" c="4">`).(xml.StartElement),
+		tokenize(t, `<Root xml:lang="en" xmlns:xmlns="v" _xmlns:a="1" xmlns:_xmlns="w">`).(xml.StartElement),
+		tokenize(t, `<s:e xmlns:s="urn:s" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:type="xs:string">`).(xml.StartElement),
+		// encoding/xml makes the prefix p of both namespaces, and then p_1 and p_2 as p is taken.
+		{Name: xml.Name{Local: "Root"}, Attr: []xml.Attr{
+			{Name: xml.Name{Space: "http://a/p", Local: "x"}, Value: "1"},
+			{Name: xml.Name{Space: "http://b/p", Local: "y"}, Value: "2"},
+			{Name: xml.Name{Space: "p", Local: "z"}, Value: "3"},
+			{Name: xml.Name{Space: "p_1", Local: "w"}, Value: "4"},
+		}},
+	}
+
+	for _, before := range elements {
+		after := roundtrip(t, before)
+
+		fixNamespacePrefixes(&before, &after)
+
+		assert.Equal(t, before, after)
+	}
+}
+
+// FuzzFixNamespacePrefixes checks that every start element encoding/xml reads is the same once it is written and
+// read back and the xmlns attributes that were added for its prefixes are undone.
+func FuzzFixNamespacePrefixes(f *testing.F) {
+	f.Add(`<x:Root xmlns:x="a" x:attr="1" y:b="2">`)
+	f.Add(`<a:e xmlns:a="u" xmlns:b="v" b:x="1" a:y="2" b:z="3" c="4" xmlns:_xmlns="w" _xmlns:q="5">`)
+	f.Add(`<Root xml:lang="en" xmlns:xmlns="v" _xmlns:a="1" xmlns:_xmlns="w" p:x="1" p_1:y="2">`)
+
+	f.Fuzz(func(t *testing.T, element string) {
+		token, err := xml.NewDecoder(strings.NewReader(element)).RawToken()
+		if err != nil {
+			return
+		}
+
+		before, ok := xml.CopyToken(token).(xml.StartElement)
+		if !ok {
+			return
+		}
+
+		after, ok := tryRoundtrip(before)
+		if !ok {
+			return
+		}
+
+		if !startElementEquals(before, after) {
+			t.Fatalf("%q is read back as %#v", element, after)
+		}
+	})
 }
 
 func TestTokenEquals(t *testing.T) {
@@ -238,4 +299,32 @@ func tokenize(t *testing.T, s string) xml.Token {
 	require.NoError(t, err)
 
 	return xml.CopyToken(token)
+}
+
+// roundtrip returns the start element as encoding/xml reads it back once it has written it.
+func roundtrip(t *testing.T, start xml.StartElement) xml.StartElement {
+	t.Helper()
+
+	after, ok := tryRoundtrip(start)
+	require.True(t, ok)
+
+	return after
+}
+
+func tryRoundtrip(start xml.StartElement) (xml.StartElement, bool) {
+	var encoded strings.Builder
+
+	encoder := xml.NewEncoder(&encoded)
+	if encoder.EncodeToken(start) != nil || encoder.Flush() != nil {
+		return xml.StartElement{}, false
+	}
+
+	token, err := xml.NewDecoder(strings.NewReader(encoded.String())).RawToken()
+	if err != nil {
+		return xml.StartElement{}, false
+	}
+
+	after, ok := xml.CopyToken(token).(xml.StartElement)
+
+	return after, ok
 }
