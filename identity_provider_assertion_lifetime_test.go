@@ -63,3 +63,50 @@ func TestIDPAssertionLifetimeDoesNotChangeRequestAge(t *testing.T) {
 	_, err := hardeningValidate(test, old)
 	assert.ErrorContains(t, err, "expired", "MaxAuthnRequestAge must not default to AssertionLifetime")
 }
+
+// The validity of an assertion is written to the millisecond, so a window from MaxClockSkew before it is made to
+// AssertionLifetime after that is shorter than a millisecond could be written as NotBefore equal to NotOnOrAfter,
+// in which no instant is valid. Such an assertion is not issued.
+func TestIDPAssertionLifetimeShorterThanItsPrecision(t *testing.T) {
+	skew := MaxClockSkew
+
+	t.Cleanup(func() { MaxClockSkew = skew })
+
+	MaxClockSkew = 0
+
+	test := NewIdentityProviderTest(t, applyKey)
+	now := TimeNow().Add(600 * time.Microsecond)
+	TimeNow = func() time.Time { return now }
+
+	test.IDP.AssertionLifetime = 500 * time.Microsecond
+	_, err := lifetimeAssertion(t, test)
+	assert.ErrorContains(t, err, "millisecond")
+}
+
+// A window of a millisecond or more is issued, and is written with NotBefore before NotOnOrAfter, whether the
+// millisecond comes from the lifetime or from the clock skew.
+func TestIDPAssertionLifetimeOfItsPrecision(t *testing.T) {
+	skew := MaxClockSkew
+
+	t.Cleanup(func() { MaxClockSkew = skew })
+
+	for name, tc := range map[string]struct{ skew, lifetime time.Duration }{
+		"a millisecond, no skew":      {0, time.Millisecond},
+		"under a millisecond, skewed": {skew, 500 * time.Microsecond},
+	} {
+		t.Run(name, func(t *testing.T) {
+			MaxClockSkew = tc.skew
+
+			test := NewIdentityProviderTest(t, applyKey)
+			now := TimeNow().Add(600 * time.Microsecond)
+			TimeNow = func() time.Time { return now }
+
+			test.IDP.AssertionLifetime = tc.lifetime
+			req, err := lifetimeAssertion(t, test)
+			require.NoError(t, err)
+
+			conditions := req.Assertion.Conditions.Element()
+			assert.Less(t, conditions.SelectAttrValue("NotBefore", ""), conditions.SelectAttrValue("NotOnOrAfter", ""))
+		})
+	}
+}

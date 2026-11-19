@@ -124,10 +124,10 @@ func (r *LogoutRequest) Element() *etree.Element {
 	el.CreateAttr("xmlns:samlp", "urn:oasis:names:tc:SAML:2.0:protocol")
 	el.CreateAttr("ID", r.ID)
 	el.CreateAttr("Version", r.Version)
-	el.CreateAttr("IssueInstant", r.IssueInstant.Format(timeFormat))
+	el.CreateAttr("IssueInstant", RelaxedTime(r.IssueInstant).String())
 
 	if r.NotOnOrAfter != nil {
-		el.CreateAttr("NotOnOrAfter", r.NotOnOrAfter.Format(timeFormat))
+		el.CreateAttr("NotOnOrAfter", RelaxedTime(*r.NotOnOrAfter).String())
 	}
 
 	if r.Destination != "" {
@@ -246,7 +246,7 @@ func (r *AuthnRequest) Element() *etree.Element {
 	el.CreateAttr("xmlns:samlp", "urn:oasis:names:tc:SAML:2.0:protocol")
 	el.CreateAttr("ID", r.ID)
 	el.CreateAttr("Version", r.Version)
-	el.CreateAttr("IssueInstant", r.IssueInstant.Format(timeFormat))
+	el.CreateAttr("IssueInstant", RelaxedTime(r.IssueInstant).String())
 
 	if r.Destination != "" {
 		el.CreateAttr("Destination", r.Destination)
@@ -449,7 +449,7 @@ func (r *ArtifactResolve) Element() *etree.Element {
 
 	el.CreateAttr("ID", r.ID)
 	el.CreateAttr("Version", r.Version)
-	el.CreateAttr("IssueInstant", r.IssueInstant.Format(timeFormat))
+	el.CreateAttr("IssueInstant", RelaxedTime(r.IssueInstant).String())
 
 	if r.Destination != "" {
 		el.CreateAttr("Destination", r.Destination)
@@ -563,7 +563,7 @@ func (r *ArtifactResponse) Element() *etree.Element {
 	}
 
 	el.CreateAttr("Version", r.Version)
-	el.CreateAttr("IssueInstant", r.IssueInstant.Format(timeFormat))
+	el.CreateAttr("IssueInstant", RelaxedTime(r.IssueInstant).String())
 
 	if r.Issuer != nil {
 		el.AddChild(r.Issuer.Element())
@@ -667,7 +667,7 @@ func (r *Response) Element() *etree.Element {
 	}
 
 	el.CreateAttr("Version", r.Version)
-	el.CreateAttr("IssueInstant", r.IssueInstant.Format(timeFormat))
+	el.CreateAttr("IssueInstant", RelaxedTime(r.IssueInstant).String())
 
 	if r.Destination != "" {
 		el.CreateAttr("Destination", r.Destination)
@@ -979,7 +979,7 @@ func (a *Assertion) Element() *etree.Element {
 	el.CreateAttr("xmlns:saml", "urn:oasis:names:tc:SAML:2.0:assertion")
 	el.CreateAttr("Version", "2.0")
 	el.CreateAttr("ID", a.ID)
-	el.CreateAttr("IssueInstant", a.IssueInstant.Format(timeFormat))
+	el.CreateAttr("IssueInstant", RelaxedTime(a.IssueInstant).String())
 	el.AddChild(a.Issuer.Element())
 
 	if a.Signature != nil {
@@ -1175,11 +1175,11 @@ type SubjectConfirmationData struct {
 func (s *SubjectConfirmationData) Element() *etree.Element {
 	el := etree.NewElement("saml:SubjectConfirmationData")
 	if !s.NotBefore.IsZero() {
-		el.CreateAttr("NotBefore", s.NotBefore.Format(timeFormat))
+		el.CreateAttr("NotBefore", RelaxedTime(s.NotBefore).String())
 	}
 
 	if !s.NotOnOrAfter.IsZero() {
-		el.CreateAttr("NotOnOrAfter", s.NotOnOrAfter.Format(timeFormat))
+		el.CreateAttr("NotOnOrAfter", RelaxedTime(s.NotOnOrAfter).String())
 	}
 
 	if s.Recipient != "" {
@@ -1246,11 +1246,11 @@ type Conditions struct {
 func (c *Conditions) Element() *etree.Element {
 	el := etree.NewElement("saml:Conditions")
 	if !c.NotBefore.IsZero() {
-		el.CreateAttr("NotBefore", c.NotBefore.Format(timeFormat))
+		el.CreateAttr("NotBefore", RelaxedTime(c.NotBefore).String())
 	}
 
 	if !c.NotOnOrAfter.IsZero() {
-		el.CreateAttr("NotOnOrAfter", c.NotOnOrAfter.Format(timeFormat))
+		el.CreateAttr("NotOnOrAfter", RelaxedTime(c.NotOnOrAfter).String())
 	}
 
 	for _, v := range c.AudienceRestrictions {
@@ -1432,14 +1432,14 @@ type AuthnStatement struct {
 // Element returns an etree.Element representing the object in XML form.
 func (a *AuthnStatement) Element() *etree.Element {
 	el := etree.NewElement("saml:AuthnStatement")
-	el.CreateAttr("AuthnInstant", a.AuthnInstant.Format(timeFormat))
+	el.CreateAttr("AuthnInstant", RelaxedTime(a.AuthnInstant).String())
 
 	if a.SessionIndex != "" {
 		el.CreateAttr("SessionIndex", a.SessionIndex)
 	}
 
 	if a.SessionNotOnOrAfter != nil {
-		el.CreateAttr("SessionNotOnOrAfter", a.SessionNotOnOrAfter.Format(timeFormat))
+		el.CreateAttr("SessionNotOnOrAfter", RelaxedTime(*a.SessionNotOnOrAfter).String())
 	}
 
 	if a.SubjectLocality != nil {
@@ -1686,7 +1686,7 @@ func (r *LogoutResponse) Element() *etree.Element {
 	}
 
 	el.CreateAttr("Version", r.Version)
-	el.CreateAttr("IssueInstant", r.IssueInstant.Format(timeFormat))
+	el.CreateAttr("IssueInstant", RelaxedTime(r.IssueInstant).String())
 
 	if r.Destination != "" {
 		el.CreateAttr("Destination", r.Destination)

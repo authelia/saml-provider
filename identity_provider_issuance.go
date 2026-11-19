@@ -377,6 +377,33 @@ func (idp *IdentityProvider) defaultSignatureMethod() string {
 	return dsig.RSASHA256SignatureMethod
 }
 
+// resolveAssertionLifetime returns the lifetime that an Issuance gives, or the default if it gives none, and an error
+// if it is negative or too short to be written (see checkValidityPrecision).
+func resolveAssertionLifetime(lifetime, defaultLifetime time.Duration) (time.Duration, error) {
+	if lifetime < 0 {
+		return 0, errors.New("AssertionLifetime must not be negative")
+	}
+
+	if lifetime == 0 {
+		lifetime = defaultLifetime
+	}
+
+	return lifetime, checkValidityPrecision(lifetime)
+}
+
+// checkValidityPrecision returns an error if an assertion with this lifetime would be valid for less than the
+// millisecond its times are written to (see RelaxedTime): from MaxClockSkew before it is made to lifetime after.
+// NotBefore and NotOnOrAfter could then be written as the same instant, and no instant would be valid. A window of a
+// millisecond or more is always written with NotBefore before NotOnOrAfter, as rounding to the millisecond keeps two
+// times a millisecond apart.
+func checkValidityPrecision(lifetime time.Duration) error {
+	if MaxClockSkew+lifetime < time.Millisecond {
+		return fmt.Errorf("AssertionLifetime %s with MaxClockSkew %s is shorter than the millisecond that the validity of an assertion is written to", lifetime, MaxClockSkew)
+	}
+
+	return nil
+}
+
 // defaultIssuance returns the Issuance that the settings of the identity provider give.
 func (idp *IdentityProvider) defaultIssuance() (Issuance, error) {
 	defaults := Issuance{
@@ -392,6 +419,10 @@ func (idp *IdentityProvider) defaultIssuance() (Issuance, error) {
 
 	if defaults.AssertionLifetime == 0 {
 		defaults.AssertionLifetime = MaxIssueDelay
+	}
+
+	if err := checkValidityPrecision(defaults.AssertionLifetime); err != nil {
+		return defaults, err
 	}
 
 	return defaults, nil
@@ -488,13 +519,12 @@ func (idp *IdentityProvider) completeIssuance(req IssuanceRequest, issuance Issu
 		issuance.DigestMethod = req.Defaults.DigestMethod
 	}
 
-	if issuance.AssertionLifetime < 0 {
-		return Issuance{}, errors.New("AssertionLifetime must not be negative")
+	lifetime, err := resolveAssertionLifetime(issuance.AssertionLifetime, req.Defaults.AssertionLifetime)
+	if err != nil {
+		return Issuance{}, err
 	}
 
-	if issuance.AssertionLifetime == 0 {
-		issuance.AssertionLifetime = req.Defaults.AssertionLifetime
-	}
+	issuance.AssertionLifetime = lifetime
 
 	if issuance.DigestMethod != "" && !slices.Contains(issuanceDigestMethods, issuance.DigestMethod) {
 		return Issuance{}, fmt.Errorf("unsupported digest method %q", issuance.DigestMethod)

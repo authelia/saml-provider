@@ -585,7 +585,9 @@ type IdentityProvider struct {
 	// AssertionLifetime is how long after it is made that an assertion states it is valid, in both the
 	// NotOnOrAfter of its Conditions and the NotOnOrAfter of its bearer SubjectConfirmationData. Defaults to
 	// MaxIssueDelay, and must not be negative. NotBefore is MaxClockSkew before the assertion is made, to allow for
-	// a service provider whose clock is behind.
+	// a service provider whose clock is behind. The window from NotBefore to NotOnOrAfter must be at least a
+	// millisecond, the precision these times are written to, or no assertion is issued, as NotBefore could otherwise
+	// be written equal to NotOnOrAfter; that can only happen when MaxClockSkew is zero.
 	//
 	// SAMLProf §4.1.4.2 requires the bearer SubjectConfirmationData to contain "a NotOnOrAfter attribute that limits
 	// the window during which the assertion can be delivered", and SAMLSecurity §6.4.1 recommends that the

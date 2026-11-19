@@ -53,7 +53,7 @@ func (r *ManageNameIDRequest) Element() *etree.Element {
 	el.CreateAttr("xmlns:samlp", samlProtocolNS)
 	el.CreateAttr("ID", r.ID)
 	el.CreateAttr("Version", r.Version)
-	el.CreateAttr("IssueInstant", r.IssueInstant.Format(timeFormat))
+	el.CreateAttr("IssueInstant", RelaxedTime(r.IssueInstant).String())
 
 	if r.Destination != "" {
 		el.CreateAttr("Destination", r.Destination)
@@ -213,7 +213,7 @@ func (r *NameIDMappingRequest) Element() *etree.Element {
 	el.CreateAttr("xmlns:samlp", samlProtocolNS)
 	el.CreateAttr("ID", r.ID)
 	el.CreateAttr("Version", r.Version)
-	el.CreateAttr("IssueInstant", r.IssueInstant.Format(timeFormat))
+	el.CreateAttr("IssueInstant", RelaxedTime(r.IssueInstant).String())
 
 	if r.Destination != "" {
 		el.CreateAttr("Destination", r.Destination)
@@ -355,7 +355,7 @@ func statusResponseElement(el *etree.Element, id, inResponseTo, version string, 
 	}
 
 	el.CreateAttr("Version", version)
-	el.CreateAttr("IssueInstant", issueInstant.Format(timeFormat))
+	el.CreateAttr("IssueInstant", RelaxedTime(issueInstant).String())
 
 	if destination != "" {
 		el.CreateAttr("Destination", destination)
