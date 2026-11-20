@@ -1,7 +1,6 @@
 package etreeutils
 
 import (
-	"sort"
 	"strings"
 
 	"github.com/beevik/etree"
@@ -90,7 +89,9 @@ func transformExcC14n(ctx, declared NSContext, el *etree.Element, inclusiveNames
 		el.Attr = append(el.Attr, declared.declare(prefix, namespace))
 	}
 
-	sort.Sort(SortedAttrs(el.Attr))
+	if err := SortAttrsCtx(scope, el.Attr); err != nil {
+		return err
+	}
 
 	if !comments {
 		c := 0

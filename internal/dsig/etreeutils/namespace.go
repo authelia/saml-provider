@@ -4,7 +4,6 @@ import (
 	"errors"
 	"fmt"
 	"maps"
-	"sort"
 
 	"github.com/beevik/etree"
 )
@@ -281,7 +280,9 @@ func NSDetatch(ctx NSContext, el *etree.Element) (*etree.Element, error) {
 		}
 	}
 
-	sort.Sort(SortedAttrs(attrs))
+	if err := SortAttrsCtx(ctx, attrs); err != nil {
+		return nil, err
+	}
 
 	el.Attr = attrs
 
