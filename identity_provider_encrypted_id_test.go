@@ -554,7 +554,7 @@ func TestQueryAnswerEncryptsPartsByPolicy(t *testing.T) {
 
 	for name, el := range map[string]*etree.Element{
 		"sent":  response.AssertionEls[0],
-		"saved": f.store.assertions[f.store.saved[0]].assertion,
+		"saved": f.store.assertions[f.store.saved[0]].Assertion,
 	} {
 		t.Run(name, func(t *testing.T) {
 			assert.NotNil(t, el.FindElement("./Subject/EncryptedID"))

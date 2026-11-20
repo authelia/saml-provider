@@ -1020,7 +1020,8 @@ func TestServeECPSavesAssertion(t *testing.T) {
 
 	require.NotNil(t, response.Response.Assertion)
 	require.Equal(t, store.saved, []string{response.Response.Assertion.ID})
-	assert.Equal(t, store.assertions[store.saved[0]].serviceProviderID, test.SP.MetadataURL.String())
+	assert.Equal(t, store.assertions[store.saved[0]].ServiceProvider, test.SP.MetadataURL.String())
+	assert.False(t, store.assertions[store.saved[0]].Encrypted, "it was sent in plaintext")
 
 	// An error states nothing, so nothing is saved.
 	w, id := serveECP(t, test, func(r *AuthnRequest) {

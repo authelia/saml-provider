@@ -2995,7 +2995,7 @@ func (req *IdpAuthnRequest) MakeAssertionEl() error {
 	req.nameIDEncrypted = sent.Subject != nil && sent.Subject.EncryptedID != nil
 
 	if issuance.AssertionEncryption == NoAssertionEncryption {
-		req.saveAssertion(signedAssertionEl)
+		req.saveAssertion(signedAssertionEl, false)
 		req.AssertionEl = signedAssertionEl
 
 		return nil
@@ -3009,7 +3009,7 @@ func (req *IdpAuthnRequest) MakeAssertionEl() error {
 		}
 	}
 
-	req.saveAssertion(signedAssertionEl)
+	req.saveAssertion(signedAssertionEl, encrypter != nil)
 
 	if encrypter == nil {
 		req.AssertionEl = signedAssertionEl
@@ -3019,22 +3019,6 @@ func (req *IdpAuthnRequest) MakeAssertionEl() error {
 	req.AssertionEl, err = encrypter.encryptAssertion(signedAssertionEl)
 
 	return err
-}
-
-// encryptAssertionEl returns the EncryptedAssertion element of the signed assertion, or the signed assertion
-// itself when the service provider has no encryption key or the IssuancePolicy gives
-// NoAssertionEncryption for it. The encryption key is then not looked at, as nothing is encrypted.
-func (req *IdpAuthnRequest) encryptAssertionEl(signedAssertionEl *etree.Element) (*etree.Element, error) {
-	encrypter, err := req.wholeAssertionEncrypter()
-	if err != nil {
-		return nil, err
-	}
-
-	if encrypter == nil {
-		return signedAssertionEl, nil
-	}
-
-	return encrypter.encryptAssertion(signedAssertionEl)
 }
 
 // wholeAssertionEncrypter returns the encrypter that the assertion is encrypted with as a whole, or nil if it is sent

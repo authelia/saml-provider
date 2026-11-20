@@ -402,38 +402,32 @@ func (p interopSessionProvider) GetAuthnSessions(_ *http.Request, _ *IdpQueryReq
 // interopAssertionStore is an AssertionStore in memory, for one replay.
 type interopAssertionStore struct {
 	mu         sync.Mutex
-	assertions map[string]interopStoredAssertion
+	assertions map[string]*StoredAssertion
 }
 
-type interopStoredAssertion struct {
-	serviceProvider string
-	assertion       *etree.Element
-	notOnOrAfter    time.Time
-}
-
-func (s *interopAssertionStore) SaveAssertion(_ *http.Request, serviceProvider string, assertion *etree.Element, notOnOrAfter time.Time) error {
+func (s *interopAssertionStore) SaveAssertion(_ *http.Request, assertion *StoredAssertion) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
 	if s.assertions == nil {
-		s.assertions = map[string]interopStoredAssertion{}
+		s.assertions = map[string]*StoredAssertion{}
 	}
 
-	s.assertions[assertion.SelectAttrValue("ID", "")] = interopStoredAssertion{serviceProvider, assertion, notOnOrAfter}
+	s.assertions[assertion.Assertion.SelectAttrValue("ID", "")] = assertion
 
 	return nil
 }
 
-func (s *interopAssertionStore) GetAssertion(_ *http.Request, id string) (*etree.Element, string, error) {
+func (s *interopAssertionStore) GetAssertion(_ *http.Request, id string) (*StoredAssertion, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
 	stored, ok := s.assertions[id]
-	if !ok || !TimeNow().Before(stored.notOnOrAfter) {
-		return nil, "", nil
+	if !ok || !TimeNow().Before(stored.NotOnOrAfter) {
+		return nil, nil
 	}
 
-	return stored.assertion, stored.serviceProvider, nil
+	return stored, nil
 }
 
 // interopSPMetadata returns the metadata that pysaml2 wrote for a service provider of the fixtures.

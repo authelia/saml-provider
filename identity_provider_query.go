@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/netip"
 	"net/url"
+	"os"
 	"slices"
 	"strings"
 	"time"
@@ -63,25 +64,43 @@ type QuerySessionProvider interface {
 }
 
 // AssertionStore keeps the assertions that the identity provider issues, so that a service provider can fetch
-// one by its ID with an AssertionIDRequest (SAMLCore §3.3.1). It is the IdentityProvider.AssertionStore field.
+// one by its ID with an AssertionIDRequest (SAMLCore §3.3.1) or on the SAML URI binding (SAMLBind §3.7). It is the
+// IdentityProvider.AssertionStore field.
 type AssertionStore interface {
-	// SaveAssertion is called with each assertion as issued, signed and before it is encrypted, and the
-	// entity ID of the service provider it was issued to: by single sign-on, and for the answer to an
-	// AttributeQuery or AuthnQuery. assertion belongs to the store. notOnOrAfter is the end of the validity
-	// of the assertion, after which there is no use in keeping it, or the zero time if it has no Conditions.
-	// The assertion is a bearer token until then, and holds the attributes of the principal, so it must be
-	// stored as carefully as a session.
+	// SaveAssertion is called with each assertion as issued: by single sign-on, and for the answer to an
+	// AttributeQuery or AuthnQuery. assertion belongs to the store, which must keep every field of it. The
+	// assertion is a bearer token until its NotOnOrAfter, and holds the attributes of the principal, so it must
+	// be stored as carefully as a session.
 	//
 	// An error is reported to the Observer and doesn't fail the request that issued the assertion.
-	SaveAssertion(r *http.Request, serviceProviderEntityID string, assertion *etree.Element, notOnOrAfter time.Time) error
+	SaveAssertion(r *http.Request, assertion *StoredAssertion) error
 
-	// GetAssertion returns the saved assertion with that ID and the entity ID of the service provider it
-	// was issued to, or a nil assertion and no error if it is unknown or has expired. The assertion is only
-	// returned to that service provider, and is not modified. r is a request from the server of the service
-	// provider.
+	// GetAssertion returns the saved assertion with that ID, as it was saved, or nil and no error if it is
+	// unknown or has expired. The assertion is only returned to the service provider it was issued to, and is
+	// not modified. r is a request from the server of the service provider.
 	//
 	// An error sends a Responder status, and is not sent to the service provider.
-	GetAssertion(r *http.Request, id string) (assertion *etree.Element, serviceProviderEntityID string, err error)
+	GetAssertion(r *http.Request, id string) (*StoredAssertion, error)
+}
+
+// StoredAssertion is an assertion that an AssertionStore keeps.
+type StoredAssertion struct {
+	// Assertion is the assertion as it was signed, if it was, and before it was encrypted as a whole, with any
+	// EncryptedID and EncryptedAttribute in place of their plaintext.
+	Assertion *etree.Element
+
+	// ServiceProvider is the entity ID of the service provider the assertion was issued to, which is the only
+	// one it is returned to.
+	ServiceProvider string
+
+	// NotOnOrAfter is the end of the validity of the assertion, after which there is no use in keeping it, or
+	// the zero time if it has no Conditions.
+	NotOnOrAfter time.Time
+
+	// Encrypted is whether the assertion was sent to the service provider as an EncryptedAssertion. Such an
+	// assertion is only ever returned encrypted again, whatever the IssuancePolicy now gives, so it is not
+	// returned at all on the URI binding, which can't carry an EncryptedAssertion.
+	Encrypted bool
 }
 
 // IdpQueryRequest is used by IdentityProvider to handle a single request of the assertion query and request
@@ -802,18 +821,18 @@ func (req *IdpQueryRequest) answerAssertionIDRequest() ([]*etree.Element, error)
 
 		seen = append(seen, id)
 
-		assertion, serviceProviderID, err := store.GetAssertion(req.HTTPRequest, id)
+		stored, err := store.GetAssertion(req.HTTPRequest, id)
 		if err != nil {
 			return nil, fmt.Errorf("cannot get an assertion: %w", err)
 		}
 
 		// An assertion issued to another service provider is treated as unknown, which is stricter than the
 		// audience rule a requester would apply itself, so that one can't fetch those of another by guessing.
-		if assertion == nil || serviceProviderID != req.ServiceProviderMetadata.EntityID || !isAssertionWithID(assertion, id) {
+		if !stored.isFor(req.ServiceProviderMetadata.EntityID, id) {
 			continue
 		}
 
-		el, err := shell.encryptAssertionEl(assertion.Copy())
+		el, err := shell.encryptStoredAssertion(stored)
 		if err != nil {
 			return nil, fmt.Errorf("cannot encrypt an assertion: %w", err)
 		}
@@ -824,10 +843,49 @@ func (req *IdpQueryRequest) answerAssertionIDRequest() ([]*etree.Element, error)
 	return assertions, nil
 }
 
-// isAssertionWithID reports whether el is a SAML assertion with that ID, which guards against a store that
-// returns something else.
-func isAssertionWithID(el *etree.Element, id string) bool {
+// isFor reports whether the stored assertion is the SAML assertion with that ID and was issued to the service
+// provider with that entity ID, which also guards against a store that returns something else.
+func (stored *StoredAssertion) isFor(serviceProviderEntityID, id string) bool {
+	if stored == nil || stored.Assertion == nil || stored.ServiceProvider != serviceProviderEntityID {
+		return false
+	}
+
+	el := stored.Assertion
+
 	return el.Tag == "Assertion" && el.NamespaceURI() == samlAssertionNS && el.SelectAttrValue("ID", "") == id
+}
+
+// encryptStoredAssertion returns the stored assertion as it is returned to the service provider of req: encrypted
+// as a whole if it was sent encrypted, or if the IssuancePolicy now has it encrypted, and otherwise in plaintext.
+func (req *IdpAuthnRequest) encryptStoredAssertion(stored *StoredAssertion) (*etree.Element, error) {
+	encrypter, err := req.storedAssertionEncrypter(stored)
+	if err != nil {
+		return nil, err
+	}
+
+	if encrypter == nil {
+		return stored.Assertion.Copy(), nil
+	}
+
+	return encrypter.encryptAssertion(stored.Assertion.Copy())
+}
+
+// storedAssertionEncrypter returns the encrypter that the stored assertion is encrypted with as a whole when it
+// is returned to the service provider of req, or nil if it is returned in plaintext. One that was sent encrypted
+// is encrypted again to the current key of the service provider, whatever the IssuancePolicy now gives, and an
+// error is returned if there is no such key. Otherwise the IssuancePolicy decides, as for single sign-on.
+func (req *IdpAuthnRequest) storedAssertionEncrypter(stored *StoredAssertion) (*elementEncrypter, error) {
+	encrypter, err := req.wholeAssertionEncrypter()
+	if err != nil || encrypter != nil || !stored.Encrypted {
+		return encrypter, err
+	}
+
+	encrypter, err = req.elementEncrypter()
+	if errors.Is(err, os.ErrNotExist) {
+		return nil, fmt.Errorf("the assertion was sent encrypted, and the service provider %q has no encryption key now", req.ServiceProviderMetadata.EntityID)
+	}
+
+	return encrypter, err
 }
 
 // spSSODescriptor returns the descriptor of the service provider whose AttributeConsumingService elements and
@@ -946,8 +1004,9 @@ func (req *IdpQueryRequest) writeResponse(w http.ResponseWriter, status Status, 
 }
 
 // saveAssertion saves the signed assertion of req in the AssertionStore of the identity provider, if it has
-// one. A failure is reported as an EventStore, and doesn't stop the assertion being issued.
-func (req *IdpAuthnRequest) saveAssertion(signedAssertionEl *etree.Element) {
+// one, with whether it is sent encrypted as a whole. A failure is reported as an EventStore, and doesn't stop the
+// assertion being issued.
+func (req *IdpAuthnRequest) saveAssertion(signedAssertionEl *etree.Element, encrypted bool) {
 	if req.IDP == nil || req.IDP.AssertionStore == nil || req.ServiceProviderMetadata == nil {
 		return
 	}
@@ -957,7 +1016,12 @@ func (req *IdpAuthnRequest) saveAssertion(signedAssertionEl *etree.Element) {
 		notOnOrAfter = req.Assertion.Conditions.NotOnOrAfter
 	}
 
-	err := req.IDP.AssertionStore.SaveAssertion(req.HTTPRequest, req.ServiceProviderMetadata.EntityID, signedAssertionEl.Copy(), notOnOrAfter)
+	err := req.IDP.AssertionStore.SaveAssertion(req.HTTPRequest, &StoredAssertion{
+		Assertion:       signedAssertionEl.Copy(),
+		ServiceProvider: req.ServiceProviderMetadata.EntityID,
+		NotOnOrAfter:    notOnOrAfter,
+		Encrypted:       encrypted,
+	})
 	if err != nil {
 		req.warn(EventStore, ErrServerError.WithDebugf("failed to save assertion: %s", err).WithWrap(err))
 	}
