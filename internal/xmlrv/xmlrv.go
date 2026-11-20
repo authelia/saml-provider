@@ -306,8 +306,14 @@ func startElementEquals(before, after xml.StartElement) bool {
 
 // fixNamespacePrefixes undoes in after the xmlns attributes that encoding/xml adds for the prefixes of the element
 // and of its attributes, so that it can be compared with before.
+//
+// It reads the attributes once: the encoder declares the prefix of an attribute just before the first attribute
+// that has it, so each declaration is known before the attributes that it is undone for. This keeps the cost of an
+// element with many prefixed attributes in proportion to their number, as the element is checked before the
+// document is authenticated.
 func fixNamespacePrefixes(before, after *xml.StartElement) {
-	if len(after.Attr) <= len(before.Attr) {
+	added := len(after.Attr) - len(before.Attr)
+	if added <= 0 {
 		return
 	}
 
@@ -315,30 +321,33 @@ func fixNamespacePrefixes(before, after *xml.StartElement) {
 	if before.Name.Space != "" && after.Name.Space == "" && after.Attr[0].Name == (xml.Name{Local: "xmlns"}) {
 		after.Name.Space = after.Attr[0].Value
 		after.Attr = after.Attr[1:]
+		added--
 	}
 
-	// The xmlns attribute of the prefix of an attribute comes just before it.
-	for len(after.Attr) > len(before.Attr) && len(after.Attr) > 1 {
-		i := 1
+	// The namespace of each prefix that an undone xmlns attribute declared.
+	var spaces map[string]string
 
-		for ; i < len(after.Attr); i++ {
-			if after.Attr[i-1].Name.Space == "xmlns" && after.Attr[i-1].Name.Local == after.Attr[i].Name.Space {
-				break
+	attrs := after.Attr[:0]
+
+	for i, attr := range after.Attr {
+		// The xmlns attribute of the prefix of an attribute comes just before it.
+		if added > 0 && attr.Name.Space == "xmlns" && i+1 < len(after.Attr) && after.Attr[i+1].Name.Space == attr.Name.Local {
+			if spaces == nil {
+				spaces = make(map[string]string, added)
 			}
+
+			spaces[attr.Name.Local] = attr.Value
+			added--
+
+			continue
 		}
 
-		if i == len(after.Attr) {
-			return
+		if space, ok := spaces[attr.Name.Space]; ok {
+			attr.Name.Space = space
 		}
 
-		prefix, space := after.Attr[i-1].Name.Local, after.Attr[i-1].Value
-
-		after.Attr = append(after.Attr[:i-1], after.Attr[i:]...)
-
-		for j := range after.Attr {
-			if after.Attr[j].Name.Space == prefix {
-				after.Attr[j].Name.Space = space
-			}
-		}
+		attrs = append(attrs, attr)
 	}
+
+	after.Attr = attrs
 }
