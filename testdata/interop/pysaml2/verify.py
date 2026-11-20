@@ -20,7 +20,7 @@ import freezegun
 import saml2.entity
 import saml2.response
 import saml2.soap
-from saml2 import BINDING_HTTP_ARTIFACT, BINDING_HTTP_POST, BINDING_SOAP
+from saml2 import BINDING_HTTP_ARTIFACT, BINDING_HTTP_POST, BINDING_SOAP, BINDING_URI
 from saml2.response import StatusError
 
 import config
@@ -134,8 +134,12 @@ def pysaml2_unwrap_keeping_bytes():
 
 
 def parse(client, case, encoded):
-    """Returns what pysaml2 makes of the answer to a case: a Response posted to the service provider, or the SOAP
-    envelope that answers a query, with the method pysaml2 has for it."""
+    """Returns what pysaml2 makes of the answer to a case: a Response posted to the service provider, the SOAP
+    envelope that answers a query, or the assertion of the URI binding, with the method pysaml2 has for it."""
+    if case["binding"] == "uri":
+        # pysaml2 verifies the signature of the assertion against the identity provider metadata.
+        return client.parse_assertion_id_request_response(base64.b64decode(encoded).decode(), BINDING_URI)
+
     if case["binding"] != "soap":
         return client.parse_authn_request_response(encoded, BINDING_HTTP_POST, outstanding={case["request_id"]: "/"})
 
@@ -190,8 +194,10 @@ def run_pysaml2_checks(case, encoded, response):
 
     for name in case["verify"]:
         if name == "signature":
-            # parse_authn_request_response raises unless the signatures that want_response_signed asks for verify.
-            check(response.response.signature is not None, "the Response is not signed")
+            # parse_authn_request_response raises unless the signatures that want_response_signed asks for verify,
+            # and parse_assertion_id_request_response unless the signature of the assertion, which is the response
+            # of the URI binding, verifies.
+            check(response.response.signature is not None, f"the {type(response.response).__name__} is not signed")
         elif name == "in-response-to":
             answer = getattr(response, "artifact_response", response)
             check(answer.in_response_to == case["request_id"], f"InResponseTo is {answer.in_response_to!r}")
@@ -204,7 +210,7 @@ def run_pysaml2_checks(case, encoded, response):
                   f"the Response is for {response.response.destination!r}")
             check(response.response.signature is not None, "the Response is not signed")
         elif name == "subject":
-            subject = response.get_subject()
+            subject = response.get_subject() if hasattr(response, "get_subject") else response.assertion.subject.name_id
             check(subject is not None and subject.text, "no NameID in the subject")
             check(subject.format == case["expect"]["name_id_format"], f"NameID format is {subject.format!r}")
             if case["expect"].get("name_id"):
@@ -247,6 +253,11 @@ def run_pysaml2_checks(case, encoded, response):
                     got.setdefault(attribute.name, []).extend(v.text for v in attribute.attribute_value)
             for attribute, value in case["expect"]["encrypted_attributes"].items():
                 check(got.get(attribute) == [value], f"attribute {attribute} is {got.get(attribute)!r}")
+        elif name == "assertion-id":
+            with open(config.ISSUED) as f:
+                want = json.load(f)[case["expect"]["assertion_of"]]["assertion_id"]
+            check(response.assertion is not None, "no assertion")
+            check(response.assertion.id == want, f"the assertion is {response.assertion.id!r}, not {want!r}")
         elif name == "decrypt-assertion":
             # pysaml2 empties encrypted_assertion once it has decrypted it, so the response as sent is looked at.
             sent = sent_message(case, encoded)

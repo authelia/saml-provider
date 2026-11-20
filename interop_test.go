@@ -325,6 +325,8 @@ func newInteropIDP(tb testing.TB, profile string) *IdentityProvider {
 		AttributeServiceURL:          mustParseURL("https://idp.example.com/saml/attribute"),
 		AuthnQueryServiceURL:         mustParseURL("https://idp.example.com/saml/authn-query"),
 		AssertionIDRequestServiceURL: mustParseURL("https://idp.example.com/saml/assertion-id"),
+		AssertionURIURL:              mustParseURL("https://idp.example.com/saml/assertion-uri"),
+		URIRequesterAuthenticator:    interopURIRequester{},
 		ArtifactResolutionURL:        mustParseURL("https://idp.example.com/saml/artifact"),
 		ArtifactStore:                NewMemoryArtifactStore(16),
 		AssertionStore:               &interopAssertionStore{},
@@ -397,6 +399,17 @@ func (p interopSessionProvider) GetAuthnSessions(_ *http.Request, _ *IdpQueryReq
 	}
 
 	return []*Session{p.get()}, nil
+}
+
+// interopRequesterHeader is the header that the replay names the service provider of a request on the URI binding
+// with, as a proxy that authenticated it would.
+const interopRequesterHeader = "X-Interop-Requester"
+
+// interopURIRequester is the URIRequesterAuthenticator of the fixtures, which trusts interopRequesterHeader.
+type interopURIRequester struct{}
+
+func (interopURIRequester) AuthenticateURIRequester(r *http.Request) (string, error) {
+	return r.Header.Get(interopRequesterHeader), nil
 }
 
 // interopAssertionStore is an AssertionStore in memory, for one replay.
@@ -643,9 +656,21 @@ func (r *interopReplay) run(tb testing.TB, c interopCase) string {
 
 	encoded, message := r.serve(tb, c)
 
-	if message.Tag == "ArtifactResponse" {
+	switch message.Tag {
+	case "Assertion":
+		// The URI binding answers with the assertion alone.
+		require.Equal(tb, "uri", c.Binding, "an Assertion answers a request on the %s binding", c.Binding)
+
+		if method := message.FindElement("./Signature/SignedInfo/SignatureMethod"); assert.NotNil(tb, method, "the Assertion is not signed") {
+			assert.Equal(tb, c.Expect.SignatureMethod, method.SelectAttrValue("Algorithm", ""))
+		}
+
+		r.checkAssertion(tb, c, message)
+
+		return encoded
+	case "ArtifactResponse":
 		message = r.checkArtifactResponse(tb, &c, message)
-	} else {
+	default:
 		require.Equal(tb, "Response", message.Tag)
 	}
 
@@ -671,29 +696,37 @@ func (r *interopReplay) run(tb testing.TB, c interopCase) string {
 	}
 
 	if assert.NotNil(tb, assertion, "no Assertion") {
-		if c.Expect.IssuesAssertion {
-			r.issued[c.ID] = interopIssued{AssertionID: assertion.SelectAttrValue("ID", "")}
-		}
-
-		if c.Expect.AssertionOf != "" {
-			issued, ok := r.issued[c.Expect.AssertionOf]
-			require.True(tb, ok, "case %s issued no assertion on this replay", c.Expect.AssertionOf)
-			assert.Equal(tb, issued.AssertionID, assertion.SelectAttrValue("ID", ""), "the assertion of %s", c.Expect.AssertionOf)
-		}
-
-		checkInteropSubject(tb, c, assertion)
-		checkInteropEncryptedAttributes(tb, c, assertion)
-		checkInteropAttributes(tb, c, assertion)
-
-		if c.Expect.AuthnInstant != "" {
-			statements := assertion.FindElements("./AuthnStatement")
-			if assert.Len(tb, statements, 1, "AuthnStatements") {
-				assert.Equal(tb, c.Expect.AuthnInstant, statements[0].SelectAttrValue("AuthnInstant", ""))
-			}
-		}
+		r.checkAssertion(tb, c, assertion)
 	}
 
 	return encoded
+}
+
+// checkAssertion checks what the case expects of the assertion it was answered with, in plaintext, and records its
+// ID if the case issues one for a later case to request.
+func (r *interopReplay) checkAssertion(tb testing.TB, c interopCase, assertion *etree.Element) {
+	tb.Helper()
+
+	if c.Expect.IssuesAssertion {
+		r.issued[c.ID] = interopIssued{AssertionID: assertion.SelectAttrValue("ID", "")}
+	}
+
+	if c.Expect.AssertionOf != "" {
+		issued, ok := r.issued[c.Expect.AssertionOf]
+		require.True(tb, ok, "case %s issued no assertion on this replay", c.Expect.AssertionOf)
+		assert.Equal(tb, issued.AssertionID, assertion.SelectAttrValue("ID", ""), "the assertion of %s", c.Expect.AssertionOf)
+	}
+
+	checkInteropSubject(tb, c, assertion)
+	checkInteropEncryptedAttributes(tb, c, assertion)
+	checkInteropAttributes(tb, c, assertion)
+
+	if c.Expect.AuthnInstant != "" {
+		statements := assertion.FindElements("./AuthnStatement")
+		if assert.Len(tb, statements, 1, "AuthnStatements") {
+			assert.Equal(tb, c.Expect.AuthnInstant, statements[0].SelectAttrValue("AuthnInstant", ""))
+		}
+	}
 }
 
 // checkNamesIssued fails a case whose request names an artifact or assertion that the case it was made from did not
@@ -815,6 +848,8 @@ func (r *interopReplay) serve(tb testing.TB, c interopCase) (string, *etree.Elem
 		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	case "soap":
 		return r.serveSOAP(tb, c, body)
+	case "uri":
+		return r.serveURI(tb, c, body)
 	default:
 		tb.Fatalf("unknown binding %q", c.Binding)
 
@@ -863,6 +898,27 @@ func (r *interopReplay) serveSOAP(tb testing.TB, c interopCase, body []byte) (st
 	require.Len(tb, soapBody.ChildElements(), 1, "the SOAP Body holds other than one message")
 
 	return base64.StdEncoding.EncodeToString(w.Body.Bytes()), soapBody.ChildElements()[0]
+}
+
+// serveURI gets the assertion that the query of a case names on the SAML URI binding, as the service provider of the
+// case, and returns the body of the answer in base64 and the Assertion it is.
+func (r *interopReplay) serveURI(tb testing.TB, c interopCase, query []byte) (string, *etree.Element) {
+	tb.Helper()
+
+	req := httptest.NewRequest(http.MethodGet, r.idp.AssertionURIURL.String()+"?"+string(query), nil)
+	req.Header.Set(interopRequesterHeader, interopServiceProviders[c.SP])
+
+	w := httptest.NewRecorder()
+	r.idp.ServeAssertionURI(w, req)
+	require.Equal(tb, http.StatusOK, w.Code, "%s", w.Body.String())
+	assert.Equal(tb, "application/samlassertion+xml", w.Header().Get("Content-Type"))
+
+	doc := etree.NewDocument()
+	require.NoError(tb, doc.ReadFromBytes(w.Body.Bytes()))
+	require.Equal(tb, "Assertion", doc.Root().Tag, "%s", w.Body.String())
+	require.Equal(tb, samlAssertionNS, doc.Root().NamespaceURI())
+
+	return base64.StdEncoding.EncodeToString(w.Body.Bytes()), doc.Root()
 }
 
 // checkInteropResponse checks what the case expects of the Response itself: its status, whom it answers and is
@@ -1156,6 +1212,7 @@ var interopBindings = map[string]string{
 	"redirect-signed": http.MethodGet,
 	"post-signed":     http.MethodPost,
 	"soap":            http.MethodPost,
+	"uri":             http.MethodGet,
 }
 
 // interopEndpoints are the services of the identity provider that a request on the SOAP binding is sent to, by the
