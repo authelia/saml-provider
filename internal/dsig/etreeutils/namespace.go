@@ -16,6 +16,11 @@ const (
 
 	XMLNamespace   = "http://www.w3.org/XML/1998/namespace"
 	XMLNSNamespace = "http://www.w3.org/2000/xmlns/"
+
+	// MaxPrefixes is the most namespace prefixes that may be in scope at an element, counting the default
+	// namespace and the xml and xmlns prefixes. A context is copied for each element that declares a namespace,
+	// so without a bound a document could make each of its elements copy every prefix that its root declares.
+	MaxPrefixes = 64
 )
 
 func NewDefaultNSContext() NSContext {
@@ -37,6 +42,7 @@ var (
 	ErrInvalidDefaultNamespace = errors.New("invalid default namespace declaration")
 	ErrTraversalHalted         = errors.New("traversal halted")
 	ErrTraversalLimit          = errors.New("traversal limit reached")
+	ErrTooManyPrefixes         = fmt.Errorf("more than %d namespace prefixes in scope", MaxPrefixes)
 )
 
 type ErrUndeclaredNSPrefix struct {
@@ -106,13 +112,19 @@ func (ctx NSContext) declare(prefix, namespace string) etree.Attr {
 	}
 }
 
+// SubContext returns the context of el, which is this context with the namespace declarations of el on top. The
+// context is returned as it is when el declares nothing, so that it is only copied for the elements that do.
 func (ctx NSContext) SubContext(el *etree.Element) (NSContext, error) {
-	// The subcontext should inherit existing declared prefixes
-	newCtx := ctx.Copy()
+	var (
+		newCtx NSContext
+		copied bool
+	)
 
-	// Merge new namespace declarations on top of existing ones.
 	for _, attr := range el.Attr {
-		if attr.Space == xmlnsPrefix {
+		var prefix string
+
+		switch {
+		case attr.Space == xmlnsPrefix:
 			// This attribute is a namespace declaration of the form "xmlns:<prefix>"
 
 			// The 'xml' namespace may only be re-declared with the name 'http://www.w3.org/XML/1998/namespace'
@@ -125,8 +137,8 @@ func (ctx NSContext) SubContext(el *etree.Element) (NSContext, error) {
 				return ctx, ErrReservedNamespace
 			}
 
-			newCtx.declare(attr.Key, attr.Value)
-		} else if attr.Space == defaultPrefix && attr.Key == xmlnsPrefix {
+			prefix = attr.Key
+		case attr.Space == defaultPrefix && attr.Key == xmlnsPrefix:
 			// This attribute is a default namespace declaration
 
 			// The xmlns namespace value may not be declared as the default namespace
@@ -134,8 +146,25 @@ func (ctx NSContext) SubContext(el *etree.Element) (NSContext, error) {
 				return ctx, ErrInvalidDefaultNamespace
 			}
 
-			newCtx.declare(defaultPrefix, attr.Value)
+			prefix = defaultPrefix
+		default:
+			continue
 		}
+
+		// The subcontext should inherit existing declared prefixes
+		if !copied {
+			newCtx, copied = ctx.Copy(), true
+		}
+
+		newCtx.declare(prefix, attr.Value)
+
+		if len(newCtx.prefixes) > MaxPrefixes {
+			return ctx, ErrTooManyPrefixes
+		}
+	}
+
+	if !copied {
+		return ctx, nil
 	}
 
 	return newCtx, nil
@@ -303,13 +332,9 @@ func NSFindIterate(el *etree.Element, namespace, tag string, handle NSIterHandle
 // NSFindIterate. If any other error is returned by the handler, that error will be
 // returned by NSFindIterate.
 func NSFindIterateCtx(ctx NSContext, el *etree.Element, namespace, tag string, handle NSIterHandler) error {
+	// NSTraverse gives the handler the context of el itself, which already has its declarations.
 	err := NSTraverse(ctx, el, func(ctx NSContext, el *etree.Element) error {
-		_ctx, err := ctx.SubContext(el)
-		if err != nil {
-			return err
-		}
-
-		currentNS, err := _ctx.LookupPrefix(el.Space)
+		currentNS, err := ctx.LookupPrefix(el.Space)
 		if err != nil {
 			return err
 		}

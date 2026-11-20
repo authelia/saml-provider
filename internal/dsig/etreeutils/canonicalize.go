@@ -61,13 +61,14 @@ func transformExcC14n(ctx, declared NSContext, el *etree.Element, inclusiveNames
 
 	el.Attr = filteredAttrs
 
-	declared = declared.Copy()
-
 	// Declare all visibly utilized prefixes that are in-scope but haven't
 	// been declared in the canonicalized form yet. These might have been
 	// declared on this element but then filtered out above, or they might
 	// have been declared on an ancestor (before canonicalization) which
-	// didn't visibly utilize and thus had them removed.
+	// didn't visibly utilize and thus had them removed. The declared context
+	// is only copied when there is one, as most elements declare nothing.
+	copied := false
+
 	for prefix := range visiblyUtilizedPrefixes {
 		// Skip redundant declarations - they have to already have the same
 		// value.
@@ -80,6 +81,10 @@ func transformExcC14n(ctx, declared NSContext, el *etree.Element, inclusiveNames
 		namespace, err := scope.LookupPrefix(prefix)
 		if err != nil {
 			return err
+		}
+
+		if !copied {
+			declared, copied = declared.Copy(), true
 		}
 
 		el.Attr = append(el.Attr, declared.declare(prefix, namespace))
