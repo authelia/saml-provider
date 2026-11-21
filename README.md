@@ -85,6 +85,7 @@ least the subset of SAML known as [interoperable SAML](https://kantarainitiative
 | `NameIDPolicy`                                    | ✅  | ✅  |
 | `ForceAuthn` / `IsPassive`                        | ✅  | ✅  |
 | `RequestedAuthnContext`                           | ✅  | ✅  |
+| `AuthnContextDeclRef` and `AuthenticatingAuthority` | ✅  | ⚠️  |
 | `AttributeConsumingService` attribute release     | ✅  | ❌  |
 | `Scoping` (`ProxyCount`, `IDPList`, `RequesterID`)[^scoping] | ✅  | ✅  |
 | `ProxyRestriction`, for each SP[^scoping]         | ✅  | ⚠️  |
@@ -481,10 +482,18 @@ without acting on it. See **`Scoping` and `ProxyRestriction`** below.
   `samlidp` implements both, resuming its login form with `IdpAuthnRequest.ResumeFormValues`, and returns `NoPassive`
   if both are set, as it can only authenticate with a login form.
 - **`RequestedAuthnContext`:** a request that the assertion can't satisfy receives a `NoAuthnContext` status. The
-  `AuthnContextEnforcer` is asked about the class of each `AuthnStatement` with `SatisfiesAuthnContext`.
-  `DefaultAssertionMaker` asserts `Session.AuthnContextClassRef`, or `PasswordProtectedTransport` when the session sets
-  none, and a custom `AssertionMaker` can set a different class. `minimum`, `maximum` and `better` need `DefaultAuthnContextEnforcer.Strength` to rank classes. Without it,
-  `minimum` and `maximum` only match a listed class, and `better` never matches. `DefaultAuthnContextEnforcer` refuses an `AuthnContextDeclRef`, and an assertion can't state one. Set
+  `AuthnContextEnforcer` is asked about the class and declaration reference of each `AuthnStatement` with
+  `SatisfiesAuthnContext`.
+  `DefaultAssertionMaker` asserts `Session.AuthnContextClassRef`, `Session.AuthnContextDeclRef` and
+  `Session.AuthenticatingAuthorities`. A session with a declaration reference and no class is stated without a class,
+  and the `PasswordProtectedTransport` default applies only when the session sets neither. A custom `AssertionMaker`
+  can state something different. The classes of SAMLAuthnCxt §3.4 are the `AuthnContextClass...` constants, and a
+  declaration by value (`AuthnContextDecl`) is not supported. `DefaultAuthnContextEnforcer` compares a requested
+  declaration reference with the declaration reference of the statement by the same rules as a class, and a statement
+  needs a class or a declaration reference to be accepted. A request that lists both kinds, or a kind the statement
+  doesn't state, receives `NoAuthnContext`. `minimum`, `maximum` and `better` need
+  `DefaultAuthnContextEnforcer.Strength` to rank classes or declaration references. Without it,
+  `minimum` and `maximum` only match a listed value, and `better` never matches. The service provider parses these elements and does not act on them. Set
   `IdentityProvider.AuthnContextEnforcer` to decide differently.
 - **`Scoping` and `ProxyRestriction`:** the `Scoping` of an `AuthnRequest` (SAMLCore §3.4.1.2) is parsed into
   `IdpAuthnRequest.Request.Scoping`, so a `SessionProvider`, an `AssertionMaker`, an `IssuancePolicy`

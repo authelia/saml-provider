@@ -1353,7 +1353,7 @@ func TestServeAuthnQueryFilters(t *testing.T) {
 		{name: "the default class", requested: &RequestedAuthnContext{AuthnContextClassRefs: []string{transportClass}}, indexes: []string{"index-one"}},
 		{name: "either class, in any order", requested: &RequestedAuthnContext{AuthnContextClassRefs: []string{strongClass, transportClass}}, indexes: []string{"index-one", "index-two"}},
 		{name: "no session of the class", requested: &RequestedAuthnContext{AuthnContextClassRefs: []string{weakClass}}},
-		{name: "declaration", requested: &RequestedAuthnContext{AuthnContextDeclRefs: []string{"urn:example:declaration"}}},
+		{name: "declaration", requested: &RequestedAuthnContext{AuthnContextDeclRefs: []string{testDeclRef}}},
 		{
 			name:      "minimum with the configured enforcer",
 			requested: &RequestedAuthnContext{Comparison: AuthnContextComparisonMinimum, AuthnContextClassRefs: []string{weakClass}},
@@ -1402,6 +1402,30 @@ func TestServeAuthnQueryFilters(t *testing.T) {
 			assert.Equal(t, indexes, tc.indexes)
 		})
 	}
+}
+
+// A session is stated with its declaration reference and authorities, and a requested declaration
+// reference is matched against that of the session.
+func TestServeAuthnQueryDeclRef(t *testing.T) {
+	f := newQueryFixture(t)
+	f.provider.sessions[1].AuthnContextDeclRef = testDeclRef
+	f.provider.sessions[1].AuthenticatingAuthorities = []string{upstreamAuthority}
+
+	query := f.authnQuery()
+	query.RequestedAuthnContext = &RequestedAuthnContext{AuthnContextDeclRefs: []string{testDeclRef}}
+
+	response := f.queryAuthn(t, query)
+	assertQueryStatus(t, response, StatusSuccess, "")
+	require.Len(t, response.Assertions, 1)
+	require.Len(t, response.Assertions[0].AuthnStatements, 1)
+
+	statement := response.Assertions[0].AuthnStatements[0]
+	assert.Equal(t, statement.SessionIndex, "index-two")
+	assert.Equal(t, statement.AuthnContext, AuthnContext{
+		AuthnContextClassRef:      &AuthnContextClassRef{Value: strongClass},
+		AuthnContextDeclRef:       &AuthnContextDeclRef{Value: testDeclRef},
+		AuthenticatingAuthorities: []string{upstreamAuthority},
+	})
 }
 
 func TestServeAuthnQueryPrincipal(t *testing.T) {

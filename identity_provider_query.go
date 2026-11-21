@@ -54,10 +54,11 @@ type QuerySessionProvider interface {
 	GetQuerySubject(r *http.Request, req *IdpQueryRequest, nameID *NameID) (*Session, error)
 
 	// GetAuthnSessions returns the active sessions of the principal that nameID identifies for the service
-	// provider of req, for an AuthnQuery, each of which is stated with its CreateTime, Index and
-	// AuthnContextClassRef. It should return only the sessions in which the service provider was sent an
-	// assertion, as the others are no business of it. It returns an empty slice and no error when there is
-	// no such principal or session, which sends a Success status with no assertion (SAMLCore §3.3.4).
+	// provider of req, for an AuthnQuery, each of which is stated with its CreateTime, Index,
+	// AuthnContextClassRef, AuthnContextDeclRef and AuthenticatingAuthorities. It should return only the
+	// sessions in which the service provider was sent an assertion, as the others are no business of it.
+	// It returns an empty slice and no error when there is no such principal or session, which sends a
+	// Success status with no assertion (SAMLCore §3.3.4).
 	//
 	// An error sends a Responder status, and is not sent to the service provider.
 	GetAuthnSessions(r *http.Request, req *IdpQueryRequest, nameID *NameID) ([]*Session, error)
@@ -758,9 +759,7 @@ func (req *IdpQueryRequest) answerAuthnQuery() ([]*etree.Element, error) {
 			AuthnInstant:    session.CreateTime,
 			SessionIndex:    session.Index,
 			SubjectLocality: sessionSubjectLocality(session),
-			AuthnContext: AuthnContext{
-				AuthnContextClassRef: &AuthnContextClassRef{Value: sessionAuthnContextClassRef(session)},
-			},
+			AuthnContext:    sessionAuthnContext(session),
 		})
 	}
 
