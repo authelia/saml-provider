@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"slices"
 	"strings"
 	"testing"
 
@@ -16,10 +17,14 @@ import (
 )
 
 const (
-	weakClass      = "urn:oasis:names:tc:SAML:2.0:ac:classes:Password"
-	transportClass = "urn:oasis:names:tc:SAML:2.0:ac:classes:PasswordProtectedTransport"
+	weakClass      = AuthnContextClassPassword
+	transportClass = AuthnContextClassPasswordProtectedTransport
 	strongClass    = "https://refeds.org/profile/mfa"
 	unrankedClass  = "urn:example:unranked"
+
+	testDeclRef       = "urn:example:declaration"
+	otherDeclRef      = "urn:example:declaration:other"
+	upstreamAuthority = "https://upstream.example.com/idp"
 )
 
 type authnContextEnforcerFunc func(*RequestedAuthnContext, *Session) error
@@ -101,8 +106,8 @@ func TestServeSSORejectsUnsatisfiableAuthnContext(t *testing.T) {
 		"exact none of several": {AuthnContextClassRefs: []string{strongClass, weakClass}},
 		"minimum unranked":      {Comparison: AuthnContextComparisonMinimum, AuthnContextClassRefs: []string{weakClass}},
 		"better than itself":    {Comparison: AuthnContextComparisonBetter, AuthnContextClassRefs: []string{transportClass}},
-		"declaration":           {AuthnContextDeclRefs: []string{"urn:example:declaration"}},
-		"declaration and class": {AuthnContextClassRefs: []string{transportClass}, AuthnContextDeclRefs: []string{"urn:example:declaration"}},
+		"declaration":           {AuthnContextDeclRefs: []string{testDeclRef}},
+		"declaration and class": {AuthnContextClassRefs: []string{transportClass}, AuthnContextDeclRefs: []string{testDeclRef}},
 		"unknown comparison":    {Comparison: "most", AuthnContextClassRefs: []string{transportClass}},
 	} {
 		t.Run(name, func(t *testing.T) {
@@ -112,23 +117,68 @@ func TestServeSSORejectsUnsatisfiableAuthnContext(t *testing.T) {
 	}
 }
 
-// The assertion carries the class of the session, or PasswordProtectedTransport when the session has
-// none, so a session provider can assert a stronger authentication truthfully.
+// The assertion carries the class, declaration reference and authorities of the session, and
+// PasswordProtectedTransport when the session sets neither a class nor a declaration reference, so a
+// session provider can assert a stronger authentication truthfully.
 func TestDefaultAssertionMakerUsesSessionAuthnContext(t *testing.T) {
-	for name, tc := range map[string]struct{ session, asserted string }{
-		"session class": {session: strongClass, asserted: strongClass},
-		"default class": {session: "", asserted: transportClass},
+	for name, tc := range map[string]struct {
+		session  Session
+		asserted AuthnContext
+	}{
+		"class only": {
+			session:  Session{AuthnContextClassRef: strongClass},
+			asserted: AuthnContext{AuthnContextClassRef: &AuthnContextClassRef{Value: strongClass}},
+		},
+		"nothing": {
+			session:  Session{},
+			asserted: AuthnContext{AuthnContextClassRef: &AuthnContextClassRef{Value: transportClass}},
+		},
+		"declaration only": {
+			session:  Session{AuthnContextDeclRef: testDeclRef},
+			asserted: AuthnContext{AuthnContextDeclRef: &AuthnContextDeclRef{Value: testDeclRef}},
+		},
+		"blank declaration only": {
+			session:  Session{AuthnContextDeclRef: "  "},
+			asserted: AuthnContext{AuthnContextClassRef: &AuthnContextClassRef{Value: transportClass}},
+		},
+		"class and declaration": {
+			session: Session{AuthnContextClassRef: strongClass, AuthnContextDeclRef: testDeclRef},
+			asserted: AuthnContext{
+				AuthnContextClassRef: &AuthnContextClassRef{Value: strongClass},
+				AuthnContextDeclRef:  &AuthnContextDeclRef{Value: testDeclRef},
+			},
+		},
+		"authorities": {
+			session: Session{AuthenticatingAuthorities: []string{upstreamAuthority, "", "  "}},
+			asserted: AuthnContext{
+				AuthnContextClassRef:      &AuthnContextClassRef{Value: transportClass},
+				AuthenticatingAuthorities: []string{upstreamAuthority},
+			},
+		},
 	} {
 		t.Run(name, func(t *testing.T) {
 			test := NewIdentityProviderTest(t, applyKey)
 			req, err := hardeningValidate(test, hardeningRequest(`ID="id-1"`, TimeNow(), hardeningIssuer))
 			require.NoError(t, err)
-			require.NoError(t, DefaultAssertionMaker{}.MakeAssertion(req, &Session{ID: "f00d", NameID: "alice", AuthnContextClassRef: tc.session}))
+
+			session := tc.session
+			session.ID, session.NameID = "f00d", "alice"
+			require.NoError(t, DefaultAssertionMaker{}.MakeAssertion(req, &session))
 			require.Len(t, req.Assertion.AuthnStatements, 1)
-			require.NotNil(t, req.Assertion.AuthnStatements[0].AuthnContext.AuthnContextClassRef)
-			assert.Equal(t, req.Assertion.AuthnStatements[0].AuthnContext.AuthnContextClassRef.Value, tc.asserted)
+			assert.Equal(t, tc.asserted, req.Assertion.AuthnStatements[0].AuthnContext)
 		})
 	}
+}
+
+func TestServeSSOMatchesRequestedDeclRef(t *testing.T) {
+	test := NewIdentityProviderTest(t, applyKey)
+	session := &Session{ID: "s", NameID: "alice", AuthnContextDeclRef: testDeclRef}
+
+	response := serveSSOWithSession(t, test, session, &RequestedAuthnContext{AuthnContextDeclRefs: []string{testDeclRef}})
+	assert.Equal(t, response.Status.StatusCode.Value, StatusSuccess)
+
+	response = serveSSOWithSession(t, test, session, &RequestedAuthnContext{AuthnContextDeclRefs: []string{otherDeclRef}})
+	assertNoAuthnContext(t, response)
 }
 
 func TestServeSSOAcceptsSessionAuthnContext(t *testing.T) {
@@ -276,6 +326,146 @@ func TestDefaultAuthnContextEnforcerComparisons(t *testing.T) {
 	t.Run("a session without a class is PasswordProtectedTransport", func(t *testing.T) {
 		assert.NoError(t, ranked.SatisfiesAuthnContext(request("", transportClass), &Session{}))
 		assert.True(t, ranked.SatisfiesAuthnContext(request("", strongClass), &Session{}) != nil)
+	})
+}
+
+// SAMLCore §3.3.2.2.1 allows a set of class references or a set of declaration references, with the
+// same comparison rules, so a requested declaration reference is matched against the declaration
+// reference of the session, and never against its class.
+func TestDefaultAuthnContextEnforcerDeclRefs(t *testing.T) {
+	enforcer := DefaultAuthnContextEnforcer{Strength: map[string]int{testDeclRef: 1, otherDeclRef: 2}}
+
+	declRefs := func(comparison string, refs ...string) *RequestedAuthnContext {
+		return &RequestedAuthnContext{Comparison: comparison, AuthnContextDeclRefs: refs}
+	}
+
+	for name, tc := range map[string]struct {
+		requested *RequestedAuthnContext
+		session   Session
+		ok        bool
+	}{
+		"exact":                         {declRefs("", testDeclRef), Session{AuthnContextDeclRef: testDeclRef}, true},
+		"any one listed":                {declRefs("", otherDeclRef, testDeclRef), Session{AuthnContextDeclRef: testDeclRef}, true},
+		"another declaration":           {declRefs(AuthnContextComparisonExact, otherDeclRef), Session{AuthnContextDeclRef: testDeclRef}, false},
+		"session without a declaration": {declRefs("", testDeclRef), Session{AuthnContextClassRef: strongClass}, false},
+		"kinds do not cross":            {declRefs("", strongClass), Session{AuthnContextClassRef: strongClass}, false},
+		"minimum":                       {declRefs(AuthnContextComparisonMinimum, testDeclRef), Session{AuthnContextDeclRef: otherDeclRef}, true},
+		"better, equal":                 {declRefs(AuthnContextComparisonBetter, testDeclRef), Session{AuthnContextDeclRef: testDeclRef}, false},
+		"empty declaration requested":   {declRefs("", ""), Session{AuthnContextClassRef: strongClass}, false},
+		"class requested of a declaration-only session": {
+			&RequestedAuthnContext{AuthnContextClassRefs: []string{transportClass}},
+			Session{AuthnContextDeclRef: testDeclRef},
+			false,
+		},
+		"class requested of a session with both": {
+			&RequestedAuthnContext{AuthnContextClassRefs: []string{strongClass}},
+			Session{AuthnContextClassRef: strongClass, AuthnContextDeclRef: testDeclRef},
+			true,
+		},
+		"both kinds requested": {
+			&RequestedAuthnContext{AuthnContextClassRefs: []string{strongClass}, AuthnContextDeclRefs: []string{testDeclRef}},
+			Session{AuthnContextClassRef: strongClass, AuthnContextDeclRef: testDeclRef},
+			false,
+		},
+		"empty class requested": {
+			&RequestedAuthnContext{AuthnContextClassRefs: []string{""}},
+			Session{AuthnContextDeclRef: testDeclRef},
+			false,
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			err := enforcer.SatisfiesAuthnContext(tc.requested, &tc.session)
+			if tc.ok {
+				assert.NoError(t, err)
+			} else {
+				assert.Error(t, err)
+			}
+		})
+	}
+}
+
+// The enforcer judges what each statement asserts, not what the session holds, so a custom
+// AssertionMaker is held to its statements.
+func TestSatisfiesAuthnContextJudgesTheStatement(t *testing.T) {
+	idp := &IdentityProvider{}
+
+	withStatement := func(context AuthnContext) *Assertion {
+		return &Assertion{AuthnStatements: []AuthnStatement{{AuthnContext: context}}}
+	}
+
+	declOnly := withStatement(AuthnContext{AuthnContextDeclRef: &AuthnContextDeclRef{Value: testDeclRef}})
+
+	t.Run("declaration asserted", func(t *testing.T) {
+		assert.NoError(t, idp.satisfiesAuthnContext(&RequestedAuthnContext{AuthnContextDeclRefs: []string{testDeclRef}}, declOnly, &Session{}))
+	})
+
+	t.Run("class of the session but not of the statement", func(t *testing.T) {
+		requested := &RequestedAuthnContext{AuthnContextClassRefs: []string{strongClass}}
+		assert.Error(t, idp.satisfiesAuthnContext(requested, declOnly, &Session{AuthnContextClassRef: strongClass}))
+	})
+
+	t.Run("declaration of the session but not of the statement", func(t *testing.T) {
+		assertion := withStatement(AuthnContext{AuthnContextClassRef: &AuthnContextClassRef{Value: weakClass}})
+		requested := &RequestedAuthnContext{AuthnContextDeclRefs: []string{testDeclRef}}
+		assert.Error(t, idp.satisfiesAuthnContext(requested, assertion, &Session{AuthnContextDeclRef: testDeclRef}))
+	})
+
+	t.Run("statement with neither", func(t *testing.T) {
+		err := idp.satisfiesAuthnContext(&RequestedAuthnContext{AuthnContextClassRefs: []string{weakClass}}, withStatement(AuthnContext{}), &Session{})
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "neither")
+	})
+
+	t.Run("empty references are absent", func(t *testing.T) {
+		requested := &RequestedAuthnContext{AuthnContextClassRefs: []string{transportClass}}
+
+		for name, authn := range map[string]AuthnContext{
+			"declaration": {AuthnContextDeclRef: &AuthnContextDeclRef{Value: ""}},
+			"class":       {AuthnContextClassRef: &AuthnContextClassRef{Value: ""}},
+			"blank class": {AuthnContextClassRef: &AuthnContextClassRef{Value: "  "}},
+		} {
+			t.Run(name, func(t *testing.T) {
+				err := idp.satisfiesAuthnContext(requested, withStatement(authn), &Session{})
+				require.Error(t, err)
+				assert.Contains(t, err.Error(), "neither")
+			})
+		}
+	})
+
+	t.Run("the enforcer sees the statement", func(t *testing.T) {
+		var seen Session
+
+		recorder := &IdentityProvider{AuthnContextEnforcer: authnContextEnforcerFunc(func(_ *RequestedAuthnContext, session *Session) error {
+			seen = *session
+
+			return nil
+		})}
+
+		session := &Session{
+			NameID:                    "alice",
+			AuthnContextClassRef:      weakClass,
+			AuthnContextDeclRef:       otherDeclRef,
+			AuthenticatingAuthorities: []string{"https://other.example.com/idp"},
+		}
+		original := *session
+		original.AuthenticatingAuthorities = slices.Clone(session.AuthenticatingAuthorities)
+
+		assertion := withStatement(AuthnContext{
+			AuthnContextClassRef:      &AuthnContextClassRef{Value: strongClass},
+			AuthnContextDeclRef:       &AuthnContextDeclRef{Value: testDeclRef},
+			AuthenticatingAuthorities: []string{upstreamAuthority},
+		})
+		require.NoError(t, recorder.satisfiesAuthnContext(&RequestedAuthnContext{AuthnContextClassRefs: []string{strongClass}}, assertion, session))
+		assert.Equal(t, seen.NameID, "alice")
+		assert.Equal(t, seen.AuthnContextClassRef, strongClass)
+		assert.Equal(t, seen.AuthnContextDeclRef, testDeclRef)
+		assert.Equal(t, seen.AuthenticatingAuthorities, []string{upstreamAuthority})
+		assert.Equal(t, original, *session, "the session is not changed")
+
+		require.NoError(t, recorder.satisfiesAuthnContext(&RequestedAuthnContext{AuthnContextDeclRefs: []string{testDeclRef}}, declOnly, session))
+		assert.Equal(t, seen.AuthnContextClassRef, "")
+		assert.Equal(t, seen.AuthnContextDeclRef, testDeclRef)
+		assert.Nil(t, seen.AuthenticatingAuthorities)
 	})
 }
 

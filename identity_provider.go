@@ -84,9 +84,20 @@ type Session struct {
 	CustomAttributes []Attribute
 
 	// AuthnContextClassRef is the authentication context class of the session, such as
-	// https://refeds.org/profile/mfa, which DefaultAssertionMaker asserts. If it is empty the
-	// assertion states PasswordProtectedTransport.
+	// https://refeds.org/profile/mfa, which DefaultAssertionMaker asserts. If the session sets neither
+	// a class nor a declaration reference, the assertion states PasswordProtectedTransport.
 	AuthnContextClassRef string `json:",omitempty"`
+
+	// AuthnContextDeclRef is a URI that identifies the authentication context declaration of the
+	// session, which is stated beside the class, or alone when the session sets no class (SAMLCore
+	// §2.7.2.2).
+	AuthnContextDeclRef string `json:",omitempty"`
+
+	// AuthenticatingAuthorities are the entity IDs of the other identity providers that authenticated
+	// the principal, such as the one an application proxied the request to, which are stated as
+	// AuthenticatingAuthority elements (SAMLCore §2.7.2.2). They must not include this identity
+	// provider.
+	AuthenticatingAuthorities []string `json:",omitempty"`
 
 	// ClientAddress is the IP address of the user, which assertions state. Set it when the identity
 	// provider is behind a proxy, as the address of the HTTP request is then the proxy's. If it is
@@ -94,10 +105,6 @@ type Session struct {
 	// out of the assertion.
 	ClientAddress string `json:",omitempty"`
 }
-
-// defaultAuthnContextClassRef is the authentication context class asserted for a session that sets
-// none.
-const defaultAuthnContextClassRef = "urn:oasis:names:tc:SAML:2.0:ac:classes:PasswordProtectedTransport"
 
 // SessionProvider is an interface used by IdentityProvider to determine the
 // Session associated with a request. For an example implementation, see
@@ -196,12 +203,14 @@ type NameIDPolicyEnforcer interface {
 // specified.
 type AuthnContextEnforcer interface {
 	// SatisfiesAuthnContext returns an error if the authentication of session, whose class is
-	// session.AuthnContextClassRef or PasswordProtectedTransport when that is empty, doesn't satisfy
-	// requested, which is not nil.
+	// session.AuthnContextClassRef or PasswordProtectedTransport when it sets neither a class nor a
+	// declaration reference, and whose declaration reference is session.AuthnContextDeclRef, doesn't
+	// satisfy requested, which is not nil.
 	//
 	// ServeSSO calls it once for each AuthnStatement of the assertion, with a copy of the session whose
-	// AuthnContextClassRef is the class that the statement asserts, so that a custom AssertionMaker is
-	// held to what it asserts. The service provider receives a NoAuthnContext status, not the error.
+	// AuthnContextClassRef, AuthnContextDeclRef and AuthenticatingAuthorities are those that the
+	// statement asserts, empty where it asserts none, so that a custom AssertionMaker is held to what it
+	// asserts. The service provider receives a NoAuthnContext status, not the error.
 	// ServeAuthnQuery calls it for each session of the principal, and leaves out those that return an
 	// error.
 	SatisfiesAuthnContext(requested *RequestedAuthnContext, session *Session) error
@@ -353,25 +362,22 @@ type AttributeReleasePolicy interface {
 	ReleaseAttributes(req AttributeReleaseRequest, session *Session, candidates []Attribute) ([]Attribute, error)
 }
 
-// DefaultAuthnContextEnforcer applies the comparison rules of SAMLCore §3.3.2.2.1 to the class
-// reference of the authentication of a session.
+// DefaultAuthnContextEnforcer applies the comparison rules of SAMLCore §3.3.2.2.1 to the kind of
+// reference that the request lists: the class of the session when it lists classes, and the declaration
+// reference of the session when it lists declaration references, which are compared by the same rules.
+// The two kinds are never compared with each other, and a request that lists both is refused.
 type DefaultAuthnContextEnforcer struct {
-	// Strength ranks authentication context classes, where a greater value is stronger. It is
-	// needed for the minimum, maximum and better comparisons, as the specification leaves the
-	// ordering to the identity provider. Classes may share a value. A class that isn't listed is
-	// only equal to itself.
+	// Strength ranks authentication context classes and declaration references, where a greater value
+	// is stronger. It is needed for the minimum, maximum and better comparisons, as the specification
+	// leaves the ordering to the identity provider. References may share a value. A reference that
+	// isn't listed is only equal to itself.
 	Strength map[string]int
 }
 
 // SatisfiesAuthnContext implements AuthnContextEnforcer.
-// Declaration references are always refused, because the assertions made here only state a class.
-// With minimum and maximum the class of the session must be at least as strong as, or no stronger
-// than, one of the requested classes, and with better it must be stronger than one of them.
+// With minimum and maximum the reference of the session must be at least as strong as, or no stronger
+// than, one of the requested references, and with better it must be stronger than one of them.
 func (e DefaultAuthnContextEnforcer) SatisfiesAuthnContext(requested *RequestedAuthnContext, session *Session) error {
-	if len(requested.AuthnContextDeclRefs) != 0 {
-		return fmt.Errorf("the request requires an AuthnContextDeclRef, which is not supported")
-	}
-
 	var satisfies func(asserted, class string) bool
 
 	switch requested.Comparison {
@@ -387,22 +393,76 @@ func (e DefaultAuthnContextEnforcer) SatisfiesAuthnContext(requested *RequestedA
 		return fmt.Errorf("unknown comparison %q", requested.Comparison)
 	}
 
-	asserted := sessionAuthnContextClassRef(session)
-	if !slices.ContainsFunc(requested.AuthnContextClassRefs, func(class string) bool { return satisfies(asserted, class) }) {
-		return fmt.Errorf("the class %q doesn't satisfy the %q comparison", asserted, requested.Comparison)
+	asserted, wanted, err := e.requestedReferences(requested, session)
+	if err != nil {
+		return err
+	}
+
+	if !slices.ContainsFunc(wanted, func(reference string) bool { return satisfies(asserted, reference) }) {
+		return fmt.Errorf("the reference %q doesn't satisfy the %q comparison", asserted, requested.Comparison)
 	}
 
 	return nil
 }
 
-// sessionAuthnContextClassRef returns the authentication context class of session, which is
-// PasswordProtectedTransport when it sets none.
+// requestedReferences returns the reference of session that is compared, and the references of requested
+// that it is compared with, which are both declaration references if requested lists declaration
+// references and both classes otherwise. SAMLCore §3.3.2.2.1 allows a set of either kind, not both.
+func (e DefaultAuthnContextEnforcer) requestedReferences(requested *RequestedAuthnContext, session *Session) (asserted string, wanted []string, err error) {
+	switch {
+	case len(requested.AuthnContextClassRefs) != 0 && len(requested.AuthnContextDeclRefs) != 0:
+		return "", nil, fmt.Errorf("the request lists both an AuthnContextClassRef and an AuthnContextDeclRef, which SAMLCore §3.3.2.2.1 does not allow")
+	case len(requested.AuthnContextDeclRefs) != 0:
+		asserted, wanted = strings.TrimSpace(session.AuthnContextDeclRef), requested.AuthnContextDeclRefs
+	default:
+		asserted, wanted = sessionAuthnContextClassRef(session), requested.AuthnContextClassRefs
+	}
+
+	if asserted == "" {
+		return "", nil, fmt.Errorf("the session states no reference of the kind that the request lists")
+	}
+
+	return asserted, wanted, nil
+}
+
+// sessionAuthnContextClassRef returns the authentication context class of session. That is
+// PasswordProtectedTransport when it sets neither a class nor a declaration reference, and empty when it
+// sets only a declaration reference. A class or declaration reference that is blank is absent.
 func sessionAuthnContextClassRef(session *Session) string {
-	return cmp.Or(session.AuthnContextClassRef, defaultAuthnContextClassRef)
+	class, declRef := strings.TrimSpace(session.AuthnContextClassRef), strings.TrimSpace(session.AuthnContextDeclRef)
+	if class != "" || declRef != "" {
+		return class
+	}
+
+	return AuthnContextClassPasswordProtectedTransport
+}
+
+// sessionAuthnContext returns the authentication context that is stated for session: its class, its
+// declaration reference, and its authenticating authorities without those that are blank, leaving out
+// whatever is empty (SAMLCore §2.7.2.2).
+func sessionAuthnContext(session *Session) AuthnContext {
+	var authn AuthnContext
+
+	if class := sessionAuthnContextClassRef(session); class != "" {
+		authn.AuthnContextClassRef = &AuthnContextClassRef{Value: class}
+	}
+
+	if declRef := strings.TrimSpace(session.AuthnContextDeclRef); declRef != "" {
+		authn.AuthnContextDeclRef = &AuthnContextDeclRef{Value: declRef}
+	}
+
+	for _, authority := range session.AuthenticatingAuthorities {
+		if strings.TrimSpace(authority) != "" {
+			authn.AuthenticatingAuthorities = append(authn.AuthenticatingAuthorities, authority)
+		}
+	}
+
+	return authn
 }
 
 // satisfiesAuthnContext returns an error unless every AuthnStatement of assertion satisfies requested,
-// by asking the AuthnContextEnforcer about a copy of session with the class that the statement asserts.
+// by asking the AuthnContextEnforcer about a copy of session with the class, declaration reference and
+// authorities that the statement asserts.
 func (idp *IdentityProvider) satisfiesAuthnContext(requested *RequestedAuthnContext, assertion *Assertion, session *Session) error {
 	if assertion == nil || len(assertion.AuthnStatements) == 0 {
 		return fmt.Errorf("assertion has no AuthnStatement")
@@ -411,12 +471,24 @@ func (idp *IdentityProvider) satisfiesAuthnContext(requested *RequestedAuthnCont
 	enforcer := idp.authnContextEnforcer()
 
 	for _, statement := range assertion.AuthnStatements {
-		if statement.AuthnContext.AuthnContextClassRef == nil {
-			return fmt.Errorf("an AuthnStatement has no AuthnContextClassRef")
+		authn := statement.AuthnContext
+
+		// The default class belongs to sessions, not statements, so a blank reference is absent.
+		asserted := *session
+		asserted.AuthnContextClassRef, asserted.AuthnContextDeclRef = "", ""
+		asserted.AuthenticatingAuthorities = slices.Clone(authn.AuthenticatingAuthorities)
+
+		if authn.AuthnContextClassRef != nil && strings.TrimSpace(authn.AuthnContextClassRef.Value) != "" {
+			asserted.AuthnContextClassRef = authn.AuthnContextClassRef.Value
 		}
 
-		asserted := *session
-		asserted.AuthnContextClassRef = statement.AuthnContext.AuthnContextClassRef.Value
+		if authn.AuthnContextDeclRef != nil && strings.TrimSpace(authn.AuthnContextDeclRef.Value) != "" {
+			asserted.AuthnContextDeclRef = authn.AuthnContextDeclRef.Value
+		}
+
+		if asserted.AuthnContextClassRef == "" && asserted.AuthnContextDeclRef == "" {
+			return fmt.Errorf("an AuthnStatement has neither an AuthnContextClassRef nor an AuthnContextDeclRef")
+		}
 
 		if err := enforcer.SatisfiesAuthnContext(requested, &asserted); err != nil {
 			return err
@@ -727,7 +799,8 @@ type IdentityProvider struct {
 
 	// AuthnContextEnforcer decides whether the authentication of a session satisfies a
 	// RequestedAuthnContext. Defaults to a DefaultAuthnContextEnforcer with no Strength, which only
-	// accepts a class that the request lists, and never satisfies the better comparison.
+	// accepts a class or declaration reference that the request lists, and never satisfies the better
+	// comparison.
 	AuthnContextEnforcer AuthnContextEnforcer
 
 	// SubjectEnforcer decides whether an assertion matches the Subject of its request. Defaults to
@@ -2537,11 +2610,7 @@ func (DefaultAssertionMaker) MakeAssertion(req *IdpAuthnRequest, session *Sessio
 				SubjectLocality: &SubjectLocality{
 					Address: address,
 				},
-				AuthnContext: AuthnContext{
-					AuthnContextClassRef: &AuthnContextClassRef{
-						Value: sessionAuthnContextClassRef(session),
-					},
-				},
+				AuthnContext: sessionAuthnContext(session),
 			},
 		},
 	}

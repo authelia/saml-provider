@@ -1513,12 +1513,19 @@ func (a *SubjectLocality) Element() *etree.Element {
 
 // AuthnContext represents the SAML element AuthnContext.
 //
+// A context must hold an AuthnContextClassRef, an AuthnContextDeclRef, or both. A declaration by value
+// (AuthnContextDecl) is not represented and is skipped when parsing: it is an XML document in one of the schemas of
+// SAMLAuthnCxt, a Session is flat data that applications store as JSON with nowhere to carry one, no profile requires
+// it, and a declaration reference says the same thing by URI.
+//
 // See http://docs.oasis-open.org/security/saml/v2.0/saml-core-2.0-os.pdf §2.7.2.2.
 type AuthnContext struct {
 	AuthnContextClassRef *AuthnContextClassRef
-	// AuthnContextDecl          *AuthnContextDecl        ... TODO
-	// AuthnContextDeclRef       *AuthnContextDeclRef     ... TODO
-	// AuthenticatingAuthorities []AuthenticatingAuthority... TODO.
+	AuthnContextDeclRef  *AuthnContextDeclRef
+
+	// AuthenticatingAuthorities holds the entity IDs of the other authorities that took part in authenticating the
+	// principal, not including the issuer of the assertion.
+	AuthenticatingAuthorities []string `xml:"AuthenticatingAuthority"`
 }
 
 // Element returns an etree.Element representing the object in XML form.
@@ -1526,6 +1533,17 @@ func (a *AuthnContext) Element() *etree.Element {
 	el := etree.NewElement("saml:AuthnContext")
 	if a.AuthnContextClassRef != nil {
 		el.AddChild(a.AuthnContextClassRef.Element())
+	}
+
+	if a.AuthnContextDeclRef != nil {
+		el.AddChild(a.AuthnContextDeclRef.Element())
+	}
+
+	for _, authority := range a.AuthenticatingAuthorities {
+		child := etree.NewElement("saml:AuthenticatingAuthority")
+		child.SetText(authority)
+
+		el.AddChild(child)
 	}
 
 	return el
@@ -1541,6 +1559,21 @@ type AuthnContextClassRef struct {
 // Element returns an etree.Element representing the object in XML form.
 func (a *AuthnContextClassRef) Element() *etree.Element {
 	el := etree.NewElement("saml:AuthnContextClassRef")
+	el.SetText(a.Value)
+
+	return el
+}
+
+// AuthnContextDeclRef represents the SAML element AuthnContextDeclRef.
+//
+// See http://docs.oasis-open.org/security/saml/v2.0/saml-core-2.0-os.pdf §2.7.2.2.
+type AuthnContextDeclRef struct {
+	Value string `xml:",chardata"`
+}
+
+// Element returns an etree.Element representing the object in XML form.
+func (a *AuthnContextDeclRef) Element() *etree.Element {
+	el := etree.NewElement("saml:AuthnContextDeclRef")
 	el.SetText(a.Value)
 
 	return el
