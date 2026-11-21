@@ -8,7 +8,8 @@ import (
 
 // The names of the attributes that the attribute bundles of the REFEDS entity categories hold, each with the
 // NameFormat urn:oasis:names:tc:SAML:2.0:attrname-format:uri. DefaultAssertionMaker states those of the fields of
-// a Session under these names. A session has no field for EduPersonTargetedIDAttributeName,
+// a Session under these names, as attributes of the X.500/LDAP Attribute Profile which state x500:Encoding="LDAP"
+// (X.500 profile §2.4). A session has no field for EduPersonTargetedIDAttributeName,
 // EduPersonAssuranceAttributeName and SchacHomeOrganizationAttributeName, which are stated when
 // Session.CustomAttributes holds an attribute with the name.
 const (
@@ -46,7 +47,7 @@ const (
 
 // bundleAttribute returns an entry of an attribute bundle.
 func bundleAttribute(friendlyName, name string) Attribute {
-	return Attribute{FriendlyName: friendlyName, Name: name, NameFormat: subjectIdentifierNameFormat}
+	return Attribute{FriendlyName: friendlyName, Name: name, NameFormat: AttributeNameFormatURI}
 }
 
 // ResearchAndScholarshipAttributes returns the attribute bundle of the REFEDS Research and Scholarship entity
@@ -264,7 +265,7 @@ func isSubjectIdentifierAttribute(attribute Attribute) bool {
 		return false
 	}
 
-	return compatibleAttrNameFormats(attribute.NameFormat, subjectIdentifierNameFormat)
+	return compatibleAttrNameFormats(attribute.NameFormat, AttributeNameFormatURI)
 }
 
 // requiredSubjectIdentifier returns the name of the subject identifier attribute among candidates that meets
