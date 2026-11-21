@@ -1322,6 +1322,11 @@ func (idp *IdentityProvider) ServeSSO(w http.ResponseWriter, r *http.Request) {
 	req, err := NewIdpAuthnRequest(idp, r)
 	if err != nil {
 		idp.observe(r, requestState{}.event(EventSSO, err))
+
+		if ToStatusError(err).HTTPStatus() == http.StatusMethodNotAllowed {
+			w.Header().Set("Allow", "GET, POST")
+		}
+
 		idp.writeHTTPError(w, r, err)
 
 		return
@@ -1594,15 +1599,6 @@ func (idp *IdentityProvider) ServeIDPInitiated(w http.ResponseWriter, r *http.Re
 		serviceProviderChosen: true,
 	}
 
-	session := idp.SessionProvider.GetSession(w, r, req)
-	if session == nil {
-		// If GetSession returns nil, it must have written an HTTP response, per the interface
-		// (this is probably because it drew a login form or something).
-		return
-	}
-
-	req.Session = session
-
 	// There is no request to answer, so every failure is an HTTP error and nothing is sent to the service
 	// provider. The service provider is the choice of the identity provider, so it is established once its
 	// metadata is found.
@@ -1618,7 +1614,7 @@ func (idp *IdentityProvider) ServeIDPInitiated(w http.ResponseWriter, r *http.Re
 	var err error
 
 	req.ServiceProviderMetadata, err = idp.serviceProvider(r, serviceProviderID)
-	if err == os.ErrNotExist {
+	if errors.Is(err, os.ErrNotExist) {
 		fail(ErrUnknownServiceProvider.WithHTTPStatus(http.StatusNotFound).
 			WithDebugf("cannot find service provider: %s", serviceProviderID))
 
@@ -1637,6 +1633,17 @@ func (idp *IdentityProvider) ServeIDPInitiated(w http.ResponseWriter, r *http.Re
 
 		return
 	}
+
+	// The session is looked up only for a service provider that can be answered, so that no one is asked to
+	// log in for a login that would then fail.
+	session := idp.SessionProvider.GetSession(w, r, req)
+	if session == nil {
+		// If GetSession returns nil, it must have written an HTTP response, per the interface
+		// (this is probably because it drew a login form or something).
+		return
+	}
+
+	req.Session = session
 
 	assertionMaker := idp.AssertionMaker
 	if assertionMaker == nil {
@@ -1814,7 +1821,8 @@ func newIdpAuthnRequest(idp *IdentityProvider, r *http.Request) (*IdpAuthnReques
 
 		req.RelayState = r.PostForm.Get("RelayState")
 	default:
-		return nil, fmt.Errorf("method not allowed")
+		return nil, ErrMalformedRequest.WithHTTPStatus(http.StatusMethodNotAllowed).
+			WithDebugf("the method %q is not GET or POST", r.Method)
 	}
 
 	return req, nil
@@ -1901,7 +1909,7 @@ func (req *IdpAuthnRequest) Validate() error {
 	serviceProviderID := req.Request.Issuer.Value
 
 	serviceProvider, err := req.IDP.serviceProvider(req.HTTPRequest, serviceProviderID)
-	if err == os.ErrNotExist {
+	if errors.Is(err, os.ErrNotExist) {
 		return ErrUnknownServiceProvider.WithDebugf("cannot handle request from unknown service provider %s", serviceProviderID)
 	} else if err != nil {
 		return ErrServerError.WithDebugf("cannot find service provider %s: %v", serviceProviderID, err).WithWrap(err)
@@ -2193,8 +2201,20 @@ func (req *IdpAuthnRequest) getACSEndpoint() error {
 func (req *IdpAuthnRequest) useRequestedACSEndpoint(index, location string) error {
 	bindings := req.acsBindings()
 
+	// The index is an xs:unsignedShort, so "01", "+1" and " 1 " all name index 1.
+	var number uint64
+
+	if index != "" {
+		var err error
+		if number, err = strconv.ParseUint(strings.TrimPrefix(strings.TrimSpace(index), "+"), 10, 16); err != nil {
+			return fmt.Errorf("the AssertionConsumerServiceIndex %q is not an unsigned short: %w", index, os.ErrNotExist)
+		}
+	}
+
 	for _, match := range []func(endpoint IndexedEndpoint) bool{
-		func(endpoint IndexedEndpoint) bool { return index != "" && strconv.Itoa(endpoint.Index) == index },
+		func(endpoint IndexedEndpoint) bool {
+			return index != "" && endpoint.Index >= 0 && uint64(endpoint.Index) == number
+		},
 		func(endpoint IndexedEndpoint) bool { return location != "" && endpoint.Location == location },
 	} {
 		for _, spssoDescriptor := range req.ServiceProviderMetadata.SPSSODescriptors {

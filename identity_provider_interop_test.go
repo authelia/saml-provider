@@ -120,6 +120,28 @@ func TestIDPACSSelection(t *testing.T) {
 			location: "https://sp/b",
 		},
 		{
+			name:     "index with a leading zero",
+			attrs:    `AssertionConsumerServiceIndex="01"`,
+			metadata: interopSP(interopDescriptor(interopACS(0, post, "https://sp/a", nil), interopACS(1, post, "https://sp/b", nil))),
+			location: "https://sp/b",
+		},
+		{
+			name:     "index with a plus sign",
+			attrs:    `AssertionConsumerServiceIndex="+1"`,
+			metadata: interopSP(interopDescriptor(interopACS(0, post, "https://sp/a", nil), interopACS(1, post, "https://sp/b", nil))),
+			location: "https://sp/b",
+		},
+		{
+			name:     "index that is not a number is rejected",
+			attrs:    `AssertionConsumerServiceIndex="one"`,
+			metadata: interopSP(interopDescriptor(interopACS(1, post, "https://sp/b", nil))),
+		},
+		{
+			name:     "negative index is rejected",
+			attrs:    `AssertionConsumerServiceIndex="-1"`,
+			metadata: interopSP(interopDescriptor(interopACS(-1, post, "https://sp/b", nil))),
+		},
+		{
 			name:     "default skips redirect listed first",
 			metadata: interopSP(interopDescriptor(interopACS(0, redirect, "https://sp/a", nil), interopACS(1, post, "https://sp/b", nil))),
 			location: "https://sp/b",
