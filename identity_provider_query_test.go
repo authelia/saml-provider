@@ -1903,3 +1903,18 @@ func TestServeQueryRefusesReplay(t *testing.T) {
 		})
 	}
 }
+
+func TestEncryptedAssertionKeepsX500Encoding(t *testing.T) {
+	f := newQueryFixture(t)
+	f.provider.subject = fullAttributeSession()
+	f.test.IDP.AttributeReleasePolicy = releaseEveryAttribute
+
+	response := f.queryAttributes(t, f.attributeQuery())
+	assertQueryStatus(t, response, StatusSuccess, "")
+	require.Len(t, response.Assertions, 1)
+	assert.Equal(t, response.Encrypted, 1)
+
+	require.Len(t, response.Assertions[0].AttributeStatements, 1)
+	assertX500Encoded(t, response.Assertions[0].AttributeStatements[0].Attributes, 10)
+	assertAttributeElementsBindX500(t, response.AssertionEls[0])
+}

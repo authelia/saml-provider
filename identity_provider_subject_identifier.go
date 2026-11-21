@@ -16,9 +16,6 @@ const (
 	PairwiseIDAttributeName = "urn:oasis:names:tc:SAML:attribute:pairwise-id"
 )
 
-// subjectIdentifierNameFormat is the NameFormat of both attributes.
-const subjectIdentifierNameFormat = "urn:oasis:names:tc:SAML:2.0:attrname-format:uri"
-
 // subjectIdentifier and subjectIdentifierScope are the syntax that the profile gives the value of both attributes
 // and its scope: a uniqueID of 1 to 127 ASCII letters, digits, "=" and "-", then "@", then a scope of 1 to 127 ASCII
 // letters, digits, "-" and ".", each of which starts with a letter or a digit. \z rather than $ is the end of the
@@ -61,7 +58,7 @@ type PairwiseIDProvider interface {
 func subjectIdentifierAttribute(name, value string) Attribute {
 	return Attribute{
 		Name:       name,
-		NameFormat: subjectIdentifierNameFormat,
+		NameFormat: AttributeNameFormatURI,
 		Values:     []AttributeValue{{Type: "xs:string", Value: value}},
 	}
 }

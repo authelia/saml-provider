@@ -1,7 +1,9 @@
 package saml
 
 import (
+	"crypto/x509"
 	"encoding/base64"
+	"encoding/xml"
 	"errors"
 	"net/http"
 	"net/http/httptest"
@@ -13,10 +15,14 @@ import (
 	"github.com/beevik/etree"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"authelia.com/provider/saml/internal/golden"
 )
 
 const (
-	uriAttrNameFormat = "urn:oasis:names:tc:SAML:2.0:attrname-format:uri"
+	uriAttrNameFormat         = "urn:oasis:names:tc:SAML:2.0:attrname-format:uri"
+	basicAttrNameFormat       = "urn:oasis:names:tc:SAML:2.0:attrname-format:basic"
+	unspecifiedAttrNameFormat = "urn:oasis:names:tc:SAML:2.0:attrname-format:unspecified"
 
 	mailAttributeName        = "urn:oid:0.9.2342.19200300.100.1.3"
 	uidAttributeName         = "urn:oid:0.9.2342.19200300.100.1.1"
@@ -54,7 +60,7 @@ func attributeReleaseSession() *Session {
 		CustomAttributes: []Attribute{{
 			Name:   "employeeNumber",
 			Values: []AttributeValue{{Type: "xs:string", Value: "42"}},
-		}},
+		}, NewX500Attribute("2.5.4.20", "telephoneNumber", "+1 555 0100")},
 	}
 }
 
@@ -151,6 +157,7 @@ func TestDefaultAttributeReleasePolicyReleasesOnlyRequested(t *testing.T) {
 		FriendlyName: "mail",
 		Name:         mailAttributeName,
 		NameFormat:   uriAttrNameFormat,
+		Attrs:        []xml.Attr{x500EncodingAttr()},
 		Values:       []AttributeValue{{Type: "xs:string", Value: "alice@example.com"}},
 	})
 }
@@ -281,7 +288,28 @@ func TestDefaultAssertionMakerCopiesCustomAttributes(t *testing.T) {
 	})
 	require.NoError(t, DefaultAssertionMaker{}.MakeAssertion(req, session))
 	assert.Equal(t, session.CustomAttributes[0].Values[0].Value, "42")
-	assert.Equal(t, session.CustomAttributes[1].Values[0].NameID.Value, "alice")
+	assert.Equal(t, session.CustomAttributes[2].Values[0].NameID.Value, "alice")
+}
+
+// TestDefaultAssertionMakerCopiesCustomAttributeAttrs checks that an AttributeReleasePolicy which edits
+// the Attrs of its candidates in place can't change those of the custom attributes of the session.
+func TestDefaultAssertionMakerCopiesCustomAttributeAttrs(t *testing.T) {
+	test := NewIdentityProviderTest(t, applyKey)
+	test.IDP.AttributeReleasePolicy = attributeReleasePolicyFunc(func(_ AttributeReleaseRequest, _ *Session, candidates []Attribute) ([]Attribute, error) {
+		for i := range candidates {
+			for j := range candidates[i].Attrs {
+				candidates[i].Attrs[j].Value = "changed"
+			}
+		}
+
+		return candidates, nil
+	})
+	req := attributeReleaseRequest(t, test, "")
+
+	session := attributeReleaseSession()
+	session.CustomAttributes = append(session.CustomAttributes, NewX500Attribute("2.5.4.3", "cn", "alice"))
+	require.NoError(t, DefaultAssertionMaker{}.MakeAssertion(req, session))
+	assert.Equal(t, session.CustomAttributes[len(session.CustomAttributes)-1].Attrs, []xml.Attr{x500EncodingAttr()})
 }
 
 // TestDefaultAssertionMakerReleasesEmailUnderRequestedName checks the attributes that a service
@@ -433,6 +461,7 @@ func TestDefaultAssertionMakerUsesConfiguredAttributeReleasePolicy(t *testing.T)
 			"urn:oid:2.5.4.3",
 			"urn:oid:1.3.6.1.4.1.5923.1.1.1.9",
 			"employeeNumber",
+			"urn:oid:2.5.4.20",
 			affiliationAttributeName,
 			"urn:oasis:names:tc:SAML:attribute:subject-id",
 		})
@@ -518,4 +547,164 @@ func TestServeSSOReleasesAttributesOfRequestedService(t *testing.T) {
 	_, response := postedResponse(t, w.Body.String())
 	assert.Equal(t, response.Status.StatusCode.Value, StatusSuccess)
 	assert.Equal(t, attributeNames(released), []string{uidAttributeName})
+}
+
+func TestDefaultAssertionMakerReleasesX500CustomAttribute(t *testing.T) {
+	test := NewIdentityProviderTest(t, applyKey)
+	req := attributeReleaseRequest(t, test, "", service(0, nil, requested("urn:oid:2.5.4.20", uriAttrNameFormat)))
+
+	attributes := releasedAttributes(t, req, attributeReleaseSession())
+	require.Len(t, attributes, 1)
+	assert.Equal(t, attributes[0], NewX500Attribute("2.5.4.20", "telephoneNumber", "+1 555 0100"))
+}
+
+// fullAttributeSession is attributeReleaseSession with a value for every field that DefaultAssertionMaker states.
+func fullAttributeSession() *Session {
+	session := attributeReleaseSession()
+	session.UserDisplayName = "Alice Smith"
+
+	return session
+}
+
+// assertX500Encoded asserts that every attribute named urn:oid: states x500:Encoding="LDAP", and that there are at
+// least that many of them.
+func assertX500Encoded(t *testing.T, attributes []Attribute, least int) {
+	t.Helper()
+
+	n := 0
+
+	for _, attribute := range attributes {
+		if strings.HasPrefix(attribute.Name, "urn:oid:") {
+			n++
+
+			assert.Equal(t, attribute.Attrs, []xml.Attr{x500EncodingAttr()}, "attribute %s", attribute.FriendlyName)
+		}
+	}
+
+	assert.GreaterOrEqual(t, n, least)
+}
+
+// assertAttributeElementsBindX500 asserts that each saml:Attribute under el that has an x500:Encoding declares the
+// x500 prefix itself, and that the attributes named urn:oid: have one.
+func assertAttributeElementsBindX500(t *testing.T, el *etree.Element) {
+	t.Helper()
+
+	attributes := el.FindElements("//Attribute")
+	require.NotEmpty(t, attributes)
+
+	for _, attribute := range attributes {
+		if !strings.HasPrefix(attribute.SelectAttrValue("Name", ""), "urn:oid:") {
+			continue
+		}
+
+		encoding := attribute.SelectAttr("x500:Encoding")
+		require.True(t, encoding != nil, "no x500:Encoding on %s", attribute.SelectAttrValue("Name", ""))
+		assert.Equal(t, encoding.Value, X500EncodingLDAP)
+		assert.Equal(t, attribute.SelectAttrValue("xmlns:x500", ""), X500AttributeNamespace)
+	}
+}
+
+func TestSessionAttributesStateX500Encoding(t *testing.T) {
+	directory := map[string]string{
+		"uid":                    "urn:oid:0.9.2342.19200300.100.1.1",
+		"mail":                   "urn:oid:0.9.2342.19200300.100.1.3",
+		"eduPersonPrincipalName": "urn:oid:1.3.6.1.4.1.5923.1.1.1.6",
+		"sn":                     "urn:oid:2.5.4.4",
+		"givenName":              "urn:oid:2.5.4.42",
+		"cn":                     "urn:oid:2.5.4.3",
+		"displayName":            "urn:oid:2.16.840.1.113730.3.1.241",
+		"scopedAffiliation":      "urn:oid:1.3.6.1.4.1.5923.1.1.1.9",
+		"eduPersonAffiliation":   "urn:oid:1.3.6.1.4.1.5923.1.1.1.1",
+	}
+
+	attributes := sessionAttributes(fullAttributeSession())
+	assert.Equal(t, friendlyNames([]AttributeStatement{{Attributes: attributes}}), []string{
+		"uid", "mail", "eduPersonPrincipalName", "sn", "givenName", "cn", "displayName", "scopedAffiliation",
+		"", "telephoneNumber", "eduPersonAffiliation",
+	})
+
+	seen := 0
+
+	for _, attribute := range attributes {
+		name, ok := directory[attribute.FriendlyName]
+		if !ok {
+			continue
+		}
+
+		seen++
+
+		assert.Equal(t, attribute.Name, name)
+		assert.Equal(t, attribute.NameFormat, AttributeNameFormatURI)
+		assert.Equal(t, attribute.Attrs, []xml.Attr{x500EncodingAttr()}, "attribute %s", attribute.FriendlyName)
+		require.NotEmpty(t, attribute.Values)
+
+		for _, value := range attribute.Values {
+			assert.Equal(t, value.Type, "xs:string")
+		}
+	}
+
+	assert.Equal(t, seen, len(directory))
+}
+
+func TestOnlyDirectoryAttributesStateX500Encoding(t *testing.T) {
+	assert.Nil(t, subjectIdentifierAttribute(SubjectIDAttributeName, "alice@example.com").Attrs)
+	assert.Nil(t, subjectIdentifierAttribute(PairwiseIDAttributeName, "alice@example.com").Attrs)
+
+	email := service(0, nil, requested("email", basicAttrNameFormat))
+	named := requestedNameAttributes(&email, fullAttributeSession())
+	require.Len(t, named, 1)
+	assert.Nil(t, named[0].Attrs)
+
+	custom := Attribute{Name: "urn:oid:2.5.4.20", NameFormat: uriAttrNameFormat, Values: []AttributeValue{{Type: "xs:string", Value: "+1 555 0100"}}}
+	attributes := sessionAttributes(&Session{CustomAttributes: []Attribute{custom}})
+	require.Len(t, attributes, 1)
+	assert.Equal(t, attributes[0], custom)
+	assert.Nil(t, attributes[0].Attrs)
+}
+
+func TestAssertionElementBindsX500Prefix(t *testing.T) {
+	test := NewIdentityProviderTest(t, applyKey)
+	test.IDP.AttributeReleasePolicy = releaseEveryAttribute
+	req := attributeReleaseRequest(t, test, "")
+	require.NoError(t, DefaultAssertionMaker{}.MakeAssertion(req, fullAttributeSession()))
+
+	el := req.Assertion.Element()
+
+	doc := etree.NewDocument()
+	doc.SetRoot(el)
+	buf, err := doc.WriteToBytes()
+	require.NoError(t, err)
+
+	var back Assertion
+
+	require.NoError(t, xml.Unmarshal(buf, &back))
+	require.Len(t, back.AttributeStatements, 1)
+	assertX500Encoded(t, back.AttributeStatements[0].Attributes, 10)
+	assertAttributeElementsBindX500(t, el)
+}
+
+func TestServeSSOSignedAssertionKeepsX500Encoding(t *testing.T) {
+	test := issuanceTestIDP(t)
+	test.IDP.AttributeReleasePolicy = releaseEveryAttribute
+	issuanceMetadata(test, issuanceUnencrypted)
+
+	session := fullAttributeSession()
+	test.IDP.SessionProvider = &mockSessionProvider{
+		GetSessionFunc: func(http.ResponseWriter, *http.Request, *IdpAuthnRequest) *Session { return session },
+	}
+
+	responseEl, _, _ := issuanceSSO(t, test)
+
+	assertionEl, err := findChild(responseEl, samlAssertionNS, "Assertion")
+	require.NoError(t, err)
+	require.True(t, assertionEl != nil, "the assertion is not sent in plaintext")
+
+	verified, err := verifyEnvelopedSignature(assertionEl, certificateVerificationKeys([]*x509.Certificate{mustParseCertificate(golden.Get(t, "idp_cert.pem"))}), anySignaturePolicy)
+	require.NoError(t, err)
+	assertAttributeElementsBindX500(t, verified)
+
+	assertion := &Assertion{}
+	require.NoError(t, unmarshalElement(verified, assertion))
+	require.Len(t, assertion.AttributeStatements, 1)
+	assertX500Encoded(t, assertion.AttributeStatements[0].Attributes, 10)
 }

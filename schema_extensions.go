@@ -263,9 +263,11 @@ func (m ExtensionElement) Element() *etree.Element {
 
 // setNamespacedAttrs sets attrs on el, which hold the namespace of each attribute and not its prefix. An attribute
 // in the XML namespace has the prefix xml, which is never declared, and one in another namespace has a prefix that
-// is declared on el.
+// is declared on el. The prefix of X500AttributeNamespace is x500, and that of any other namespace is ns1, ns2 and
+// so on in order of appearance.
 func setNamespacedAttrs(el *etree.Element, attrs []xml.Attr) {
 	prefixes := map[string]string{}
+	generated := 0
 
 	for _, attr := range attrs {
 		switch attr.Name.Space {
@@ -276,7 +278,13 @@ func setNamespacedAttrs(el *etree.Element, attrs []xml.Attr) {
 		default:
 			prefix, ok := prefixes[attr.Name.Space]
 			if !ok {
-				prefix = "ns" + strconv.Itoa(len(prefixes)+1)
+				if attr.Name.Space == X500AttributeNamespace {
+					prefix = "x500"
+				} else {
+					generated++
+					prefix = "ns" + strconv.Itoa(generated)
+				}
+
 				prefixes[attr.Name.Space] = prefix
 
 				el.CreateAttr("xmlns:"+prefix, attr.Name.Space)

@@ -94,6 +94,7 @@ least the subset of SAML known as [interoperable SAML](https://kantarainitiative
 | Replay detection                                  | ✅  | ⚠️  |
 | Protocol `Extensions`[^protoext]                  | ✅  | ⚠️  |
 | Attribute Extensions (`ext:OriginalIssuer`, `ext:LastModified`)[^attrext] | ✅  | ✅  |
+| X.500/LDAP Attribute Profile (`x500:Encoding`)[^x500] | ✅  | ⚠️  |
 
 #### Signing and Encryption
 
@@ -144,9 +145,19 @@ without acting on it. See **`Scoping` and `ProxyRestriction`** below.
 
 [^attrext]: `Attribute.OriginalIssuer` and `Attribute.LastModified` are the XML attributes of the SAML V2.0 Attribute
     Extensions, marshalled with the prefix `ext`, and `Attribute.Attrs` keeps any other XML attribute, such as
-    `x500:Encoding`, with its namespace. They are kept in assertions, metadata (`RequestedAttribute` and
-    `mdattr:EntityAttributes`) and queries. An attribute of the `Session` with them is released with them. A
-    `LastModified` that isn't a time is kept in `Attrs` rather than refused.
+    `x500:Encoding`, with its namespace, which an assertion writes with the prefix `x500`. They are kept in assertions,
+    metadata (`RequestedAttribute` and `mdattr:EntityAttributes`) and queries. An attribute of the `Session` with them
+    is released with them. A `LastModified` that isn't a time is kept in `Attrs` rather than refused.
+
+[^x500]: The SAML V2.0 X.500/LDAP Attribute Profile, whose §2.4 has an attribute named by an OID in the URI name format
+    state `x500:Encoding="LDAP"`. Every `urn:oid:` attribute `DefaultAssertionMaker` makes does. `NewX500Attribute` and
+    `NewX500BinaryAttribute` build one for `Session.CustomAttributes`, which are otherwise sent as given, and so are
+    not given the encoding unless built with them. An `AttributeReleasePolicy` can drop the encoding for a service
+    provider that objects to it by clearing `Attrs` on the candidate. The subject-id and pairwise-id attributes belong
+    to another profile and don't state it, nor does an attribute under a name the SP chose.
+    `AttributeNameFormatUnspecified`, `AttributeNameFormatURI` and `AttributeNameFormatBasic` are the name formats.
+    The SP keeps the XML attribute in `Attribute.Attrs` and doesn't act on it. The Kerberos Attribute Profile is not
+    supported.
 
 [^ecp]: The base profile of SAMLProfiles §4.2. The channel bindings, holder-of-key confirmation and delegation of the
     ECP v2.0 extension are not supported, see the notes below.

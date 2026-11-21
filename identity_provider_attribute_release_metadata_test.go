@@ -2,6 +2,7 @@ package saml
 
 import (
 	"bytes"
+	"encoding/xml"
 	"errors"
 	"slices"
 	"strings"
@@ -770,6 +771,7 @@ func TestSessionDisplayNameIsACandidate(t *testing.T) {
 		FriendlyName: "displayName",
 		Name:         "urn:oid:2.16.840.1.113730.3.1.241",
 		NameFormat:   uriAttrNameFormat,
+		Attrs:        []xml.Attr{x500EncodingAttr()},
 		Values:       []AttributeValue{{Type: "xs:string", Value: "Alice S."}},
 	})
 }
