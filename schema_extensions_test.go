@@ -183,7 +183,7 @@ func TestProtocolExtensionsElementDeclaresNamespaces(t *testing.T) {
 	out, err := doc.WriteToString()
 	require.NoError(t, err)
 	assert.Equal(t, out, `<samlp:Extensions>`+
-		`<Hint xmlns="urn:example:extension" kind="a" xmlns:ns1="urn:oasis:names:tc:SAML:2.0:profiles:attribute:X500" ns1:Encoding="LDAP">`+
+		`<Hint xmlns="urn:example:extension" kind="a" xmlns:x500="urn:oasis:names:tc:SAML:2.0:profiles:attribute:X500" x500:Encoding="LDAP">`+
 		`<Value xmlns="urn:example:extension">42</Value></Hint>`+
 		`<Flag xmlns="urn:example:other"/>`+
 		`</samlp:Extensions>`)

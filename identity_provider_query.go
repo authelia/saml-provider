@@ -694,7 +694,7 @@ func checkQueriedAttributes(queried []Attribute) error {
 // errata E89).
 func cmpAttrNameFormat(nameFormat string) string {
 	if nameFormat == "" {
-		return unspecifiedAttrNameFormat
+		return AttributeNameFormatUnspecified
 	}
 
 	return nameFormat

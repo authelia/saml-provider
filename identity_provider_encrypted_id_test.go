@@ -13,6 +13,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"authelia.com/provider/saml/internal/dsig"
+	"authelia.com/provider/saml/xmlenc"
 )
 
 // elementEncryptionPolicyFunc is an ElementEncryptionPolicy made of two functions, either of which may be nil.
@@ -564,4 +565,40 @@ func TestQueryAnswerEncryptsPartsByPolicy(t *testing.T) {
 			assert.NotNil(t, el.FindElement("./Signature"))
 		})
 	}
+}
+
+func TestEncryptedAttributeKeepsX500Encoding(t *testing.T) {
+	test, req := encryptedPartsRequest(t)
+	test.IDP.ElementEncryptionPolicy = DefaultElementEncryptionPolicy{AttributeServiceProviders: []string{test.SP.MetadataURL.String()}}
+
+	body := respond(t, req)
+	sent := sentAssertionElement(t, test, body)
+	require.Nil(t, sent.FindElement("./AttributeStatement/Attribute"))
+
+	encrypted := sent.FindElements("./AttributeStatement/EncryptedAttribute")
+	require.Len(t, encrypted, 4)
+
+	// One EncryptedAttribute on its own: its plaintext binds every prefix it uses.
+	plaintext, err := xmlenc.Decrypt(test.SPKey, encrypted[0].FindElement("./EncryptedData"))
+	require.NoError(t, err)
+
+	doc := etree.NewDocument()
+	require.NoError(t, doc.ReadFromBytes(plaintext))
+	require.Equal(t, doc.Root().Tag, "Attribute")
+	assert.Equal(t, doc.Root().SelectAttrValue("xmlns:x500", ""), X500AttributeNamespace)
+	assert.Equal(t, doc.Root().SelectAttrValue("x500:Encoding", ""), X500EncodingLDAP)
+
+	for _, declaration := range []string{
+		`xmlns:x500="` + X500AttributeNamespace + `"`,
+		`xmlns:saml="urn:oasis:names:tc:SAML:2.0:assertion"`,
+		`xmlns:xs="http://www.w3.org/2001/XMLSchema"`,
+		`xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"`,
+	} {
+		assert.Contains(t, string(plaintext), declaration)
+	}
+
+	assertion, err := test.SP.ParseXMLResponse([]byte(body), []string{"id-request"}, test.SP.AcsURL)
+	require.NoError(t, err)
+	require.Len(t, assertion.AttributeStatements, 1)
+	assertX500Encoded(t, assertion.AttributeStatements[0].Attributes, 4)
 }

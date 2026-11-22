@@ -2566,33 +2566,18 @@ func (idp *IdentityProvider) attributeReleasePolicy() AttributeReleasePolicy {
 
 // sessionAttributes returns the attributes of the fields of session, but for its SubjectID, under the
 // names the identity provider gives them. They are part of what principalAttributes offers to the
-// AttributeReleasePolicy. The custom attributes of the session are copies, as the policy may change
-// its candidates.
+// AttributeReleasePolicy. Each attribute of a field is a directory attribute of the X.500/LDAP Attribute
+// Profile, made by NewX500Attribute, so it states x500:Encoding="LDAP" (X.500 profile §2.4). The custom
+// attributes of the session are copies, as the policy may change its candidates.
 func sessionAttributes(session *Session) []Attribute {
 	var attributes []Attribute
 
 	if session.UserName != "" {
-		attributes = append(attributes, Attribute{
-			FriendlyName: "uid",
-			Name:         "urn:oid:0.9.2342.19200300.100.1.1",
-			NameFormat:   "urn:oasis:names:tc:SAML:2.0:attrname-format:uri",
-			Values: []AttributeValue{{
-				Type:  "xs:string",
-				Value: session.UserName,
-			}},
-		})
+		attributes = append(attributes, NewX500Attribute("urn:oid:0.9.2342.19200300.100.1.1", "uid", session.UserName))
 	}
 
 	if session.UserEmail != "" {
-		attributes = append(attributes, Attribute{
-			FriendlyName: "mail",
-			Name:         "urn:oid:0.9.2342.19200300.100.1.3",
-			NameFormat:   "urn:oasis:names:tc:SAML:2.0:attrname-format:uri",
-			Values: []AttributeValue{{
-				Type:  "xs:string",
-				Value: session.UserEmail,
-			}},
-		})
+		attributes = append(attributes, NewX500Attribute(MailAttributeName, "mail", session.UserEmail))
 	}
 
 	if session.EduPersonPrincipalName != "" || session.UserEmail != "" {
@@ -2605,75 +2590,27 @@ func sessionAttributes(session *Session) []Attribute {
 			value = session.UserEmail
 		}
 
-		attributes = append(attributes, Attribute{
-			FriendlyName: "eduPersonPrincipalName",
-			Name:         "urn:oid:1.3.6.1.4.1.5923.1.1.1.6",
-			NameFormat:   "urn:oasis:names:tc:SAML:2.0:attrname-format:uri",
-			Values: []AttributeValue{{
-				Type:  "xs:string",
-				Value: value,
-			}},
-		})
+		attributes = append(attributes, NewX500Attribute(EduPersonPrincipalNameAttributeName, "eduPersonPrincipalName", value))
 	}
 
 	if session.UserSurname != "" {
-		attributes = append(attributes, Attribute{
-			FriendlyName: "sn",
-			Name:         "urn:oid:2.5.4.4",
-			NameFormat:   "urn:oasis:names:tc:SAML:2.0:attrname-format:uri",
-			Values: []AttributeValue{{
-				Type:  "xs:string",
-				Value: session.UserSurname,
-			}},
-		})
+		attributes = append(attributes, NewX500Attribute(SurnameAttributeName, "sn", session.UserSurname))
 	}
 
 	if session.UserGivenName != "" {
-		attributes = append(attributes, Attribute{
-			FriendlyName: "givenName",
-			Name:         "urn:oid:2.5.4.42",
-			NameFormat:   "urn:oasis:names:tc:SAML:2.0:attrname-format:uri",
-			Values: []AttributeValue{{
-				Type:  "xs:string",
-				Value: session.UserGivenName,
-			}},
-		})
+		attributes = append(attributes, NewX500Attribute(GivenNameAttributeName, "givenName", session.UserGivenName))
 	}
 
 	if session.UserCommonName != "" {
-		attributes = append(attributes, Attribute{
-			FriendlyName: "cn",
-			Name:         "urn:oid:2.5.4.3",
-			NameFormat:   "urn:oasis:names:tc:SAML:2.0:attrname-format:uri",
-			Values: []AttributeValue{{
-				Type:  "xs:string",
-				Value: session.UserCommonName,
-			}},
-		})
+		attributes = append(attributes, NewX500Attribute("urn:oid:2.5.4.3", "cn", session.UserCommonName))
 	}
 
 	if session.UserDisplayName != "" {
-		attributes = append(attributes, Attribute{
-			FriendlyName: "displayName",
-			Name:         DisplayNameAttributeName,
-			NameFormat:   "urn:oasis:names:tc:SAML:2.0:attrname-format:uri",
-			Values: []AttributeValue{{
-				Type:  "xs:string",
-				Value: session.UserDisplayName,
-			}},
-		})
+		attributes = append(attributes, NewX500Attribute(DisplayNameAttributeName, "displayName", session.UserDisplayName))
 	}
 
 	if session.UserScopedAffiliation != "" {
-		attributes = append(attributes, Attribute{
-			FriendlyName: "scopedAffiliation",
-			Name:         "urn:oid:1.3.6.1.4.1.5923.1.1.1.9",
-			NameFormat:   "urn:oasis:names:tc:SAML:2.0:attrname-format:uri",
-			Values: []AttributeValue{{
-				Type:  "xs:string",
-				Value: session.UserScopedAffiliation,
-			}},
-		})
+		attributes = append(attributes, NewX500Attribute(EduPersonScopedAffiliationAttributeName, "scopedAffiliation", session.UserScopedAffiliation))
 	}
 
 	// The policy may change its candidates, so it gets copies of the custom attributes of the session.
@@ -2682,20 +2619,7 @@ func sessionAttributes(session *Session) []Attribute {
 	}
 
 	if len(session.Groups) != 0 {
-		groupMemberAttributeValues := make([]AttributeValue, 0, len(session.Groups))
-		for _, group := range session.Groups {
-			groupMemberAttributeValues = append(groupMemberAttributeValues, AttributeValue{
-				Type:  "xs:string",
-				Value: group,
-			})
-		}
-
-		attributes = append(attributes, Attribute{
-			FriendlyName: "eduPersonAffiliation",
-			Name:         "urn:oid:1.3.6.1.4.1.5923.1.1.1.1",
-			NameFormat:   "urn:oasis:names:tc:SAML:2.0:attrname-format:uri",
-			Values:       groupMemberAttributeValues,
-		})
+		attributes = append(attributes, NewX500Attribute("urn:oid:1.3.6.1.4.1.5923.1.1.1.1", "eduPersonAffiliation", session.Groups...))
 	}
 
 	return attributes
@@ -2716,7 +2640,7 @@ func requestedNameAttributes(service *AttributeConsumingService, session *Sessio
 
 	for _, requested := range service.RequestedAttributes {
 		switch requested.NameFormat {
-		case "", basicAttrNameFormat, unspecifiedAttrNameFormat:
+		case "", AttributeNameFormatBasic, AttributeNameFormatUnspecified:
 		default:
 			continue
 		}
@@ -2760,13 +2684,6 @@ func requestedNameAttributes(service *AttributeConsumingService, session *Sessio
 // nonAlphanumeric matches the characters which are ignored in a name recognised by
 // requestedNameAttributes.
 var nonAlphanumeric = regexp.MustCompile("[^A-Za-z0-9]+")
-
-// basicAttrNameFormat and unspecifiedAttrNameFormat are the attribute name formats of SAMLCore §8.2.3
-// and §8.2.1.
-const (
-	basicAttrNameFormat       = "urn:oasis:names:tc:SAML:2.0:attrname-format:basic"
-	unspecifiedAttrNameFormat = "urn:oasis:names:tc:SAML:2.0:attrname-format:unspecified"
-)
 
 // AttributeConsumingService returns the AttributeConsumingService of req.SPSSODescriptor which
 // describes the attributes the service provider wants, or nil if there is none. The result is a copy
@@ -2883,6 +2800,8 @@ func (a AttributeValue) equal(b AttributeValue) bool {
 
 // clone returns a copy of a which shares none of its values.
 func (a Attribute) clone() Attribute {
+	a.Attrs = slices.Clone(a.Attrs)
+
 	a.Values = slices.Clone(a.Values)
 	for i, value := range a.Values {
 		if value.NameID != nil {
@@ -2897,7 +2816,7 @@ func (a Attribute) clone() Attribute {
 // compatibleAttrNameFormats returns true if attributes with the NameFormats a and b can have the same
 // name. A missing NameFormat is unspecified, which is compatible with any other.
 func compatibleAttrNameFormats(a, b string) bool {
-	if a == "" || a == unspecifiedAttrNameFormat || b == "" || b == unspecifiedAttrNameFormat {
+	if a == "" || a == AttributeNameFormatUnspecified || b == "" || b == AttributeNameFormatUnspecified {
 		return true
 	}
 
